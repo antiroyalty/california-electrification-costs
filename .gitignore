@@ -2,3 +2,5 @@ data
 __pycache__
 reference
 wip-outputs
+images
+.DS_Store
