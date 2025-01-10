@@ -45,8 +45,7 @@ class CostService:
         return self.csv_file
     
 
-# Example initial CSV file path
-initial_csv = "path/to/initial_data.csv"
+initial_csv = "initial_data.csv" # TODO: update
 
 scenario = "baseline"
 housing_type = "single-family-detached"
@@ -56,5 +55,4 @@ cost_service = CostService(initial_csv, scenario, housing_type, county="Riversid
 
 final_csv = cost_service.run()
 
-# Print the final CSV file path or any relevant information
 print("Final processed CSV file:", final_csv)

@@ -90,7 +90,6 @@ def test_calculate_annual_costs_electricity():
         assert pytest.approx(annual_costs[plan], rel=1e-2) == expected_cost
 
 def test_process_county_scenario(tmp_path):
-    # Setup mock input file
     county = "testcounty"
     file_path = tmp_path / "data"
     file_path.mkdir(parents=True)
@@ -98,17 +97,14 @@ def test_process_county_scenario(tmp_path):
     load_data = pd.DataFrame({"default.electricity.kwh": [1.0] * 24})  # 1 kWh for every hour
     load_data.to_csv(mock_file, index=False)
 
-    # Call the function
     annual_costs = process_county_scenario(file_path, county, "default")
 
-    # Assertions
     assert annual_costs is not None
     for plan in RATE_PLANS["PGE"].keys():
         assert plan in annual_costs
     assert all(value > 0 for value in annual_costs.values())  # Costs should be positive
 
 def test_process_all_counties(tmp_path):
-    # Setup input directory
     base_input_dir = tmp_path / "input"
     base_output_dir = tmp_path / "output"
     county = "testcounty"
@@ -118,7 +114,6 @@ def test_process_all_counties(tmp_path):
     load_data = pd.DataFrame({"default.electricity.kwh": [1.0] * 24})
     load_data.to_csv(mock_file, index=False)
 
-    # Call the function
     process_all_counties(
         base_input_dir=base_input_dir,
         base_output_dir=base_output_dir,
@@ -128,14 +123,11 @@ def test_process_all_counties(tmp_path):
         load_type="default",
     )
 
-    # Verify output
     output_dir = base_output_dir / "baseline" / "single-family-detached" / county / "results"
     output_files = list(output_dir.glob("RESULTS_electricity_annual_costs_testcounty_*.csv"))
 
-    # Assert that exactly one file exists
     assert len(output_files) == 1, f"Expected 1 output file, found {len(output_files)}"
 
-    # Verify contents of the file
     results_df = pd.read_csv(output_files[0])
     assert "default.electricity.E-TOU-C.usd" in results_df.columns
     assert results_df.iloc[0]["default.electricity.E-TOU-C.usd"] > 0  # Validate data
