@@ -1,0 +1,73 @@
+import os
+import requests
+import pandas as pd
+from geopy.geocoders import Nominatim
+
+def get_tmy_weather_data(api_key, base_input_dir, scenarios, housing_types, output_dir, counties=None):
+    # Initialize geolocator for dynamic centroid fetching
+    geolocator = Nominatim(user_agent="county_centroid_fetcher")
+
+    for scenario in scenarios:
+        for housing_type in housing_types:
+            # Define scenario path
+            scenario_path = os.path.join(base_input_dir, scenario, housing_type)
+            if not os.path.exists(scenario_path):
+                print(f"Scenario path not found: {scenario_path}")
+                continue
+
+            if counties == None:
+                # Dynamically retrieve counties
+                counties = [county for county in os.listdir(scenario_path)
+                            if os.path.isdir(os.path.join(scenario_path, county))]
+
+            for county in counties:
+                print(f"Processing {county}...")
+
+                try:
+                    # Get centroid coordinates dynamically using geopy
+                    location = geolocator.geocode(f"{county}, California")
+                    if location is None:
+                        print(f"Could not find centroid for {county}. Skipping...")
+                        continue
+                    latitude, longitude = location.latitude, location.longitude
+
+                    # Fetch TMY data from NREL
+                    base_url = "https://developer.nrel.gov/api/solar/nsrdb_psm3_download.csv"
+                    params = {
+                        "api_key": api_key,
+                        "wkt": f"POINT({longitude} {latitude})",
+                        "names": "tmy",  # Requesting Typical Meteorological Year data
+                        "interval": "60",  # Hourly data
+                        "utc": "true",
+                        "email": "ana.santasheva@berkeley.edu" # TODO Ana: REDACT
+                    }
+
+                    print(f"Fetching TMY data for {county} ({latitude}, {longitude})...")
+
+                    response = requests.get(base_url, params=params)
+
+                    if response.status_code == 200:
+                        file_path = os.path.join(output_dir, scenario, housing_type, county, f"weather_TMY_{county}.csv")
+                        os.makedirs(output_dir, exist_ok=True)
+                        with open(file_path, "w") as file:
+                            file.write(response.text)
+                        print(f"Saved TMY data for {county} to {file_path}")
+                    else:
+                        print(f"Failed to fetch TMY data for {county}: {response.status_code} {response.text}")
+                except Exception as e:
+                    print(f"Error processing {county}: {e}")
+
+# Example usage
+api_key = "5APOhWZQefbvqlNs98sus64Jf80rEMiwBRNF8cNz" # TODO Ana: REDACT
+base_input_dir = "./data"
+output_dir = "./data"
+
+scenarios = ["baseline"] # "heat_pump_and_water_heater", 
+             # "heat_pump_water_heater_and_induction_stove",
+             # "heat_pump_heating_cooling_water_heater_and_induction_stove"]
+
+housing_types = ["single-family-detached"] # "single-family-attached"]
+
+counties = ["alameda", "riverside"]
+
+get_tmy_weather_data(api_key, base_input_dir, scenarios, housing_types, output_dir, counties)

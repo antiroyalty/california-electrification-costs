@@ -1,0 +1,178 @@
+import os
+import pandas as pd
+
+# Which columns should be used to calculate electricity and gas rates based on each scenario
+SCENARIO_DATA_MAP = {
+    "baseline": {
+        # baseline
+        "default": {
+            "electricity": {
+                "file_prefix": "electricity_loads_", # or "sam_optimized_load_profiles_"
+                "column": "total_load" # or + "Total Load"
+            },
+            "gas": {
+                "file_prefix": "gas_loads_",
+                "column": "load.gas.avg.therms"
+            },
+        },
+        # baseline w/ solar + storage
+        "solar_storage": {
+            "electricity": {
+                "file_prefix": "sam_optimized_load_profiles_",
+                "column": "Grid to Load"
+            },
+            "gas": {
+                "file_prefix": "gas_loads_",
+                "column": "load.gas.avg.therms"
+            }
+        },
+    },
+    "sc1": {
+        # household adopted induction stove
+        "default": {
+            "electricity": {
+                "file_prefix": "electricity_loads_", # also need induction stove load
+                "column": "total_load_w_simulated_induction"
+            },
+            "gas": {
+                "file_prefix": "gas_loads_",
+                "column": "load.gas.no_stove.avg.therms" # TODO: need to calculate total + average columns for loads without gas stove, heating, water heating
+            }
+        },
+        # household adopted induction stove w/ solar + storage
+        "solar_storage": {
+            "electricity": {
+                "file_prefix": "sam_optimized_load_profiles_",
+                "column": "Grid to Load"
+            },
+            "gas": {
+                "file_prefix": "gas_loads_",
+                "column": "load.gas.no_stove.avg.therms",
+            }
+        }
+    },
+    "sc2": {
+        # household adopted induction stove, heat pump
+        "default": {
+            "electricity": {
+                "file_prefix": "electricity_loads_", # also need induction stove load
+                "column": "total_load_w_simulated_induction_heatpump"
+            },
+            "gas": {
+                "file_prefix": "gas_loads_",
+                "column": "load.gas.no_stove_heating.avg.therms" # TODO: need to calculate total + average columns for loads without gas stove, heating, water heating
+            }
+        },
+        # household adopted induction stove, heat pump w/ solar + storage
+        "solar_storage": {
+            "electricity": {
+                "file_prefix": "sam_optimized_load_profiles_",
+                "column": "Grid to Load"
+            },
+            "gas": {
+                "file_prefix": "gas_loads_",
+                "column": "load.gas.no_stove_heating.avg.therms",
+            }
+        }
+    },
+    "sc3": {
+        # household adopted induction stove, heat pump, water heater
+        "default": {
+            "electricity": {
+                "file_prefix": "electricity_loads_", # also need induction stove load
+                "column": "total_load_w_simulated_induction_heatpump_waterheater"
+            },
+            "gas": {
+                "file_prefix": "gas_loads_",
+                "column": "load.gas.no_stove_heating_waterheating.avg.therms" # TODO: need to calculate total + average columns for loads without gas stove, heating, water heating
+            }
+        },
+        "solar_storage": {
+            # household adopted induction stove, heat pump, water heater w/ solar + storage
+            "electricity": {
+                "file_prefix": "sam_optimized_load_profiles_",
+                "column": "Grid to Load"
+            },
+            "gas": {
+                "file_prefix": "gas_loads_",
+                "column": "load.gas.no_stove_heating_waterheating.avg.therms",
+            }
+        }
+    },
+}
+
+OUTPUT_FILE_NAME = "loadprofiles_for_rates"
+OUTPUT_COLUMNS = ["timestamp", "default.electricity.kwh", "default.gas.therms", "solarstorage.electricity.kwh", "solarstorage.gas.therms"]
+
+def aggregate_to_hourly(file_path, column_name):
+    # Aggregate 15-minute gas loads to hourly loads.
+    try:
+        df = pd.read_csv(file_path, parse_dates=["timestamp"])
+        if column_name not in df.columns:
+            raise ValueError(f"Column '{column_name}' not found in file: {file_path}")
+        
+        # Set timestamp as index and resample to hourly
+        df = df.set_index("timestamp")
+        hourly_df = df.resample("H")[column_name].sum().reset_index()
+
+        return hourly_df[column_name]
+    except Exception as e:
+        raise RuntimeError(f"Error processing file {file_path}: {e}")
+
+def get_file_path(path, county, file_prefix):
+    return os.path.join(path, county, f"{file_prefix}{county}.csv")
+
+def read_load_profile(file_path, column_name):
+    try:
+        df = pd.read_csv(file_path, usecols=[column_name])
+        return df[column_name]
+    except Exception as e:
+        raise RuntimeError(f"Error reading file {file_path}: {e}")
+
+def prepare_for_rates_analysis(base_input_dir, base_output_dir, housing_type, scenario, county):
+    directory = SCENARIO_DATA_MAP.get(scenario, {})
+
+    if not directory:
+        raise ValueError(f"Scenario '{scenario}' is not defined in the structures.")
+
+    path = os.path.join(base_input_dir, scenario, housing_type)
+
+    # File paths
+    electricity_default_file = get_file_path(path, county, directory["default"]["electricity"]["file_prefix"])
+    gas_default_file = get_file_path(path, county, directory["default"]["gas"]["file_prefix"])
+    electricity_solar_storage_file = get_file_path(path, county, directory["solar_storage"]["electricity"]["file_prefix"])
+    gas_solar_storage_file = get_file_path(path, county, directory["solar_storage"]["gas"]["file_prefix"])
+    
+    # Read data
+    timestamp = read_load_profile(electricity_default_file, "timestamp")
+    electricity_default = read_load_profile(electricity_default_file, directory["default"]["electricity"]["column"])
+    electricity_solar_storage = read_load_profile(electricity_solar_storage_file, directory["solar_storage"]["electricity"]["column"])
+    gas_default_hourly = aggregate_to_hourly(gas_default_file, directory["default"]["gas"]["column"])
+    gas_solar_storage_hourly = aggregate_to_hourly(gas_solar_storage_file, directory["solar_storage"]["gas"]["column"])
+
+    combined_df = pd.DataFrame({
+        "timestamp": timestamp,
+        "default.electricity.kwh": electricity_default,
+        "default.gas.therms": gas_default_hourly,
+        "solarstorage.electricity.kwh": electricity_solar_storage,
+        "solarstorage.gas.therms": gas_solar_storage_hourly,
+    }).dropna() # TODO: Ana, there appears to be one additional row of gas data even after aggregated... fix this later
+
+    output_file_path = os.path.join(base_output_dir, scenario, housing_type, county, f"{OUTPUT_FILE_NAME}_{county}.csv")
+    combined_df.to_csv(output_file_path, index=False)
+    print(f"Combined results saved to: {output_file_path}")
+
+
+
+base_input_dir = "./data"
+base_output_dir = "./data"
+
+county = 'alameda'
+
+prepare_for_rates_analysis(
+    base_input_dir=base_input_dir,
+    base_output_dir=base_output_dir,
+    scenario="baseline",
+    housing_type="single-family-detached",
+    county=county
+)
