@@ -51,6 +51,19 @@ def process(scenarios, housing_types, counties):
         "errors":    [ { "file_path": ..., "error": ... }, ... ],
       }
     """
+    # Normalize county names: remove trailing "County" and lowercase them.
+    normalized_counties = []
+    for c in counties:
+        # Strip leading/trailing whitespace, then lowercase
+        c_clean = c.strip().lower()
+        # Remove trailing " county" if present
+        if c_clean.endswith(" county"):
+            c_clean = c_clean[: -len(" county")]
+        normalized_counties.append(c_clean)
+    
+    # Reassign the processed list back to counties
+    counties = normalized_counties
+
     summary = {
         "processed": [],
         "skipped": [],

@@ -19,27 +19,29 @@ class CostService:
         # "heat_pump_heating_cooling_water_heater_and_induction_stove": ["heating", "cooling", "hot_water", "appliances", "cooking", "misc"]
     }
 
-    def __init__(self, initial_csv, scenario, housing_type, county):
+    def __init__(self, initial_csv, scenario, housing_type, county, output_dir):
         self.csv_file = initial_csv
         self.scenario = scenario
         self.housing_type = housing_type
         self.county = county
+        self.output_dir = output_dir
 
     def run(self):
         # Should give an array of CSV file paths
-        result = IdentifySuitableBuildings.process(scenario, housing_type, output_base_dir="data", target_county="Riverside County") # self.csv_file
+        result = IdentifySuitableBuildings.process(self.scenario, self.housing_type, output_base_dir=self.output_dir, target_county=county)
 
         print("Step 1")
         print(result)
 
         # # Step 2: Pull Buildings
-        result = PullBuildings.process(output_base_dir="data", download_new_files=False)
+        result = PullBuildings.process(output_base_dir=self.output_dir, download_new_files=False)
 
         print("Step 2")
         print(result)
     
         # # Step 3: Build County Load Profiles
-        result = BuildElectricityLoadProfiles.process(self.SCENARIOS, [housing_type], [county])
+        print("county, ", county)
+        result = BuildElectricityLoadProfiles.process(self.SCENARIOS, [self.housing_type], [self.county])
 
         print("Step 3")
         print(result)
@@ -64,9 +66,9 @@ initial_csv = "initial_data.csv" # TODO: update
 
 scenario = "baseline"
 housing_type = "single-family-detached"
-county = "alameda"
+county = "Riverside County"
 
-cost_service = CostService(initial_csv, scenario, housing_type, county="Riverside County")
+cost_service = CostService(initial_csv, scenario, housing_type, county="Riverside County", output_dir="data")
 
 final_csv = cost_service.run()
 
