@@ -113,7 +113,7 @@ def build_county_gas_profile(scenario, housing_type, county, county_dir, output_
 
     save_county_gas_profiles(county_gas_totals, county, output_dir)
 
-def build_gas_load_profiles(scenarios, housing_types, base_input_dir, base_output_dir, counties=None):
+def process(scenarios, housing_types, base_input_dir, base_output_dir, counties=None):
     for scenario in scenarios:
         for housing_type in housing_types:
             scenario_path = os.path.join(base_input_dir, scenario, housing_type)
@@ -143,10 +143,3 @@ def build_gas_load_profiles(scenarios, housing_types, base_input_dir, base_outpu
                 
                 # Build the gas profile for the county
                 build_county_gas_profile(scenario, housing_type, county, county_dir, output_dir, end_uses)
-
-base_input_dir = "data"
-base_output_dir = "data"
-counties = ["alameda"] # "alpine", "riverside"]
-housing_types = ["single-family-detached"]
-
-build_gas_load_profiles(SCENARIOS, housing_types, base_input_dir, base_output_dir, counties)

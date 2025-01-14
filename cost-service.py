@@ -1,7 +1,7 @@
 import step1_identify_suitable_buildings as IdentifySuitableBuildings
 import step2_pull_buildings as PullBuildings
 import step3_build_electricity_load_profiles as BuildElectricityLoadProfiles
-# import step4_build_gas_load_profiles as BuildGasLoadProfiles
+import step4_build_gas_load_profiles as BuildGasLoadProfiles
 # import step5_convert_gas_appliances_to_electrical_appliances as ConvertGasToElectric
 # import step6_get_household_electricity_loads_for_solar_storage as 
 # import step7_get_weather_files as WeatherFiles
@@ -19,11 +19,12 @@ class CostService:
         # "heat_pump_heating_cooling_water_heater_and_induction_stove": ["heating", "cooling", "hot_water", "appliances", "cooking", "misc"]
     }
 
-    def __init__(self, initial_csv, scenario, housing_type, county, output_dir):
+    def __init__(self, initial_csv, scenario, housing_type, county, input_dir, output_dir):
         self.csv_file = initial_csv
         self.scenario = scenario
         self.housing_type = housing_type
         self.county = county
+        self.input_dir = input_dir
         self.output_dir = output_dir
 
     def run(self):
@@ -46,7 +47,10 @@ class CostService:
         print("Step 3")
         print(result)
 
-        # # Step 4: Evaluate Electricity Rates
+        # # Step 4: Build Gas Load Profiles
+        result = BuildGasLoadProfiles.process(self.SCENARIOS, [self.housing_type], self.input_dir, self.output_dir, [self.county])
+
+        # 
         # self.csv_file = EvaluateElectricityRates.process(self.csv_file)
 
 
@@ -67,8 +71,10 @@ initial_csv = "initial_data.csv" # TODO: update
 scenario = "baseline"
 housing_type = "single-family-detached"
 county = "Riverside County"
+input_dir = "data"
+output_dir = "data"
 
-cost_service = CostService(initial_csv, scenario, housing_type, county="Riverside County", output_dir="data")
+cost_service = CostService(initial_csv, scenario, housing_type, county=county, input_dir=input_dir, output_dir=output_dir)
 
 final_csv = cost_service.run()
 
