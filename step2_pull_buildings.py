@@ -64,7 +64,7 @@ def process_county(scenario, housing_type, county_path, bucket_name, s3_prefix, 
         print(f"Mismatch in file count for {county_path}: {len(building_ids)} IDs, {downloaded_file_count} files")
         return False
 
-def process_all_scenarios(output_base_dir="data", download_new_files=True):
+def process(output_base_dir="data", download_new_files=True):
     bucket_name = "oedi-data-lake"
     s3_prefix = "nrel-pds-building-stock/end-use-load-profiles-for-us-building-stock/2024/resstock_amy2018_release_2/timeseries_individual_buildings/by_state/upgrade=0/state=CA/"
 
@@ -75,7 +75,11 @@ def process_all_scenarios(output_base_dir="data", download_new_files=True):
     success_summary = []
     failure_summary = []
 
-    if download_new_files == False: return
+    if not download_new_files:
+        return {
+            "success_summary": success_summary,
+            "failure_summary": failure_summary,
+        }
 
     for scenario in scenarios:
         for housing_type in housing_types:
@@ -159,3 +163,10 @@ def process_all_scenarios(output_base_dir="data", download_new_files=True):
         print(f"- {failure['county']} ({failure['scenario']}, {failure['housing_type']}): "
               f"{failure['total_buildings']} total, {failure['retrieved_buildings']} retrieved, "
               f"{failure['missing_buildings']} missing")
+        
+
+    return {
+        # "logs": logs,
+        "success_summary": success_summary,
+        "failure_summary": failure_summary,
+    }

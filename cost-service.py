@@ -1,5 +1,5 @@
 import step1_identify_suitable_buildings as IdentifySuitableBuildings
-# import step2_pull_buildings as PullBuildings
+import step2_pull_buildings as PullBuildings
 # import step3_build_electricity_load_profiles as BuildElectricityLoadProfiles
 # import step4_build_gas_load_profiles as BuildGasLoadProfiles
 # import step5_convert_gas_appliances_to_electrical_appliances as ConvertGasToElectric
@@ -22,11 +22,15 @@ class CostService:
         # Should give an array of CSV file paths
         result = IdentifySuitableBuildings.process(scenario, housing_type, output_base_dir="data", target_county="Riverside County") # self.csv_file
 
+        print("Step 1")
         print(result)
 
         # # Step 2: Pull Buildings
-        # self.csv_file = PullBuildings.process(self.csv_file)
+        result = PullBuildings.process(output_base_dir="data", download_new_files=False)
 
+        print("Step 2")
+        print(result)
+    
         # # Step 3: Build County Load Profiles
         # self.csv_file = BuildCountyLoadProfiles.process(self.csv_file)
 
