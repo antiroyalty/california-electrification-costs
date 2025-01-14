@@ -16,14 +16,11 @@ from step11_evaluate_electricity_rates import (
     RATE_PLANS,
 )
 
-# Test data and constants
 TEST_LOAD_PROFILE = [1.0] * 8760  # Simplistic load profile: 1 kWh every hour
 TEST_LOAD_TYPE = "default"
 
-# Mock data for CSV files
 MOCK_CSV_CONTENT = "default.electricity.kwh\n" + "\n".join(["1.0"] * 8760)
 
-# Helper function to create a mock DataFrame
 def create_mock_dataframe():
     return pd.DataFrame({"default.electricity.kwh": TEST_LOAD_PROFILE})
 

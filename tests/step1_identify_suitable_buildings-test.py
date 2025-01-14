@@ -5,7 +5,6 @@ import sys
 import warnings
 
 warnings.filterwarnings("ignore", category=pd.errors.DtypeWarning) # suppress warnings
-
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 
 from step1_identify_suitable_buildings import (

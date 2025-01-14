@@ -7,7 +7,6 @@ from botocore import UNSIGNED
 # Initialize S3 client
 s3 = boto3.client('s3', config=Config(signature_version=UNSIGNED))
 
-# Function to download a specific file from S3
 def download_parquet_file(bucket_name, s3_key, output_dir):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -65,7 +64,7 @@ def process_county(scenario, housing_type, county_path, bucket_name, s3_prefix, 
         print(f"Mismatch in file count for {county_path}: {len(building_ids)} IDs, {downloaded_file_count} files")
         return False
 
-def process_all_scenarios(output_base_dir="data"):
+def process_all_scenarios(output_base_dir="data", download_new_files=True):
     bucket_name = "oedi-data-lake"
     s3_prefix = "nrel-pds-building-stock/end-use-load-profiles-for-us-building-stock/2024/resstock_amy2018_release_2/timeseries_individual_buildings/by_state/upgrade=0/state=CA/"
 
@@ -75,6 +74,8 @@ def process_all_scenarios(output_base_dir="data"):
 
     success_summary = []
     failure_summary = []
+
+    if download_new_files == False: return
 
     for scenario in scenarios:
         for housing_type in housing_types:
@@ -158,6 +159,3 @@ def process_all_scenarios(output_base_dir="data"):
         print(f"- {failure['county']} ({failure['scenario']}, {failure['housing_type']}): "
               f"{failure['total_buildings']} total, {failure['retrieved_buildings']} retrieved, "
               f"{failure['missing_buildings']} missing")
-
-# Run the processing function
-process_all_scenarios()
