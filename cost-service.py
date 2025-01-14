@@ -1,6 +1,6 @@
 import step1_identify_suitable_buildings as IdentifySuitableBuildings
 import step2_pull_buildings as PullBuildings
-# import step3_build_electricity_load_profiles as BuildElectricityLoadProfiles
+import step3_build_electricity_load_profiles as BuildElectricityLoadProfiles
 # import step4_build_gas_load_profiles as BuildGasLoadProfiles
 # import step5_convert_gas_appliances_to_electrical_appliances as ConvertGasToElectric
 # import step6_get_household_electricity_loads_for_solar_storage as 
@@ -12,6 +12,13 @@ import step2_pull_buildings as PullBuildings
 # import step12_evaluate_capital_costs
 
 class CostService:
+    SCENARIOS = {
+        "baseline": {"appliances", "misc"},
+        # "heat_pump_and_water_heater": ["heating", "hot_water", "appliances", "misc"],
+        # "heat_pump_water_heater_and_induction_stove": ["heating", "cooling", "hot_water", "appliances", "cooking", "misc"],
+        # "heat_pump_heating_cooling_water_heater_and_induction_stove": ["heating", "cooling", "hot_water", "appliances", "cooking", "misc"]
+    }
+
     def __init__(self, initial_csv, scenario, housing_type, county):
         self.csv_file = initial_csv
         self.scenario = scenario
@@ -32,10 +39,14 @@ class CostService:
         print(result)
     
         # # Step 3: Build County Load Profiles
-        # self.csv_file = BuildCountyLoadProfiles.process(self.csv_file)
+        result = BuildElectricityLoadProfiles.process(self.SCENARIOS, [housing_type], [county])
+
+        print("Step 3")
+        print(result)
 
         # # Step 4: Evaluate Electricity Rates
         # self.csv_file = EvaluateElectricityRates.process(self.csv_file)
+
 
         # # Step 5: Run SAM Model for Solar & Storage
         # self.csv_file = RunSamModelForSolarStorage.process(self.csv_file)

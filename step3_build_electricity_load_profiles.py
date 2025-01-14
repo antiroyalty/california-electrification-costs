@@ -1,15 +1,6 @@
 import os
 import pandas as pd
 
-# Define scenarios and corresponding end uses
-SCENARIOS = {
-    "baseline": ["appliances", "misc"],
-    # "heat_pump_and_water_heater": ["heating", "hot_water", "appliances", "misc"],
-    # "heat_pump_water_heater_and_induction_stove": ["heating", "cooling", "hot_water", "appliances", "cooking", "misc"],
-    # "heat_pump_heating_cooling_water_heater_and_induction_stove": ["heating", "cooling", "hot_water", "appliances", "cooking", "misc"]
-}
-
-# Define end use columns
 END_USE_COLUMNS = {
     "heating": [
         'out.electricity.heating.energy_consumption',
@@ -45,25 +36,64 @@ END_USE_COLUMNS = {
     ]
 }
 
-# Base directories
 BASE_INPUT_DIR = "data"
 BASE_OUTPUT_DIR = "data"
 
 INPUT_FOLDER_NAME = "buildings"
 OUTPUT_FILE_PREFIX = "electricity_loads"
 
-def build_load_profiles(scenarios, housing_types, counties):
+def process(scenarios, housing_types, counties):
+    """
+    Returns a summary dict with structure:
+      {
+        "processed": [ { "county": ..., "status": ..., "num_files": ... }, ... ],
+        "skipped":   [ { "county": ..., "status": ... }, ... ],
+        "errors":    [ { "file_path": ..., "error": ... }, ... ],
+      }
+    """
+    summary = {
+        "processed": [],
+        "skipped": [],
+        "errors": []
+    }
+
     for scenario, end_use_categories in scenarios.items():
         for housing_type in housing_types:
             for county in counties:
                 print(f"Processing {county} for {scenario}, {housing_type}")
-                
-                # Define input and output paths
-                input_dir = os.path.join(BASE_INPUT_DIR, scenario, housing_type, county, INPUT_FOLDER_NAME)
-                output_path = os.path.join(BASE_OUTPUT_DIR, scenario, housing_type, county, f"{OUTPUT_FILE_PREFIX}_{county}.csv")
 
+                # Record info about this county's run
+                county_info = {
+                    "county": county,
+                    "scenario": scenario,
+                    "housing_type": housing_type,
+                    "status": None,
+                    "num_files": 0
+                }
+
+                # Define input and output paths
+                input_dir = os.path.join(
+                    BASE_INPUT_DIR, scenario, housing_type, county, INPUT_FOLDER_NAME
+                )
+                output_path = os.path.join(
+                    BASE_OUTPUT_DIR, scenario, housing_type, county,
+                    f"{OUTPUT_FILE_PREFIX}_{county}.csv"
+                )
+
+                # Check if input_dir exists
                 if not os.path.exists(input_dir):
                     print(f"Directory not found: {input_dir}")
+                    county_info["status"] = "directory_not_found"
+                    summary["skipped"].append(county_info)
+                    continue
+
+                # List files
+                all_files = os.listdir(input_dir)
+                if not all_files:
+                    # Directory is empty => skip
+                    print(f"No data processed for {county} in {scenario} - {housing_type}")
+                    county_info["status"] = "no_files"
+                    summary["skipped"].append(county_info)
                     continue
 
                 # Collect all end use columns relevant to the scenario
@@ -73,52 +103,67 @@ def build_load_profiles(scenarios, housing_types, counties):
 
                 all_data = pd.DataFrame()
 
-                # Process all Parquet files in the directory
-                for file_name in os.listdir(input_dir):
+                # Process each Parquet
+                for file_name in all_files:
                     file_path = os.path.join(input_dir, file_name)
-                    if file_path.endswith('.parquet'):
+                    if file_path.endswith(".parquet"):
+                        county_info["num_files"] += 1
                         try:
                             data = pd.read_parquet(file_path)
                         except Exception as e:
                             print(f"Error reading {file_path}: {e}")
+                            summary["errors"].append({
+                                "file_path": file_path,
+                                "error": str(e)
+                            })
                             continue
 
-                        # Ensure all required columns exist
-                        if 'timestamp' in data.columns and all(col in data.columns for col in end_uses):
-                            data['timestamp'] = pd.to_datetime(data['timestamp'])
-                            data = data[['timestamp'] + end_uses]
-                            all_data = pd.concat([all_data, data], axis=0, ignore_index=True)
+                        # Ensure required columns
+                        required_cols = ["timestamp"] + end_uses
+                        missing = [col for col in required_cols if col not in data.columns]
+                        if missing:
+                            # Mark as missing columns
+                            msg = f"Missing columns in {file_path}: {missing}"
+                            print(msg)
+                            summary["errors"].append({
+                                "file_path": file_path,
+                                "error": f"Missing columns: {missing}"
+                            })
+                            continue
 
-                # Check if data was loaded
+                        # Filter data
+                        data["timestamp"] = pd.to_datetime(data["timestamp"])
+                        data = data[required_cols]
+                        all_data = pd.concat([all_data, data], axis=0, ignore_index=True)
+
+                # If after scanning all Parquet files, we have no valid data => skip
                 if all_data.empty:
                     print(f"No data processed for {county} in {scenario} - {housing_type}")
+                    county_info["status"] = "empty_data"
+                    summary["skipped"].append(county_info)
                     continue
 
-                # Group data by timestamp to calculate average across all buildings
-                average_profile = all_data.groupby('timestamp')[end_uses].mean()
+                # Group data by timestamp
+                average_profile = all_data.groupby("timestamp")[end_uses].mean()
 
-                # Create a full year's timestamp range
+                # Full year range
                 full_year = pd.date_range(
-                    start=all_data['timestamp'].min(), 
-                    end=all_data['timestamp'].max(), 
-                    freq='H'
+                    start=all_data["timestamp"].min(),
+                    end=all_data["timestamp"].max(),
+                    freq="H"
                 )
 
-                # Reindex to include all hours in the range
                 average_profile = average_profile.reindex(full_year)
-                average_profile['total_load'] = average_profile[end_uses].sum(axis=1)
+                average_profile["total_load"] = average_profile[end_uses].sum(axis=1)
 
-                # Reset index and save to CSV
+                # Save to CSV
                 average_profile.reset_index(inplace=True)
-                average_profile.rename(columns={'index': 'timestamp'}, inplace=True)
+                average_profile.rename(columns={"index": "timestamp"}, inplace=True)
                 os.makedirs(os.path.dirname(output_path), exist_ok=True)
                 average_profile.to_csv(output_path, index=False)
 
                 print(f"Saved load profile to {output_path}")
+                county_info["status"] = "processed"
+                summary["processed"].append(county_info)
 
-# Define housing types and counties
-housing_types = ["single-family-detached"] # , "single-family-attached"]
-counties = ["alameda", "alpine", "riverside"]  # Add more counties
-
-# Build load profiles
-build_load_profiles(SCENARIOS, housing_types, counties)
+    return summary

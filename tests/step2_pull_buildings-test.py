@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../'
 from step2_pull_buildings import (
     download_parquet_file,
     process_county,
-    process_all_scenarios
+    process # add tests to test process function
 )
 
 @pytest.fixture
@@ -119,7 +119,7 @@ def test_process_all_scenarios_handles_missing_scenario_path(mocker, tmp_path):
     mocker.patch("os.path.exists", return_value=False)
 
     # Call process_all_scenarios with default (download_new_files=True).
-    result = process_all_scenarios(output_base_dir=str(tmp_path), download_new_files=True)
+    result = process(output_base_dir=str(tmp_path), download_new_files=True)
     assert result is None, "Should skip scenarios when paths are missing and return None"
 
 def test_process_all_scenarios_no_download(mocker, tmp_path):
@@ -129,7 +129,7 @@ def test_process_all_scenarios_no_download(mocker, tmp_path):
 
     # Even if directories exist, if download_new_files=False it should do nothing
     tmp_path.mkdir(exist_ok=True)
-    result = process_all_scenarios(output_base_dir=str(tmp_path), download_new_files=False)
+    result = process(output_base_dir=str(tmp_path), download_new_files=False)
 
     # Verify that it didn't enter the logic that downloads files
     mock_process_county.assert_not_called()
