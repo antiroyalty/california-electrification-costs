@@ -3,6 +3,8 @@ import os
 import pandas as pd
 import numpy as np
 
+# TODO: Make this a Monte Carlo simulation, trying all values in range
+# TODO: Add climate-dependent (county-dependent?) COP values
 # Conversion constants
 EFFICIENCY_GAS_STOVE = 0.45  # Average efficiency (40-50%)
 EFFICIENCY_INDUCTION_STOVE = 0.875  # Average efficiency (85-90%)
@@ -66,19 +68,28 @@ def convert_appliances_for_county(county, base_input_dir, base_output_dir, scena
 
 def convert_loads_for_counties(base_input_dir, base_output_dir, counties=None, scenarios=None, housing_types=None):
     if counties is None:
-        # Dynamically determine counties from folder structure
         scenario_path = os.path.join(base_input_dir, scenarios[0], housing_types[0])
+
+        if not os.path.exists(scenario_path):
+            print(f"Scenario path does not exist: {scenario_path}")
+            return
+
+        # Dynamically determine counties from folder structure
         counties = [county for county in os.listdir(scenario_path) if os.path.isdir(os.path.join(scenario_path, county))]
+        print("*****")
+        print(counties)
 
     for county in counties:
+        print("&&&&&")
+        print(county)
         for housing_type in housing_types:
             convert_appliances_for_county(county, base_input_dir, base_output_dir, scenarios, housing_type)
 
-# Example usage
-base_input_dir = "data"
-base_output_dir = "data"
-counties = ["alameda", "riverside"]
-housing_types = ["single-family-detached"]
-scenarios = ["baseline"] # "heat_pump_and_water_heater", "heat_pump_water_heater_and_induction_stove"]
+# # Example usage
+# base_input_dir = "data"
+# base_output_dir = "data"
+# counties = ["alameda", "riverside"]
+# housing_types = ["single-family-detached"]
+# scenarios = ["baseline"] # "heat_pump_and_water_heater", "heat_pump_water_heater_and_induction_stove"]
 
-convert_loads_for_counties(base_input_dir, base_output_dir, counties, scenarios, housing_types)
+# convert_loads_for_counties(base_input_dir, base_output_dir, None, scenarios, housing_types)
