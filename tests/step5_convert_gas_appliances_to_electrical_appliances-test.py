@@ -95,7 +95,7 @@ def test_convert_appliances_for_county_no_file(mocker):
     mock_to_csv = mocker.patch("pandas.DataFrame.to_csv")
 
     convert_appliances_for_county(
-        county="fake_county",
+        county="alameda_test",
         base_input_dir="/data",
         base_output_dir="/data",
         scenarios=["baseline"],
@@ -119,7 +119,7 @@ def test_convert_appliances_for_county_missing_column(mocker, mock_gas_loads_df)
     mock_to_csv = mocker.patch("pandas.DataFrame.to_csv")
 
     convert_appliances_for_county(
-        county="fake_county",
+        county="alameda_test",
         base_input_dir="/data",
         base_output_dir="/data",
         scenarios=["baseline"],
@@ -141,39 +141,24 @@ def test_convert_appliances_for_county_success(mocker, mock_gas_loads_df):
     # Capture the DataFrame passed to `to_csv`
     saved_dataframes = []
 
-    def to_csv_side_effect(*args, **kwargs):
-        print("to_csv called with args:", args)
-        print("to_csv called with kwargs:", kwargs)
-        df = args[0]
-        saved_dataframes.append(df)
-        # Make sure to_csv does not return a string or other default value
-        print("Captured DataFrame type:", type(df))
-        print("Captured DataFrame content:\n", df)
-
-        return None
-    
-    mock_to_csv = mocker.patch("pandas.DataFrame.to_csv", side_effect=to_csv_side_effect)
+    def to_csv_side_effect(self, path, **kwargs):
+        saved_dataframes.append(self)  # Use `self` to capture the DataFrame
+        print("Captured DataFrame content:\n", self)
+        
+    mock_to_csv = mocker.patch("pandas.DataFrame.to_csv", new=to_csv_side_effect)
 
     convert_appliances_for_county(
-        county="fake_county",
+        county="alameda_test",
         base_input_dir="/data",
         base_output_dir="/data",
         scenarios=["baseline"],
         housing_type="sfd"
     )
 
-    print("mock_to_csv.call_count:", mock_to_csv.call_count)
-
-    # Verify to_csv was called and inspect the saved DataFrame
     mock_read_csv.assert_called_once()
-    assert mock_to_csv.call_count == 1, "to_csv was not called as expected"
-
-    print("Saved DataFrames:", saved_dataframes)
 
     assert len(saved_dataframes) == 1, "No DataFrame was captured from to_csv"
     written_df = saved_dataframes[0]
-
-    print("Final written DataFrame columns:", written_df.columns)
 
     # Confirm the new columns exist
     assert "simulated.electricity.heat_pump.energy_consumption.electricity.total.kwh" in written_df.columns
