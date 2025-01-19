@@ -1,6 +1,8 @@
 import os
 import pandas as pd
 
+from helpers import slugify_county_name
+
 # Conversion factor
 KWH_TO_THERMS = 0.0341296
 
@@ -127,12 +129,7 @@ def process(scenarios, housing_types, base_input_dir, base_output_dir, counties=
                         if os.path.isdir(os.path.join(scenario_path, county))]
             
             for county in counties:
-                county_slug = (
-                    county.lower()
-                            .replace("county", "")
-                            .strip()
-                            .replace(" ", "-")
-                )
+                county_slug = slugify_county_name(county)
 
                 print(f"Processing gas load profile in {county} for {scenario}, {housing_type}")
             

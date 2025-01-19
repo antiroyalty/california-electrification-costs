@@ -3,6 +3,8 @@ import os
 import pandas as pd
 import numpy as np
 
+from helpers import slugify_county_name
+
 # TODO: Make this a Monte Carlo simulation, trying all values in range
 # TODO: Add climate-dependent (county-dependent?) COP values
 # Conversion constants
@@ -79,12 +81,7 @@ def process(base_input_dir, base_output_dir, counties=None, scenarios=None, hous
         print(counties)
 
     for county in counties:
-        county_slug = (
-            county.lower()
-                    .replace("county", "")
-                    .strip()
-                    .replace(" ", "-")
-        )
+        county_slug = slugify_county_name(county)
                         
         for housing_type in housing_types:
             convert_appliances_for_county(county_slug, base_input_dir, base_output_dir, scenarios, housing_type)
