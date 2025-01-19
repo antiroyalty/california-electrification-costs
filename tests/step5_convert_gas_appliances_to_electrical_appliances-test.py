@@ -149,10 +149,10 @@ def test_convert_appliances_for_county_success(mocker, mock_gas_loads_df):
 
     convert_appliances_for_county(
         county="alameda_test",
-        base_input_dir="/data",
-        base_output_dir="/data",
+        base_input_dir="data",
+        base_output_dir="data",
         scenarios=["baseline"],
-        housing_type="sfd"
+        housing_type="single-family-detached"
     )
 
     mock_read_csv.assert_called_once()
@@ -183,8 +183,8 @@ def test_process_no_counties(mocker):
     mock_isdir = mocker.patch(
         "os.path.isdir",
         side_effect=lambda path: path in [
-            "/base/in/baseline/single-family-detached/alameda",
-            "/base/in/baseline/single-family-detached/riverside"
+            "data/baseline/single-family-detached/alameda",
+            "data/baseline/single-family-detached/riverside"
         ]
     )
 
@@ -193,7 +193,7 @@ def test_process_no_counties(mocker):
 
     scenarios = ["baseline"]
     housing_types = ["single-family-detached"]
-    process("/base/in", "/base/out", counties=None, scenarios=scenarios, housing_types=housing_types)
+    process("data", "data", counties=None, scenarios=scenarios, housing_types=housing_types)
 
     assert mock_convert_county.call_count == 2
 
@@ -213,7 +213,7 @@ def test_process_explicit_counties(mocker):
     scenarios = ["baseline"]
     housing_types = ["sfd"]
     process(
-        "/base/in", "/base/out",
+        "data", "data",
         counties=["alameda", "riverside"],
         scenarios=scenarios,
         housing_types=housing_types
@@ -244,3 +244,57 @@ def test_process_scenario_path_missing(mocker):
     #   but that doesn't exist => it won't find counties => won't call convert_appliances_for_county
     mock_convert_county.assert_not_called()
     mock_listdir.assert_not_called()
+
+@pytest.mark.parametrize("county_in, expected_slug", [
+    ("Riverside County", "riverside"),
+    ("Santa Clara County", "santa-clara"),
+])
+def test_convert_county_name_to_slug(mocker, county_in, expected_slug):
+    """
+    Pass multiple counties like 'Riverside County' and 'Santa Clara County'
+    to step5's process(), verifying they're each slugified when calling 
+    convert_appliances_for_county.
+    """
+    # Mock file checks so we don't rely on real directories:
+    mocker.patch("os.path.exists", return_value=True)
+    mocker.patch("os.path.isdir", return_value=True)
+    # No auto county discovery since we supply counties explicitly
+    mocker.patch("os.listdir", return_value=[])
+
+    # Patch read_csv so we don't fail on missing CSV or missing columns
+    dummy_df = pd.DataFrame({
+        "timestamp": [1,2],
+        "out.natural_gas.heating.energy_consumption.gas.total.kwh": [5.0, 6.0],
+        "out.natural_gas.range_oven.energy_consumption.gas.total.kwh": [1.0, 2.0],
+        "out.natural_gas.hot_water.energy_consumption.gas.total.kwh": [2.5, 3.0],
+    })
+    mocker.patch("pandas.read_csv", return_value=dummy_df)
+
+    # We patch convert_appliances_for_county, because that's what step5's process calls
+    mock_convert = mocker.patch(
+        "step5_convert_gas_appliances_to_electrical_appliances.convert_appliances_for_county"
+    )
+
+    scenarios = ["baseline"]
+    housing_types = ["single-family-detached"]
+
+    # Now call the step5 process function
+    process(
+        base_input_dir="data",
+        base_output_dir="data",
+        counties=[county_in],  # e.g. "Riverside County" or "Santa Clara County"
+        scenarios=scenarios,
+        housing_types=housing_types
+    )
+
+    # Expect a single call to convert_appliances_for_county
+    mock_convert.assert_called_once()
+    # The call signature is: (county, base_input_dir, base_output_dir, scenarios, housing_type)
+    (actual_county_arg, actual_in, actual_out, actual_scen, actual_htype) = mock_convert.call_args[0]
+
+    # Confirm the county got slugified
+    assert actual_county_arg == expected_slug, f"Expected {expected_slug}, got {actual_county_arg}"
+    assert actual_in == "data"
+    assert actual_out == "data"
+    assert actual_scen == scenarios
+    assert actual_htype == "single-family-detached"

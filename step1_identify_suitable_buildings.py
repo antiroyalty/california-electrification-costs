@@ -98,8 +98,8 @@ def filter_metadata(metadata, housing_type, county_code, scenario):
     
     # print(f"- Original metadata count: {metadata.shape[0]}")
     # print(f"- Filtering reduced the dataset by: {metadata.shape[0] - filtered_metadata.shape[0]} entries")
-    print(f"{metadata[county_condition].shape[0]}") # Modeled
-    print(f"{filtered_metadata.shape[0]}") # Matching
+    # print(f"{metadata[county_condition].shape[0]}") # Modeled
+    # print(f"{filtered_metadata.shape[0]}") # Matching
     
     return filtered_metadata
 
@@ -134,9 +134,9 @@ def generate_output_filename(county_name):
     return filename
 
 def process(scenario, housing_type, output_base_dir="data", target_county=None):
-    print("--------------------Step 1: Identify Suitable Buildings{---------------------------")
-    print(f"{scenario}")
-    print(f"{housing_type}")
+    # print("--------------------Step 1: Identify Suitable Buildings{---------------------------")
+    # print(f"{scenario}")
+    # print(f"{housing_type}")
 
     metadata = get_metadata(scenario)
     unique_counties = metadata[['in.county', 'in.county_name']].drop_duplicates()
@@ -149,12 +149,12 @@ def process(scenario, housing_type, output_base_dir="data", target_county=None):
     output_csv_paths = []
 
     for _, row in counties.iterrows():
-        print(f"Processing county: {row['in.county_name']} ({row['in.county']})")
+        # print(f"Processing county: {row['in.county_name']} ({row['in.county']})")
 
         county_code = row['in.county']
         county_name = row['in.county_name']
 
-        print(" ")
+        # print(" ")
 
         output_dir = os.path.join("data", scenario, housing_type, county_name)
         formatted_county_name = generate_output_filename(county_name)
@@ -164,6 +164,6 @@ def process(scenario, housing_type, output_base_dir="data", target_county=None):
         
         output_csv_paths.append(output_csv)
 
-    print("--------------------}Step 1: Identify Suitable Buildings---------------------------")
+    # print("--------------------}Step 1: Identify Suitable Buildings---------------------------")
     return output_csv_paths
 

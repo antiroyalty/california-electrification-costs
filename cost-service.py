@@ -28,38 +28,32 @@ class CostService:
         self.output_dir = output_dir
 
     def run(self):
-        # Should give an array of CSV file paths
+        print("----- Step 1 -----")
         result = IdentifySuitableBuildings.process(self.scenario, self.housing_type, output_base_dir=self.output_dir, target_county=county)
+        print(result, "\n")
 
-        print("Step 1")
-        print(result)
-
-        # # Step 2: Pull Buildings
+        print("----- Step 2 -----")
         result = PullBuildings.process(output_base_dir=self.output_dir, download_new_files=False)
-
-        print("Step 2")
-        print(result)
+        print(result, "\n")
     
-        # # Step 3: Build County Load Profiles
-        print("county, ", county)
+        print("----- Step 3 -----")
         result = BuildElectricityLoadProfiles.process(self.SCENARIOS, [self.housing_type], [self.county])
+        print(result, "\n")
 
-        print("Step 3")
-        print(result)
-
-        # # Step 4: Build Gas Load Profiles
+        print("----- Step 4 -----")
         result = BuildGasLoadProfiles.process(self.SCENARIOS, [self.housing_type], self.input_dir, self.output_dir, [self.county])
+        print(result, "\n")
 
-        print("Step 4")
-        print(result)
-
+        print("----- Step 5 -----")
         result = ConvertGasToElectric.process(self.input_dir, self.output_dir, [self.county], list(self.SCENARIOS.keys()), [self.housing_type] )
+        print(result, "\n")
 
-        print("Step 5")
-        print(result)
-
+        print("---- Step 6 -----")
+        print("(No step 6 - steps misnumbered) \n")
+    
+        print("----- Step 7 -----")
         result = WeatherFiles.process(self.input_dir, self.output_dir, list(self.SCENARIOS.keys()), [self.housing_type], [self.county])
-        print(result)
+        print(result, "\n")
         # self.csv_file = EvaluateElectricityRates.process(self.csv_file)
 
 

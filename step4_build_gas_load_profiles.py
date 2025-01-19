@@ -99,8 +99,8 @@ def average_county_gas_profiles(county_gas_totals, building_count, end_uses):
 def save_county_gas_profiles(county_gas_totals, county, output_dir):
     os.makedirs(output_dir, exist_ok=True)
     output_file = os.path.join(output_dir, f"gas_loads_{county}.csv")
-    county_gas_totals.to_csv(output_file)
     print(f"Saved results to {output_file}")
+    county_gas_totals.to_csv(output_file)
 
 def build_county_gas_profile(scenario, housing_type, county, county_dir, output_dir, end_uses):
     county_gas_totals, building_count = sum_county_gas_profiles(county_dir, end_uses)
@@ -127,11 +127,17 @@ def process(scenarios, housing_types, base_input_dir, base_output_dir, counties=
                         if os.path.isdir(os.path.join(scenario_path, county))]
             
             for county in counties:
-                print(f"Processing {county} for {scenario}, {housing_type}")
-                
-                # Define input and output paths
-                county_dir = os.path.join(scenario_path, county, "buildings")
-                output_dir = os.path.join(base_output_dir, scenario, housing_type, county)
+                county_slug = (
+                    county.lower()
+                            .replace("county", "")
+                            .strip()
+                            .replace(" ", "-")
+                )
+
+                print(f"Processing gas load profile in {county} for {scenario}, {housing_type}")
+            
+                county_dir = os.path.join(scenario_path, county_slug, "buildings")
+                output_dir = os.path.join(base_output_dir, scenario, housing_type, county_slug)
                 
                 if not os.path.exists(county_dir):
                     print(f"County directory not found: {county_dir}")
@@ -142,4 +148,4 @@ def process(scenarios, housing_types, base_input_dir, base_output_dir, counties=
                 end_uses = [col for category in end_use_categories for col in END_USE_COLUMNS[category]]
                 
                 # Build the gas profile for the county
-                build_county_gas_profile(scenario, housing_type, county, county_dir, output_dir, end_uses)
+                build_county_gas_profile(scenario, housing_type, county_slug, county_dir, output_dir, end_uses)

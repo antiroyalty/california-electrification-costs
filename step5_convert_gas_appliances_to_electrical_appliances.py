@@ -76,14 +76,18 @@ def process(base_input_dir, base_output_dir, counties=None, scenarios=None, hous
 
         # Dynamically determine counties from folder structure
         counties = [county for county in os.listdir(scenario_path) if os.path.isdir(os.path.join(scenario_path, county))]
-        print("*****")
         print(counties)
 
     for county in counties:
-        print("&&&&&")
-        print(county)
+        county_slug = (
+            county.lower()
+                    .replace("county", "")
+                    .strip()
+                    .replace(" ", "-")
+        )
+                        
         for housing_type in housing_types:
-            convert_appliances_for_county(county, base_input_dir, base_output_dir, scenarios, housing_type)
+            convert_appliances_for_county(county_slug, base_input_dir, base_output_dir, scenarios, housing_type)
 
 # # Example usage
 # base_input_dir = "data"
@@ -91,5 +95,4 @@ def process(base_input_dir, base_output_dir, counties=None, scenarios=None, hous
 # counties = ["alameda", "riverside"]
 # housing_types = ["single-family-detached"]
 # scenarios = ["baseline"] # "heat_pump_and_water_heater", "heat_pump_water_heater_and_induction_stove"]
-
 # convert_loads_for_counties(base_input_dir, base_output_dir, None, scenarios, housing_types)

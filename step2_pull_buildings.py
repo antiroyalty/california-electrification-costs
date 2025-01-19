@@ -77,7 +77,7 @@ def process(output_base_dir="data", download_new_files=True):
 
     if not download_new_files:
         return {
-            "success_summary": success_summary,
+            "success_summary": success_summary.append("No new files needed to be downloaded"),
             "failure_summary": failure_summary,
         }
 

@@ -278,3 +278,63 @@ def test_process_county_ok(mocker):
     process(scenarios, ["sfd"], "/base/in", "/base/out")
     # Expect 2 calls, for ctyA and ctyB
     assert mock_bld.call_count == 2
+
+def test_convert_county_name_to_slug(mocker):
+    """
+    Pass multiple counties like 'Riverside County' and 'Santa Clara County' to step4's process()
+    and ensure they're each slugified (e.g. 'riverside', 'santa-clara') for build_county_gas_profile.
+    """
+    # Mock file checks so we don't rely on real directories:
+    mocker.patch("os.path.exists", return_value=True)
+    mocker.patch("os.path.isdir", return_value=True)
+    # We won't rely on automatic county discovery; we supply 'counties' directly:
+    mocker.patch("os.listdir", return_value=[])
+
+    # Spy on build_county_gas_profile to see how it's invoked
+    mock_build = mocker.patch("step4_build_gas_load_profiles.build_county_gas_profile")
+
+    scenarios = {"baseline": ["heating"]}
+    housing_types = ["single-family-detached"]
+    # Two counties that need slug conversion
+    input_counties = ["Riverside County", "Santa Clara County"]
+
+    # Call the process function
+    process(
+        scenarios=scenarios,
+        housing_types=housing_types,
+        base_input_dir="data",
+        base_output_dir="data",
+        counties=input_counties,
+    )
+
+    # We expect exactly 2 calls, one per county
+    assert mock_build.call_count == 2, "Should invoke build_county_gas_profile twice (once per county)."
+
+    # Grab each call in turn
+    first_call_args = mock_build.call_args_list[0][0]
+    second_call_args = mock_build.call_args_list[1][0]
+
+    # Each call's signature is: (scenario, housing_type, county, county_dir, output_dir, end_uses)
+    # -----------------------------
+    # 1) Riverside County -> 'riverside'
+    scenario_1, housing_1, county_1, county_dir_1, output_dir_1, end_uses_1 = first_call_args
+
+    assert scenario_1 == "baseline"
+    assert housing_1 == "single-family-detached"
+    # County is slugified to "riverside"
+    assert county_1 == "riverside", f"Expected 'riverside', got {county_1}"
+    # Directories must also contain "riverside"
+    assert county_dir_1 == "data/baseline/single-family-detached/riverside/buildings"
+    assert output_dir_1 == "data/baseline/single-family-detached/riverside"
+
+    # -----------------------------
+    # 2) Santa Clara County -> 'santa-clara'
+    scenario_2, housing_2, county_2, county_dir_2, output_dir_2, end_uses_2 = second_call_args
+
+    assert scenario_2 == "baseline"
+    assert housing_2 == "single-family-detached"
+    # County is slugified to "santa-clara"
+    assert county_2 == "santa-clara", f"Expected 'santa-clara', got {county_2}"
+    # Directories must also contain "santa-clara"
+    assert county_dir_2 == "data/baseline/single-family-detached/santa-clara/buildings"
+    assert output_dir_2 == "data/baseline/single-family-detached/santa-clara"

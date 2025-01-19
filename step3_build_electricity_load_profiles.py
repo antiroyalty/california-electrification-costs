@@ -73,7 +73,7 @@ def process(scenarios, housing_types, counties):
     for scenario, end_use_categories in scenarios.items():
         for housing_type in housing_types:
             for county in counties:
-                print(f"Processing {county} for {scenario}, {housing_type}")
+                print(f"Processing electricity load profile in {county} for {scenario}, {housing_type}")
 
                 # Record info about this county's run
                 county_info = {
@@ -175,7 +175,7 @@ def process(scenarios, housing_types, counties):
                 os.makedirs(os.path.dirname(output_path), exist_ok=True)
                 average_profile.to_csv(output_path, index=False)
 
-                print(f"Saved load profile to {output_path}")
+                print(f"Saved electricity load profile to {output_path}")
                 county_info["status"] = "processed"
                 summary["processed"].append(county_info)
 
