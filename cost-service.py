@@ -2,9 +2,9 @@ import step1_identify_suitable_buildings as IdentifySuitableBuildings
 import step2_pull_buildings as PullBuildings
 import step3_build_electricity_load_profiles as BuildElectricityLoadProfiles
 import step4_build_gas_load_profiles as BuildGasLoadProfiles
-# import step5_convert_gas_appliances_to_electrical_appliances as ConvertGasToElectric
+import step5_convert_gas_appliances_to_electrical_appliances as ConvertGasToElectric
 # import step6_get_household_electricity_loads_for_solar_storage as 
-# import step7_get_weather_files as WeatherFiles
+import step7_get_weather_files as WeatherFiles
 # import step8_run_sam_model_for_solar_storage as RunSamModelForSolarStorage
 # import step9_get_loads_for_rates
 # import step10_evaluate_gas_rates
@@ -50,7 +50,16 @@ class CostService:
         # # Step 4: Build Gas Load Profiles
         result = BuildGasLoadProfiles.process(self.SCENARIOS, [self.housing_type], self.input_dir, self.output_dir, [self.county])
 
-        # 
+        print("Step 4")
+        print(result)
+
+        result = ConvertGasToElectric.process(self.input_dir, self.output_dir, [self.county], list(self.SCENARIOS.keys()), [self.housing_type] )
+
+        print("Step 5")
+        print(result)
+
+        result = WeatherFiles.process(self.input_dir, self.output_dir, list(self.SCENARIOS.keys()), [self.housing_type], [self.county])
+        print(result)
         # self.csv_file = EvaluateElectricityRates.process(self.csv_file)
 
 

@@ -66,7 +66,7 @@ def convert_appliances_for_county(county, base_input_dir, base_output_dir, scena
             print(f"An unexpected error occurred while processing {county} in scenario {scenario}: {e}")
             continue
 
-def convert_loads_for_counties(base_input_dir, base_output_dir, counties=None, scenarios=None, housing_types=None):
+def process(base_input_dir, base_output_dir, counties=None, scenarios=None, housing_types=None):
     if counties is None:
         scenario_path = os.path.join(base_input_dir, scenarios[0], housing_types[0])
 

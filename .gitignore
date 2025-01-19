@@ -4,3 +4,4 @@ reference
 wip-outputs
 images
 .DS_Store
+.env

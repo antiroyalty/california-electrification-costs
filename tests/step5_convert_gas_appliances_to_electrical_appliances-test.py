@@ -17,7 +17,7 @@ from step5_convert_gas_appliances_to_electrical_appliances import (
     convert_gas_stove_to_induction_stove,
     convert_gas_water_heater_to_electric_waterheater,
     convert_appliances_for_county,
-    convert_loads_for_counties
+    process
 )
 
 # ------------------------------------------------------------------------------
@@ -166,10 +166,10 @@ def test_convert_appliances_for_county_success(mocker, mock_gas_loads_df):
     assert "simulated.electricity.hot_water.energy_consumption.electricity.total.kwh" in written_df.columns
 
 # ------------------------------------------------------------------------------
-# 3. convert_loads_for_counties
+# 3. process
 # ------------------------------------------------------------------------------
 
-def test_convert_loads_for_counties_no_counties(mocker):
+def test_process_no_counties(mocker):
     """
     If counties=None, code tries to discover counties from the folder structure.
     This test won't define that folder structure; just ensure no crash.
@@ -193,7 +193,7 @@ def test_convert_loads_for_counties_no_counties(mocker):
 
     scenarios = ["baseline"]
     housing_types = ["single-family-detached"]
-    convert_loads_for_counties("/base/in", "/base/out", counties=None, scenarios=scenarios, housing_types=housing_types)
+    process("/base/in", "/base/out", counties=None, scenarios=scenarios, housing_types=housing_types)
 
     assert mock_convert_county.call_count == 2
 
@@ -203,7 +203,7 @@ def test_convert_loads_for_counties_no_counties(mocker):
     print("Found counties:", found_counties)
     assert sorted(found_counties) == ["alameda", "riverside"]
 
-def test_convert_loads_for_counties_explicit_counties(mocker):
+def test_process_explicit_counties(mocker):
     """
     If we specify counties, it uses them directly.
     """
@@ -212,7 +212,7 @@ def test_convert_loads_for_counties_explicit_counties(mocker):
 
     scenarios = ["baseline"]
     housing_types = ["sfd"]
-    convert_loads_for_counties(
+    process(
         "/base/in", "/base/out",
         counties=["alameda", "riverside"],
         scenarios=scenarios,
@@ -226,7 +226,7 @@ def test_convert_loads_for_counties_explicit_counties(mocker):
     cty2_args = calls[1][0]
     assert cty1_args[0] == "alameda" or cty1_args[0] == "riverside"
 
-def test_convert_loads_for_counties_scenario_path_missing(mocker):
+def test_process_scenario_path_missing(mocker):
     """
     If the discovered scenario path doesn't exist, it might skip discovering counties
     or raise an error. We'll see how the code handles it.
@@ -237,7 +237,7 @@ def test_convert_loads_for_counties_scenario_path_missing(mocker):
 
     scenarios = ["baseline"]
     housing_types = ["sfd"]
-    convert_loads_for_counties("/base/in", "/base/out", counties=None, scenarios=scenarios, housing_types=housing_types)
+    process("/base/in", "/base/out", counties=None, scenarios=scenarios, housing_types=housing_types)
 
     # Because the scenario path is missing, it tries to do:
     #   scenario_path = /base/in/baseline/sfd
