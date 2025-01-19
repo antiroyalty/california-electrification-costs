@@ -4,6 +4,8 @@ import pandas as pd
 from geopy.geocoders import Nominatim
 from dotenv import load_dotenv
 
+from helpers import slugify_county_name
+
 load_dotenv()
 API_KEY = os.getenv("NREL_WEATHER_API_KEY", "mock_api_key")
 
@@ -26,6 +28,8 @@ def process(base_input_dir, output_dir, scenarios, housing_types, counties=None)
 
             for county in counties:
                 print(f"Processing {county}...")
+
+                county = slugify_county_name(county)
 
                 try:
                     # Get centroid coordinates dynamically using geopy
