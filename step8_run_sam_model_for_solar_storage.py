@@ -4,16 +4,20 @@ import PySAM.Battery as battery_model
 import PySAM.ResourceTools as tools
 import pandas as pd
 import matplotlib.pyplot as plt
+import statistics
+
+from helpers import slugify_county_name
 
 LOADPROFILE_FILE_PREFIX = "electricity_loads"
 TOTAL_LOAD_COLUMN_NAME = "total_load"
 OUTPUT_LOADPROFILE_FILE_PREFIX = "sam_optimized_load_profiles"
 
-def generate_solar_storage_profiles(base_input_dir, base_output_dir, scenarios, housing_types, counties=None, years_of_analysis=1):
+def process(base_input_dir, base_output_dir, scenarios, housing_types, counties=None, years_of_analysis=1):
     for scenario in scenarios:
         for housing_type in housing_types:
             # Define the scenario path to dynamically list counties
             scenario_path = os.path.join(base_input_dir, scenario, housing_type)
+
             if not os.path.exists(scenario_path):
                 print(f"Scenario path not found: {scenario_path}")
                 continue
@@ -25,13 +29,13 @@ def generate_solar_storage_profiles(base_input_dir, base_output_dir, scenarios, 
             
             for county in counties:
                 print(f"Processing {county} for {scenario}, {housing_type}...")
+                county = slugify_county_name(county)
+            
                 try:
-                    # Set up paths
                     weather_file = os.path.join(base_input_dir, scenario, housing_type, county, f"weather_TMY_{county}.csv")
                     load_file = os.path.join(scenario_path, county, f"{LOADPROFILE_FILE_PREFIX}_{county}.csv")
                     output_file = os.path.join(base_output_dir, scenario, housing_type, county, f"{OUTPUT_LOADPROFILE_FILE_PREFIX}_{county}.csv")
 
-                    # Ensure files exist
                     if not os.path.exists(weather_file):
                         print(f"Weather file not found: {weather_file}. Skipping...")
                         continue
@@ -42,17 +46,25 @@ def generate_solar_storage_profiles(base_input_dir, base_output_dir, scenarios, 
                     # Load SAM CSV solar resource data
                     solar_resource_data = tools.SAM_CSV_to_solar_data(weather_file)
 
-                    # TODO: Ana, convert system capacity to be dynamically assigned based on the household load, rather than static = 5 kW system
-                    annual_load_kwh = load_data.sum().iloc[0]  # Sum of 8760 values (assuming single column of kWh)
-                    avg_daily_irradiance = solar_resource_data["dni"].mean() * 24 / 1000  # kWh/m²/day
+                    # Load the household load profile
+                    load_data = pd.read_csv(load_file)
+                    load_column_name = TOTAL_LOAD_COLUMN_NAME  # Adjust if column name is different
+                    load_profile = load_data[load_column_name].tolist()
+
+                    annual_load_kwh = load_data[load_column_name].sum()  # Sum of 8760 values (single column of kWh)
+                    # Documentation of column names here: https://github.com/NREL/pysam/blob/8a5f6889cf2bae867d70bcff6ca408d142bd4b61/Examples/NonAnnualSimulation.ipynb#L358
+                    # In a solar resource file, global horizontal irradiance (gh) includes both the direct (beam) component of sunlight and the diffuse (scattered) component.
+                    # Diffuse irradiance (df) only includes the scattered portion of sunlight that reaches the surface.
+                    avg_daily_irradiance = statistics.mean(solar_resource_data["gh"]) * 24 / 1000  # kWh/m²/day
                     system_efficiency = 0.15  # PV system efficiency (adjust as necessary)
-                    desired_offset = 1.0
+                    desired_offset = 1.2 # 1.2 times the annual load
                     system_capacity = (annual_load_kwh * desired_offset) / (avg_daily_irradiance * 365 * system_efficiency)
 
                     # Initialize PV system
                     solar = pvwatts.default("PVWattsResidential")
                     solar.SolarResource.solar_resource_data = solar_resource_data
-                    solar.SystemDesign.system_capacity = 5  # 5 kW system
+                    # DONE: Ana, convert system capacity to be dynamically assigned based on the household load, rather than static = 5 kW system
+                    solar.SystemDesign.system_capacity = system_capacity  # 5 kW system
                     solar.SystemDesign.dc_ac_ratio = 1.2
                     solar.SystemDesign.tilt = 20
                     solar.SystemDesign.azimuth = 180
@@ -61,10 +73,7 @@ def generate_solar_storage_profiles(base_input_dir, base_output_dir, scenarios, 
                     # Initialize battery model
                     battery = battery_model.from_existing(solar, "GenericBatteryResidential")
 
-                    # Load the household load profile
-                    load_data = pd.read_csv(load_file)
-                    load_column_name = TOTAL_LOAD_COLUMN_NAME  # Adjust if column name is different
-                    load_profile = load_data[load_column_name].tolist()
+
                     battery.Load.load = load_profile
 
                     # Configure battery parameters
@@ -127,15 +136,15 @@ def generate_solar_storage_profiles(base_input_dir, base_output_dir, scenarios, 
                     print(f"Error processing {county}: {e}")
 
 # Example usage
-base_input_dir = "./data"
-base_output_dir = "./data"
+base_input_dir = "data"
+base_output_dir = "data"
 scenarios = ["baseline"] # "heat_pump_and_water_heater", 
              # "heat_pump_water_heater_and_induction_stove",
              # "heat_pump_heating_cooling_water_heater_and_induction_stove"]
 housing_types = ["single-family-detached"] # "single-family-attached"]
 
-counties = ["alameda", "alpine", "riverside"]
+counties = ["alameda", "riverside"]
 
 # rate_plan = ...
 
-generate_solar_storage_profiles(base_input_dir, base_output_dir, scenarios, housing_types, counties)
+process(base_input_dir, base_output_dir, scenarios, housing_types, counties)
