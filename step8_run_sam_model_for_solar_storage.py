@@ -6,17 +6,17 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import statistics
 
-from helpers import slugify_county_name
+from helpers import slugify_county_name, get_counties
 
 LOADPROFILE_FILE_PREFIX = "electricity_loads"
 TOTAL_LOAD_COLUMN_NAME = "total_load"
 OUTPUT_LOADPROFILE_FILE_PREFIX = "sam_optimized_load_profiles"
 
-def get_counties(scenario_path, counties):
-    if counties is None:
-        return [c for c in os.listdir(scenario_path) if os.path.isdir(os.path.join(scenario_path, c))]
+# def get_counties(scenario_path, counties):
+#     if counties is None:
+#         return [c for c in os.listdir(scenario_path) if os.path.isdir(os.path.join(scenario_path, c))]
 
-    return [slugify_county_name(c) for c in counties]
+#     return [slugify_county_name(c) for c in counties]
 
 def prepare_data_and_compute_system_capacity(weather_file, load_file, years_of_analysis):
     solar_resource_data = tools.SAM_CSV_to_solar_data(weather_file)

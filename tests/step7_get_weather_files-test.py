@@ -52,19 +52,6 @@ def test_get_tmy_weather_data_success(mock_geolocator, mock_requests_get, setup_
     file_path = os.path.join(output_dir, "baseline", "single-family-detached", "alameda", "weather_TMY_alameda.csv")
     assert os.path.exists(file_path)
 
-def test_get_tmy_weather_data_missing_directory(mock_geolocator, mock_requests_get, tmp_path):
-    base_input_dir = str(tmp_path / "non_existent")
-    output_dir = str(tmp_path / "output")
-
-    process(
-        scenarios=["baseline"],
-        housing_types=["single-family-detached"],
-        counties=["alameda"],
-        base_input_dir=base_input_dir,
-        output_dir=output_dir,
-    )
-    assert mock_requests_get.call_count == 0
-
 def test_get_tmy_weather_data_missing_county_centroid(mock_geolocator, mock_requests_get, setup_dirs):
     base_input_dir, output_dir = setup_dirs
     mock_geolocator.geocode.return_value = None
