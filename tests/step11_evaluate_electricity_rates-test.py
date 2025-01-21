@@ -6,13 +6,14 @@ from io import StringIO
 import os
 import glob
 import sys
+from pathlib import Path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 
 from step11_evaluate_electricity_rates import (
     get_season,
     calculate_annual_costs_electricity,
     process_county_scenario,
-    process_all_counties,
+    process,
     RATE_PLANS,
 )
 
@@ -29,7 +30,6 @@ def create_mock_dataframe():
 def mock_csv_file():
     return StringIO(MOCK_CSV_CONTENT)
 
-
 def test_get_season_summer():
     # June (month=6) is summer
     # Calculate hour_index for June 15, 2018
@@ -37,7 +37,6 @@ def test_get_season_summer():
     # Days before June: 31 (Jan) + 28 (Feb) + 31 (Mar) + 30 (Apr) + 31 (May) + 15 (June) - 1 = 165 days
     hour_index = 165 * 24
     assert get_season(hour_index) == "summer"
-
 
 def test_get_season_winter():
     # January (month=1) is winter
@@ -87,12 +86,15 @@ def test_calculate_annual_costs_electricity():
         assert pytest.approx(annual_costs[plan], rel=1e-2) == expected_cost
 
 def test_process_county_scenario(tmp_path):
-    county = "testcounty"
+    county = "Alameda County"
     file_path = tmp_path / "data"
     file_path.mkdir(parents=True)
     mock_file = file_path / f"loadprofiles_for_rates_{county}.csv"
     load_data = pd.DataFrame({"default.electricity.kwh": [1.0] * 24})  # 1 kWh for every hour
     load_data.to_csv(mock_file, index=False)
+
+    # Confirm the file was created
+    assert mock_file.exists(), f"Mock file was not created at {mock_file}"
 
     annual_costs = process_county_scenario(file_path, county, "default")
 
@@ -101,39 +103,47 @@ def test_process_county_scenario(tmp_path):
         assert plan in annual_costs
     assert all(value > 0 for value in annual_costs.values())  # Costs should be positive
 
-def test_process_all_counties(tmp_path):
-    base_input_dir = tmp_path / "input"
-    base_output_dir = tmp_path / "output"
-    county = "testcounty"
-    input_file_dir = base_input_dir / "baseline" / "single-family-detached" / county
-    input_file_dir.mkdir(parents=True)
-    mock_file = input_file_dir / "loadprofiles_for_rates_testcounty.csv"
-    load_data = pd.DataFrame({"default.electricity.kwh": [1.0] * 24})
+def test_process_with_file_written(tmp_path):
+    county = "Alameda County"
+    county_slug = "alameda"  # Slugified version for file paths
+    file_path = tmp_path / "baseline" / "single-family-detached" / county_slug
+    file_path.mkdir(parents=True)
+
+    mock_file = file_path / f"loadprofiles_for_rates_{county_slug}.csv"
+    load_data = pd.DataFrame({"default.electricity.kwh": [1.0] * 24})  # Simplified profile
     load_data.to_csv(mock_file, index=False)
 
-    process_all_counties(
-        base_input_dir=base_input_dir,
-        base_output_dir=base_output_dir,
-        counties=[county],
-        scenarios=["baseline"],
-        housing_types=["single-family-detached"],
-        load_type="default",
-    )
+    def mock_process_county_scenario(file_path, county, load_type):
+        return {
+            "E-TOU-C": 100.0, # arguments to process_county_scenario should return annual costs formatted as tuple of (plan, cost)
+            "E-TOU-D": 120.0,
+        }
 
-    output_dir = base_output_dir / "baseline" / "single-family-detached" / county / "results"
-    output_files = list(output_dir.glob("RESULTS_electricity_annual_costs_testcounty_*.csv"))
+    with patch("step11_evaluate_electricity_rates.process_county_scenario", side_effect=mock_process_county_scenario):
+        process(
+            base_input_dir=tmp_path,
+            base_output_dir=tmp_path,
+            counties=[county],
+            scenarios=["baseline"],
+            housing_types=["single-family-detached"],
+            load_type="default",
+        )
 
-    assert len(output_files) == 1, f"Expected 1 output file, found {len(output_files)}"
+        output_dir = tmp_path / "baseline" / "single-family-detached" / county_slug / "results"
+        output_files = list(output_dir.glob(f"RESULTS_electricity_annual_costs_{county_slug}_*.csv"))
 
-    results_df = pd.read_csv(output_files[0])
-    assert "default.electricity.E-TOU-C.usd" in results_df.columns
-    assert results_df.iloc[0]["default.electricity.E-TOU-C.usd"] > 0  # Validate data
+        assert len(output_files) == 1, f"Expected 1 output file, found {len(output_files)}"
+
+        results_df = pd.read_csv(output_files[0])
+        assert "default.electricity.E-TOU-C.usd" in results_df.columns
+        assert results_df.iloc[0]["default.electricity.E-TOU-C.usd"] == 100.0
+        assert results_df.iloc[0]["default.electricity.E-TOU-D.usd"] == 120.0
 
 def test_process_county_scenario_file_not_found(tmp_path):
     # Call the function without creating the file
     file_path = tmp_path / "data"
     file_path.mkdir(parents=True)
-    county = "missingcounty"
+    county = "Missing County"
 
     # Capture printed output
     with pytest.raises(FileNotFoundError) as exc_info:
@@ -143,14 +153,14 @@ def test_process_county_scenario_file_not_found(tmp_path):
     assert str(exc_info.value) == expected_message
 
 def test_invalid_load_type():
-    base_input_dir = "./data"
-    base_output_dir = "./data"
+    base_input_dir = "data"
+    base_output_dir = "data"
     counties = ["alameda"]
     scenarios = ["baseline"]
     housing_types = ["single-family-detached"]
     load_type = "invalid_load_type"
 
     with pytest.raises(ValueError) as exc_info:
-        process_all_counties(base_input_dir, base_output_dir, counties, scenarios, housing_types, load_type)
+        process(base_input_dir, base_output_dir, counties, scenarios, housing_types, load_type)
 
     assert "Invalid load_type 'invalid_load_type'. Must be one of ['default', 'solarstorage']." in str(exc_info.value)

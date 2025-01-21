@@ -11,6 +11,7 @@
 from datetime import datetime, timedelta
 import os
 import pandas as pd
+from helpers import get_counties, get_scenario_path
 
 BASELINE_ALLOWANCES = {
     "PGE": {
@@ -206,6 +207,13 @@ def calculate_annual_costs_electricity(load_profile):
 
 def process_county_scenario(file_path, county, load_type):
     file = os.path.join(file_path, f"{INPUT_FILE_NAME}_{county}.csv")
+
+    file = os.path.join(file_path, f"{INPUT_FILE_NAME}_{county}.csv")
+    print(f"DEBUG: file_path={file_path}")
+    print(f"DEBUG: Constructed file={file}")
+
+    if not os.path.exists(file):
+        raise FileNotFoundError(f"File not found: {file}")
     if not os.path.exists(file):
         raise FileNotFoundError(f"File not found: {file}")
 
@@ -216,7 +224,7 @@ def process_county_scenario(file_path, county, load_type):
 
     return calculate_annual_costs_electricity(load_profile)
 
-def process_all_counties(base_input_dir, base_output_dir, counties, scenarios, housing_types, load_type):
+def process(base_input_dir, base_output_dir, scenarios, housing_types, counties, load_type):
     valid_load_types = ["default", "solarstorage"]
     if load_type not in valid_load_types:
         raise ValueError(f"Invalid load_type '{load_type}'. Must be one of {valid_load_types}.")
@@ -224,23 +232,24 @@ def process_all_counties(base_input_dir, base_output_dir, counties, scenarios, h
     timestamp = datetime.now().strftime("%Y%m%d_%H")
 
     for housing_type in housing_types:
-        for county in counties:
-            for scenario in scenarios:
-                file_path = os.path.join(base_input_dir, scenario, housing_type, county)
+        for scenario in scenarios:
+            scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
+            counties = get_counties(scenario_path, counties)
+
+            for county in counties:
+                file_path = os.path.join(scenario_path, county)
 
                 annual_costs = process_county_scenario(file_path, county, load_type)
 
                 print(f"For {county}, {load_type}, annual electricity costs are:")
                 print(annual_costs)
 
-                # Prepare results as a DataFrame
                 results_data = {
                     f"{load_type}.electricity.{plan}.usd": [cost]
                     for plan, cost in annual_costs.items()
                 }
                 results_df = pd.DataFrame(results_data, index=[scenario])
 
-                # Output file
                 output_file_path = os.path.join(base_output_dir, scenario, housing_type, county, "results", f"{OUTPUT_FILE_NAME}_{county}_{timestamp}.csv")
 
                 os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
@@ -260,11 +269,11 @@ def process_all_counties(base_input_dir, base_output_dir, counties, scenarios, h
                 combined_df.to_csv(output_file_path, index_label="scenario")
                 print(f"Results saved to {output_file_path}")
 
-base_input_dir = "./data"
-base_output_dir = "./data"
-counties = ["alameda"]
-scenarios = ["baseline"]
-housing_types = ["single-family-detached"]
-load_type = "default" # default, solarstorage
+# base_input_dir = "data"
+# base_output_dir = "data"
+# counties = ["alameda"]
+# scenarios = ["baseline"]
+# housing_types = ["single-family-detached"]
+# load_type = "default" # default, solarstorage
 
-process_all_counties(base_input_dir, base_output_dir, counties, scenarios, housing_types, load_type)
+# process(base_input_dir, base_output_dir, scenarios, housing_types, counties, load_type)

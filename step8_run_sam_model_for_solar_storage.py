@@ -6,17 +6,11 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import statistics
 
-from helpers import slugify_county_name, get_counties
+from helpers import get_counties, get_scenario_path
 
 LOADPROFILE_FILE_PREFIX = "electricity_loads"
 TOTAL_LOAD_COLUMN_NAME = "total_load"
 OUTPUT_LOADPROFILE_FILE_PREFIX = "sam_optimized_load_profiles"
-
-# def get_counties(scenario_path, counties):
-#     if counties is None:
-#         return [c for c in os.listdir(scenario_path) if os.path.isdir(os.path.join(scenario_path, c))]
-
-#     return [slugify_county_name(c) for c in counties]
 
 def prepare_data_and_compute_system_capacity(weather_file, load_file, years_of_analysis):
     solar_resource_data = tools.SAM_CSV_to_solar_data(weather_file)
@@ -31,6 +25,7 @@ def prepare_data_and_compute_system_capacity(weather_file, load_file, years_of_a
     system_efficiency = 0.15
     desired_offset = 1.2
     # DONE: Ana, convert system capacity to be dynamically assigned based on the household load, rather than static = 5 kW system
+    # TODO: Ana, only allow solar system capacities in increments that are actually sold on the market
     system_capacity = (annual_load_kwh * desired_offset) / (avg_daily_irradiance * 365 * system_efficiency) # 5 # kW
 
     return solar_resource_data, load_profile, system_capacity
@@ -38,7 +33,10 @@ def prepare_data_and_compute_system_capacity(weather_file, load_file, years_of_a
 def create_solar_model(solar_resource_data, system_capacity, years_of_analysis):
     # Initialize PV system
     solar = pvwatts.default("PVWattsResidential")
-    solar.SolarResource.solar_resource_data = solar_resource_data
+    solar.SolarResource.solar_resource_data = solar_resource_data 
+    # TODO, Ana: only allow solar panels of specific sizes that actually exist on the market
+    # this would require looking at the load profile / system_capacity, and finding the solar
+    # panel that is the closest to the size specified here
     solar.SystemDesign.system_capacity = system_capacity
     solar.SystemDesign.dc_ac_ratio = 1.2
     solar.SystemDesign.tilt = 20
@@ -54,7 +52,9 @@ def create_battery_model(solar, load_profile, years_of_analysis):
     battery.Load.load = load_profile
     battery.BatteryCell.batt_chem = 1
     battery.BatteryCell.batt_Vnom_default = 3.6
-    battery.BatteryCell.batt_Qfull = 13.5 * 1000 / 3.6
+    # TODO: Ana, adjust the size of the battery depending on what the household load profile is + solar performance
+    # These battery profiles would likely need to be categorized into buckets that *actually* exist on the market
+    battery.BatteryCell.batt_Qfull = 13.5 * 1000 / 3.6 # Adjust the size of the battery. Here it's statically specified to be 13.5 kWh
     battery.BatterySystem.batt_ac_or_dc = 1
     battery.BatterySystem.batt_meter_position = 0
     battery.BatterySystem.batt_power_discharge_max_kwac = 5
@@ -114,11 +114,7 @@ def process(base_input_dir, base_output_dir, scenarios, housing_types, counties=
     for scenario in scenarios:
         for housing_type in housing_types:
             # Define the scenario path to dynamically list counties
-            scenario_path = os.path.join(base_input_dir, scenario, housing_type)
-    
-            if not os.path.exists(scenario_path):
-                print(f"Scenario path not found: {scenario_path}")
-                continue
+            scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
     
             counties_to_run = get_counties(scenario_path, counties)
     

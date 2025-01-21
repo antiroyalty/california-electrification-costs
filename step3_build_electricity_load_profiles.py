@@ -149,7 +149,7 @@ def process(scenarios, housing_types, counties):
                         data = data[required_cols]
                         all_data = pd.concat([all_data, data], axis=0, ignore_index=True)
 
-                # If after scanning all Parquet files, we have no valid data => skip
+                # If after scanning all Parquet files, I have no valid data => skip
                 if all_data.empty:
                     print(f"No data processed for {county} in {scenario} - {housing_type}")
                     county_info["status"] = "empty_data"

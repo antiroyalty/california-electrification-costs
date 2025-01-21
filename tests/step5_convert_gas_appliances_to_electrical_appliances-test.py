@@ -52,8 +52,8 @@ def test_convert_gas_stove_to_induction_stove_typical():
 
 def test_convert_gas_stove_to_induction_stove_negative():
     """
-    If input is negative (bad data?), confirm we get a negative as well or check behavior.
-    Here we simply verify the formula is consistent, even though real data might filter it out.
+    If input is negative (bad data?), confirm I get a negative as well or check behavior.
+    Here I simply verify the formula is consistent, even though real data might filter it out.
     """
     gas_stove_kwh = -10.0
     result = convert_gas_stove_to_induction_stove(gas_stove_kwh)
@@ -106,7 +106,7 @@ def test_convert_appliances_for_county_no_file(mocker):
 
 def test_convert_appliances_for_county_missing_column(mocker, mock_gas_loads_df):
     """
-    If the gas loads CSV is missing a required column, we catch a KeyError and skip.
+    If the gas loads CSV is missing a required column, I catch a KeyError and skip.
     """
     # Remove a required column
     mock_gas_loads_df.drop(
@@ -132,7 +132,7 @@ def test_convert_appliances_for_county_missing_column(mocker, mock_gas_loads_df)
 
 def test_convert_appliances_for_county_success(mocker, mock_gas_loads_df):
     """
-    Normal scenario: Have all the necessary columns, so we do the conversions and write a new CSV.
+    Normal scenario: Have all the necessary columns, so I do the conversions and write a new CSV.
     """
     mock_exists = mocker.patch("os.path.exists", return_value=True)
     mock_read_csv = mocker.patch("pandas.read_csv", return_value=mock_gas_loads_df)
@@ -205,7 +205,7 @@ def test_process_no_counties(mocker):
 
 def test_process_explicit_counties(mocker):
     """
-    If we specify counties, it uses them directly.
+    If I specify counties, it uses them directly.
     """
     mock_convert_county = mocker.patch("step5_convert_gas_appliances_to_electrical_appliances.convert_appliances_for_county")
     mock_exists = mocker.patch("os.path.exists", return_value=True)
@@ -255,13 +255,12 @@ def test_convert_county_name_to_slug(mocker, county_in, expected_slug):
     to step5's process(), verifying they're each slugified when calling 
     convert_appliances_for_county.
     """
-    # Mock file checks so we don't rely on real directories:
     mocker.patch("os.path.exists", return_value=True)
     mocker.patch("os.path.isdir", return_value=True)
-    # No auto county discovery since we supply counties explicitly
+    # No auto county discovery since I supply counties explicitly
     mocker.patch("os.listdir", return_value=[])
 
-    # Patch read_csv so we don't fail on missing CSV or missing columns
+    # Patch read_csv so I don't fail on missing CSV or missing columns
     dummy_df = pd.DataFrame({
         "timestamp": [1,2],
         "out.natural_gas.heating.energy_consumption.gas.total.kwh": [5.0, 6.0],
@@ -270,7 +269,6 @@ def test_convert_county_name_to_slug(mocker, county_in, expected_slug):
     })
     mocker.patch("pandas.read_csv", return_value=dummy_df)
 
-    # We patch convert_appliances_for_county, because that's what step5's process calls
     mock_convert = mocker.patch(
         "step5_convert_gas_appliances_to_electrical_appliances.convert_appliances_for_county"
     )

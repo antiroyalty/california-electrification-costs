@@ -25,6 +25,7 @@ def get_counties(scenario_path, counties):
     if counties is None: # Dynamically retrieve counties
         return [c for c in os.listdir(scenario_path) if os.path.isdir(os.path.join(scenario_path, c))]
 
+    # format as ['alameda'] not ['Alameda County']
     return [slugify_county_name(c) for c in counties]
 
 def get_scenario_path(base_input_dir, scenario, housing_type):

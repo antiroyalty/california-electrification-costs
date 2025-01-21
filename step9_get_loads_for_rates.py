@@ -14,7 +14,7 @@ SCENARIO_DATA_MAP = {
             },
             "gas": {
                 "file_prefix": "gas_loads_",
-                "column": "load.gas.avg.therms"
+                "column": "load.gas.avg.therms" # TODO: Ana, why am I using avg therms here? Is this a miscalculation? Revisit this logic.
             },
         },
         # baseline w/ solar + storage
@@ -156,7 +156,7 @@ def prepare_for_rates_analysis(base_input_dir, base_output_dir, housing_type, sc
     output_file_path = os.path.join(base_output_dir, scenario, housing_type, county, f"{OUTPUT_FILE_NAME}_{county}.csv")
     os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
     combined_df.to_csv(output_file_path, index=False)
-    print(f"Combined results saved to: {output_file_path}")
+    print(f"Step 9 - Combined results saved to: {output_file_path}")
 
 def process(base_input_dir, base_output_dir, scenarios, housing_types, counties=None):
     for scenario in scenarios:

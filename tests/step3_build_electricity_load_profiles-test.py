@@ -43,7 +43,7 @@ def test_build_load_profiles_no_input_directory(
     mock_to_csv,
     mock_makedirs
 ):
-    """If input directory doesn't exist, we skip it and record in summary."""
+    """If input directory doesn't exist, I skip it and record in summary."""
     mock_os_path_exists.return_value = False  # directory doesn't exist
     mock_os_listdir.return_value = []  # won't be used
 
@@ -66,7 +66,7 @@ def test_build_load_profiles_empty_directory(
     mock_to_csv,
     mock_makedirs
 ):
-    """If the directory exists but has no Parquet files, we skip processing."""
+    """If the directory exists but has no Parquet files, I skip processing."""
     mock_os_path_exists.return_value = True
     mock_os_listdir.return_value = []  # no files in directory
 
@@ -94,7 +94,7 @@ def test_build_load_profiles_incomplete_columns(
     mock_os_listdir.return_value = ["house1.parquet", "house2.parquet"]
 
     # Scenario requires 'timestamp' and columns in END_USE_COLUMNS["appliances"], "misc"
-    # Let’s pretend we only have 'timestamp' and a partial set of columns
+    # Let’s pretend I only have 'timestamp' and a partial set of columns
     df_missing_cols = pd.DataFrame({"timestamp": pd.date_range("2021-01-01", periods=2, freq="H")})
     mock_read_parquet.return_value = df_missing_cols
 
@@ -107,7 +107,7 @@ def test_build_load_profiles_incomplete_columns(
     assert len(summary["processed"]) == 0
     assert len(summary["skipped"]) == 1
     assert summary["skipped"][0]["status"] == "empty_data"
-    # Also we expect 2 errors about missing columns for house1 & house2
+    # Also I expect 2 errors about missing columns for house1 & house2
     assert len(summary["errors"]) == 2
     mock_to_csv.assert_not_called()
 
@@ -119,7 +119,7 @@ def test_build_load_profiles_some_files_valid(
     mock_makedirs
 ):
     """
-    Some files have valid columns, others do not. We only process valid files.
+    Some files have valid columns, others do not. I only process valid files.
     The final output is aggregated and saved to CSV.
     """
     mock_os_path_exists.return_value = True
@@ -128,7 +128,7 @@ def test_build_load_profiles_some_files_valid(
     # We'll define 2 valid DataFrames, 1 invalid
     valid_cols = [
         "timestamp",
-        # Because baseline => ["appliances", "misc"] => we need all columns in END_USE_COLUMNS["appliances"] + END_USE_COLUMNS["misc"]
+        # Because baseline => ["appliances", "misc"] => I need all columns in END_USE_COLUMNS["appliances"] + END_USE_COLUMNS["misc"]
         "out.electricity.ceiling_fan.energy_consumption",
         "out.electricity.dishwasher.energy_consumption",
         "out.electricity.lighting_interior.energy_consumption",
@@ -171,13 +171,13 @@ def test_build_load_profiles_some_files_valid(
     summary = process(scenarios, housing_types, counties)
 
     # Expect 2 valid, 1 invalid => final data is from 2 valid files
-    # => We finish with a "processed" status
+    # => I finish with a "processed" status
     assert len(summary["processed"]) == 1
     processed_info = summary["processed"][0]
     assert processed_info["status"] == "processed"
-    assert processed_info["num_files"] == 3, "We attempted 3 files, though 1 was partially invalid."
+    assert processed_info["num_files"] == 3, "I attempted 3 files, though 1 was partially invalid."
 
-    # The code's data logic only appends valid columns => so we end up with data from the 2 valid frames
+    # The code's data logic only appends valid columns => so I end up with data from the 2 valid frames
     # => 1 error about missing columns
     assert len(summary["errors"]) == 1
     assert "Missing columns" in summary["errors"][0]["error"]

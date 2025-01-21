@@ -94,6 +94,8 @@ OUTPUT_COLUMNS = ["county", "scenario", "housing_type", "territory", "annual_cos
 LOAD_FOR_RATE_GAS_COLUMN_SUFFIX = ".gas.therms"
 
 def categorize_season(month_number):
+    # TODO, Ana: Make sure that these season categorizations are the same for each utility
+    # ie, each peak / offpeak period corresponds to the right seasons here
     if month_number in [11, 2, 3]:  # November, February, March
         return 'winter_offpeak'
     elif month_number in [12, 1]:   # December, January
@@ -111,6 +113,7 @@ def sum_therms_by_season(gas_data, load_type):
     
     return therms_by_season, total_therms
 
+# TODO, Ana: this currently only works for PG&E rates. Add SCE and SDGE rates too.
 def calculate_annual_costs_gas(load_profile_df, territory, load_type):
     seasonal_therms, total_therms = sum_therms_by_season(load_profile_df, load_type)
     
@@ -134,18 +137,17 @@ def calculate_annual_costs_gas(load_profile_df, territory, load_type):
     return total_cost
 
 def get_territory_for_county(county):
+    # TODO: Ana, establish key-value pair of mapping for all counties to gas rate territories
     if county == 'alameda':
         return "T"
     else:
-        raise ValueError("County to gas territory mapping not specified.")
+        raise ValueError("Step10@get_territory_for_county: County to gas territory mapping not specified.")
 
 def process_county_scenario(file_path, county, load_type):
-    # Construct the full file path for the county's CSV file
     file = os.path.join(file_path, f"{INPUT_FILE_NAME}_{county}.csv")
 
-    # Check if the file exists
     if not os.path.exists(file):
-        print(f"File not found: {file}")
+        print(f"Step10@process_county_scenario: File not found: {file}")
         return None
 
     load_profile_df = pd.read_csv(file, parse_dates=["timestamp"])
@@ -157,7 +159,7 @@ def process_county_scenario(file_path, county, load_type):
     
     return calculate_annual_costs_gas(load_profile_df, territory, load_type)
 
-def process_all_counties(base_input_dir, base_output_dir, counties, scenarios, housing_types, load_type):
+def process(base_input_dir, base_output_dir, scenarios, housing_types, counties, load_type):
     valid_load_types = ["default", "solarstorage"]
     if load_type not in valid_load_types:
         raise ValueError(f"Invalid load_type '{load_type}'. Must be one of {valid_load_types}.")
@@ -198,11 +200,11 @@ def process_all_counties(base_input_dir, base_output_dir, counties, scenarios, h
                 combined_df.to_csv(output_file_path, index_label="scenario")
                 print(f"Results saved to {output_file_path}")
 
-base_input_dir = "./data"
-base_output_dir = "./data"
-counties = ["alameda"] # , "alpine", "riverside"]
-scenarios = ["baseline"]
-housing_types = ["single-family-detached"]
-load_type = "solarstorage" # default, solarstorage
+# base_input_dir = "data"
+# base_output_dir = "data"
+# counties = ["alameda"] # , "alpine", "riverside"]
+# scenarios = ["baseline"]
+# housing_types = ["single-family-detached"]
+# load_type = "solarstorage" # default, solarstorage
 
-process_all_counties(base_input_dir, base_output_dir, counties, scenarios, housing_types, load_type)
+# process(base_input_dir, base_output_dir, scenarios, housing_types, counties, load_type)

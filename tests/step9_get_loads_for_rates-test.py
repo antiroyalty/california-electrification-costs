@@ -74,9 +74,9 @@ def test_process(
 
     def capture_to_csv(file_path, index=False):
         # Retrieve the DataFrame from the mock_read_csv calls
-        # Since to_csv is a method of DataFrame, we need to access the 'self' parameter
+        # Since to_csv is a method of DataFrame, I need to access the 'self' parameter
         # However, unittest.mock doesn't provide a straightforward way to capture 'self'
-        # Instead, we can inspect the calls to read_csv and reconstruct the DataFrame
+        # Instead, I can inspect the calls to read_csv and reconstruct the DataFrame
         # Alternatively, use a wrapper or a different mocking strategy
         pass  # We'll handle verification differently
 

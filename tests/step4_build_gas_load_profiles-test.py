@@ -17,7 +17,7 @@ import pandas as pd
 from unittest.mock import patch, MagicMock
 import sys
 
-# Add parent directory to path so we can import the module
+# Add parent directory to path so I can import the module
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 
 from step4_build_gas_load_profiles import (
@@ -106,7 +106,7 @@ def test_update_county_totals_initialize(sample_dataframe):
 
 def test_update_county_totals_aggregate(sample_dataframe):
     """
-    If we have an existing county_gas_totals, update_county_totals should
+    If I have an existing county_gas_totals, update_county_totals should
     add the new building's usage to the existing columns.
     """
     end_uses = [
@@ -179,7 +179,7 @@ def test_average_county_gas_profiles(sample_dataframe):
 
 def test_save_county_gas_profiles(mocker):
     """
-    Ensure we write a CSV to 'gas_loads_{county}.csv' under the given output dir.
+    Ensure I write a CSV to 'gas_loads_{county}.csv' under the given output dir.
     """
     mock_to_csv = mocker.patch("pandas.DataFrame.to_csv")
     mock_makedirs = mocker.patch("os.makedirs")
@@ -199,7 +199,7 @@ def test_save_county_gas_profiles(mocker):
 
 def test_build_county_gas_profile_no_data(mocker):
     """
-    If sum_county_gas_profiles returns (None, 0), we skip averaging and saving.
+    If sum_county_gas_profiles returns (None, 0), I skip averaging and saving.
     """
     mock_sum = mocker.patch("step4_build_gas_load_profiles.sum_county_gas_profiles", return_value=(None, 0))
     mock_avg = mocker.patch("step4_build_gas_load_profiles.average_county_gas_profiles")
@@ -213,7 +213,7 @@ def test_build_county_gas_profile_no_data(mocker):
 
 def test_build_county_gas_profile_with_data(mocker):
     """
-    If sum_county_gas_profiles returns valid data, we call average_county_gas_profiles
+    If sum_county_gas_profiles returns valid data, I call average_county_gas_profiles
     and save_county_gas_profiles.
     """
     mock_sum = mocker.patch(
@@ -247,7 +247,7 @@ def test_process_no_scenario_path(mocker):
 
 def test_process_county_dir_missing(mocker):
     """
-    If the county folder doesn't have 'buildings', we skip that county.
+    If the county folder doesn't have 'buildings', I skip that county.
     """
     def side_exists(path):
         if "buildings" in path:
@@ -265,7 +265,7 @@ def test_process_county_dir_missing(mocker):
 
 def test_process_county_ok(mocker):
     """
-    If scenario path and county_dir exist, we call build_county_gas_profile.
+    If scenario path and county_dir exist, I call build_county_gas_profile.
     """
     def side_exists(path):
         return True  # everything exists
@@ -284,10 +284,8 @@ def test_convert_county_name_to_slug(mocker):
     Pass multiple counties like 'Riverside County' and 'Santa Clara County' to step4's process()
     and ensure they're each slugified (e.g. 'riverside', 'santa-clara') for build_county_gas_profile.
     """
-    # Mock file checks so we don't rely on real directories:
     mocker.patch("os.path.exists", return_value=True)
     mocker.patch("os.path.isdir", return_value=True)
-    # We won't rely on automatic county discovery; we supply 'counties' directly:
     mocker.patch("os.listdir", return_value=[])
 
     # Spy on build_county_gas_profile to see how it's invoked
@@ -307,7 +305,6 @@ def test_convert_county_name_to_slug(mocker):
         counties=input_counties,
     )
 
-    # We expect exactly 2 calls, one per county
     assert mock_build.call_count == 2, "Should invoke build_county_gas_profile twice (once per county)."
 
     # Grab each call in turn
