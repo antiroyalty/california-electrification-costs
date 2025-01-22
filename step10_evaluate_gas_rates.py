@@ -87,6 +87,22 @@ RATE_PLANS = {
     }
 }
 
+# https://www.pge.com/assets/rates/tariffs/PGECZ_90Rev.pdf
+PGE_RATE_TERRITORY_COUNTY_MAPPING = {
+    "T": ["Marin", "San Francisco", "San Mateo"],
+    "Q": ["Santa Cruz", "Monterey"],
+    "X": [
+        "San Luis Obispo", "San Benito", "Santa Clara", 
+        "Alameda", "Contra Costa", "Napa", "Sonoma", 
+        "Mendocino", "Santa Barbara"
+    ],
+    "P": ["Sacramento", "Placer", "El Dorado", "Amador"],
+    "S": ["Glenn", "Colusa", "Yolo", "Sutter", "Butte"],
+    "R": ["Merced", "Fresno", "Madera", "Mariposa", "Tehama"],
+    "Y&Z": ["Nevada", "Plumas", "Humboldt", "Trinity", "Lake", "Shasta", "Sierra", "Alpine", "Mono"],
+    "W": ["Kings"]
+}
+
 INPUT_FILE_NAME = "loadprofiles_for_rates"
 OUTPUT_FILE_NAME = "RESULTS_gas_annual_costs"
 OUTPUT_COLUMNS = ["county", "scenario", "housing_type", "territory", "annual_cost"]
@@ -138,8 +154,14 @@ def calculate_annual_costs_gas(load_profile_df, territory, load_type):
 
 def get_territory_for_county(county):
     # TODO: Ana, establish key-value pair of mapping for all counties to gas rate territories
-    if county == 'alameda':
-        return "T"
+    # Currently implemented for SOME PG&E territories
+    # This assumes that each county can only belong to one territory, but this is not necessarily the case
+    # The allocation is done visually, roughly by area
+    # County that has the largest area in a territory gets attributed to that territory
+    # Yet to add support for SCE and SDGE
+    for territory, counties in PGE_RATE_TERRITORY_COUNTY_MAPPING.items():
+        if county in counties:
+            return territory
     else:
         raise ValueError("Step10@get_territory_for_county: County to gas territory mapping not specified.")
 

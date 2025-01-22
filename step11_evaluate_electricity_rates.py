@@ -17,11 +17,10 @@ BASELINE_ALLOWANCES = {
     "PGE": {
         "E-TOU-C": {
             "territories": {
-                "T": {  # Territory T
+                "T": {
                     "summer": 6.5,  # kWh/day
                     "winter": 7.5,  # kWh/day
                 },
-                # Add other territories as needed
                 "P": {
                     "summer": 13.5,
                     "winter": 11.0,

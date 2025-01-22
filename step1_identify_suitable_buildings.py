@@ -141,6 +141,7 @@ def process(scenario, housing_type, output_base_dir="data", target_county=None):
     metadata = get_metadata(scenario)
     unique_counties = metadata[['in.county', 'in.county_name']].drop_duplicates()
 
+    # TODO: Ana, Make this work with more than one county, but not all counties
     if target_county:
         counties = unique_counties[unique_counties['in.county_name'] == target_county].head(1)
     else:
@@ -149,12 +150,8 @@ def process(scenario, housing_type, output_base_dir="data", target_county=None):
     output_csv_paths = []
 
     for _, row in counties.iterrows():
-        # print(f"Processing county: {row['in.county_name']} ({row['in.county']})")
-
         county_code = row['in.county']
         county_name = row['in.county_name']
-
-        # print(" ")
 
         output_dir = os.path.join("data", scenario, housing_type, county_name)
         formatted_county_name = generate_output_filename(county_name)

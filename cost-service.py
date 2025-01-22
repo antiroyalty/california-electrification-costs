@@ -19,11 +19,11 @@ class CostService:
         # "heat_pump_heating_cooling_water_heater_and_induction_stove": ["heating", "cooling", "hot_water", "appliances", "cooking", "misc"]
     }
 
-    def __init__(self, initial_csv, scenario, housing_type, county, input_dir, output_dir):
+    def __init__(self, initial_csv, scenario, housing_type, counties, input_dir, output_dir):
         self.csv_file = initial_csv
         self.scenario = scenario
         self.housing_type = housing_type
-        self.county = county
+        self.counties = counties
         self.input_dir = input_dir
         self.output_dir = output_dir
 
@@ -37,7 +37,7 @@ class CostService:
         print(result, "\n")
     
         print("----- Step 3 -----")
-        result = BuildElectricityLoadProfiles.process(self.SCENARIOS, [self.housing_type], [self.county])
+        result = BuildElectricityLoadProfiles.process(self.SCENARIOS, [self.housing_type], [self.counties])
         print(result, "\n")
 
         # print("----- Step 4 -----")
@@ -45,31 +45,30 @@ class CostService:
         # print(result, "\n")
 
         print("----- Step 5 -----")
-        result = ConvertGasToElectric.process(self.input_dir, self.output_dir, [self.county], list(self.SCENARIOS.keys()), [self.housing_type] )
+        result = ConvertGasToElectric.process(self.input_dir, self.output_dir, [self.counties], list(self.SCENARIOS.keys()), [self.housing_type] )
         print(result, "\n")
 
         print("---- Step 6 -----")
         print("(No step 6 - steps misnumbered) \n")
     
         print("----- Step 7 -----")
-        result = WeatherFiles.process(self.input_dir, self.output_dir, list(self.SCENARIOS.keys()), [self.housing_type], [self.county])
+        result = WeatherFiles.process(self.input_dir, self.output_dir, list(self.SCENARIOS.keys()), [self.housing_type], [self.counties])
         print(result, "\n")
-        # self.csv_file = EvaluateElectricityRates.process(self.csv_file)
 
         print("----- Step 8 -----")
-        result = RunSamModelForSolarStorage.process(self.input_dir, self.output_dir, list(self.SCENARIOS.keys()), [self.housing_type], [self.county])
+        result = RunSamModelForSolarStorage.process(self.input_dir, self.output_dir, list(self.SCENARIOS.keys()), [self.housing_type], [self.counties])
         print(result, "\n")
 
         print("----- Step 9 -----")
-        result = GetLoadsForRates.process(self.input_dir, self.output_dir, list(self.SCENARIOS.keys()), [self.housing_type], [self.county])
+        result = GetLoadsForRates.process(self.input_dir, self.output_dir, list(self.SCENARIOS.keys()), [self.housing_type], [self.counties])
         print(result, "\n")
 
         print("----- Step 10 -----")
-        result = EvaluateGasRates.process(self.input_dir, self.output_dir, list(self.SCENARIOS.keys()), [self.housing_type], [self.county], "default") # last argument is  load_type, which can be 'default' or 'solarstorage'
+        result = EvaluateGasRates.process(self.input_dir, self.output_dir, list(self.SCENARIOS.keys()), [self.housing_type], [self.counties], "default") # last argument is  load_type, which can be 'default' or 'solarstorage'
         print(result, "\n")
 
         print("----- Step 11 -----")
-        result = EvaluateElectricityRates.process(self.input_dir, self.output_dir, list(self.SCENARIOS.keys()), [self.housing_type], [self.county], "default") # last argument is  load_type, which can be 'default' or 'solarstorage'
+        result = EvaluateElectricityRates.process(self.input_dir, self.output_dir, list(self.SCENARIOS.keys()), [self.housing_type], [self.counties], "default") # last argument is  load_type, which can be 'default' or 'solarstorage'
         print(result, "\n")
 
         return self.csv_file
@@ -79,12 +78,16 @@ initial_csv = "initial_data.csv" # TODO: update
 
 scenario = "baseline"
 housing_type = "single-family-detached"
-county = "Riverside County"
+counties = ["Alameda County"]
 input_dir = "data"
 output_dir = "data"
 
-cost_service = CostService(initial_csv, scenario, housing_type, county=county, input_dir=input_dir, output_dir=output_dir)
+cost_service = CostService(initial_csv, scenario, housing_type, counties=counties, input_dir=input_dir, output_dir=output_dir)
 
 final_csv = cost_service.run()
 
 print("Final processed CSV file:", final_csv)
+
+# Next steps:
+# For Gas and Electricity rates, model more regions
+# Run for PG&E counties
