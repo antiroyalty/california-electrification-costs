@@ -3,7 +3,7 @@ import step2_pull_buildings as PullBuildings
 import step3_build_electricity_load_profiles as BuildElectricityLoadProfiles
 import step4_build_gas_load_profiles as BuildGasLoadProfiles
 import step5_convert_gas_appliances_to_electrical_appliances as ConvertGasToElectric
-# import step6_get_household_electricity_loads_for_solar_storage as 
+import step6_combine_real_and_simulated_electricity_loads as CombineRealAndSimulatedProfiles
 import step7_get_weather_files as WeatherFiles
 import step8_run_sam_model_for_solar_storage as RunSamModelForSolarStorage
 import step9_get_loads_for_rates as GetLoadsForRates
@@ -13,7 +13,7 @@ import step11_evaluate_electricity_rates as EvaluateElectricityRates
 
 class CostService:
     SCENARIOS = {
-        "baseline": {"appliances", "misc"},
+        "baseline": {"appliances", "heating", "hot_water", "cooking", "misc"}, # everything is gas
         # "heat_pump_and_water_heater": ["heating", "hot_water", "appliances", "misc"],
         # "heat_pump_water_heater_and_induction_stove": ["heating", "cooling", "hot_water", "appliances", "cooking", "misc"],
         # "heat_pump_heating_cooling_water_heater_and_induction_stove": ["heating", "cooling", "hot_water", "appliances", "cooking", "misc"]
@@ -29,46 +29,47 @@ class CostService:
 
     def run(self):
         print("----- Step 1 -----")
-        result = IdentifySuitableBuildings.process(self.scenario, self.housing_type, output_base_dir=self.output_dir, target_county=county)
-        print(result, "\n")
+        result = IdentifySuitableBuildings.process(self.scenario, self.housing_type, output_base_dir=self.output_dir, target_county=counties)
+        # print(result, "\n")
 
         print("----- Step 2 -----")
-        result = PullBuildings.process(output_base_dir=self.output_dir, download_new_files=False)
-        print(result, "\n")
+        # result = PullBuildings.process(output_base_dir=self.output_dir, download_new_files=False)
+        # print(result, "\n")
     
         print("----- Step 3 -----")
-        result = BuildElectricityLoadProfiles.process(self.SCENARIOS, [self.housing_type], [self.counties])
-        print(result, "\n")
+        # Make sure I don't pull load profiles on every run, only if they don't already exist
+        # result = BuildElectricityLoadProfiles.process(self.SCENARIOS, [self.housing_type], self.counties)
+        # print(result, "\n")
 
         # print("----- Step 4 -----")
-        # result = BuildGasLoadProfiles.process(self.SCENARIOS, [self.housing_type], self.input_dir, self.output_dir, [self.county])
+        # result = BuildGasLoadProfiles.process(self.SCENARIOS, [self.housing_type], self.input_dir, self.output_dir, self.counties)
         # print(result, "\n")
 
         print("----- Step 5 -----")
-        result = ConvertGasToElectric.process(self.input_dir, self.output_dir, [self.counties], list(self.SCENARIOS.keys()), [self.housing_type] )
-        print(result, "\n")
+        # result = ConvertGasToElectric.process(self.input_dir, self.output_dir, self.counties, list(self.SCENARIOS.keys()), [self.housing_type] )
+        # print(result, "\n")
 
-        print("---- Step 6 -----")
-        print("(No step 6 - steps misnumbered) \n")
+        print("----- Step 6 -----")
+        # result = CombineRealAndSimulatedProfiles.process(self.input_dir, self.output_dir, list(self.SCENARIOS.keys()), [self.housing_type], self.counties)
     
         print("----- Step 7 -----")
-        result = WeatherFiles.process(self.input_dir, self.output_dir, list(self.SCENARIOS.keys()), [self.housing_type], [self.counties])
-        print(result, "\n")
+        result = WeatherFiles.process(self.input_dir, self.output_dir, list(self.SCENARIOS.keys()), [self.housing_type], self.counties)
+        # print(result, "\n")
 
         print("----- Step 8 -----")
-        result = RunSamModelForSolarStorage.process(self.input_dir, self.output_dir, list(self.SCENARIOS.keys()), [self.housing_type], [self.counties])
-        print(result, "\n")
+        # result = RunSamModelForSolarStorage.process(self.input_dir, self.output_dir, list(self.SCENARIOS.keys()), [self.housing_type], self.counties)
+        # print(result, "\n")
 
         print("----- Step 9 -----")
-        result = GetLoadsForRates.process(self.input_dir, self.output_dir, list(self.SCENARIOS.keys()), [self.housing_type], [self.counties])
-        print(result, "\n")
+        # result = GetLoadsForRates.process(self.input_dir, self.output_dir, list(self.SCENARIOS.keys()), [self.housing_type], self.counties)
+        # print(result, "\n")
 
         print("----- Step 10 -----")
-        result = EvaluateGasRates.process(self.input_dir, self.output_dir, list(self.SCENARIOS.keys()), [self.housing_type], [self.counties], "default") # last argument is  load_type, which can be 'default' or 'solarstorage'
+        # result = EvaluateGasRates.process(self.input_dir, self.output_dir, list(self.SCENARIOS.keys()), [self.housing_type], self.counties, "default") # last argument is  load_type, which can be 'default' or 'solarstorage'
         print(result, "\n")
 
         print("----- Step 11 -----")
-        result = EvaluateElectricityRates.process(self.input_dir, self.output_dir, list(self.SCENARIOS.keys()), [self.housing_type], [self.counties], "default") # last argument is  load_type, which can be 'default' or 'solarstorage'
+        # result = EvaluateElectricityRates.process(self.input_dir, self.output_dir, list(self.SCENARIOS.keys()), [self.housing_type], self.counties, "default") # last argument is  load_type, which can be 'default' or 'solarstorage'
         print(result, "\n")
 
         return self.csv_file
@@ -91,3 +92,9 @@ print("Final processed CSV file:", final_csv)
 # Next steps:
 # For Gas and Electricity rates, model more regions
 # Run for PG&E counties
+
+
+# # Todo:
+# - adjust load profiles to be housed in a single folder
+# - why are electricity loads so far off when the simulated loads are incorporated in baseline values? Debug whether this is a units issue, or a conversion issue
+# - Annual total electricity loads seem too low for berkeley. Should be around 6K, but getting 1K. 

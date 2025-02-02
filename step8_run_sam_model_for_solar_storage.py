@@ -8,8 +8,9 @@ import statistics
 
 from helpers import get_counties, get_scenario_path
 
-LOADPROFILE_FILE_PREFIX = "electricity_loads"
-TOTAL_LOAD_COLUMN_NAME = "total_load"
+# LOADPROFILE_FILE_PREFIX = "electricity_loads"
+LOADPROFILE_FILE_PREFIX = "combined_profiles_baseline"
+TOTAL_LOAD_COLUMN_NAME = "electricity.real_and_simulated.for_typical_county_home.kwh"
 OUTPUT_LOADPROFILE_FILE_PREFIX = "sam_optimized_load_profiles"
 
 def prepare_data_and_compute_system_capacity(weather_file, load_file, years_of_analysis):
@@ -129,6 +130,8 @@ def process(base_input_dir, base_output_dir, scenarios, housing_types, counties=
                         print(f"Weather file not found: {weather_file}. Skipping...")
                         continue
                     if not os.path.exists(load_file):
+                        # TODO: Ana, this should raise, all load profiles should exist
+                        # Subsequent steps will fail if this fails
                         print(f"Load file not found: {load_file}. Skipping...")
                         continue
 

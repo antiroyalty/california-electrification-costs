@@ -1,6 +1,8 @@
 # helpers.py
 import os
 
+LOADPROFILES = "loadprofiles" # folder name where all load profiles are stored
+
 def slugify_county_name(county_name: str) -> str:
     """
     Takes a county name like "Santa Clara County" or "Riverside County"

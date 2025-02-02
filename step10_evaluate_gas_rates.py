@@ -3,6 +3,8 @@ from datetime import datetime, timedelta
 import os
 import pandas as pd
 
+from helpers import get_counties, get_scenario_path, slugify_county_name
+
 # Need mapping from county to service region
 # Need other utilities gas rates
 
@@ -51,7 +53,7 @@ BASELINE_ALLOWANCES = {
                     "winter_offpeak": 1.48,
                     "winter_onpeak": 2.00,
                 },
-                "Y": {
+                "Y&Z": {
                     "summer": 0.72,
                     "winter_offpeak": 2.22,
                     "winter_onpeak": 2.58,
@@ -89,18 +91,21 @@ RATE_PLANS = {
 
 # https://www.pge.com/assets/rates/tariffs/PGECZ_90Rev.pdf
 PGE_RATE_TERRITORY_COUNTY_MAPPING = {
-    "T": ["Marin", "San Francisco", "San Mateo"],
-    "Q": ["Santa Cruz", "Monterey"],
-    "X": [
+    "T": [slugify_county_name(county) for county in ["Marin", "San Francisco", "San Mateo"]],
+    "Q": [slugify_county_name(county) for county in ["Santa Cruz", "Monterey"]],
+    "X": [slugify_county_name(county) for county in [
         "San Luis Obispo", "San Benito", "Santa Clara", 
         "Alameda", "Contra Costa", "Napa", "Sonoma", 
         "Mendocino", "Santa Barbara"
-    ],
-    "P": ["Sacramento", "Placer", "El Dorado", "Amador"],
-    "S": ["Glenn", "Colusa", "Yolo", "Sutter", "Butte"],
-    "R": ["Merced", "Fresno", "Madera", "Mariposa", "Tehama"],
-    "Y&Z": ["Nevada", "Plumas", "Humboldt", "Trinity", "Lake", "Shasta", "Sierra", "Alpine", "Mono"],
-    "W": ["Kings"]
+    ]],
+    "P": [slugify_county_name(county) for county in ["Sacramento", "Placer", "El Dorado", "Amador"]],
+    "S": [slugify_county_name(county) for county in ["Glenn", "Colusa", "Yolo", "Sutter", "Butte"]],
+    "R": [slugify_county_name(county) for county in ["Merced", "Fresno", "Madera", "Mariposa", "Tehama"]],
+    "Y&Z": [slugify_county_name(county) for county in [
+        "Nevada", "Plumas", "Humboldt", "Trinity", 
+        "Lake", "Shasta", "Sierra", "Alpine", "Mono"
+    ]],
+    "W": [slugify_county_name(county) for county in ["Kings"]]
 }
 
 INPUT_FILE_NAME = "loadprofiles_for_rates"
@@ -163,7 +168,7 @@ def get_territory_for_county(county):
         if county in counties:
             return territory
     else:
-        raise ValueError("Step10@get_territory_for_county: County to gas territory mapping not specified.")
+        raise ValueError("Step10@get_territory_for_county: County to gas territory mapping not specified: ", county)
 
 def process_county_scenario(file_path, county, load_type):
     file = os.path.join(file_path, f"{INPUT_FILE_NAME}_{county}.csv")
@@ -187,11 +192,14 @@ def process(base_input_dir, base_output_dir, scenarios, housing_types, counties,
         raise ValueError(f"Invalid load_type '{load_type}'. Must be one of {valid_load_types}.")
     
     timestamp = datetime.now().strftime("%Y%m%d_%H")
-
     for housing_type in housing_types:
-        for county in counties:
-            for scenario in scenarios:
-                file_path = os.path.join(base_input_dir, scenario, housing_type, county)
+        for scenario in scenarios:
+            # TODO, test correctly getting the county here, and transposing it to slug / lowercase
+            scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
+            counties = get_counties(scenario_path, counties)
+
+            for county in counties:
+                file_path = os.path.join(scenario_path, county)
 
                 annual_costs = process_county_scenario(file_path, county, load_type)
             

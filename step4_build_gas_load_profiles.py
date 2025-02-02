@@ -26,7 +26,9 @@ def process_building_data(data, end_uses):
 
     data['timestamp'] = pd.to_datetime(data['timestamp'])
     hourly_data = data[['timestamp'] + end_uses].copy()
+    # Sum it to a total
     hourly_data['load.gas.total.kwh'] = hourly_data[end_uses].sum(axis=1)
+    # We also want a sum across all buildings by end-use
 
     grouped = hourly_data.groupby('timestamp', as_index=False).sum()
 
@@ -40,8 +42,9 @@ def update_county_totals(county_gas_totals, building_gas_totals, building_count,
         county_gas_totals = building_gas_totals.rename(columns={col: f"{col}.gas.total.kwh" for col in end_uses}).copy()
         county_gas_totals['load.gas.total.therms'] = county_gas_totals['load.gas.total.kwh'] * KWH_TO_THERMS
     else:
-        # Aggregate totals for each end use with the suffixed column names
+        # Aggregate totals FOR EACH END USE with the suffixed column names
         for col, suffixed_col in zip(end_uses, suffixed_end_uses):
+            print("Step4@update_county_totals#suffixed_end_uses", suffixed_end_uses)
             county_gas_totals[suffixed_col] += building_gas_totals[col]
 
         county_gas_totals['load.gas.total.kwh'] += building_gas_totals['load.gas.total.kwh']
@@ -84,6 +87,8 @@ def average_county_gas_profiles(county_gas_totals, building_count, end_uses):
 
         # Calculate averages for each individual end use in kWh and therms
         for col in end_uses:
+            print("Step4@average_county_gas_profile: ", col)
+            consumption_col = col
             total_col = f"{col}.gas.total.kwh"
             avg_kwh_col = f"{col}.gas.avg.kwh"
             avg_therms_col = f"{col}.gas.avg.therms"
@@ -143,6 +148,8 @@ def process(scenarios, housing_types, base_input_dir, base_output_dir, counties=
                 # Collect all end use columns relevant to the scenario
                 end_use_categories = scenarios[scenario]
                 end_uses = [col for category in end_use_categories for col in END_USE_COLUMNS[category]]
+                print(end_use_categories)
+                print("Step4@process: ", end_uses)
                 
                 # Build the gas profile for the county
                 build_county_gas_profile(scenario, housing_type, county_slug, county_dir, output_dir, end_uses)

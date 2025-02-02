@@ -14,7 +14,7 @@ SCENARIO_DATA_MAP = {
             },
             "gas": {
                 "file_prefix": "gas_loads_",
-                "column": "load.gas.avg.therms" # TODO: Ana, why am I using avg therms here? Is this a miscalculation? Revisit this logic.
+                "column": "load.gas.avg.therms" # TODO: Ana, why am I using avg therms here? Is this a miscalculation? Revisit this logic. This is because this is a COUNTY average, not a time average
             },
         },
         # baseline w/ solar + storage

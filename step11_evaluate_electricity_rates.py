@@ -49,7 +49,7 @@ BASELINE_ALLOWANCES = {
                     "summer": 9.8,
                     "winter": 9.7,
                 },
-                "Y": {
+                "Y&Z": {
                     "summer": 10.5,
                     "winter": 11.1,
                 },

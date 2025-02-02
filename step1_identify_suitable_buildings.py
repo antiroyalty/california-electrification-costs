@@ -1,6 +1,7 @@
 import pandas as pd
 import os
 import re
+from helpers import LOADPROFILES
 
 SCENARIOS = {
     "baseline": {
@@ -61,7 +62,7 @@ def get_metadata(scenario):
     
     return metadata
 
-def filter_metadata(metadata, housing_type, county_code, scenario):
+def filter_metadata(metadata, housing_type, county_code, county_name, scenario):
     if scenario not in SCENARIOS:
         raise ValueError(f"Scenario '{scenario}' is not defined in SCENARIOS dictionary.")
     
@@ -71,36 +72,28 @@ def filter_metadata(metadata, housing_type, county_code, scenario):
     }
 
     # Initial conditions based on county and housing type
+    upgrade = "0" # baseline, no housing upgrades
     county_condition = metadata["in.county"] == county_code
+    county_name_condition = metadata["in.county_name"] == county_name
     housing_condition = metadata["in.geometry_building_type_recs"] == housing_name_map[housing_type]
 
     # Combine initial conditions using bitwise AND
-    conditions = county_condition & housing_condition
+    conditions = upgrade & county_condition & county_name_condition & housing_condition
 
-    # Retrieve scenario-specific filters
     scenario_filters = SCENARIOS[scenario]
 
     for column, condition in scenario_filters.items():
         if condition is None:
-            # If the condition is None, check for NaN values
             conditions &= metadata[column].isna()
         elif isinstance(condition, list):
-            # If the condition is a list, use .isin()
             conditions &= metadata[column].isin(condition)
         else:
-            # For other conditions, use equality
             conditions &= (metadata[column] == condition)
 
         filtered_count = metadata[conditions].shape[0]
-        # print(f"Count after applying filter on '{column}': {filtered_count}")
 
     filtered_metadata = metadata[conditions]
-    
-    # print(f"- Original metadata count: {metadata.shape[0]}")
-    # print(f"- Filtering reduced the dataset by: {metadata.shape[0] - filtered_metadata.shape[0]} entries")
-    # print(f"{metadata[county_condition].shape[0]}") # Modeled
-    # print(f"{filtered_metadata.shape[0]}") # Matching
-    
+
     return filtered_metadata
 
 def save_building_ids(filtered_metadata, scenario, county, output_dir):
@@ -120,30 +113,26 @@ def save_building_ids(filtered_metadata, scenario, county, output_dir):
     )
     
     df_building_ids.to_csv(output_csv_path, index=False)
-    # print(f"Filtered building IDs saved to {output_csv_path}")
     
     return output_csv_path
 
 def generate_output_filename(county_name):
-    # Convert to lowercase
     filename = county_name.lower()
-    # Replace spaces and underscores with hyphens
     filename = re.sub(r'[\s_]+', '-', filename)
-    # Remove the word 'county' if present
     filename = filename.replace('county', '').strip('-')
+
     return filename
 
-def process(scenario, housing_type, output_base_dir="data", target_county=None):
-    # print("--------------------Step 1: Identify Suitable Buildings{---------------------------")
-    # print(f"{scenario}")
-    # print(f"{housing_type}")
-
+def process(scenario, housing_type, output_base_dir="data", target_counties=None):
     metadata = get_metadata(scenario)
     unique_counties = metadata[['in.county', 'in.county_name']].drop_duplicates()
 
-    # TODO: Ana, Make this work with more than one county, but not all counties
-    if target_county:
-        counties = unique_counties[unique_counties['in.county_name'] == target_county].head(1)
+    if target_counties:
+        print("inside specified target counties")
+        print(target_counties)
+        print(unique_counties)
+        counties = unique_counties[unique_counties['in.county_name'].isin(target_counties)]
+        print(counties)
     else:
         counties = unique_counties
 
@@ -153,14 +142,16 @@ def process(scenario, housing_type, output_base_dir="data", target_county=None):
         county_code = row['in.county']
         county_name = row['in.county_name']
 
-        output_dir = os.path.join("data", scenario, housing_type, county_name)
+        print("Running in for loop")
         formatted_county_name = generate_output_filename(county_name)
-        output_dir = os.path.join(output_base_dir, scenario, housing_type, formatted_county_name)
-        filtered_metadata = filter_metadata(metadata, housing_type, county_code, scenario)
+        print(formatted_county_name)
+        output_dir = os.path.join(output_base_dir, LOADPROFILES, housing_type, formatted_county_name)
+        filtered_metadata = filter_metadata(metadata, housing_type, county_code, county_name, scenario)
+        print("Metadata filtered")
+        print(filtered_metadata)
         output_csv = save_building_ids(filtered_metadata, scenario, county_name, output_dir)
         
         output_csv_paths.append(output_csv)
 
-    # print("--------------------}Step 1: Identify Suitable Buildings---------------------------")
     return output_csv_paths
 
