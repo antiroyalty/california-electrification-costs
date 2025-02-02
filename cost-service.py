@@ -29,11 +29,11 @@ class CostService:
 
     def run(self):
         print("----- Step 1 -----")
-        result = IdentifySuitableBuildings.process(self.scenario, self.housing_type, output_base_dir=self.output_dir, target_county=counties)
+        result = IdentifySuitableBuildings.process(self.scenario, self.housing_type, output_base_dir=self.output_dir, target_counties=counties)
         # print(result, "\n")
 
         print("----- Step 2 -----")
-        # result = PullBuildings.process(output_base_dir=self.output_dir, download_new_files=False)
+        result = PullBuildings.process(self.scenario, self.housing_type, self.counties, output_base_dir=self.output_dir, download_new_files=False)
         # print(result, "\n")
     
         print("----- Step 3 -----")

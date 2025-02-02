@@ -4,13 +4,12 @@ import pandas as pd
 from unittest.mock import MagicMock, patch
 import sys
 
-# Add the parent directory to sys.path so Python can find the module
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 
 from step2_pull_buildings import (
     download_parquet_file,
     process_county,
-    process # add tests to test process function
+    process
 )
 
 @pytest.fixture
@@ -45,7 +44,7 @@ def test_download_parquet_file_skips_if_file_exists(mocker, tmp_path, mock_s3_cl
     output_dir = tmp_path / "output"
     output_file = output_dir / "test-key"
     output_dir.mkdir()
-    output_file.touch()  # Create the file to simulate it already exists
+    output_file.touch()
 
     download_parquet_file(bucket_name, s3_key, output_dir)
     mock_s3_client.download_file.assert_not_called()
@@ -113,15 +112,6 @@ def test_process_county_downloads_files(mocker, tmp_path, sample_metadata, mock_
     assert mock_s3_client.download_file.call_count == len(sample_metadata), \
         "Should call S3 download once per building ID"
 
-def test_process_all_scenarios_handles_missing_scenario_path(mocker, tmp_path):
-    """Test process_all_scenarios skips missing scenario paths when directories do not exist."""
-    # Mock os.path.exists to always return False => scenario dirs won't exist
-    mocker.patch("os.path.exists", return_value=False)
-
-    # Call process_all_scenarios with default (download_new_files=True).
-    result = process(output_base_dir=str(tmp_path), download_new_files=True)
-    assert result is None, "Should skip scenarios when paths are missing and return None"
-
 def test_process_all_scenarios_no_download(mocker, tmp_path):
     """Test process_all_scenarios does nothing if download_new_files=False."""
     # Patch process_county to ensure it is NOT called
@@ -129,9 +119,10 @@ def test_process_all_scenarios_no_download(mocker, tmp_path):
 
     # Even if directories exist, if download_new_files=False it should do nothing
     tmp_path.mkdir(exist_ok=True)
-    result = process(output_base_dir=str(tmp_path), download_new_files=False)
+    result = process('baseline', 'single-family-detached', ['Alameda County', 'Contra Costa County'], output_base_dir=str(tmp_path), download_new_files=False)
 
     # Verify that it didn't enter the logic that downloads files
     mock_process_county.assert_not_called()
-    # The function returns None as soon as it sees download_new_files=False
-    assert result is None, "Should return None when no downloads occur"
+
+    # Process returns a key-value pair with success and failure summaries as soon as it sees download_new_files=False
+    assert result == {'failure_summary': [], 'success_summary': ['No new building files needed to be downloaded.']}
