@@ -13,7 +13,7 @@ import step11_evaluate_electricity_rates as EvaluateElectricityRates
 
 class CostService:
     SCENARIOS = {
-        "baseline": {"appliances", "heating", "hot_water", "cooking", "misc"}, # everything is gas
+        "baseline": {"gas": {"heating", "hot_water", "cooking"}, "electric": {"appliances", "misc"}}, # Almost everything is gas, except normal electrical appliances
         # "heat_pump_and_water_heater": ["heating", "hot_water", "appliances", "misc"],
         # "heat_pump_water_heater_and_induction_stove": ["heating", "cooling", "hot_water", "appliances", "cooking", "misc"],
         # "heat_pump_heating_cooling_water_heater_and_induction_stove": ["heating", "cooling", "hot_water", "appliances", "cooking", "misc"]
@@ -38,7 +38,7 @@ class CostService:
     
         print("----- Step 3 -----")
         # Make sure I don't pull load profiles on every run, only if they don't already exist
-        # result = BuildElectricityLoadProfiles.process(self.SCENARIOS, [self.housing_type], self.counties)
+        result = BuildElectricityLoadProfiles.process(self.scenario, [self.housing_type], self.counties, input_dir, output_dir)
         # print(result, "\n")
 
         # print("----- Step 4 -----")

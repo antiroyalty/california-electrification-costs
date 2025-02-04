@@ -1,5 +1,6 @@
 import os
 import pandas as pd
+from helpers import get_counties, get_scenario_path
 
 END_USE_COLUMNS = {
     "heating": [
@@ -19,7 +20,7 @@ END_USE_COLUMNS = {
     ],
     "appliances": [
         'out.electricity.ceiling_fan.energy_consumption',
-        # 'out.electricity.clothes_dryer.energy_consumption',
+        'out.electricity.clothes_dryer.energy_consumption',
         'out.electricity.dishwasher.energy_consumption',
         'out.electricity.lighting_interior.energy_consumption',
         'out.electricity.lighting_garage.energy_consumption',
@@ -36,13 +37,73 @@ END_USE_COLUMNS = {
     ]
 }
 
-BASE_INPUT_DIR = "data"
-BASE_OUTPUT_DIR = "data"
-
 INPUT_FOLDER_NAME = "buildings"
 OUTPUT_FILE_PREFIX = "electricity_loads"
 
-def process(scenarios, housing_types, counties):
+def get_end_use_columns(end_use_categories):
+    end_uses = []
+
+    for category in end_use_categories["electric"]: # We're only building electric load profiles in this file
+        end_uses.extend(END_USE_COLUMNS.get(category, []))
+
+    return end_uses
+
+def list_parquet_files(input_dir):
+    if not os.path.exists(input_dir):
+        return []
+    return [f for f in os.listdir(input_dir) if f.endswith(".parquet")]
+
+def read_parquet_file(file_path, required_cols):
+    try:
+        data = pd.read_parquet(file_path)
+    except Exception as e:
+        return None, f"Error reading {file_path}: {e}" # Returns (data, error) tuple
+
+    missing_cols = [col for col in required_cols if col not in data.columns]
+    if missing_cols:
+        return None, f"Missing columns in {file_path}: {missing_cols}"
+
+    data["timestamp"] = pd.to_datetime(data["timestamp"])
+    return data[required_cols], None # Returns (data, error) tuple
+
+def process_county_data(input_dir, output_path, end_uses):
+    # Process all Parquet files in a county directory and save aggregated results.
+    all_files = list_parquet_files(input_dir)
+
+    if not all_files:
+        return "no_files", 0 # nothin in there
+
+    all_data = pd.DataFrame()
+
+    for file_name in all_files:
+        file_path = os.path.join(input_dir, file_name)
+
+        data, error = read_parquet_file(file_path, ["timestamp"] + end_uses)
+        if error:
+            print(error)
+            continue
+        all_data = pd.concat([all_data, data], axis=0, ignore_index=True)
+
+    if all_data.empty:
+        return "empty_data", 0
+
+    # Group by timestamp. What is the TYPICAL load at this timestamp (for that end use)? Calculate this here.
+    average_profile = all_data.groupby("timestamp")[end_uses].mean()
+    
+    # Full year coverage
+    full_year = pd.date_range(start=all_data["timestamp"].min(), end=all_data["timestamp"].max(), freq="H")
+    average_profile = average_profile.reindex(full_year)
+    average_profile["total_load"] = average_profile[end_uses].sum(axis=1) # Sum all end uses into the total_load column, at each given timestamp
+
+    # Save to CSV
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    average_profile.reset_index(inplace=True)
+    average_profile.rename(columns={"index": "timestamp"}, inplace=True)
+    average_profile.to_csv(output_path, index=False)
+
+    return "processed", len(all_files)
+
+def process(scenarios, housing_types, counties, base_input_dir, base_output_dir):
     """
     Returns a summary dict with structure:
       {
@@ -51,19 +112,6 @@ def process(scenarios, housing_types, counties):
         "errors":    [ { "file_path": ..., "error": ... }, ... ],
       }
     """
-    # Normalize county names: remove trailing "County" and lowercase them.
-    normalized_counties = []
-    for c in counties:
-        # Strip leading/trailing whitespace, then lowercase
-        c_clean = c.strip().lower()
-        # Remove trailing " county" if present
-        if c_clean.endswith(" county"):
-            c_clean = c_clean[: -len(" county")]
-        normalized_counties.append(c_clean)
-    
-    # Reassign the processed list back to counties
-    counties = normalized_counties
-
     summary = {
         "processed": [],
         "skipped": [],
@@ -72,6 +120,9 @@ def process(scenarios, housing_types, counties):
 
     for scenario, end_use_categories in scenarios.items():
         for housing_type in housing_types:
+            scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
+            counties = get_counties(scenario_path, counties)
+
             for county in counties:
                 print(f"Processing electricity load profile in {county} for {scenario}, {housing_type}")
 
@@ -84,99 +135,25 @@ def process(scenarios, housing_types, counties):
                     "num_files": 0
                 }
 
-                # Define input and output paths
-                input_dir = os.path.join(
-                    BASE_INPUT_DIR, scenario, housing_type, county, INPUT_FOLDER_NAME
-                )
-                output_path = os.path.join(
-                    BASE_OUTPUT_DIR, scenario, housing_type, county,
-                    f"{OUTPUT_FILE_PREFIX}_{county}.csv"
-                )
+                input_dir = os.path.join(base_input_dir, scenario, housing_type, county, INPUT_FOLDER_NAME)
+                output_path = os.path.join(base_output_dir, scenario, housing_type, county, f"{OUTPUT_FILE_PREFIX}_{county}.csv")
 
-                # Check if input_dir exists
                 if not os.path.exists(input_dir):
                     print(f"Directory not found: {input_dir}")
                     county_info["status"] = "directory_not_found"
                     summary["skipped"].append(county_info)
                     continue
 
-                # List files
-                all_files = os.listdir(input_dir)
-                if not all_files:
-                    # Directory is empty => skip
-                    print(f"No data processed for {county} in {scenario} - {housing_type}")
-                    county_info["status"] = "no_files"
+                end_uses = get_end_use_columns(end_use_categories)
+                status, num_files = process_county_data(input_dir, output_path, end_uses)
+
+                county_info["status"] = status
+                county_info["num_files"] = num_files
+
+                if status == "processed":
+                    print(f"Saved electricity load profile to {output_path}")
+                    summary["processed"].append(county_info)
+                else:
                     summary["skipped"].append(county_info)
-                    continue
-
-                # Collect all end use columns relevant to the scenario
-                end_uses = []
-                for category in end_use_categories:
-                    end_uses.extend(END_USE_COLUMNS[category])
-
-                all_data = pd.DataFrame()
-
-                # Process each Parquet
-                for file_name in all_files:
-                    file_path = os.path.join(input_dir, file_name)
-                    if file_path.endswith(".parquet"):
-                        county_info["num_files"] += 1
-                        try:
-                            data = pd.read_parquet(file_path)
-                        except Exception as e:
-                            print(f"Error reading {file_path}: {e}")
-                            summary["errors"].append({
-                                "file_path": file_path,
-                                "error": str(e)
-                            })
-                            continue
-
-                        # Ensure required columns
-                        required_cols = ["timestamp"] + end_uses
-                        missing = [col for col in required_cols if col not in data.columns]
-                        if missing:
-                            # Mark as missing columns
-                            msg = f"Missing columns in {file_path}: {missing}"
-                            print(msg)
-                            summary["errors"].append({
-                                "file_path": file_path,
-                                "error": f"Missing columns: {missing}"
-                            })
-                            continue
-
-                        # Filter data
-                        data["timestamp"] = pd.to_datetime(data["timestamp"])
-                        data = data[required_cols]
-                        all_data = pd.concat([all_data, data], axis=0, ignore_index=True)
-
-                # If after scanning all Parquet files, I have no valid data => skip
-                if all_data.empty:
-                    print(f"No data processed for {county} in {scenario} - {housing_type}")
-                    county_info["status"] = "empty_data"
-                    summary["skipped"].append(county_info)
-                    continue
-
-                # Group data by timestamp
-                average_profile = all_data.groupby("timestamp")[end_uses].mean()
-
-                # Full year range
-                full_year = pd.date_range(
-                    start=all_data["timestamp"].min(),
-                    end=all_data["timestamp"].max(),
-                    freq="H"
-                )
-
-                average_profile = average_profile.reindex(full_year)
-                average_profile["total_load"] = average_profile[end_uses].sum(axis=1)
-
-                # Save to CSV
-                average_profile.reset_index(inplace=True)
-                average_profile.rename(columns={"index": "timestamp"}, inplace=True)
-                os.makedirs(os.path.dirname(output_path), exist_ok=True)
-                average_profile.to_csv(output_path, index=False)
-
-                print(f"Saved electricity load profile to {output_path}")
-                county_info["status"] = "processed"
-                summary["processed"].append(county_info)
 
     return summary
