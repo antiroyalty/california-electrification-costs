@@ -63,11 +63,9 @@ def filter_metadata(metadata, housing_type, county_code, county_name, scenario):
     return filtered_metadata
 
 def save_building_ids(filtered_metadata, scenario, county, output_dir):
-    print("D")
     os.makedirs(output_dir, exist_ok=True)
     
     building_id_column = "bldg_id"
-    print("C")
 
     if building_id_column not in filtered_metadata.columns:
         raise ValueError(f"Column '{building_id_column}' not found in metadata")
@@ -75,17 +73,13 @@ def save_building_ids(filtered_metadata, scenario, county, output_dir):
     building_ids = filtered_metadata[building_id_column].unique()
     df_building_ids = pd.DataFrame(building_ids, columns=[building_id_column])
     
-    print("F")
     output_csv_path = os.path.join(
         output_dir,
         f"step1_filtered_building_ids.csv"
     )
     
-    print("G")
     df_building_ids.to_csv(output_csv_path, index=False)
     
-    print("About to return the putput csv")
-    print(output_csv_path)
     return output_csv_path
 
 def process(scenario, housing_type, output_base_dir="data", target_counties=None, force_recompute=True):
@@ -108,9 +102,7 @@ def process(scenario, housing_type, output_base_dir="data", target_counties=None
         output_csv = os.path.join(output_dir, "step1_filtered_building_ids.csv")
 
          # Step 1: Check if processing is necessary
-        print("A")
         if not force_recompute:
-            print("B")
             print(f"Skipping {county_name} - existing valid file found at {output_csv}")
             output_csv_paths.append(output_csv)
             continue  # Skip processing
@@ -119,13 +111,10 @@ def process(scenario, housing_type, output_base_dir="data", target_counties=None
 
         # Step 2: Generate metadata
         filtered_metadata = filter_metadata(metadata, housing_type, county_code, county_name, scenario)
-        
-        print("C")
+
         # Step 3: Save building IDs
         output_csv = save_building_ids(filtered_metadata, scenario, county_name, output_dir)
         output_csv_paths.append(output_csv)
-        print(output_csv_paths)
-
 
     return output_csv_paths
 
