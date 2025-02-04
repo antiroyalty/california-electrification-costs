@@ -13,13 +13,13 @@ from step1_identify_suitable_buildings import (
     get_metadata,
     filter_metadata,
     save_building_ids,
-    generate_output_filename,
     process,
 )
 
 @pytest.fixture
 def sample_metadata():
     data = {
+        "upgrade": 0,
         "in.county": ["001", "002", "003"],
         "in.county_name": ["Alameda County", "Contra Costa County", "San Francisco County"],
         "in.geometry_building_type_recs": ["Single-Family Detached", "Single-Family Attached", "Single-Family Detached"],
@@ -78,11 +78,6 @@ def test_save_building_ids(sample_metadata, tmp_path):
     assert "bldg_id" in saved_data.columns
     assert len(saved_data) == 3
 
-def test_generate_output_filename():
-    assert generate_output_filename("Riverside County") == "riverside"
-    assert generate_output_filename("Los Angeles County") == "los-angeles"
-    assert generate_output_filename("San_Francisco") == "san-francisco"
-
 def test_process_function(mocker, sample_metadata, tmp_path):
     mocker.patch("step1_identify_suitable_buildings.get_metadata", return_value=sample_metadata)
     mocker.patch("step1_identify_suitable_buildings.save_building_ids", return_value="mock_output.csv")
@@ -120,21 +115,21 @@ def test_process_output_file_paths(mocker, sample_metadata, tmp_path):
             mock_output_dir,
             LOADPROFILES,
             "single-family-detached",
-            generate_output_filename("Alameda"),
+            "alameda",
             "step1_filtered_building_ids.csv",
         ),
         os.path.join(
             mock_output_dir,
             LOADPROFILES,
             "single-family-detached",
-            generate_output_filename("Contra Costa"),
+            "contra-costa",
             "step1_filtered_building_ids.csv",
         ),
         os.path.join(
             mock_output_dir,
             LOADPROFILES,
             "single-family-detached",
-            generate_output_filename("San Francisco"),
+            "san-francisco",
             "step1_filtered_building_ids.csv",
         ),
     ]
@@ -163,14 +158,14 @@ def test_process_multiple_counties(mocker, sample_metadata, tmp_path):
             mock_output_dir,
             LOADPROFILES,
             "single-family-detached",
-            generate_output_filename("Alameda"),
+            "alameda",
             "step1_filtered_building_ids.csv",
         ),
         os.path.join(
             mock_output_dir,
             LOADPROFILES,
             "single-family-detached",
-            generate_output_filename("Contra Costa"),
+            "contra-costa",
             "step1_filtered_building_ids.csv",
         ),
     ]
@@ -235,3 +230,39 @@ def test_process_output_file_row_count_real_data(tmp_path):
     # that aligned with the filters described in SCENARIOS for "baseline"
     # And it resulted in 185 rows of results, with 1 header row
     assert output_df.shape[0] == 185, f"Expected 185 rows in {expected_file}, but found {output_df.shape[0]}." # Should be 185 + one header
+
+def test_process_skips_existing_file_when_force_recompute_false(mocker, sample_metadata, tmp_path):
+    mocker.patch("step1_identify_suitable_buildings.get_metadata", return_value=sample_metadata)
+
+    mock_output_dir = tmp_path / "mock_data"
+    expected_file = os.path.join(mock_output_dir, LOADPROFILES, "single-family-detached", "alameda", "step1_filtered_building_ids.csv")
+
+    # First run: This should create the file
+    result_first = process("baseline", "single-family-detached", output_base_dir=mock_output_dir, target_counties=["Alameda County"])
+    print(f"First process() call returned: {result_first}")
+    # Check if the file exists after the first run
+    assert os.path.exists(expected_file), f"After first run, expected {expected_file} to exist, but it doesn't."
+
+    # Second run: This should SKIP processing
+    mock_to_csv = mocker.patch("pandas.DataFrame.to_csv")
+    result_second = process("baseline", "single-family-detached", output_base_dir=mock_output_dir, target_counties=["Alameda County"], force_recompute=False)
+    assert expected_file in result_second, f"Expected {expected_file} in process() return list, but got {result_second}"
+    # Ensure the save_building_ids function was NOT called on the second run
+    mock_to_csv.assert_not_called()
+
+def test_process_regenerates_when_force_recompute_true(mocker, sample_metadata, tmp_path):
+    mocker.patch("step1_identify_suitable_buildings.get_metadata", return_value=sample_metadata)
+
+    mock_output_dir = tmp_path / "mock_data"
+
+    # Run process first to "create" the file
+    process("baseline", "single-family-detached", output_base_dir=mock_output_dir, target_counties=["Alameda County"])
+
+    # Run process again with `force_recompute=True`, expecting it to REPROCESS the file
+    result = process("baseline", "single-family-detached", output_base_dir=mock_output_dir, target_counties=["Alameda County"], force_recompute=True)
+
+    expected_file = os.path.join(mock_output_dir, LOADPROFILES, "single-family-detached", "alameda", "step1_filtered_building_ids.csv")
+
+    assert expected_file in result, f"Expected {expected_file} in process() return list, but got {result}"
+    assert os.path.exists(expected_file), f"File {expected_file} should exist."
+    

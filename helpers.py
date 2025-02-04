@@ -1,7 +1,28 @@
 # helpers.py
 import os
+import pandas as pd
 
 LOADPROFILES = "loadprofiles" # folder name where all load profiles are stored
+
+def is_valid_csv(file_path):
+    """Checks if a CSV file is valid: non-empty, contains expected data."""
+    try:
+        if os.path.getsize(file_path) == 0:  # Empty file
+            return False
+
+        df = pd.read_csv(file_path, nrows=10)  # Read only a few rows for efficiency
+
+        required_columns = ["timestamp", "total_load"]  # Ensure necessary columns exist
+        if not all(col in df.columns for col in required_columns):
+            return False
+
+        if df.empty or df["timestamp"].isnull().all():
+            return False
+
+        return True
+    except Exception as e:
+        print(f"Error validating {file_path}: {e}")
+        return False
 
 def slugify_county_name(county_name: str) -> str:
     """

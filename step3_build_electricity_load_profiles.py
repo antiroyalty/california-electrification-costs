@@ -1,6 +1,6 @@
 import os
 import pandas as pd
-from helpers import get_counties, get_scenario_path
+from helpers import get_counties, get_scenario_path, is_valid_csv
 
 END_USE_COLUMNS = {
     "heating": [
@@ -103,7 +103,13 @@ def process_county_data(input_dir, output_path, end_uses):
 
     return "processed", len(all_files)
 
-def process(scenarios, housing_types, counties, base_input_dir, base_output_dir):
+def should_skip_processing(output_path, force_recompute):
+    if force_recompute:
+        return False  # Always regenerate if forced
+
+    return os.path.exists(output_path) and is_valid_csv(output_path)
+
+def process(scenarios, housing_types, counties, base_input_dir, base_output_dir, force_recompute=True):
     """
     Returns a summary dict with structure:
       {
@@ -137,13 +143,22 @@ def process(scenarios, housing_types, counties, base_input_dir, base_output_dir)
 
                 input_dir = os.path.join(base_input_dir, scenario, housing_type, county, INPUT_FOLDER_NAME)
                 output_path = os.path.join(base_output_dir, scenario, housing_type, county, f"{OUTPUT_FILE_PREFIX}_{county}.csv")
+                
+                # 1. Make sure processing is necessary
+                if should_skip_processing(output_path, force_recompute):
+                    print(f"Skipping {county} - existing valid profile found at {output_path}")
+                    county_info["status"] = "skipped_existing"
+                    summary["skipped"].append(county_info)
+                    continue  # Skip processing
 
+                # 2. Make sure input directory exists
                 if not os.path.exists(input_dir):
                     print(f"Directory not found: {input_dir}")
                     county_info["status"] = "directory_not_found"
                     summary["skipped"].append(county_info)
                     continue
 
+                # 3. Process data
                 end_uses = get_end_use_columns(end_use_categories)
                 status, num_files = process_county_data(input_dir, output_path, end_uses)
 
@@ -156,4 +171,5 @@ def process(scenarios, housing_types, counties, base_input_dir, base_output_dir)
                 else:
                     summary["skipped"].append(county_info)
 
+    print(summary)
     return summary

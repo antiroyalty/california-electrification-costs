@@ -29,16 +29,16 @@ class CostService:
 
     def run(self):
         print("----- Step 1 -----")
-        result = IdentifySuitableBuildings.process(self.scenario, self.housing_type, output_base_dir=self.output_dir, target_counties=counties)
-        # print(result, "\n")
+        result = IdentifySuitableBuildings.process(self.scenario, self.housing_type, output_base_dir=self.output_dir, target_counties=counties, force_recompute=False)
+        print(result, "\n")
 
         print("----- Step 2 -----")
         result = PullBuildings.process(self.scenario, self.housing_type, self.counties, output_base_dir=self.output_dir, download_new_files=False)
-        # print(result, "\n")
+        print(result, "\n")
     
         print("----- Step 3 -----")
         # Make sure I don't pull load profiles on every run, only if they don't already exist
-        result = BuildElectricityLoadProfiles.process(self.scenario, [self.housing_type], self.counties, input_dir, output_dir)
+        result = BuildElectricityLoadProfiles.process(self.SCENARIOS, [self.housing_type], self.counties, input_dir, output_dir, force_recompute=False)
         # print(result, "\n")
 
         # print("----- Step 4 -----")
@@ -53,7 +53,7 @@ class CostService:
         # result = CombineRealAndSimulatedProfiles.process(self.input_dir, self.output_dir, list(self.SCENARIOS.keys()), [self.housing_type], self.counties)
     
         print("----- Step 7 -----")
-        result = WeatherFiles.process(self.input_dir, self.output_dir, list(self.SCENARIOS.keys()), [self.housing_type], self.counties)
+        # result = WeatherFiles.process(self.input_dir, self.output_dir, list(self.SCENARIOS.keys()), [self.housing_type], self.counties)
         # print(result, "\n")
 
         print("----- Step 8 -----")
@@ -66,11 +66,11 @@ class CostService:
 
         print("----- Step 10 -----")
         # result = EvaluateGasRates.process(self.input_dir, self.output_dir, list(self.SCENARIOS.keys()), [self.housing_type], self.counties, "default") # last argument is  load_type, which can be 'default' or 'solarstorage'
-        print(result, "\n")
+        # print(result, "\n")
 
         print("----- Step 11 -----")
         # result = EvaluateElectricityRates.process(self.input_dir, self.output_dir, list(self.SCENARIOS.keys()), [self.housing_type], self.counties, "default") # last argument is  load_type, which can be 'default' or 'solarstorage'
-        print(result, "\n")
+        # print(result, "\n")
 
         return self.csv_file
     

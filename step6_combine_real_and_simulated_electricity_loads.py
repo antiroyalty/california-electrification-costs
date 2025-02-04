@@ -169,4 +169,4 @@ def process(input_dir, output_dir, scenarios, housing_types, counties):
                 results.append(result)
     return results
 
-process("data", "data", ["baseline"], ["single-family-detached"], ["Alameda County"])
+# process("data", "data", ["baseline"], ["single-family-detached"], ["Alameda County"])
