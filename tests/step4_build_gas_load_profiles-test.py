@@ -32,6 +32,7 @@ from step4_build_gas_load_profiles import (
     END_USE_COLUMNS
 )
 
+from cost_service import CostService
 
 @pytest.fixture
 def sample_dataframe():
@@ -240,8 +241,7 @@ def test_process_no_scenario_path(mocker):
     mocker.patch("os.path.exists", return_value=False)
     mock_listdir = mocker.patch("os.listdir")
 
-    scenarios = {"baseline": ["heating"]}
-    process(scenarios, ["sfd"], "/base/in", "/base/out", counties=["cty"])
+    process(CostService.SCENARIOS, ["single-family-detached"], "/data", "/data", counties=["Alameda County"])
     mock_listdir.assert_not_called()
 
 
@@ -258,8 +258,7 @@ def test_process_county_dir_missing(mocker):
     mocker.patch("os.listdir", return_value=["cty"])
     mock_bld = mocker.patch("step4_build_gas_load_profiles.build_county_gas_profile")
 
-    scenarios = {"baseline": ["heating"]}
-    process(scenarios, ["sfd"], "/base/in", "/base/out")
+    process(CostService.SCENARIOS, ["single-family-detached"], "/data", "/data")
     mock_bld.assert_not_called()
 
 
@@ -274,8 +273,7 @@ def test_process_county_ok(mocker):
     mocker.patch("os.listdir", return_value=["ctyA", "ctyB"])
     mock_bld = mocker.patch("step4_build_gas_load_profiles.build_county_gas_profile")
 
-    scenarios = {"baseline": ["heating"]}
-    process(scenarios, ["sfd"], "/base/in", "/base/out")
+    process(CostService.SCENARIOS, ["single-family-detached"], "/data", "/data")
     # Expect 2 calls, for ctyA and ctyB
     assert mock_bld.call_count == 2
 
@@ -291,14 +289,12 @@ def test_convert_county_name_to_slug(mocker):
     # Spy on build_county_gas_profile to see how it's invoked
     mock_build = mocker.patch("step4_build_gas_load_profiles.build_county_gas_profile")
 
-    scenarios = {"baseline": ["heating"]}
     housing_types = ["single-family-detached"]
     # Two counties that need slug conversion
     input_counties = ["Riverside County", "Santa Clara County"]
 
-    # Call the process function
     process(
-        scenarios=scenarios,
+        scenarios=CostService.SCENARIOS,
         housing_types=housing_types,
         base_input_dir="data",
         base_output_dir="data",
@@ -335,3 +331,47 @@ def test_convert_county_name_to_slug(mocker):
     # Directories must also contain "santa-clara"
     assert county_dir_2 == "data/baseline/single-family-detached/santa-clara/buildings"
     assert output_dir_2 == "data/baseline/single-family-detached/santa-clara"
+
+def test_process_extracts_gas_end_uses(mocker):
+    """
+    Ensure process correctly extracts gas-related end-use categories from scenarios
+    and maps them to END_USE_COLUMNS before calling build_county_gas_profile.
+    """
+    mocker.patch("os.path.exists", return_value=True)
+    mocker.patch("os.path.isdir", return_value=True)
+    mocker.patch("os.listdir", return_value=["alameda"])
+
+    # Spy on build_county_gas_profile
+    mock_build = mocker.patch("step4_build_gas_load_profiles.build_county_gas_profile")
+
+    mock_get_scenario_path = mocker.patch("step4_build_gas_load_profiles.get_scenario_path", return_value="/data/baseline/single-family-detached")
+    mock_get_counties = mocker.patch("step4_build_gas_load_profiles.get_counties", return_value=["alameda"])
+
+    mock_scenarios = {
+        "baseline": {
+            "gas": {"hot_water", "cooking", "heating"},
+            "electric": {"appliances", "misc"}
+        }
+    }
+
+    # Expected mapping for END_USE_COLUMNS
+    mock_end_use_columns = {
+        "hot_water": ["out.natural_gas.hot_water.energy_consumption"],
+        "cooking": ["out.natural_gas.range_oven.energy_consumption"],
+        "heating": ["out.natural_gas.heating.energy_consumption"]
+    }
+
+    mocker.patch("step4_build_gas_load_profiles.END_USE_COLUMNS", mock_end_use_columns)
+
+    process(mock_scenarios, ["single-family-detached"], "/data", "/data", counties=["Alameda County"])
+
+    # Ensure build_county_gas_profile was called with correct arguments
+    mock_build.assert_called_once()
+    _, _, _, _, _, end_uses = mock_build.call_args[0]
+
+    expected_end_uses = [
+        "out.natural_gas.hot_water.energy_consumption",
+        "out.natural_gas.range_oven.energy_consumption",
+        "out.natural_gas.heating.energy_consumption"
+    ]
+    assert set(end_uses) == set(expected_end_uses), f"Expected {expected_end_uses}, but got {end_uses}"

@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 
-from helpers import slugify_county_name
+from helpers import get_scenario_path, get_counties
 
 # Conversion factor
 KWH_TO_THERMS = 0.0341296
@@ -123,33 +123,23 @@ def build_county_gas_profile(scenario, housing_type, county, county_dir, output_
 def process(scenarios, housing_types, base_input_dir, base_output_dir, counties=None):
     for scenario in scenarios:
         for housing_type in housing_types:
-            scenario_path = os.path.join(base_input_dir, scenario, housing_type)
-            if not os.path.exists(scenario_path):
-                print(f"Scenario path not found: {scenario_path}")
-                continue
-            
-            if counties is None:
-                # Dynamically collect all county names
-                counties = [county for county in os.listdir(scenario_path) 
-                        if os.path.isdir(os.path.join(scenario_path, county))]
+            scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
+            counties = get_counties(scenario_path, counties)
             
             for county in counties:
-                county_slug = slugify_county_name(county)
-
                 print(f"Processing gas load profile in {county} for {scenario}, {housing_type}")
             
-                county_dir = os.path.join(scenario_path, county_slug, "buildings")
-                output_dir = os.path.join(base_output_dir, scenario, housing_type, county_slug)
+                county_dir = os.path.join(scenario_path, county, "buildings")
+                output_dir = os.path.join(base_output_dir, scenario, housing_type, county)
                 
                 if not os.path.exists(county_dir):
                     print(f"County directory not found: {county_dir}")
                     continue
                 
-                # Collect all end use columns relevant to the scenario
-                end_use_categories = scenarios[scenario]
+                # Collect all GAS end use columns relevant to the scenario
+                # Scenarios should be defined by constant in CostService and passed as an argument here
+                end_use_categories = scenarios[scenario]['gas']
                 end_uses = [col for category in end_use_categories for col in END_USE_COLUMNS[category]]
-                print(end_use_categories)
-                print("Step4@process: ", end_uses)
                 
                 # Build the gas profile for the county
-                build_county_gas_profile(scenario, housing_type, county_slug, county_dir, output_dir, end_uses)
+                build_county_gas_profile(scenario, housing_type, county, county_dir, output_dir, end_uses)
