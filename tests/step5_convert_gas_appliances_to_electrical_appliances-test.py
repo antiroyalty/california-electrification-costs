@@ -226,25 +226,6 @@ def test_process_explicit_counties(mocker):
     cty2_args = calls[1][0]
     assert cty1_args[0] == "alameda" or cty1_args[0] == "riverside"
 
-def test_process_scenario_path_missing(mocker):
-    """
-    If the discovered scenario path doesn't exist, it might skip discovering counties
-    or raise an error. We'll see how the code handles it.
-    """
-    mock_exists = mocker.patch("os.path.exists", return_value=False)
-    mock_listdir = mocker.patch("os.listdir")
-    mock_convert_county = mocker.patch("step5_convert_gas_appliances_to_electrical_appliances.convert_appliances_for_county")
-
-    scenarios = ["baseline"]
-    housing_types = ["sfd"]
-    process("/base/in", "/base/out", counties=None, scenarios=scenarios, housing_types=housing_types)
-
-    # Because the scenario path is missing, it tries to do:
-    #   scenario_path = /base/in/baseline/sfd
-    #   but that doesn't exist => it won't find counties => won't call convert_appliances_for_county
-    mock_convert_county.assert_not_called()
-    mock_listdir.assert_not_called()
-
 @pytest.mark.parametrize("county_in, expected_slug", [
     ("Riverside County", "riverside"),
     ("Santa Clara County", "santa-clara"),

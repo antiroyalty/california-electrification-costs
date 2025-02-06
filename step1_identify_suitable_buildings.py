@@ -98,12 +98,12 @@ def process(scenario, housing_type, output_base_dir="data", target_counties=None
         county_name = row['in.county_name']
 
         formatted_county_name = slugify_county_name(county_name)
-        output_dir = os.path.join(output_base_dir, LOADPROFILES, housing_type, formatted_county_name)
+        output_dir = os.path.join(output_base_dir, scenario, housing_type, formatted_county_name)
         output_csv = os.path.join(output_dir, "step1_filtered_building_ids.csv")
 
          # Step 1: Check if processing is necessary
         if not force_recompute:
-            print(f"Skipping {county_name} - existing valid file found at {output_csv}")
+            print(f"Skipping {county_name} since recompute was not request. Would have generated file in: {output_csv}")
             output_csv_paths.append(output_csv)
             continue  # Skip processing
 

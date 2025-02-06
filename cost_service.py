@@ -29,11 +29,11 @@ class CostService:
 
     def run(self):
         print("----- Step 1 -----")
-        result = IdentifySuitableBuildings.process(self.scenario, self.housing_type, output_base_dir=self.output_dir, target_counties=counties, force_recompute=False)
+        result = IdentifySuitableBuildings.process(self.scenario, self.housing_type, output_base_dir=self.output_dir, target_counties=counties, force_recompute=True)
         print(result, "\n")
 
         print("----- Step 2 -----")
-        result = PullBuildings.process(self.scenario, self.housing_type, self.counties, output_base_dir=self.output_dir, download_new_files=False)
+        result = PullBuildings.process(self.scenario, self.housing_type, self.counties, output_base_dir="data", download_new_files=True) # output directory should just be 'data', not 'loadprofiles'
         print(result, "\n")
     
         print("----- Step 3 -----")
@@ -41,12 +41,12 @@ class CostService:
         result = BuildElectricityLoadProfiles.process(self.SCENARIOS, [self.housing_type], self.counties, input_dir, output_dir, force_recompute=False)
         # print(result, "\n")
 
-        # print("----- Step 4 -----")
-        # result = BuildGasLoadProfiles.process(self.SCENARIOS, [self.housing_type], self.input_dir, self.output_dir, self.counties)
+        print("----- Step 4 -----")
+        result = BuildGasLoadProfiles.process(self.SCENARIOS, [self.housing_type], self.input_dir, self.output_dir, self.counties)
         # print(result, "\n")
 
         print("----- Step 5 -----")
-        # result = ConvertGasToElectric.process(self.input_dir, self.output_dir, self.counties, list(self.SCENARIOS.keys()), [self.housing_type] )
+        result = ConvertGasToElectric.process(self.input_dir, self.output_dir, self.counties, list(self.SCENARIOS.keys()), [self.housing_type] )
         # print(result, "\n")
 
         print("----- Step 6 -----")
@@ -81,7 +81,7 @@ scenario = "baseline"
 housing_type = "single-family-detached"
 counties = ["Alameda County"]
 input_dir = "data"
-output_dir = "data"
+output_dir = "data/loadprofiles"
 
 cost_service = CostService(initial_csv, scenario, housing_type, counties=counties, input_dir=input_dir, output_dir=output_dir)
 

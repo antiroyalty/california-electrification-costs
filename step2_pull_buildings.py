@@ -43,6 +43,8 @@ def process_county(scenario, housing_type, county_path, bucket_name, s3_prefix, 
     scenario_path = get_scenario_path(output_base_dir, scenario, housing_type)
     output_dir = os.path.join(scenario_path, county_name, "buildings")
 
+    print(f"Outputting files to: {output_dir}")
+
     # Ensure the directory exists before proceeding
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)

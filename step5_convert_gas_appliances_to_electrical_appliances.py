@@ -3,7 +3,7 @@ import os
 import pandas as pd
 import numpy as np
 
-from helpers import slugify_county_name
+from helpers import get_counties, get_scenario_path
 
 # TODO: Make this a Monte Carlo simulation, trying all values in range
 # TODO: Add climate-dependent (county-dependent?) COP values
@@ -14,6 +14,9 @@ COP_HEAT_PUMP = 2.75  # Average effective COP (2.0-3.0 for ducted, 2.5-4.0 for n
 EFFICIENCY_GAS_HEATING = 0.875  # Average efficiency (80-95%)
 COP_HPWH = 2.75  # Average effective COP (2.0-3.5)
 EFFICIENCY_GAS_WATER_HEATER = 0.75  # Average efficiency (60-90%)
+
+INPUT_FILE_PREFIX = "gas_loads" # from output of Step 4
+OUTPUT_FILE_PREFIX = "electricity_loads_simulated"
 
 # Conversion functions
 def convert_gas_heating_to_electric_heatpump(gas_heating_kwh):
@@ -30,8 +33,8 @@ def convert_gas_water_heater_to_electric_waterheater(gas_water_heating_kwh):
 
 def convert_appliances_for_county(county, base_input_dir, base_output_dir, scenarios, housing_type):
     for scenario in scenarios:
-        input_file = os.path.join(base_input_dir, scenario, housing_type, county, f"gas_loads_{county}.csv")
-        output_file = os.path.join(base_output_dir, scenario, housing_type, county, f"electricity_loads_simulated_{county}.csv")
+        input_file = os.path.join(base_input_dir, scenario, housing_type, county, f"{INPUT_FILE_PREFIX}_{county}.csv")
+        output_file = os.path.join(base_output_dir, scenario, housing_type, county, f"{OUTPUT_FILE_PREFIX}_{county}.csv")
 
         if not os.path.exists(input_file):
             print(f"Gas load profile not found for {county} in scenario {scenario}. Looked in: {input_file}. Skipping...")
@@ -68,23 +71,14 @@ def convert_appliances_for_county(county, base_input_dir, base_output_dir, scena
             print(f"An unexpected error occurred while processing {county} in scenario {scenario}: {e}")
             continue
 
-def process(base_input_dir, base_output_dir, counties=None, scenarios=None, housing_types=None):
-    if counties is None:
-        scenario_path = os.path.join(base_input_dir, scenarios[0], housing_types[0])
+def process(base_input_dir, base_output_dir, counties, scenarios, housing_types):
+    for housing_type in housing_types:
+        for scenario in scenarios:
+            scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
+            counties = get_counties(scenario_path, counties)
 
-        if not os.path.exists(scenario_path):
-            print(f"Scenario path does not exist: {scenario_path}")
-            return
-
-        # Dynamically determine counties from folder structure
-        counties = [county for county in os.listdir(scenario_path) if os.path.isdir(os.path.join(scenario_path, county))]
-        print(counties)
-
-    for county in counties:
-        county_slug = slugify_county_name(county)
-                        
-        for housing_type in housing_types:
-            convert_appliances_for_county(county_slug, base_input_dir, base_output_dir, scenarios, housing_type)
+            for county in counties:
+                convert_appliances_for_county(county, base_input_dir, base_output_dir, scenarios, housing_type)
 
 # # Example usage
 # base_input_dir = "data"

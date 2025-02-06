@@ -20,6 +20,8 @@ END_USE_COLUMNS = {
     "misc": ['out.natural_gas.fireplace.energy_consumption']
 }
 
+OUTPUT_FILE_PREFIX = "gas_loads"
+
 def process_building_data(data, end_uses):
     if 'timestamp' not in data.columns or not all(col in data.columns for col in end_uses):
         raise ValueError("Missing required columns: 'timestamp' and/or end_uses.")
@@ -44,7 +46,6 @@ def update_county_totals(county_gas_totals, building_gas_totals, building_count,
     else:
         # Aggregate totals FOR EACH END USE with the suffixed column names
         for col, suffixed_col in zip(end_uses, suffixed_end_uses):
-            print("Step4@update_county_totals#suffixed_end_uses", suffixed_end_uses)
             county_gas_totals[suffixed_col] += building_gas_totals[col]
 
         county_gas_totals['load.gas.total.kwh'] += building_gas_totals['load.gas.total.kwh']
@@ -53,7 +54,6 @@ def update_county_totals(county_gas_totals, building_gas_totals, building_count,
     county_gas_totals['building_count'] = building_count
 
     return county_gas_totals
-
 
 def sum_county_gas_profiles(input_dir, end_uses):
     county_gas_totals = None
@@ -64,7 +64,6 @@ def sum_county_gas_profiles(input_dir, end_uses):
         if file_path.endswith('.parquet'):
             try:
                 data = pd.read_parquet(file_path) # read it
-                print(file_path)
             except Exception as e:
                 print(f"Error reading {file_path}: {e}")
                 continue
@@ -78,20 +77,16 @@ def sum_county_gas_profiles(input_dir, end_uses):
     return county_gas_totals, building_count
 
 def average_county_gas_profiles(county_gas_totals, building_count, end_uses):
-    print(county_gas_totals.head())
-
     if building_count > 0:
         # Calculate average for total load
-        county_gas_totals['load.gas.avg.kwh'] = county_gas_totals['load.gas.total.kwh'].div(building_count)
-        county_gas_totals['load.gas.avg.therms'] = county_gas_totals['load.gas.avg.kwh'] * KWH_TO_THERMS
+        county_gas_totals['load.gas.building_avg.kwh'] = county_gas_totals['load.gas.total.kwh'].div(building_count)
+        county_gas_totals['load.gas.building_avg.therms'] = county_gas_totals['load.gas.building_avg.kwh'] * KWH_TO_THERMS
 
         # Calculate averages for each individual end use in kWh and therms
         for col in end_uses:
-            print("Step4@average_county_gas_profile: ", col)
-            consumption_col = col
             total_col = f"{col}.gas.total.kwh"
-            avg_kwh_col = f"{col}.gas.avg.kwh"
-            avg_therms_col = f"{col}.gas.avg.therms"
+            avg_kwh_col = f"{col}.gas.building_avg.kwh"
+            avg_therms_col = f"{col}.gas.building_avg.therms"
 
             if total_col in county_gas_totals.columns:
                 # Average in kWh
@@ -105,7 +100,8 @@ def average_county_gas_profiles(county_gas_totals, building_count, end_uses):
 
 def save_county_gas_profiles(county_gas_totals, county, output_dir):
     os.makedirs(output_dir, exist_ok=True)
-    output_file = os.path.join(output_dir, f"gas_loads_{county}.csv")
+    output_file = os.path.join(output_dir, f"{OUTPUT_FILE_PREFIX}_{county}.csv")
+
     print(f"Saved results to {output_file}")
     county_gas_totals.to_csv(output_file)
 
@@ -141,5 +137,4 @@ def process(scenarios, housing_types, base_input_dir, base_output_dir, counties=
                 end_use_categories = scenarios[scenario]['gas']
                 end_uses = [col for category in end_use_categories for col in END_USE_COLUMNS[category]]
                 
-                # Build the gas profile for the county
                 build_county_gas_profile(scenario, housing_type, county, county_dir, output_dir, end_uses)
