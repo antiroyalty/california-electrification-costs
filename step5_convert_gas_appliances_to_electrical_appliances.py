@@ -31,6 +31,15 @@ def convert_gas_water_heater_to_electric_waterheater(gas_water_heating_kwh):
     electric_water_heating_kwh = gas_water_heating_kwh / COP_HPWH * EFFICIENCY_GAS_WATER_HEATER
     return electric_water_heating_kwh
 
+def save_converted_load_profiles(simulated_electricity_loads, output_file):
+    os.makedirs(os.path.dirname(output_file), exist_ok=True)
+    simulated_electricity_loads.to_csv(output_file, index=False)
+    print(f"Converted load profiles saved to: {output_file}")
+
+    # Why the heck is this 720,000 kWh....
+    annual_total = simulated_electricity_loads.drop("timestamp", axis=1).sum().sum() # sum by column, then sum across columns to produce single total
+    print(f"Annual total electricity consumption: {annual_total} kWh")
+
 def convert_appliances_for_county(county, base_input_dir, base_output_dir, scenarios, housing_type):
     for scenario in scenarios:
         input_file = os.path.join(base_input_dir, scenario, housing_type, county, f"{INPUT_FILE_PREFIX}_{county}.csv")
@@ -59,10 +68,8 @@ def convert_appliances_for_county(county, base_input_dir, base_output_dir, scena
                 "out.natural_gas.hot_water.energy_consumption.gas.total.kwh"
             ].apply(convert_gas_water_heater_to_electric_waterheater)
 
-            # Save the converted load profiles
-            os.makedirs(os.path.dirname(output_file), exist_ok=True)
-            simulated_electricity_loads.to_csv(output_file, index=False)
-            print(f"Converted load profiles saved for {county} in scenario {scenario}. Saved to: {output_file}")
+            
+            save_converted_load_profiles(simulated_electricity_loads, output_file)
         
         except KeyError as e:
             print(f"Error: Missing expected column in {input_file}. {e}")
