@@ -118,3 +118,27 @@ def process(scenario, housing_type, output_base_dir="data", target_counties=None
 
     return output_csv_paths
 
+# norcal_counties = [
+#     "Alameda County", "Contra Costa County", "Marin County", "Napa County", 
+#     "San Francisco County", "San Mateo County", "Santa Clara County", "Solano County", "Sonoma County",  # Bay Area
+#     "Del Norte County", "Humboldt County", "Lake County", "Mendocino County", "Trinity County",  # North Coast
+#     "Butte County", "Colusa County", "Glenn County", "Lassen County", "Modoc County", 
+#     "Nevada County", "Plumas County", "Shasta County", "Sierra County", "Siskiyou County", "Tehama County",  # North Valley & Sierra
+# ]
+
+# central_counties = [
+#     "Fresno County", "Kern County", "Kings County", "Madera County", "Merced County", 
+#     "Sacramento County", "San Joaquin County", "Stanislaus County", "Sutter County", 
+#     "Tulare County", "Yolo County",  # Central Valley
+#     "Monterey County", "San Benito County", "San Luis Obispo County", "Santa Barbara County", 
+#     "Santa Cruz County", "Ventura County",  # Central Coast
+#     "Alpine County", "Amador County", "Mono County",  # Eastern Sierra & Inland
+# ]
+
+# socal_counties = [
+#     "Los Angeles County", "Orange County", "San Bernardino County", 
+#     "Riverside County", "Ventura County",  # Greater Los Angeles
+#     "San Diego County", "Imperial County"  # San Diego & Imperial
+# ]
+
+# process("baseline", "single-family-detached", output_base_dir="data", target_counties=socal_counties, force_recompute=True)

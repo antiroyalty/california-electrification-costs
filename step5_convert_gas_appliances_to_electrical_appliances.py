@@ -18,6 +18,12 @@ EFFICIENCY_GAS_WATER_HEATER = 0.75  # Average efficiency (60-90%)
 INPUT_FILE_PREFIX = "gas_loads" # from output of Step 4
 OUTPUT_FILE_PREFIX = "electricity_loads_simulated"
 
+# Note for typical homes in Alameda County
+# Home Size	Heating & Cooling Consumption (kWh/year)
+# 1,500 sq. ft.	~3,000 – 5,500 kWh
+# 2,000 sq. ft.	~4,500 – 7,500 kWh
+# 2,500 sq. ft.	~5,500 – 9,000 kWh
+
 # Conversion functions
 def convert_gas_heating_to_electric_heatpump(gas_heating_kwh):
     electric_heatpump_kwh = gas_heating_kwh / COP_HEAT_PUMP * EFFICIENCY_GAS_HEATING
@@ -36,9 +42,13 @@ def save_converted_load_profiles(simulated_electricity_loads, output_file):
     simulated_electricity_loads.to_csv(output_file, index=False)
     print(f"Converted load profiles saved to: {output_file}")
 
+    print(f"Heat pump annual: {simulated_electricity_loads['simulated.electricity.heat_pump.energy_consumption.electricity.kwh'].sum()} kWh")
+    print(f"Induction stove annual: {simulated_electricity_loads['simulated.electricity.induction_stove.energy_consumption.electricity.kwh'].sum()} kWh")
+    print(f"Hot water annual: {simulated_electricity_loads['simulated.electricity.hot_water.energy_consumption.electricity.kwh'].sum()} kWh")
+    
     # Why the heck is this 720,000 kWh....
-    annual_total = simulated_electricity_loads.drop("timestamp", axis=1).sum().sum() # sum by column, then sum across columns to produce single total
-    print(f"Annual total electricity consumption: {annual_total} kWh")
+    annual_total = simulated_electricity_loads.drop("timestamp", axis=1).sum().sum()
+    print(f"Total simulated electricity consumption: {annual_total} kWh")
 
 def convert_appliances_for_county(county, base_input_dir, base_output_dir, scenarios, housing_type):
     for scenario in scenarios:
@@ -56,16 +66,18 @@ def convert_appliances_for_county(county, base_input_dir, base_output_dir, scena
 
             print(f"Processing {county} for scenario {scenario}...")
 
-            simulated_electricity_loads["simulated.electricity.heat_pump.energy_consumption.electricity.total.kwh"] = gas_loads[
-                "out.natural_gas.heating.energy_consumption.gas.total.kwh"
+            simulated_electricity_loads["simulated.electricity.heat_pump.energy_consumption.electricity.kwh"] = gas_loads[
+                # This needs to sum by building_avg
+                # Aka for a typical building in the given county, after looking at all the buildings within that county with the desired properties
+                "out.natural_gas.heating.energy_consumption.gas.building_avg.kwh"
             ].apply(convert_gas_heating_to_electric_heatpump)
             
-            simulated_electricity_loads["simulated.electricity.induction_stove.energy_consumption.electricity.total.kwh"] = gas_loads[
-                "out.natural_gas.range_oven.energy_consumption.gas.total.kwh"
+            simulated_electricity_loads["simulated.electricity.induction_stove.energy_consumption.electricity.kwh"] = gas_loads[
+                "out.natural_gas.range_oven.energy_consumption.gas.building_avg.kwh"
             ].apply(convert_gas_stove_to_induction_stove)
             
-            simulated_electricity_loads["simulated.electricity.hot_water.energy_consumption.electricity.total.kwh"] = gas_loads[
-                "out.natural_gas.hot_water.energy_consumption.gas.total.kwh"
+            simulated_electricity_loads["simulated.electricity.hot_water.energy_consumption.electricity.kwh"] = gas_loads[
+                "out.natural_gas.hot_water.energy_consumption.gas.building_avg.kwh"
             ].apply(convert_gas_water_heater_to_electric_waterheater)
 
             

@@ -101,6 +101,16 @@ def average_county_gas_profiles(county_gas_totals, building_count, end_uses):
 def save_county_gas_profiles(county_gas_totals, county, output_dir):
     os.makedirs(output_dir, exist_ok=True)
     output_file = os.path.join(output_dir, f"{OUTPUT_FILE_PREFIX}_{county}.csv")
+    print(f"Converted load profiles saved to: {output_file}")
+
+    print("******")
+    print(county_gas_totals.filter(like="energy_consumption.gas.building_avg.kwh"))
+    print(county_gas_totals.filter(like="energy_consumption.gas.building_avg.kwh").columns)
+    print("Sum of total")
+    print(f"{county_gas_totals.filter(like='energy_consumption.gas.building_avg.kwh').sum(axis=1).sum()} kWh")
+
+    # annual_gas_load = county_gas_totals.drop("timestamp",  axis=1).sum().sum()
+    # print(f"Annual gas load: {annual_gas_load}")
 
     print(f"Saved results to {output_file}")
     county_gas_totals.to_csv(output_file)

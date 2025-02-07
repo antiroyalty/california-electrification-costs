@@ -29,7 +29,7 @@ class CostService:
 
     def run(self):
         print("----- Step 1 -----")
-        result = IdentifySuitableBuildings.process(self.scenario, self.housing_type, output_base_dir=self.output_dir, target_counties=counties, force_recompute=True)
+        result = IdentifySuitableBuildings.process(self.scenario, self.housing_type, output_base_dir="data", target_counties=self.counties, force_recompute=True)
         print(result, "\n")
 
         print("----- Step 2 -----")
@@ -38,15 +38,15 @@ class CostService:
     
         print("----- Step 3 -----")
         # Make sure I don't pull load profiles on every run, only if they don't already exist
-        result = BuildElectricityLoadProfiles.process(self.SCENARIOS, [self.housing_type], self.counties, input_dir, output_dir, force_recompute=False)
+        # result = BuildElectricityLoadProfiles.process(self.SCENARIOS, [self.housing_type], self.counties, "data", "data/loadprofiles", force_recompute=False)
         # print(result, "\n")
 
         print("----- Step 4 -----")
-        result = BuildGasLoadProfiles.process(self.SCENARIOS, [self.housing_type], self.input_dir, self.output_dir, self.counties)
+        # result = BuildGasLoadProfiles.process(self.SCENARIOS, [self.housing_type], "data", "data/loadprofiles", self.counties)
         # print(result, "\n")
 
         print("----- Step 5 -----")
-        result = ConvertGasToElectric.process(self.input_dir, self.output_dir, self.counties, list(self.SCENARIOS.keys()), [self.housing_type] )
+        # result = ConvertGasToElectric.process("data/loadprofiles", "data/loadprofiles", self.counties, list(self.SCENARIOS.keys()), [self.housing_type] )
         # print(result, "\n")
 
         print("----- Step 6 -----")
@@ -79,11 +79,36 @@ initial_csv = "initial_data.csv" # TODO: update
 
 scenario = "baseline"
 housing_type = "single-family-detached"
-counties = ["Alameda County"]
+# counties = ["Alameda County"]
 input_dir = "data"
 output_dir = "data/loadprofiles"
 
-cost_service = CostService(initial_csv, scenario, housing_type, counties=counties, input_dir=input_dir, output_dir=output_dir)
+sample_counties = ["San Francisco County"]
+
+norcal_counties = [
+    "Alameda County", "Contra Costa County", "Marin County", "Napa County", 
+    "San Francisco County", "San Mateo County", "Santa Clara County", "Solano County", "Sonoma County",  # Bay Area
+    "Del Norte County", "Humboldt County", "Lake County", "Mendocino County", "Trinity County",  # North Coast
+    "Butte County", "Colusa County", "Glenn County", "Lassen County", "Modoc County", 
+    "Nevada County", "Plumas County", "Shasta County", "Sierra County", "Siskiyou County", "Tehama County",  # North Valley & Sierra
+]
+
+central_counties = [
+    "Fresno County", "Kern County", "Kings County", "Madera County", "Merced County", 
+    "Sacramento County", "San Joaquin County", "Stanislaus County", "Sutter County", 
+    "Tulare County", "Yolo County",  # Central Valley
+    "Monterey County", "San Benito County", "San Luis Obispo County", "Santa Barbara County", 
+    "Santa Cruz County", "Ventura County",  # Central Coast
+    "Alpine County", "Amador County", "Mono County",  # Eastern Sierra & Inland
+]
+
+socal_counties = [
+    "Los Angeles County", "Orange County", "San Bernardino County", 
+    "Riverside County", "Ventura County",  # Greater Los Angeles
+    "San Diego County", "Imperial County"  # San Diego & Imperial
+]
+
+cost_service = CostService(initial_csv, scenario, housing_type, counties=norcal_counties, input_dir=input_dir, output_dir=output_dir)
 
 final_csv = cost_service.run()
 

@@ -88,7 +88,7 @@ def combine_profiles(input_dir, output_dir, scenario, housing_type, county, scen
     # The retrieval of the profiles does not need to change based on scenario
     # All the loadprofiles are in 'baseline' (we are not pulling new files for each scenario)
     # though the output directory should be different
-    base_path = os.path.join(input_dir, "baseline", housing_type, county_slug)
+    base_path = os.path.join(input_dir, "baseline", housing_type, county_slug) # ultimately I should rename the folder called "baseline" to be "nrel load profiles" or "nrel downloaded data or something". This is a TODO
 
     # Real electricity profile
     electricity_real_file = os.path.join(base_path, f"{scenario_data_map['default']['electricity']['file_prefix']}{county_slug}.csv")
