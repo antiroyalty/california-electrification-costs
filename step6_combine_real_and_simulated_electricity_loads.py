@@ -11,7 +11,7 @@ SCENARIO_DATA_MAP = {
         # baseline
         "default": {
             "electricity": {
-                "file_prefix": "electricity_loads_", # or "sam_optimized_load_profiles_"
+                "file_prefix": "electricity_loads_",
                 "columns": ["total_load"], # or + "Total Load"
             },
             "electricity_simulated": {

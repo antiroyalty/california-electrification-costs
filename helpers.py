@@ -4,6 +4,29 @@ import pandas as pd
 
 LOADPROFILES = "loadprofiles" # folder name where all load profiles are stored
 
+norcal_counties = [
+    "Alameda County", "Contra Costa County", "Marin County", "Napa County", 
+    "San Francisco County", "San Mateo County", "Santa Clara County", "Solano County", "Sonoma County",  # Bay Area
+    "Del Norte County", "Humboldt County", "Lake County", "Mendocino County", "Trinity County",  # North Coast
+    "Butte County", "Colusa County", "Glenn County", "Lassen County", "Modoc County", 
+    "Nevada County", "Plumas County", "Shasta County", "Sierra County", "Siskiyou County", "Tehama County",  # North Valley & Sierra
+]
+
+central_counties = [
+    "Fresno County", "Kern County", "Kings County", "Madera County", "Merced County", 
+    "Sacramento County", "San Joaquin County", "Stanislaus County", "Sutter County", 
+    "Tulare County", "Yolo County",  # Central Valley
+    "Monterey County", "San Benito County", "San Luis Obispo County", "Santa Barbara County", 
+    "Santa Cruz County", "Ventura County",  # Central Coast
+    "Alpine County", "Amador County", "Mono County",  # Eastern Sierra & Inland
+]
+
+socal_counties = [
+    "Los Angeles County", "Orange County", "San Bernardino County", 
+    "Riverside County", "Ventura County",  # Greater Los Angeles
+    "San Diego County", "Imperial County"  # San Diego & Imperial
+]
+
 def is_valid_csv(file_path):
     """Checks if a CSV file is valid: non-empty, contains expected data."""
     try:

@@ -1,23 +1,14 @@
 import pandas as pd
 import os
 import re
+import sys
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from helpers import LOADPROFILES, slugify_county_name, is_valid_csv, norcal_counties, socal_counties, central_counties
 
 SCENARIOS = {
-    "baseline": {
-        # "in.vacancy_status": "Occupied",
-        "in.cooking_range": ["Gas"],
-        "in.heating_fuel": "Natural Gas",
-        "in.water_heater_fuel": "Natural Gas",
-        "in.has_pv": "No",
-        "in.hvac_cooling_type": None,
-        # "in.tenure": "Owner",
+    "all": {
     },
-}
-
-HOUSING_NAME_MAP = {
-    "single-family-detached": "Single-Family Detached",
-    "single-family-attached": "Single-Family Attached",
 }
 
 def get_metadata(scenario):
@@ -41,10 +32,9 @@ def filter_metadata(metadata, housing_type, county_code, county_name, scenario):
     upgrade = (metadata["upgrade"] == 0) # baseline, no housing upgrades
     county_condition = metadata["in.county"] == county_code
     county_name_condition = metadata["in.county_name"] == county_name
-    housing_condition = metadata["in.geometry_building_type_recs"] == HOUSING_NAME_MAP[housing_type]
 
     # Combine initial conditions using bitwise AND
-    conditions = upgrade & county_condition & county_name_condition & housing_condition
+    conditions = upgrade & county_condition & county_name_condition
 
     scenario_filters = SCENARIOS[scenario]
 
@@ -98,8 +88,9 @@ def process(scenario, housing_type, output_base_dir="data", target_counties=None
         county_name = row['in.county_name']
 
         formatted_county_name = slugify_county_name(county_name)
-        output_dir = os.path.join(output_base_dir, scenario, housing_type, formatted_county_name)
-        output_csv = os.path.join(output_dir, "step1_filtered_building_ids.csv")
+        output_dir = os.path.join(output_base_dir, formatted_county_name)
+        print(f"Outputting files to: {output_dir}")
+        output_csv = os.path.join(output_dir, "step1_nrel_bulkfiltered_building_ids.csv")
 
          # Step 1: Check if processing is necessary
         if not force_recompute:
@@ -118,6 +109,6 @@ def process(scenario, housing_type, output_base_dir="data", target_counties=None
 
     return output_csv_paths
 
-# Done: single-family-detached: norcal, socal, central
-# Done: Single-family-attached: norcal, socal, central
-process("baseline", "single-family-attached", output_base_dir="data", target_counties=central_counties, force_recompute=True)
+# Done: norcal_counties, socal_counties, central_counties
+
+process("all", "all", output_base_dir="../data/nrel/upgrade0", target_counties=central_counties, force_recompute=True)

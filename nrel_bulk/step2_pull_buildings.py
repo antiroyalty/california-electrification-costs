@@ -1,8 +1,11 @@
 import os
 import pandas as pd
 import boto3
+import sys
 from botocore.client import Config
 from botocore import UNSIGNED
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from helpers import get_scenario_path, get_counties, norcal_counties, socal_counties, central_counties
 
 # Initialize S3 client
@@ -40,7 +43,7 @@ def process_county(scenario, housing_type, county_path, bucket_name, s3_prefix, 
     
     # Correct the output directory construction
     county_name = os.path.basename(county_path)
-    scenario_path = get_scenario_path(output_base_dir, scenario, housing_type)
+    scenario_path = output_base_dir # no scenarios for bulk download, implied to be ugprade # passed in path
     output_dir = os.path.join(scenario_path, county_name, "buildings")
 
     print(f"Outputting files to: {output_dir}")
@@ -80,7 +83,7 @@ def process(scenario, housing_type, counties, output_base_dir="data", download_n
             "failure_summary": failure_summary,
         }
 
-    scenario_path = get_scenario_path(output_base_dir, scenario, housing_type)
+    scenario_path = output_base_dir # get_scenario_path(output_base_dir, ..., ...)
     counties = get_counties(scenario_path, counties)
     
     for county_name in counties:
@@ -100,6 +103,7 @@ def process(scenario, housing_type, counties, output_base_dir="data", download_n
 
         if not success:
             try:
+                print(f"Metadata path is: {metadata_path}")
                 county_buildings = pd.read_csv(metadata_path)
                 total_buildings = len(county_buildings["bldg_id"].to_list())
             except FileNotFoundError:
@@ -164,10 +168,5 @@ def process(scenario, housing_type, counties, output_base_dir="data", download_n
         "failure_summary": failure_summary,
     }
 
-# housing_types = ["single-family-detached", "single-family-attached"]
-# scenarios = ["baseline", "heat_pump_and_water_heater", "heat_pump_water_heater_and_induction_stove",
-#                 "heat_pump_heating_cooling_water_heater_and_induction_stove"]
-
-# Done: single-family-detached: norcal_counties, socal_counties, central_counties
-# Done: single-family-attached: norcal_counties, socal_counties, central_counties
-process("baseline", "single-family-attached", central_counties, output_base_dir="data", download_new_files=True) # output directory should just be 'data', not 'loadprofiles'
+# Done: upgrade0: norcal_counties
+process("all", "all", norcal_counties, output_base_dir="../data/nrel/upgrade0", download_new_files=True)

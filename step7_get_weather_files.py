@@ -4,7 +4,7 @@ import pandas as pd
 from geopy.geocoders import Nominatim
 from dotenv import load_dotenv
 
-from helpers import slugify_county_name, get_counties, get_scenario_path
+from helpers import slugify_county_name, get_counties, get_scenario_path, norcal_counties, central_counties, socal_counties
 
 load_dotenv()
 API_KEY = os.getenv("NREL_WEATHER_API_KEY", "mock_api_key")
@@ -57,12 +57,5 @@ def process(base_input_dir, output_dir, scenarios, housing_types, counties=None)
                 except Exception as e:
                     print(f"Error processing {county}: {e}")
 
-norcal_counties = [
-    "Alameda County", "Contra Costa County", "Marin County", "Napa County", 
-    "San Francisco County", "San Mateo County", "Santa Clara County", "Solano County", "Sonoma County",  # Bay Area
-    "Del Norte County", "Humboldt County", "Lake County", "Mendocino County", "Trinity County",  # North Coast
-    "Butte County", "Colusa County", "Glenn County", "Lassen County", "Modoc County", 
-    "Nevada County", "Plumas County", "Shasta County", "Sierra County", "Siskiyou County", "Tehama County",  # North Valley & Sierra
-]
-
+# Done: single-family-detached: norcal_counties, socal_counties, central_counties
 process("data", "data/loadprofiles", "baseline", ["single-family-detached"], norcal_counties)
