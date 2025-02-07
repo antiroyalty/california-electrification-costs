@@ -168,5 +168,5 @@ def process(scenario, housing_type, counties, output_base_dir="data", download_n
         "failure_summary": failure_summary,
     }
 
-# Done: upgrade0: norcal_counties
-process("all", "all", norcal_counties, output_base_dir="../data/nrel/upgrade0", download_new_files=True)
+# Done: upgrade0: norcal_counties, socal_counties
+process("all", "all", socal_counties, output_base_dir="../data/nrel/upgrade0", download_new_files=True)
