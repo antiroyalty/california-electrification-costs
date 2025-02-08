@@ -10,7 +10,7 @@ from helpers import get_scenario_path, get_counties, norcal_counties, socal_coun
 
 # Initialize S3 client
 s3 = boto3.client('s3', config=Config(signature_version=UNSIGNED))
-S3_PREFIX = "nrel-pds-building-stock/end-use-load-profiles-for-us-building-stock/2024/resstock_amy2018_release_2/timeseries_individual_buildings/by_state/upgrade=0/state=CA/"
+S3_PREFIX = "nrel-pds-building-stock/end-use-load-profiles-for-us-building-stock/2024/resstock_amy2018_release_2/timeseries_individual_buildings/by_state/upgrade=11/state=CA/"
 S3_BUCKET_NAME = "oedi-data-lake"
 
 def download_parquet_file(bucket_name, s3_key, output_dir):
@@ -168,5 +168,8 @@ def process(scenario, housing_type, counties, output_base_dir="data", download_n
         "failure_summary": failure_summary,
     }
 
-# Done: upgrade0: norcal_counties, socal_counties
-process("all", "all", socal_counties, output_base_dir="../data/nrel/upgrade0", download_new_files=True)
+# Done: upgrade0: norcal_counties, socal_counties, central_counties
+# Done: upgrade6: norcal, socal, central
+counties = norcal_counties + central_counties + socal_counties
+
+process("all", "all", counties, output_base_dir="../data/nrel/upgrade11", download_new_files=True)

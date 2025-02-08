@@ -10,11 +10,13 @@ SCENARIOS = {
     "all": {
     },
 }
+NREL_RESSTOCK_UPGRADE_NUMBER = 11
 
 def get_metadata(scenario):
     metadata_path = os.path.join(
         "data",
-        f"CA_metadata_and_annual_results.csv"
+        # f"CA_metadata_and_annual_results.csv"
+        "CA_upgrade11_metadata_and_annual_results.csv"
     )
     
     try:
@@ -29,7 +31,7 @@ def filter_metadata(metadata, housing_type, county_code, county_name, scenario):
         raise ValueError(f"Scenario '{scenario}' is not defined in SCENARIOS dictionary.")
     
     # Initial conditions based on upgrade, county and housing type
-    upgrade = (metadata["upgrade"] == 0) # baseline, no housing upgrades
+    upgrade = (metadata["upgrade"] == NREL_RESSTOCK_UPGRADE_NUMBER) 
     county_condition = metadata["in.county"] == county_code
     county_name_condition = metadata["in.county_name"] == county_name
 
@@ -109,6 +111,8 @@ def process(scenario, housing_type, output_base_dir="data", target_counties=None
 
     return output_csv_paths
 
-# Done: norcal_counties, socal_counties, central_counties
+# Done: upgrade0 norcal_counties, socal_counties, central_counties
+# Done: upgrade6 norcal_counties, 
+counties = norcal_counties + central_counties + socal_counties
 
-process("all", "all", output_base_dir="../data/nrel/upgrade0", target_counties=central_counties, force_recompute=True)
+process("all", "all", output_base_dir="../data/nrel/upgrade11", target_counties=counties, force_recompute=True)
