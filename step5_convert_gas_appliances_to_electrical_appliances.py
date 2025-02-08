@@ -99,7 +99,6 @@ def process(base_input_dir, base_output_dir, counties, scenarios, housing_types)
             for county in counties:
                 convert_appliances_for_county(county, base_input_dir, base_output_dir, scenarios, housing_type)
 
-# # Example usage
 # base_input_dir = "data"
 # base_output_dir = "data"
 # counties = ["alameda", "riverside"]
