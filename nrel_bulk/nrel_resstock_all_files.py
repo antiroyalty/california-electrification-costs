@@ -46,4 +46,4 @@ def process(state, upgrade, output_base_dir="data", download_new_files=True):
     print("Download process completed.")
     return {"message": f"Download completed for {state} in upgrade{upgrade}."}
 
-process(state="CA", upgrade="0", output_base_dir="../data/nrel", download_new_files=True)
+process(state="CA", upgrade="4", output_base_dir="../data/nrel", download_new_files=True)
