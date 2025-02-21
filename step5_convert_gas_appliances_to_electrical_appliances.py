@@ -3,11 +3,12 @@ import os
 import pandas as pd
 import numpy as np
 
-from helpers import get_counties, get_scenario_path
+from helpers import get_counties, get_scenario_path, log, to_number
 
 # TODO: Make this a Monte Carlo simulation, trying all values in range
 # TODO: Add climate-dependent (county-dependent?) COP values
 # Conversion constants
+# TODO: Consider a "low efficiency" and "high efficiency" household appliance adopter
 EFFICIENCY_GAS_STOVE = 0.45  # Average efficiency (40-50%)
 EFFICIENCY_INDUCTION_STOVE = 0.875  # Average efficiency (85-90%)
 COP_HEAT_PUMP = 2.75  # Average effective COP (2.0-3.0 for ducted, 2.5-4.0 for non-ducted)
@@ -27,28 +28,31 @@ OUTPUT_FILE_PREFIX = "electricity_loads_simulated"
 # Conversion functions
 def convert_gas_heating_to_electric_heatpump(gas_heating_kwh):
     electric_heatpump_kwh = gas_heating_kwh / COP_HEAT_PUMP * EFFICIENCY_GAS_HEATING
+
     return electric_heatpump_kwh
 
 def convert_gas_stove_to_induction_stove(gas_stove_kwh):
     induction_stove_kwh = gas_stove_kwh * (EFFICIENCY_GAS_STOVE / EFFICIENCY_INDUCTION_STOVE)
+
     return induction_stove_kwh
 
 def convert_gas_water_heater_to_electric_waterheater(gas_water_heating_kwh):
     electric_water_heating_kwh = gas_water_heating_kwh / COP_HPWH * EFFICIENCY_GAS_WATER_HEATER
+
     return electric_water_heating_kwh
 
 def save_converted_load_profiles(simulated_electricity_loads, output_file):
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
     simulated_electricity_loads.to_csv(output_file, index=False)
-    print(f"Converted load profiles saved to: {output_file}")
 
-    print(f"Heat pump annual: {simulated_electricity_loads['simulated.electricity.heat_pump.energy_consumption.electricity.kwh'].sum()} kWh")
-    print(f"Induction stove annual: {simulated_electricity_loads['simulated.electricity.induction_stove.energy_consumption.electricity.kwh'].sum()} kWh")
-    print(f"Hot water annual: {simulated_electricity_loads['simulated.electricity.hot_water.energy_consumption.electricity.kwh'].sum()} kWh")
-    
-    # Why the heck is this 720,000 kWh....
-    annual_total = simulated_electricity_loads.drop("timestamp", axis=1).sum().sum()
-    print(f"Total simulated electricity consumption: {annual_total} kWh")
+    log(
+        at='step5#convert_gas_appliances_to_electrical_appliances',
+        heatpump_annual_kwh=to_number(simulated_electricity_loads['simulated.electricity.heat_pump.energy_consumption.electricity.kwh'].sum()),
+        induction_stove_annual_kwh=to_number(simulated_electricity_loads['simulated.electricity.induction_stove.energy_consumption.electricity.kwh'].sum()),
+        hot_water_annual_kwh=to_number(simulated_electricity_loads['simulated.electricity.hot_water.energy_consumption.electricity.kwh'].sum()),
+        total_annual_kwh=to_number(simulated_electricity_loads.drop('timestamp', axis=1).sum().sum()),
+        saved_to=output_file,
+    )
 
 def convert_appliances_for_county(county, base_input_dir, base_output_dir, scenarios, housing_type):
     for scenario in scenarios:
@@ -64,23 +68,35 @@ def convert_appliances_for_county(county, base_input_dir, base_output_dir, scena
             simulated_electricity_loads = pd.DataFrame()
             simulated_electricity_loads['timestamp'] = gas_loads['timestamp'].copy()
 
-            print(f"Processing {county} for scenario {scenario}...")
-
             simulated_electricity_loads["simulated.electricity.heat_pump.energy_consumption.electricity.kwh"] = gas_loads[
                 # This needs to sum by building_avg
                 # Aka for a typical building in the given county, after looking at all the buildings within that county with the desired properties
                 "out.natural_gas.heating.energy_consumption.gas.building_avg.kwh"
             ].apply(convert_gas_heating_to_electric_heatpump)
+
+            log(
+                gas_heating_kwh=to_number(gas_loads["out.natural_gas.heating.energy_consumption.gas.building_avg.kwh"].sum()),
+                electric_heatpump_kwh=to_number(simulated_electricity_loads["simulated.electricity.heat_pump.energy_consumption.electricity.kwh"].sum()),
+            )
             
             simulated_electricity_loads["simulated.electricity.induction_stove.energy_consumption.electricity.kwh"] = gas_loads[
                 "out.natural_gas.range_oven.energy_consumption.gas.building_avg.kwh"
             ].apply(convert_gas_stove_to_induction_stove)
+
+            log(
+                gas_stove_kwh=to_number(gas_loads["out.natural_gas.range_oven.energy_consumption.gas.building_avg.kwh"].sum()),
+                induction_stove_kwh=to_number(simulated_electricity_loads["simulated.electricity.induction_stove.energy_consumption.electricity.kwh"].sum()),
+            )
             
             simulated_electricity_loads["simulated.electricity.hot_water.energy_consumption.electricity.kwh"] = gas_loads[
                 "out.natural_gas.hot_water.energy_consumption.gas.building_avg.kwh"
             ].apply(convert_gas_water_heater_to_electric_waterheater)
 
-            
+            log(
+                gas_water_heating_kwh=to_number(gas_loads["out.natural_gas.hot_water.energy_consumption.gas.building_avg.kwh"].sum()),
+                electric_water_heating_kwh=to_number(simulated_electricity_loads["simulated.electricity.hot_water.energy_consumption.electricity.kwh"].sum())
+            )
+
             save_converted_load_profiles(simulated_electricity_loads, output_file)
         
         except KeyError as e:

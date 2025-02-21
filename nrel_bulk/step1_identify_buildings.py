@@ -91,16 +91,12 @@ def process(scenario, housing_type, output_base_dir="data", target_counties=None
 
         formatted_county_name = slugify_county_name(county_name)
         output_dir = os.path.join(output_base_dir, formatted_county_name)
-        print(f"Outputting files to: {output_dir}")
         output_csv = os.path.join(output_dir, "step1_nrel_bulkfiltered_building_ids.csv")
 
          # Step 1: Check if processing is necessary
         if not force_recompute:
-            print(f"Skipping {county_name} since recompute was not request. Would have generated file in: {output_csv}")
             output_csv_paths.append(output_csv)
             continue  # Skip processing
-
-        print(f"Processing {county_name}...")
 
         # Step 2: Generate metadata
         filtered_metadata = filter_metadata(metadata, housing_type, county_code, county_name, scenario)
@@ -113,6 +109,6 @@ def process(scenario, housing_type, output_base_dir="data", target_counties=None
 
 # Done: upgrade0 norcal_counties, socal_counties, central_counties
 # Done: upgrade6 norcal_counties, 
-counties = norcal_counties + central_counties + socal_counties
+# counties = norcal_counties + central_counties + socal_counties
 
-process("all", "all", output_base_dir="../data/nrel/upgrade11", target_counties=counties, force_recompute=True)
+# process("all", "all", output_base_dir="../data/nrel/upgrade11", target_counties=counties, force_recompute=True)

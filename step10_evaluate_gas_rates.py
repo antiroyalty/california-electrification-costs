@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 import os
 import pandas as pd
 
-from helpers import get_counties, get_scenario_path, slugify_county_name
+from helpers import get_counties, get_scenario_path, slugify_county_name, log, to_number
 
 # Need mapping from county to service region
 # Need other utilities gas rates
@@ -96,14 +96,14 @@ PGE_RATE_TERRITORY_COUNTY_MAPPING = {
     "X": [slugify_county_name(county) for county in [
         "San Luis Obispo", "San Benito", "Santa Clara", 
         "Alameda", "Contra Costa", "Napa", "Sonoma", 
-        "Mendocino", "Santa Barbara"
-    ]],
+        "Mendocino", "Santa Barbara", "Solano", "Del Norte"
+    ]], # TODO: Ana, Double check whether Solano and Del Norte are correctly placed here
     "P": [slugify_county_name(county) for county in ["Sacramento", "Placer", "El Dorado", "Amador"]],
     "S": [slugify_county_name(county) for county in ["Glenn", "Colusa", "Yolo", "Sutter", "Butte"]],
     "R": [slugify_county_name(county) for county in ["Merced", "Fresno", "Madera", "Mariposa", "Tehama"]],
     "Y&Z": [slugify_county_name(county) for county in [
         "Nevada", "Plumas", "Humboldt", "Trinity", 
-        "Lake", "Shasta", "Sierra", "Alpine", "Mono"
+        "Lake", "Shasta", "Sierra", "Alpine", "Mono",
     ]],
     "W": [slugify_county_name(county) for county in ["Kings"]]
 }
@@ -174,14 +174,14 @@ def process_county_scenario(file_path, county, load_type):
     file = os.path.join(file_path, f"{INPUT_FILE_NAME}_{county}.csv")
 
     if not os.path.exists(file):
-        print(f"Step10@process_county_scenario: File not found: {file}")
+        log(
+            at="step10_evaluate_gas_rates",
+            file_not_found=file,
+        )
         return None
 
     load_profile_df = pd.read_csv(file, parse_dates=["timestamp"])
     load_profile_df["month"] = load_profile_df["timestamp"].dt.month
-
-    print(load_profile_df["month"])
-
     territory = get_territory_for_county(county) # "T"  # Placeholder for territory mapping logic. Alameda == territory T
     
     return calculate_annual_costs_gas(load_profile_df, territory, load_type)
@@ -202,17 +202,20 @@ def process(base_input_dir, base_output_dir, scenarios, housing_types, counties,
                 file_path = os.path.join(scenario_path, county)
 
                 annual_costs = process_county_scenario(file_path, county, load_type)
+
+                log(
+                    at="step10_evaluate_gas_rates",
+                    county=county,
+                    total_annual_gas_costs=to_number(annual_costs)
+                )
             
-                print(f"For {county}, {load_type}, total annual gas costs are: {annual_costs}")
                 results_df = pd.DataFrame({
                     f"{load_type}.gas.usd": [annual_costs],
                 }, index=[scenario])
 
-                # Define the output file path
-                output_file_path = os.path.join(base_output_dir, scenario, housing_type, county, "results", f"{OUTPUT_FILE_NAME}_{county}_{timestamp}.csv")
+                output_file_path = os.path.join(base_output_dir, scenario, housing_type, county, "results", "gas", f"{OUTPUT_FILE_NAME}_{county}_{timestamp}.csv")
 
                 if os.path.exists(output_file_path):
-                    # Read the existing file
                     existing_df = pd.read_csv(output_file_path, index_col="scenario")
                     
                     # Overwrite the column if it exists
@@ -226,9 +229,9 @@ def process(base_input_dir, base_output_dir, scenarios, housing_types, counties,
                     # If the file doesn't exist, use the new DataFrame
                     combined_df = results_df
 
-                # Save the updated DataFrame
+                os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
                 combined_df.to_csv(output_file_path, index_label="scenario")
-                print(f"Results saved to {output_file_path}")
+                log(saved_to=output_file_path)
 
 # base_input_dir = "data"
 # base_output_dir = "data"

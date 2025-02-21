@@ -1,6 +1,7 @@
 # helpers.py
 import os
 import pandas as pd
+import datetime
 
 LOADPROFILES = "loadprofiles" # folder name where all load profiles are stored
 
@@ -81,3 +82,41 @@ def get_scenario_path(base_input_dir, scenario, housing_type):
         print(f"Scenario path not found: {scenario_path}")
 
     return scenario_path
+
+def log(**metrics):
+    """
+    Logs a standardized message summarizing key outputs from a processing step.
+    
+    Example usage:
+    
+        log(
+            at=6,
+            description="Combined load profiles computed for alameda",
+            electricity_real="1351.94 kWh",
+            electricity_simulated="0 kWh",
+            combined_electricity="1351.94 kWh",
+            gas_real="423.217 therms",
+            gas_adjustment="-423.217 therms",
+            combined_gas="0.0 therms"
+        )
+    
+    Parameters:
+        step (int or str, optional): Identifier for the processing step.
+        description (str, optional): A brief description of what the step does.
+        **metrics: Arbitrary key-value pairs for important numbers (e.g., counts, annual totals, costs).
+    """
+    if metrics:
+        # Determine the longest key for nice alignment.
+        key_length =[len(str(key)) for key in metrics.keys()]
+        max_key_length = max(key_length + [30])
+        for key, value in metrics.items():
+            # Format the key to be title-cased and replace underscores with spaces.
+            key_formatted = key.replace('_', ' ').ljust(max_key_length)
+            print(f"{key_formatted}: {value}")
+
+def to_number(number):
+    return f"{number:_.0f}"
+
+def format_load_profile(load_profile):
+    return [round(x, 2) for x in load_profile[:24]]
+    

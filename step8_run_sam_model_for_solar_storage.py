@@ -6,7 +6,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import statistics
 
-from helpers import get_counties, get_scenario_path
+from helpers import get_counties, get_scenario_path, log, format_load_profile
 
 # LOADPROFILE_FILE_PREFIX = "electricity_loads"
 LOADPROFILE_FILE_PREFIX = "combined_profiles_baseline"
@@ -27,6 +27,11 @@ def prepare_data_and_compute_system_capacity(weather_file, load_file, years_of_a
     desired_offset = 1.2
     # DONE: Ana, convert system capacity to be dynamically assigned based on the household load, rather than static = 5 kW system
     # TODO: Ana, only allow solar system capacities in increments that are actually sold on the market
+    # TODO: explore whether I'm missing a "better" configuration of solar + storage where a smaller solar and storage system
+    # could actually result in lower NPV and thus be "better"
+    # what if we just looked at the "incremental" load profile
+    # build enough solar + storage for ALL of your load, or just build enough solar + storage for your ELECTRIFIED load
+    # exhaustively search each permutation
     system_capacity = (annual_load_kwh * desired_offset) / (avg_daily_irradiance * 365 * system_efficiency) # 5 # kW
 
     return solar_resource_data, load_profile, system_capacity
@@ -108,8 +113,21 @@ def validate_and_save_results(county, load_profile, system_to_load, batt_to_load
         'Difference': difference
     }, index=date_range)
 
+    # TODO: Ana, I think the load profiles need to be shifted by 3 hours 
+    # They are provided in ET, we're working with PT
+    log(
+        at="step8_run_sam_model_for_solar_storage",
+        load_profile=format_load_profile(load_profile),
+        system_to_load=format_load_profile(system_to_load),
+        battery_to_load=format_load_profile(batt_to_load),
+        grid_to_load=format_load_profile(grid_to_load),
+        solar_battery_to_load=format_load_profile(solar_battery_to_load),
+        total_supply=format_load_profile(total_supply),
+        difference=format_load_profile(difference),
+        saved_to=output_file,
+    )
+
     df.to_csv(output_file)
-    print(f"Saved results for {county} to {output_file}")
 
 def process(base_input_dir, base_output_dir, scenarios, housing_types, counties=None, years_of_analysis=1):
     for scenario in scenarios:
@@ -120,7 +138,6 @@ def process(base_input_dir, base_output_dir, scenarios, housing_types, counties=
             counties_to_run = get_counties(scenario_path, counties)
     
             for county in counties_to_run:
-                print(f"Processing {county} for {scenario}, {housing_type}...")
                 try:
                     weather_file = os.path.join(base_input_dir, scenario, housing_type, county, f"weather_TMY_{county}.csv")
                     load_file = os.path.join(scenario_path, county, f"{LOADPROFILE_FILE_PREFIX}_{county}.csv")

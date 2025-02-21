@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 
-from helpers import slugify_county_name, get_counties, get_scenario_path
+from helpers import slugify_county_name, get_counties, get_scenario_path, log
 
 # Which columns should be used to calculate electricity and gas rates based on each scenario
 SCENARIO_DATA_MAP = {
@@ -14,7 +14,7 @@ SCENARIO_DATA_MAP = {
             },
             "gas": {
                 "file_prefix": "gas_loads_",
-                "column": "load.gas.avg.therms" # TODO: Ana, why am I using avg therms here? Is this a miscalculation? Revisit this logic. This is because this is a COUNTY average, not a time average
+                "column": "load.gas.building_avg.therms" # TODO: Ana, why am I using avg therms here? Is this a miscalculation? Revisit this logic. This is because this is a COUNTY average, not a time average
             },
         },
         # baseline w/ solar + storage
@@ -25,7 +25,7 @@ SCENARIO_DATA_MAP = {
             },
             "gas": {
                 "file_prefix": "gas_loads_",
-                "column": "load.gas.avg.therms"
+                "column": "load.gas.building_avg.therms"
             }
         },
     },
@@ -156,7 +156,11 @@ def prepare_for_rates_analysis(base_input_dir, base_output_dir, housing_type, sc
     output_file_path = os.path.join(base_output_dir, scenario, housing_type, county, f"{OUTPUT_FILE_NAME}_{county}.csv")
     os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
     combined_df.to_csv(output_file_path, index=False)
-    print(f"Step 9 - Combined results saved to: {output_file_path}")
+    
+    log(
+        at="step9_get_loads_for_rates",
+        saved_to=output_file_path,
+    )
 
 def process(base_input_dir, base_output_dir, scenarios, housing_types, counties=None):
     for scenario in scenarios:

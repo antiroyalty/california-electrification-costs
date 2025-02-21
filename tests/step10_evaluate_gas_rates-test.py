@@ -11,7 +11,6 @@ from datetime import datetime
 import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 
-
 from step10_evaluate_gas_rates import (
     categorize_season,
     process,

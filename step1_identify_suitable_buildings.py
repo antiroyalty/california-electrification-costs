@@ -1,7 +1,7 @@
 import pandas as pd
 import os
 import re
-from helpers import LOADPROFILES, slugify_county_name, is_valid_csv, norcal_counties, socal_counties, central_counties
+from helpers import LOADPROFILES, slugify_county_name, log, norcal_counties, socal_counties, central_counties
 
 SCENARIOS = {
     "baseline": {
@@ -10,8 +10,9 @@ SCENARIOS = {
         "in.heating_fuel": "Natural Gas",
         "in.water_heater_fuel": "Natural Gas",
         "in.has_pv": "No",
-        "in.hvac_cooling_type": None,
-        # "in.tenure": "Owner",
+        "in.hvac_cooling_type": None, # May not apply for central valley / socal
+        # "in.tenure": "Owner", 
+        # TODO: Ana, investigate whether we can get results for Owned vs. Rented
     },
 }
 
@@ -37,7 +38,7 @@ def filter_metadata(metadata, housing_type, county_code, county_name, scenario):
     if scenario not in SCENARIOS:
         raise ValueError(f"Scenario '{scenario}' is not defined in SCENARIOS dictionary.")
     
-    # Initial conditions based on upgrade, county and housing type
+# Initial conditions based on upgrade, county and housing type
     upgrade = (metadata["upgrade"] == 0) # baseline, no housing upgrades
     county_condition = metadata["in.county"] == county_code
     county_name_condition = metadata["in.county_name"] == county_name
@@ -92,6 +93,9 @@ def process(scenario, housing_type, output_base_dir="data", target_counties=None
         counties = unique_counties
 
     output_csv_paths = []
+    processed_count = 0
+    skipped_count = 0
+    total_buildings = 0
 
     for _, row in counties.iterrows():
         county_code = row['in.county']
@@ -103,21 +107,30 @@ def process(scenario, housing_type, output_base_dir="data", target_counties=None
 
          # Step 1: Check if processing is necessary
         if not force_recompute:
-            print(f"Skipping {county_name} since recompute was not request. Would have generated file in: {output_csv}")
             output_csv_paths.append(output_csv)
+            skipped_count += 1
             continue  # Skip processing
-
-        print(f"Processing {county_name}...")
 
         # Step 2: Generate metadata
         filtered_metadata = filter_metadata(metadata, housing_type, county_code, county_name, scenario)
+        num_buildings = filtered_metadata.shape[0]
+        total_buildings += num_buildings
 
         # Step 3: Save building IDs
         output_csv = save_building_ids(filtered_metadata, scenario, county_name, output_dir)
         output_csv_paths.append(output_csv)
+        processed_count += 1
 
+    log(
+        step=1,
+        title="identify suitable buildings",
+        num_counties_processed=len(output_csv_paths),
+        total_csv_files_generated=len(output_csv_paths),
+        counties_processed=processed_count,
+        counties_skipped=skipped_count
+    )
     return output_csv_paths
 
 # Done: single-family-detached: norcal, socal, central
 # Done: Single-family-attached: norcal, socal, central
-process("baseline", "single-family-attached", output_base_dir="data", target_counties=central_counties, force_recompute=True)
+# process("baseline", "single-family-attached", output_base_dir="data", target_counties=central_counties, force_recompute=True)

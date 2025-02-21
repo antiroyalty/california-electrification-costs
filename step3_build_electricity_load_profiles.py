@@ -1,6 +1,6 @@
 import os
 import pandas as pd
-from helpers import get_counties, get_scenario_path, is_valid_csv
+from helpers import get_counties, get_scenario_path, is_valid_csv, log
 
 END_USE_COLUMNS = {
     "heating": [
@@ -130,8 +130,6 @@ def process(scenarios, housing_types, counties, base_input_dir, base_output_dir,
             counties = get_counties(scenario_path, counties)
 
             for county in counties:
-                print(f"Processing electricity load profile in {county} for {scenario}, {housing_type}")
-
                 # Record info about this county's run
                 county_info = {
                     "county": county,
@@ -146,14 +144,12 @@ def process(scenarios, housing_types, counties, base_input_dir, base_output_dir,
                 
                 # 1. Make sure processing is necessary
                 if should_skip_processing(output_path, force_recompute):
-                    print(f"Skipping {county} - existing valid profile found at {output_path}")
                     county_info["status"] = "skipped_existing"
                     summary["skipped"].append(county_info)
                     continue  # Skip processing
 
                 # 2. Make sure input directory exists
                 if not os.path.exists(input_dir):
-                    print(f"Directory not found: {input_dir}")
                     county_info["status"] = "directory_not_found"
                     summary["skipped"].append(county_info)
                     continue
@@ -166,10 +162,16 @@ def process(scenarios, housing_types, counties, base_input_dir, base_output_dir,
                 county_info["num_files"] = num_files
 
                 if status == "processed":
-                    print(f"Saved electricity load profile to {output_path}")
                     summary["processed"].append(county_info)
                 else:
                     summary["skipped"].append(county_info)
 
-    print(summary)
+    log(
+        step=3,
+        title="build electricity load profiles",
+        processed=summary["processed"],
+        skipped=summary["skipped"],
+        errors=summary["errors"]
+    )
+
     return summary

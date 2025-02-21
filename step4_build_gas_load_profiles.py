@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 
-from helpers import get_scenario_path, get_counties
+from helpers import get_scenario_path, get_counties, log, to_number
 
 # Conversion factor
 KWH_TO_THERMS = 0.0341296
@@ -65,7 +65,7 @@ def sum_county_gas_profiles(input_dir, end_uses):
             try:
                 data = pd.read_parquet(file_path) # read it
             except Exception as e:
-                print(f"Error reading {file_path}: {e}")
+                log(error=f"Error reading {file_path}: {e}")
                 continue
 
             if 'timestamp' in data.columns and all(col in data.columns for col in end_uses):
@@ -95,31 +95,29 @@ def average_county_gas_profiles(county_gas_totals, building_count, end_uses):
                 # Average in therms
                 county_gas_totals[avg_therms_col] = county_gas_totals[avg_kwh_col] * KWH_TO_THERMS
 
-    # county_gas_totals.to_csv('county_gas_totals_with_averages.csv')
     return county_gas_totals
 
 def save_county_gas_profiles(county_gas_totals, county, output_dir):
     os.makedirs(output_dir, exist_ok=True)
     output_file = os.path.join(output_dir, f"{OUTPUT_FILE_PREFIX}_{county}.csv")
-    print(f"Converted load profiles saved to: {output_file}")
 
-    print("******")
-    print(county_gas_totals.filter(like="energy_consumption.gas.building_avg.kwh"))
-    print(county_gas_totals.filter(like="energy_consumption.gas.building_avg.kwh").columns)
-    print("Sum of total")
-    print(f"{county_gas_totals.filter(like='energy_consumption.gas.building_avg.kwh').sum(axis=1).sum()} kWh")
+    log(
+        at="step4_build_gas_profiles#save_county_gas_profiles",
+        gas_heating_kwh=to_number(county_gas_totals['out.natural_gas.heating.energy_consumption.gas.building_avg.kwh'].sum()),
+        gas_range_oven_kwh=to_number(county_gas_totals['out.natural_gas.range_oven.energy_consumption.gas.building_avg.kwh'].sum()),
+        gas_hot_water_kwh=to_number(county_gas_totals['out.natural_gas.hot_water.energy_consumption.gas.building_avg.kwh'].sum()),
+        annual_gas_load_kwh=to_number(county_gas_totals['load.gas.building_avg.kwh'].sum()),
+        annual_gas_load_therms=to_number(county_gas_totals['load.gas.building_avg.therms'].sum()),
+        saved_at=output_file
+    )
 
-    # annual_gas_load = county_gas_totals.drop("timestamp",  axis=1).sum().sum()
-    # print(f"Annual gas load: {annual_gas_load}")
-
-    print(f"Saved results to {output_file}")
     county_gas_totals.to_csv(output_file)
 
 def build_county_gas_profile(scenario, housing_type, county, county_dir, output_dir, end_uses):
     county_gas_totals, building_count = sum_county_gas_profiles(county_dir, end_uses)
 
     if county_gas_totals is None or building_count == 0:
-        print(f"No valid data found in {county_dir} for {scenario} - {housing_type}. Skipping.")
+        log(details=f"No valid data found in {county_dir} for {scenario} - {housing_type}. Skipping.")
         return
 
     county_gas_totals = average_county_gas_profiles(county_gas_totals, building_count, end_uses)
@@ -133,13 +131,16 @@ def process(scenarios, housing_types, base_input_dir, base_output_dir, counties=
             counties = get_counties(scenario_path, counties)
             
             for county in counties:
-                print(f"Processing gas load profile in {county} for {scenario}, {housing_type}")
+                log(
+                    at="step4_build_gas_load_profiles#process",
+                    details=f"Processing gas load profile in {county} for {scenario}, {housing_type}",
+                )
             
                 county_dir = os.path.join(scenario_path, county, "buildings")
                 output_dir = os.path.join(base_output_dir, scenario, housing_type, county)
                 
                 if not os.path.exists(county_dir):
-                    print(f"County directory not found: {county_dir}")
+                    log(details=f"County directory not found: {county_dir}")
                     continue
                 
                 # Collect all GAS end use columns relevant to the scenario

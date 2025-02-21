@@ -14,7 +14,7 @@ import step11_evaluate_electricity_rates as EvaluateElectricityRates
 class CostService:
     SCENARIOS = {
         "baseline": {"gas": {"heating", "hot_water", "cooking"}, "electric": {"appliances", "misc"}}, # Almost everything is gas, except normal electrical appliances
-        # "heat_pump_and_water_heater": ["heating", "hot_water", "appliances", "misc"],
+        # "heat_pump": {"gas": {"hot_water", "cooking"}, "electric": {"appliances", "misc", "heating"}},
         # "heat_pump_water_heater_and_induction_stove": ["heating", "cooling", "hot_water", "appliances", "cooking", "misc"],
         # "heat_pump_heating_cooling_water_heater_and_induction_stove": ["heating", "cooling", "hot_water", "appliances", "cooking", "misc"]
     }
@@ -27,50 +27,43 @@ class CostService:
         self.input_dir = input_dir
         self.output_dir = output_dir
 
+    def log_step(self, step):
+        print("-" * 15, f" Step {step} ", "-" * 15)
+
     def run(self):
-        print("----- Step 1 -----")
+        self.log_step(1)
         result = IdentifySuitableBuildings.process(self.scenario, self.housing_type, output_base_dir="data", target_counties=self.counties, force_recompute=True)
-        print(result, "\n")
 
-        print("----- Step 2 -----")
+        self.log_step(2)
         result = PullBuildings.process(self.scenario, self.housing_type, self.counties, output_base_dir="data", download_new_files=True) # output directory should just be 'data', not 'loadprofiles'
-        print(result, "\n")
     
-        print("----- Step 3 -----")
+        self.log_step(3)
         # Make sure I don't pull load profiles on every run, only if they don't already exist
-        # result = BuildElectricityLoadProfiles.process(self.SCENARIOS, [self.housing_type], self.counties, "data", "data/loadprofiles", force_recompute=False)
-        # print(result, "\n")
+        result = BuildElectricityLoadProfiles.process(self.SCENARIOS, [self.housing_type], self.counties, "data", "data/loadprofiles", force_recompute=False)
 
-        print("----- Step 4 -----")
-        # result = BuildGasLoadProfiles.process(self.SCENARIOS, [self.housing_type], "data", "data/loadprofiles", self.counties)
-        # print(result, "\n")
+        self.log_step(4)
+        result = BuildGasLoadProfiles.process(self.SCENARIOS, [self.housing_type], "data", "data/loadprofiles", self.counties)
 
-        print("----- Step 5 -----")
-        # result = ConvertGasToElectric.process("data/loadprofiles", "data/loadprofiles", self.counties, list(self.SCENARIOS.keys()), [self.housing_type] )
-        # print(result, "\n")
+        self.log_step(5)
+        result = ConvertGasToElectric.process("data/loadprofiles", "data/loadprofiles", self.counties, list(self.SCENARIOS.keys()), [self.housing_type] )
 
-        print("----- Step 6 -----")
-        # result = CombineRealAndSimulatedProfiles.process(self.input_dir, self.output_dir, list(self.SCENARIOS.keys()), [self.housing_type], self.counties)
+        self.log_step(6)
+        result = CombineRealAndSimulatedProfiles.process("data/loadprofiles", "data/loadprofiles", list(self.SCENARIOS.keys()), [self.housing_type], self.counties)
     
-        print("----- Step 7 -----")
-        # result = WeatherFiles.process(self.input_dir, self.output_dir, list(self.SCENARIOS.keys()), [self.housing_type], self.counties)
-        # print(result, "\n")
+        self.log_step(7)
+        result = WeatherFiles.process("data/loadprofiles", "data/loadprofiles", list(self.SCENARIOS.keys()), [self.housing_type], self.counties)
 
-        print("----- Step 8 -----")
-        # result = RunSamModelForSolarStorage.process(self.input_dir, self.output_dir, list(self.SCENARIOS.keys()), [self.housing_type], self.counties)
-        # print(result, "\n")
+        self.log_step(8)
+        result = RunSamModelForSolarStorage.process("data/loadprofiles", "data/loadprofiles", list(self.SCENARIOS.keys()), [self.housing_type], self.counties)
 
-        print("----- Step 9 -----")
-        # result = GetLoadsForRates.process(self.input_dir, self.output_dir, list(self.SCENARIOS.keys()), [self.housing_type], self.counties)
-        # print(result, "\n")
+        self.log_step(9)
+        result = GetLoadsForRates.process("data/loadprofiles", "data/loadprofiles", list(self.SCENARIOS.keys()), [self.housing_type], self.counties)
 
-        print("----- Step 10 -----")
-        # result = EvaluateGasRates.process(self.input_dir, self.output_dir, list(self.SCENARIOS.keys()), [self.housing_type], self.counties, "default") # last argument is  load_type, which can be 'default' or 'solarstorage'
-        # print(result, "\n")
+        self.log_step(10)
+        result = EvaluateGasRates.process("data/loadprofiles", "data/loadprofiles", list(self.SCENARIOS.keys()), [self.housing_type], self.counties, "default") # last argument is  load_type, which can be 'default' or 'solarstorage'
 
-        print("----- Step 11 -----")
-        # result = EvaluateElectricityRates.process(self.input_dir, self.output_dir, list(self.SCENARIOS.keys()), [self.housing_type], self.counties, "default") # last argument is  load_type, which can be 'default' or 'solarstorage'
-        # print(result, "\n")
+        self.log_step(11)
+        result = EvaluateElectricityRates.process("data/loadprofiles", "data/loadprofiles", list(self.SCENARIOS.keys()), [self.housing_type], self.counties, "default") # last argument is  load_type, which can be 'default' or 'solarstorage'
 
         return self.csv_file
     
@@ -79,7 +72,7 @@ initial_csv = "initial_data.csv" # TODO: update
 
 scenario = "baseline"
 housing_type = "single-family-detached"
-# counties = ["Alameda County"]
+counties = ["Alameda County"]
 input_dir = "data"
 output_dir = "data/loadprofiles"
 
@@ -89,9 +82,9 @@ norcal_counties = [
     "Alameda County", "Contra Costa County", "Marin County", "Napa County", 
     "San Francisco County", "San Mateo County", "Santa Clara County", "Solano County", "Sonoma County",  # Bay Area
     "Del Norte County", "Humboldt County", "Lake County", "Mendocino County", "Trinity County",  # North Coast
-    "Butte County", "Colusa County", "Glenn County", "Lassen County", "Modoc County", 
-    "Nevada County", "Plumas County", "Shasta County", "Sierra County", "Siskiyou County", "Tehama County",  # North Valley & Sierra
-]
+    "Butte County", "Colusa County", 
+    "Nevada County", "Plumas County", "Shasta County", "Sierra County", "Tehama County",  # North Valley & Sierra
+] # "Modoc County", "Glenn County", "Siskiyou County", "Lassen County"
 
 central_counties = [
     "Fresno County", "Kern County", "Kings County", "Madera County", "Merced County", 
@@ -111,8 +104,6 @@ socal_counties = [
 cost_service = CostService(initial_csv, scenario, housing_type, counties=norcal_counties, input_dir=input_dir, output_dir=output_dir)
 
 final_csv = cost_service.run()
-
-print("Final processed CSV file:", final_csv)
 
 # Next steps:
 # For Gas and Electricity rates, model more regions
