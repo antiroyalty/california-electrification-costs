@@ -11,9 +11,17 @@ SCENARIOS = {
         "in.water_heater_fuel": "Natural Gas",
         "in.has_pv": "No",
         "in.hvac_cooling_type": None, # May not apply for central valley / socal
-        # "in.tenure": "Owner", 
+        "in.tenure": "Owner", 
         # TODO: Ana, investigate whether we can get results for Owned vs. Rented
     },
+    # "heat_pump": { # Just make them all the same metadata for now
+    #     "in.cooking_range": ["Gas"],
+    #     "in.heating_fuel": "Natural Gas",
+    #     "in.water_heater_fuel": "Natural Gas",
+    #     "in.has_pv": "No",
+    #     "in.hvac_cooling_type": None, # May not apply for central valley / socal
+    #     "in.tenure": "Owner", 
+    # }
 }
 
 HOUSING_NAME_MAP = {
@@ -35,8 +43,9 @@ def get_metadata(scenario):
     return metadata
 
 def filter_metadata(metadata, housing_type, county_code, county_name, scenario):
-    if scenario not in SCENARIOS:
-        raise ValueError(f"Scenario '{scenario}' is not defined in SCENARIOS dictionary.")
+    # Only need new metadata filters for baseline
+    # Because we are doing an apples-to-apples comparison
+    # So we have to be converting existing buildings via thermo / phyiscs properties
     
 # Initial conditions based on upgrade, county and housing type
     upgrade = (metadata["upgrade"] == 0) # baseline, no housing upgrades
@@ -84,6 +93,9 @@ def save_building_ids(filtered_metadata, scenario, county, output_dir):
     return output_csv_path
 
 def process(scenario, housing_type, output_base_dir="data", target_counties=None, force_recompute=True):
+    if scenario != "baseline":
+        return [] # Early return; we only need to filter metadata for baseline -- for all other runs, use baseline metadata and buildings, and convert them using thermo properties
+
     metadata = get_metadata(scenario)
     unique_counties = metadata[['in.county', 'in.county_name']].drop_duplicates()
 
