@@ -10,11 +10,13 @@ import step9_get_loads_for_rates as GetLoadsForRates
 import step10_evaluate_gas_rates as EvaluateGasRates
 import step11_evaluate_electricity_rates as EvaluateElectricityRates
 # import step12_evaluate_capital_costs
+import step13_combine_total_annual_costs as CombineTotalAnnualCosts
+import step14_build_maps as BuildMaps
 
 class CostService:
     SCENARIOS = {
-        "baseline": {"gas": {"heating", "hot_water", "cooking"}, "electric": {"appliances", "misc"}}, # Almost everything is gas, except normal electrical appliances
-        # "heat_pump": {"gas": {"hot_water", "cooking"}, "electric": {"appliances", "misc", "heating"}},
+        # "baseline": {"gas": {"heating", "hot_water", "cooking"}, "electric": {"appliances", "misc"}}, # Almost everything is gas, except normal electrical appliances
+        "heat_pump": {"gas": {"hot_water", "cooking"}, "electric": {"appliances", "misc", "heating"}},
         # "heat_pump_water_heater_and_induction_stove": ["heating", "cooling", "hot_water", "appliances", "cooking", "misc"],
         # "heat_pump_heating_cooling_water_heater_and_induction_stove": ["heating", "cooling", "hot_water", "appliances", "cooking", "misc"]
     }
@@ -65,12 +67,17 @@ class CostService:
         self.log_step(11)
         result = EvaluateElectricityRates.process("data/loadprofiles", "data/loadprofiles", list(self.SCENARIOS.keys()), [self.housing_type], self.counties, "default") # last argument is  load_type, which can be 'default' or 'solarstorage'
 
+        CombineTotalAnnualCosts.process("data/loadprofiles", "data/loadprofiles", list(self.SCENARIOS.keys()), [self.housing_type], self.counties)
+
+        BuildMaps.process("data/loadprofiles", "data/loadprofiles", list(self.SCENARIOS.keys()), [self.housing_type], self.counties)
+        
         return self.csv_file
     
 
 initial_csv = "initial_data.csv" # TODO: update
 
 scenario = "baseline"
+scenario = "heat_pump"
 housing_type = "single-family-detached"
 counties = ["Alameda County"]
 input_dir = "data"
@@ -101,7 +108,7 @@ socal_counties = [
     "San Diego County", "Imperial County"  # San Diego & Imperial
 ]
 
-cost_service = CostService(initial_csv, scenario, housing_type, counties=norcal_counties, input_dir=input_dir, output_dir=output_dir)
+cost_service = CostService(initial_csv, scenario, housing_type, counties= norcal_counties + central_counties, input_dir=input_dir, output_dir=output_dir)
 
 final_csv = cost_service.run()
 
