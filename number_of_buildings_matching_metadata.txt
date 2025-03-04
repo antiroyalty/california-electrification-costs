@@ -1,0 +1,62 @@
+Number of buildings matching current metadata:
+
+    "baseline": {
+        "in.cooking_range": ["Gas"],
+        "in.heating_fuel": "Natural Gas",
+        "in.water_heater_fuel": "Natural Gas",
+        "in.has_pv": "No",
+        "in.hvac_cooling_type": None, # May not apply for central valley / socal
+        "in.tenure": "Owner",
+    },
+
+glenn                    0
+lassen                   0
+modoc                    0
+siskiyou                 0
+alpine                   1
+del-norte                1
+plumas                   1
+sierra                   1
+trinity                  1
+amador                   2
+mono                     2
+colusa                   3
+mendocino                3
+tehama                   3
+lake                     4
+san-benito               5
+madera                   6
+kings                    8
+nevada                   8
+sutter                   8
+imperial                11
+napa                    13
+yolo                    13
+butte                   16
+shasta                  18
+merced                  21
+humboldt                25
+monterey                30
+san-luis-obispo         32
+marin                   35
+santa-cruz              36
+solano                  42
+tulare                  42
+santa-barbara           49
+stanislaus              50
+fresno                  54
+sonoma                  60
+san-francisco           69
+kern                    74
+san-joaquin             79
+ventura                 85
+san-mateo               97
+contra-costa           118
+sacramento             153
+santa-clara            165
+alameda                185
+riverside              193
+san-bernardino         208
+san-diego              263
+orange                 269
+los-angeles           1032
