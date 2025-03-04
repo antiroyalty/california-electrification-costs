@@ -5,7 +5,7 @@ Number of buildings matching current metadata:
         "in.heating_fuel": "Natural Gas",
         "in.water_heater_fuel": "Natural Gas",
         "in.has_pv": "No",
-        "in.hvac_cooling_type": None, # May not apply for central valley / socal
+        "in.hvac_cooling_type": None,
         "in.tenure": "Owner",
     },
 
