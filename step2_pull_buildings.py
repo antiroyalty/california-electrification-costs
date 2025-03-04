@@ -10,7 +10,6 @@ S3_PREFIX = "nrel-pds-building-stock/end-use-load-profiles-for-us-building-stock
 S3_BUCKET_NAME = "oedi-data-lake"
 METADATA_FILE_NAME = "step1_filtered_building_ids.csv"
 
-
 def ensure_directory_exists(directory):
     if not os.path.exists(directory):
         os.makedirs(directory)
@@ -20,7 +19,6 @@ def ensure_directory_exists(directory):
             status="created",
             details=f"Directory '{directory}' created."
         )
-
 
 def download_parquet_file(bucket_name, s3_key, output_dir):
     output_file = os.path.join(output_dir, os.path.basename(s3_key))
@@ -41,11 +39,9 @@ def download_parquet_file(bucket_name, s3_key, output_dir):
             details="Error downloading file."
         )
 
-
 def check_for_downloads(output_dir, building_ids):
     downloaded_files = [f for f in os.listdir(output_dir) if os.path.isfile(os.path.join(output_dir, f))]
     return len(building_ids) == len(downloaded_files)
-
 
 def process_county(scenario, housing_type, county_path, bucket_name, s3_prefix, output_base_dir):
     county_metadata_path = os.path.join(county_path, METADATA_FILE_NAME)
@@ -113,7 +109,7 @@ def process_county(scenario, housing_type, county_path, bucket_name, s3_prefix, 
 def process(scenario, housing_type, counties, output_base_dir="data", download_new_files=True):
     results = []
 
-    if not download_new_files:
+    if not download_new_files or scenario != "baseline":
         log(at="process", details="No new building files needed to be downloaded.")
         return results
 

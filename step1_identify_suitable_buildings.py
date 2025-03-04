@@ -11,17 +11,9 @@ SCENARIOS = {
         "in.water_heater_fuel": "Natural Gas",
         "in.has_pv": "No",
         "in.hvac_cooling_type": None, # May not apply for central valley / socal
-        "in.tenure": "Owner", 
+        "in.tenure": "Owner",
         # TODO: Ana, investigate whether we can get results for Owned vs. Rented
     },
-    # "heat_pump": { # Just make them all the same metadata for now
-    #     "in.cooking_range": ["Gas"],
-    #     "in.heating_fuel": "Natural Gas",
-    #     "in.water_heater_fuel": "Natural Gas",
-    #     "in.has_pv": "No",
-    #     "in.hvac_cooling_type": None, # May not apply for central valley / socal
-    #     "in.tenure": "Owner", 
-    # }
 }
 
 HOUSING_NAME_MAP = {

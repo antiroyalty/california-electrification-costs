@@ -1,20 +1,24 @@
 # PG&E October 2024 Gas Rate Structure
-from datetime import datetime, timedelta
 import os
 import pandas as pd
 
-from helpers import get_counties, get_scenario_path, slugify_county_name, log, to_number
+from helpers import get_counties, get_scenario_path, slugify_county_name, log, to_number, get_timestamp
 
 # Need mapping from county to service region
 # Need other utilities gas rates
 
 # Baseline Allowance for Residential Gas Rates (in therms/day)
+# TODO: Ana, go more granular in the data so that we can more easily map to the PG&E and SCE climate zones / tarrif regions
+# Gas rates also have baseline summer / winter allowances
+# https://www.pge.com/tariffs/assets/pdf/tariffbook/GAS_SCHEDS_G-1.pdf
+# https://www.pge.com/tariffs/assets/pdf/tariffbook/GAS_MAPS_Service_Area_Map.pdf
+# https://www.cpuc.ca.gov/news-and-updates/all-news/breaking-down-pges-natural-gas-costs-and-rates
 BASELINE_ALLOWANCES = {
     "PGE": {
         "G-1": {
             "territories": {
                 "P": {
-                    "summer": 0.39,  # therms/day
+                    "summer": 0.39,  # therms/day/dwelling unit
                     "winter_offpeak": 1.88,
                     "winter_onpeak": 2.19,
                 },
@@ -63,7 +67,8 @@ BASELINE_ALLOWANCES = {
     }
 }
 
-# Rate plans for gas (per therm)
+# Residential gas rates have baseline allowances:
+# https://www.pge.com/tariffs/assets/pdf/tariffbook/GAS_SCHEDS_G-1.pdf
 RATE_PLANS = {
     "PGE": {
         "G-1": {
@@ -78,18 +83,10 @@ RATE_PLANS = {
                 "total_charge": 2.79773,  # per therm
             }
         },
-        "G-PPPS": {  # Public Purpose Program Surcharge
-            "residential": 0.11051,  # per therm
-        },
-        "G-NT": {
-            "procurement_charge": 0.27473,
-            "transportation_charge": 1.30455,  # based on usage tiers
-            "total_charge": 1.57928  # per therm (example tier)
-        }
-    }
+    } # TODO: There is also a gas public purpose program (G-PPPS) that comes with surcharges
 }
 
-# https://www.pge.com/assets/rates/tariffs/PGECZ_90Rev.pdf
+# Baseline allowance map
 PGE_RATE_TERRITORY_COUNTY_MAPPING = {
     "T": [slugify_county_name(county) for county in ["Marin", "San Francisco", "San Mateo"]],
     "Q": [slugify_county_name(county) for county in ["Santa Cruz", "Monterey"]],
@@ -98,15 +95,28 @@ PGE_RATE_TERRITORY_COUNTY_MAPPING = {
         "Alameda", "Contra Costa", "Napa", "Sonoma", 
         "Mendocino", "Santa Barbara", "Solano", "Del Norte"
     ]], # TODO: Ana, Double check whether Solano and Del Norte are correctly placed here
-    "P": [slugify_county_name(county) for county in ["Sacramento", "Placer", "El Dorado", "Amador"]],
-    "S": [slugify_county_name(county) for county in ["Glenn", "Colusa", "Yolo", "Sutter", "Butte"]],
-    "R": [slugify_county_name(county) for county in ["Merced", "Fresno", "Madera", "Mariposa", "Tehama"]],
-    "Y&Z": [slugify_county_name(county) for county in [
-        "Nevada", "Plumas", "Humboldt", "Trinity", 
-        "Lake", "Shasta", "Sierra", "Alpine", "Mono",
+    "P": [slugify_county_name(county) for county in [
+        "Placer", "El Dorado", "Amador", "Calaveras", "Lake"
     ]],
-    "W": [slugify_county_name(county) for county in ["Kings"]]
+    "S": [slugify_county_name(county) for county in [
+        "Glenn", "Colusa", "Yolo", "Sutter", "Butte", "Yuba",
+        "Sacramento", "Stanislaus", "San Joaquin", "Solano", "Sutter"
+    ]],
+    "R": [slugify_county_name(county) for county in [
+        "Merced", "Fresno", "Madera", "Mariposa", "Tehama"
+    ]],
+    "Y&Z": [slugify_county_name(county) for county in [
+        "Nevada", "Plumas", "Humboldt", "Trinity", "Tulare", "Lassen"
+        "Lake", "Shasta", "Sierra", "Alpine", "Mono", "Toulumne"
+    ]],
+    "W": [slugify_county_name(county) for county in [
+        "Kings", 
+        # Revisit these
+        "Kern", "Inyo", "Mono", "Los Angeles", "Ventura", "San Bernadino", "Sierra", "Plumas", "Modoc", "Sisikiyou"
+    ]]
 }
+
+# Revisit these (SCE or SDGE): Kern, Inyo, Mono, Los Angeles, Ventura, San Bernadino, Sierra, Plumas, Modoc, Sisikiyou
 
 INPUT_FILE_NAME = "loadprofiles_for_rates"
 OUTPUT_FILE_NAME = "RESULTS_gas_annual_costs"
@@ -138,15 +148,12 @@ def sum_therms_by_season(gas_data, load_type):
 def calculate_annual_costs_gas(load_profile_df, territory, load_type):
     seasonal_therms, total_therms = sum_therms_by_season(load_profile_df, load_type)
     
-    # Initialize the total cost
     total_cost = 0.0
     
-    # Loop through each season and calculate the cost
     for season, therms_used in seasonal_therms.items():
         # Retrieve the baseline allowance for the season
         baseline = BASELINE_ALLOWANCES["PGE"]["G-1"]["territories"][territory][season]
         
-        # Determine if usage is within baseline or exceeds it
         if therms_used <= baseline:
             rate = RATE_PLANS["PGE"]["G-1"]["baseline"]["total_charge"]
         else:
@@ -168,10 +175,11 @@ def get_territory_for_county(county):
         if county in counties:
             return territory
     else:
-        raise ValueError("Step10@get_territory_for_county: County to gas territory mapping not specified: ", county)
+        log(message="Step10@get_territory_for_county: County to gas territory mapping not specified", county=county)
+        return "T" # use T as default for now
 
-def process_county_scenario(file_path, county, load_type):
-    file = os.path.join(file_path, f"{INPUT_FILE_NAME}_{county}.csv")
+def process_county_scenario(scenario_path, county, load_type):
+    file = os.path.join(scenario_path, county, f"{INPUT_FILE_NAME}_{county}.csv")
 
     if not os.path.exists(file):
         log(
@@ -182,56 +190,68 @@ def process_county_scenario(file_path, county, load_type):
 
     load_profile_df = pd.read_csv(file, parse_dates=["timestamp"])
     load_profile_df["month"] = load_profile_df["timestamp"].dt.month
-    territory = get_territory_for_county(county) # "T"  # Placeholder for territory mapping logic. Alameda == territory T
+    territory = get_territory_for_county(county)
     
     return calculate_annual_costs_gas(load_profile_df, territory, load_type)
 
-def process(base_input_dir, base_output_dir, scenarios, housing_types, counties, load_type):
-    valid_load_types = ["default", "solarstorage"]
-    if load_type not in valid_load_types:
-        raise ValueError(f"Invalid load_type '{load_type}'. Must be one of {valid_load_types}.")
+def get_output_file_path(base_output_dir, scenario, housing_type, county, timestamp):
+    output_path = os.path.join(
+        base_output_dir,
+        scenario,
+        housing_type,
+        county,
+        "results",
+        "gas",
+        f"{OUTPUT_FILE_NAME}_{county}_{timestamp}.csv"
+    )
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+    return output_path
+
+def update_csv_with_results(output_file_path, results_df):
+    if os.path.exists(output_file_path):
+        existing_df = pd.read_csv(output_file_path, index_col="scenario")
+
+        for idx in results_df.index:
+            for col in results_df.columns:
+                existing_df.loc[idx, col] = results_df.loc[idx, col]
+        return existing_df
+    else:
+        return results_df
     
-    timestamp = datetime.now().strftime("%Y%m%d_%H")
+def build_results_df(scenario, annual_costs, annual_costs_solarstorage):
+    data = {"gas.usd": [annual_costs, annual_costs_solarstorage]}
+    index = [scenario, f"{scenario}.solarstorage"]
+    df = pd.DataFrame(data, index=index)
+
+    return df
+
+def process(base_input_dir, base_output_dir, scenario, housing_types, counties):
+    timestamp = get_timestamp()
+
     for housing_type in housing_types:
-        for scenario in scenarios:
-            # TODO, test correctly getting the county here, and transposing it to slug / lowercase
-            scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
-            counties = get_counties(scenario_path, counties)
+        scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
+        scenario_counties = get_counties(scenario_path, counties)
 
-            for county in counties:
-                file_path = os.path.join(scenario_path, county)
+        for county in scenario_counties:
 
-                annual_costs = process_county_scenario(file_path, county, load_type)
+            annual_costs = process_county_scenario(scenario_path, county, "default")
+            annual_costs_solarstorage = process_county_scenario(scenario_path, county, "solarstorage")
+            annual_costs_results = build_results_df(scenario, annual_costs, annual_costs_solarstorage)
 
-                log(
-                    at="step10_evaluate_gas_rates",
-                    county=county,
-                    total_annual_gas_costs=to_number(annual_costs)
-                )
-            
-                results_df = pd.DataFrame({
-                    f"{load_type}.gas.usd": [annual_costs],
-                }, index=[scenario])
+            output_file_path = get_output_file_path(base_output_dir, scenario, housing_type, county, timestamp)
+            combined_df = update_csv_with_results(output_file_path, annual_costs_results)
 
-                output_file_path = os.path.join(base_output_dir, scenario, housing_type, county, "results", "gas", f"{OUTPUT_FILE_NAME}_{county}_{timestamp}.csv")
+            log(
+                at="step10_evaluate_gas_rates",
+                county=county,
+                annual_gas_costs=to_number(annual_costs),
+                annual_gas_costs_solarstorage=to_number(annual_costs_solarstorage),
+                saved_to=output_file_path,
+            )
 
-                if os.path.exists(output_file_path):
-                    existing_df = pd.read_csv(output_file_path, index_col="scenario")
-                    
-                    # Overwrite the column if it exists
-                    if f"{load_type}.gas.usd" in existing_df.columns:
-                        print(f"Overwriting existing column '{load_type}.gas.usd'.")
-                        existing_df = existing_df.drop(columns=[f"{load_type}.gas.usd"])
-                    
-                    # Merge the new column
-                    combined_df = existing_df.join(results_df, how="outer")
-                else:
-                    # If the file doesn't exist, use the new DataFrame
-                    combined_df = results_df
-
-                os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
-                combined_df.to_csv(output_file_path, index_label="scenario")
-                log(saved_to=output_file_path)
+            combined_df.to_csv(output_file_path, index_label="scenario")
 
 # base_input_dir = "data"
 # base_output_dir = "data"

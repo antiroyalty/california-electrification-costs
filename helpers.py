@@ -1,7 +1,7 @@
 # helpers.py
 import os
 import pandas as pd
-import datetime
+from datetime import datetime
 
 LOADPROFILES = "loadprofiles" # folder name where all load profiles are stored
 
@@ -68,6 +68,9 @@ def slugify_county_name(county_name: str) -> str:
                    .replace(" ", "-")
     )
 
+def get_timestamp():
+    return datetime.now().strftime("%Y%m%d_%H")
+
 def get_counties(scenario_path, counties):
     if counties is None: # Dynamically retrieve counties
         return [c for c in os.listdir(scenario_path) if os.path.isdir(os.path.join(scenario_path, c))]
@@ -115,7 +118,21 @@ def log(**metrics):
             print(f"{key_formatted}: {value}")
 
 def to_number(number):
-    return f"{number:_.0f}"
+    if number is None or pd.isnull(number):
+        return "N/A"
+    try:
+        return f"{number:_.0f}"
+    except (TypeError, ValueError):
+        return "N/A"
+
+def to_decimal_number(number):
+    if number is None or pd.isnull(number):
+        return "N/A"
+    try:
+        return f"{number:,.2f}"
+    except (TypeError, ValueError):
+        return "N/A"
+
 
 def format_load_profile(load_profile):
     return [round(x, 2) for x in load_profile[:24]]

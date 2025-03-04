@@ -2,6 +2,7 @@
 import os
 import pandas as pd
 import numpy as np
+
 from helpers import get_counties, get_scenario_path, log, to_number
 
 OUTPUT_FILE_PREFIX = "combined_profiles"
@@ -34,11 +35,27 @@ SCENARIO_DATA_MAP = {
             },
             "electricity_simulated": {
                 "file_prefix": "electricity_loads_simulated_",
-                "columns": ["simulated.electricity.heat_pump.energy_consumption.electricity.building_avg.kwh"]
+                "columns": ["simulated.electricity.heat_pump.energy_consumption.electricity.kwh"]
             },
             "gas": {
                 "file_prefix": "gas_loads_",
                 "columns":  ["out.natural_gas.range_oven.energy_consumption.gas.building_avg.therms", "out.natural_gas.hot_water.energy_consumption.gas.building_avg.therms"],
+            }
+        },
+    },
+    "induction_stove": { 
+        "default": {
+            "electricity": {
+                "file_prefix": "electricity_loads_",
+                "columns": ["total_load"]
+            },
+            "electricity_simulated": {
+                "file_prefix": "electricity_loads_simulated_",
+                "columns": ["simulated.electricity.induction_stove.energy_consumption.electricity.kwh"]
+            },
+            "gas": {
+                "file_prefix": "gas_loads_",
+                "columns":  ["out.natural_gas.heating.energy_consumption.gas.building_avg.therms", "out.natural_gas.hot_water.energy_consumption.gas.building_avg.therms"],
             }
         },
     },
@@ -50,7 +67,7 @@ SCENARIO_DATA_MAP = {
 # To later be summed and used in SAM solar modeling and rates
 # Actually separate functionality of aggregation and resampling
 
-def aggregate_columns(file_path, columns, operation="sum", resample_to_hourly=False):
+def aggregate_columns(file_path, columns, resample_to_hourly=False):
     """
     Aggregate specified columns in a file, with optional resampling to hourly intervals.
     """
@@ -62,12 +79,8 @@ def aggregate_columns(file_path, columns, operation="sum", resample_to_hourly=Fa
         df = pd.read_csv(file_path, usecols=["timestamp"] + columns, parse_dates=["timestamp"])
         df = df.set_index("timestamp")
         
-        if operation == "sum":
-            aggregated = df[columns].sum(axis=1)
-        elif operation == "subtract":
-            aggregated = -df[columns].sum(axis=1)
-        else:
-            raise ValueError(f"Step6@aggregate_columns: Unsupported operation: {operation}")
+        # Sum the columns
+        aggregated = df[columns].sum(axis=1)
         
         if resample_to_hourly:
             aggregated = aggregated.resample("H", label='left', closed='left').sum()
@@ -83,6 +96,7 @@ def aggregate_columns(file_path, columns, operation="sum", resample_to_hourly=Fa
 
 def combine_profiles(input_dir, output_dir, scenario, housing_type, county, scenario_data_map):
     county_slug = county.lower().replace(" ", "_")
+    # TODO, Ana:
     # The retrieval of the profiles does not need to change based on scenario
     # All the loadprofiles are in 'baseline' (we are not pulling new files for each scenario)
     # though the output directory should be different
@@ -96,21 +110,16 @@ def combine_profiles(input_dir, output_dir, scenario, housing_type, county, scen
     # Simulated electricity profile
     electricity_simulated_file = os.path.join(base_path, f"{scenario_data_map['default']['electricity_simulated']['file_prefix']}{county_slug}.csv")
     electricity_simulated_columns = scenario_data_map['default']['electricity_simulated']['columns']
+
     if electricity_simulated_columns:
-        electricity_simulated = aggregate_columns(electricity_simulated_file, electricity_simulated_columns, operation="sum", resample_to_hourly=True)
+        electricity_simulated = aggregate_columns(electricity_simulated_file, electricity_simulated_columns, resample_to_hourly=True)
     else:
         electricity_simulated = pd.Series(0, index=electricity_real.index)  # No simulated data
 
     # Real gas profile
     gas_real_file = os.path.join(base_path, f"{scenario_data_map['default']['gas']['file_prefix']}{county_slug}.csv")
     gas_real_columns = scenario_data_map['default']['gas']['columns']
-    gas_real = aggregate_columns(gas_real_file, gas_real_columns, operation="sum", resample_to_hourly=True)
-
-    # # Adjust gas profile by subtracting simulated loads
-    # if "columns" in scenario_data_map['default']['gas']:
-    #     gas_simulated_adjustment = aggregate_columns(gas_real_file, scenario_data_map['default']['gas']['columns'], operation="subtract", resample_to_hourly=True)
-    # else:
-    #     gas_simulated_adjustment = pd.Series(0, index=electricity_real.index)  # No adjustments for gas / no subtraction for gas if no columns specified
+    gas_real = aggregate_columns(gas_real_file, gas_real_columns, resample_to_hourly=True)
 
     gas_simulated_adjustment = 0
 

@@ -29,75 +29,51 @@ SCENARIO_DATA_MAP = {
             }
         },
     },
-    "sc1": {
-        # household adopted induction stove
+    "heat_pump": {
+        # household adopted heat pump
         "default": {
             "electricity": {
-                "file_prefix": "electricity_loads_",
-                "column": "total_load_w_simulated_induction"
+                "file_prefix": "combined_profiles_heat_pump_", # or "sam_optimized_load_profiles_"
+                "column": "electricity.real_and_simulated.for_typical_county_home.kwh" # or + "Total Load"
             },
             "gas": {
-                "file_prefix": "gas_loads_",
-                "column": "load.gas.no_stove.avg.therms" # TODO: need to calculate total + average columns for loads without gas stove, heating, water heating
+                "file_prefix": "combined_profiles_heat_pump_",
+                "column": "gas.hourly_total.for_typical_county_home.therms"
             }
         },
-        # household adopted induction stove w/ solar + storage
+        # household adopted heat pump w/ solar + storage
         "solar_storage": {
             "electricity": {
                 "file_prefix": "sam_optimized_load_profiles_",
                 "column": "Grid to Load"
             },
             "gas": {
-                "file_prefix": "gas_loads_",
-                "column": "load.gas.no_stove.avg.therms",
+                "file_prefix": "combined_profiles_heat_pump_",
+                "column": "gas.hourly_total.for_typical_county_home.therms",
             }
         }
     },
-    "sc2": {
-        # household adopted induction stove, heat pump
+    "induction_stove": {
+        # household adopted heat pump
         "default": {
             "electricity": {
-                "file_prefix": "electricity_loads_",
-                "column": "total_load_w_simulated_induction_heatpump"
+                "file_prefix": "combined_profiles_induction_stove_", # or "sam_optimized_load_profiles_"
+                "column": "electricity.real_and_simulated.for_typical_county_home.kwh" # or + "Total Load"
             },
             "gas": {
-                "file_prefix": "gas_loads_",
-                "column": "load.gas.no_stove_heating.avg.therms" # TODO: need to calculate total + average columns for loads without gas stove, heating, water heating
+                "file_prefix": "combined_profiles_induction_stove_",
+                "column": "gas.hourly_total.for_typical_county_home.therms"
             }
         },
-        # household adopted induction stove, heat pump w/ solar + storage
+        # household adopted heat pump w/ solar + storage
         "solar_storage": {
             "electricity": {
                 "file_prefix": "sam_optimized_load_profiles_",
                 "column": "Grid to Load"
             },
             "gas": {
-                "file_prefix": "gas_loads_",
-                "column": "load.gas.no_stove_heating.avg.therms",
-            }
-        }
-    },
-    "sc3": {
-        # household adopted induction stove, heat pump, water heater
-        "default": {
-            "electricity": {
-                "file_prefix": "electricity_loads_",
-                "column": "total_load_w_simulated_induction_heatpump_waterheater"
-            },
-            "gas": {
-                "file_prefix": "gas_loads_",
-                "column": "load.gas.no_stove_heating_waterheating.avg.therms" # TODO: need to calculate total + average columns for loads without gas stove, heating, water heating
-            }
-        },
-        "solar_storage": {
-            # household adopted induction stove, heat pump, water heater w/ solar + storage
-            "electricity": {
-                "file_prefix": "sam_optimized_load_profiles_",
-                "column": "Grid to Load"
-            },
-            "gas": {
-                "file_prefix": "gas_loads_",
-                "column": "load.gas.no_stove_heating_waterheating.avg.therms",
+                "file_prefix": "combined_profiles_induction_stove_",
+                "column": "gas.hourly_total.for_typical_county_home.therms",
             }
         }
     },
@@ -133,6 +109,8 @@ def prepare_for_rates_analysis(base_input_dir, base_output_dir, housing_type, sc
     directory = SCENARIO_DATA_MAP.get(scenario, {})
     county = slugify_county_name(county)
     path = get_scenario_path(base_input_dir, scenario, housing_type)
+
+    log(at="step9", county=county, path=path)
 
     electricity_default_file = get_file_path(path, county, directory["default"]["electricity"]["file_prefix"])
     gas_default_file = get_file_path(path, county, directory["default"]["gas"]["file_prefix"])

@@ -15,8 +15,9 @@ import step14_build_maps as BuildMaps
 
 class CostService:
     SCENARIOS = {
-        # "baseline": {"gas": {"heating", "hot_water", "cooking"}, "electric": {"appliances", "misc"}}, # Almost everything is gas, except normal electrical appliances
-        "heat_pump": {"gas": {"hot_water", "cooking"}, "electric": {"appliances", "misc", "heating"}},
+        "baseline": {"gas": {"heating", "hot_water", "cooking"}, "electric": {"appliances", "misc"}}, # Almost everything is gas, except normal electrical appliances
+        # "heat_pump": {"gas": {"hot_water", "cooking"}, "electric": {"appliances", "misc", "heating"}},
+        # "induction_stove": {"gas": {"hot_water", "heating"}, "electric": {"appliances", "misc", "cooking"}}
         # "heat_pump_water_heater_and_induction_stove": ["heating", "cooling", "hot_water", "appliances", "cooking", "misc"],
         # "heat_pump_heating_cooling_water_heater_and_induction_stove": ["heating", "cooling", "hot_water", "appliances", "cooking", "misc"]
     }
@@ -62,24 +63,25 @@ class CostService:
         result = GetLoadsForRates.process("data/loadprofiles", "data/loadprofiles", list(self.SCENARIOS.keys()), [self.housing_type], self.counties)
 
         self.log_step(10)
-        result = EvaluateGasRates.process("data/loadprofiles", "data/loadprofiles", list(self.SCENARIOS.keys()), [self.housing_type], self.counties, "default") # last argument is  load_type, which can be 'default' or 'solarstorage'
+        result = EvaluateGasRates.process("data/loadprofiles", "data/loadprofiles", scenario, [self.housing_type], self.counties)
 
         self.log_step(11)
-        result = EvaluateElectricityRates.process("data/loadprofiles", "data/loadprofiles", list(self.SCENARIOS.keys()), [self.housing_type], self.counties, "default") # last argument is  load_type, which can be 'default' or 'solarstorage'
+        result = EvaluateElectricityRates.process("data/loadprofiles", "data/loadprofiles", scenario, [self.housing_type], self.counties)
 
-        CombineTotalAnnualCosts.process("data/loadprofiles", "data/loadprofiles", list(self.SCENARIOS.keys()), [self.housing_type], self.counties)
+        CombineTotalAnnualCosts.process("data/loadprofiles", "data/loadprofiles", scenario, [self.housing_type], self.counties)
 
-        BuildMaps.process("data/loadprofiles", "data/loadprofiles", list(self.SCENARIOS.keys()), [self.housing_type], self.counties)
+        BuildMaps.process("data/loadprofiles", "data/loadprofiles", scenario, [self.housing_type], self.counties)
         
         return self.csv_file
     
 
 initial_csv = "initial_data.csv" # TODO: update
 
-scenario = "baseline"
+# scenario = "baseline"
 scenario = "heat_pump"
+# scenario = "induction_stove"
 housing_type = "single-family-detached"
-counties = ["Alameda County"]
+counties = ["Marin County"]
 input_dir = "data"
 output_dir = "data/loadprofiles"
 
@@ -107,8 +109,8 @@ socal_counties = [
     "Riverside County", "Ventura County",  # Greater Los Angeles
     "San Diego County", "Imperial County"  # San Diego & Imperial
 ]
-
-cost_service = CostService(initial_csv, scenario, housing_type, counties= norcal_counties + central_counties, input_dir=input_dir, output_dir=output_dir)
+# norcal_counties + central_counties
+cost_service = CostService(initial_csv, scenario, housing_type, counties=norcal_counties + central_counties + socal_counties, input_dir=input_dir, output_dir=output_dir)
 
 final_csv = cost_service.run()
 

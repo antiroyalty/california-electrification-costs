@@ -6,6 +6,7 @@ from helpers import get_scenario_path, get_counties, log, to_number
 # Conversion factor
 KWH_TO_THERMS = 0.0341296
 
+# TODO: Ana, deduplicate
 # Define scenarios and natural gas end uses
 SCENARIOS = {
     "baseline": ["heating", "hot_water", "cooking", "appliances", "misc"],
@@ -126,6 +127,10 @@ def build_county_gas_profile(scenario, housing_type, county, county_dir, output_
 
 def process(scenarios, housing_types, base_input_dir, base_output_dir, counties=None):
     for scenario in scenarios:
+        if scenario != "baseline":
+            log(at="step4_build_gas_load_profiles", message="no new electricity profiles needed to be downloaded")
+            return
+
         for housing_type in housing_types:
             scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
             counties = get_counties(scenario_path, counties)

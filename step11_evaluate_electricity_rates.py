@@ -11,7 +11,7 @@
 from datetime import datetime, timedelta
 import os
 import pandas as pd
-from helpers import get_counties, get_scenario_path, log, to_number
+from helpers import get_counties, get_scenario_path, log, to_number, get_timestamp
 
 BASELINE_ALLOWANCES = {
     "PGE": {
@@ -32,8 +32,7 @@ BASELINE_ALLOWANCES = {
     }
 }
 
-# Revised rate plans for E-TOU-C.
-# From the PDF, the Total Usage rates for E-TOU-C are:
+# Total Usage rates for E-TOU-C are:
 #   Summer: Peak = $0.60729, Off-Peak = $0.50429, with a baseline credit of $0.10135.
 #   Winter: Peak = $0.49312, Off-Peak = $0.46312, with the same baseline credit.
 # Note: The baseline credit applies only to baseline usage.
@@ -48,7 +47,7 @@ RATE_PLANS = {
                 "fixedCharge": 0.00,
                 "baseline_credit": 0.10135,
                 # Defaulting to territory T baseline allowance;
-                # In practice this should be chosen per the customer's territory.
+                # In practice this should be chosen per the customer's territory
                 "baseline_allowance": BASELINE_ALLOWANCES["PGE"]["E-TOU-C"]["territories"]["T"]["summer"],
             },
             "winter": {
@@ -178,12 +177,8 @@ def calculate_annual_costs_electricity(load_profile):
     return annual_costs
 
 def process_county_scenario(file_path, county, load_type):
-    file = os.path.join(file_path, f"{INPUT_FILE_NAME}_{county}.csv")
+    file = os.path.join(file_path, county, f"{INPUT_FILE_NAME}_{county}.csv")
 
-    file = os.path.join(file_path, f"{INPUT_FILE_NAME}_{county}.csv")
-
-    if not os.path.exists(file):
-        raise FileNotFoundError(f"File not found: {file}")
     if not os.path.exists(file):
         raise FileNotFoundError(f"File not found: {file}")
 
@@ -194,53 +189,89 @@ def process_county_scenario(file_path, county, load_type):
 
     return calculate_annual_costs_electricity(load_profile)
 
-def process(base_input_dir, base_output_dir, scenarios, housing_types, counties, load_type):
-    valid_load_types = ["default", "solarstorage"]
-    if load_type not in valid_load_types:
-        raise ValueError(f"Invalid load_type '{load_type}'. Must be one of {valid_load_types}.")
+def build_results_df(scenario, annual_costs, annual_costs_solarstorage):
+    """
+    Creates a DataFrame with two rows: 
+    one for the default tariffs (row name = {scenario})
+    one for the solarstorage tariffs (row name = '{scenario}.solarstorage')
+    """
+    columns = [f"electricity.{tariff}.usd" for tariff in annual_costs.keys()]
+    df = pd.DataFrame(columns=columns, index=[scenario, f"{scenario}.solarstorage"])
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H")
+    # Default tarrifs
+    for tariff, cost in annual_costs.items():
+        col_name = f"electricity.{tariff}.usd"
+        df.loc[scenario, col_name] = cost
+
+    # Solarstorage tarrifs
+    for tariff, cost in annual_costs_solarstorage.items():
+        col_name = f"electricity.{tariff}.usd"
+        df.loc[f"{scenario}.solarstorage", col_name] = cost
+
+    return df
+
+def get_output_file_path(base_output_dir, scenario, housing_type, county, timestamp):
+    output_path = os.path.join(
+        base_output_dir,
+        scenario,
+        housing_type,
+        county,
+        "results",
+        "electricity",
+        f"{OUTPUT_FILE_NAME}_{county}_{timestamp}.csv"
+    )
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+    return output_path
+
+def update_csv_with_results(output_file_path, results_df):
+    """
+    If an output CSV exists, update overlapping rows/columns with new results
+    else, use the new dataframe
+    """
+
+    if os.path.exists(output_file_path):
+        existing_df = pd.read_csv(output_file_path, index_col="scenario")
+
+        for idx in results_df.index:
+            for col in results_df.columns:
+                existing_df.loc[idx, col] = results_df.loc[idx, col]
+        return existing_df
+    else:
+        return results_df
+    
+def process(base_input_dir, base_output_dir, scenario, housing_types, counties):
+    timestamp = get_timestamp()
 
     for housing_type in housing_types:
-        for scenario in scenarios:
-            scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
-            counties = get_counties(scenario_path, counties)
+        scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
+        scenario_counties = get_counties(scenario_path, counties)
 
-            for county in counties:
-                file_path = os.path.join(scenario_path, county)
-                annual_costs = process_county_scenario(file_path, county, load_type)
+        for county in scenario_counties:
+            annual_costs = process_county_scenario(scenario_path, county, "default")
+            annual_costs_solarstorage = process_county_scenario(scenario_path, county, "solarstorage")
+            annual_costs_results = build_results_df(scenario, annual_costs, annual_costs_solarstorage)
 
-                results_data = {
-                    f"{load_type}.electricity.{plan}.usd": [cost]
-                    for plan, cost in annual_costs.items()
-                }
-                results_df = pd.DataFrame(results_data, index=[scenario])
+            output_file_path = get_output_file_path(base_output_dir, scenario, housing_type, county, timestamp)
+            combined_df = update_csv_with_results(output_file_path, annual_costs_results)
 
-                output_file_path = os.path.join(base_output_dir, scenario, housing_type, county, "results", "electricity", f"{OUTPUT_FILE_NAME}_{county}_{timestamp}.csv")
-                os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
+            log(
+                at="step11_evaluate_electricity_rates",
+                county=county,
+                annual_electricity_costs_ETOUC=to_number(annual_costs['E-TOU-C']),
+                annual_electricity_costs_ETOUD=to_number(annual_costs['E-TOU-D']),
+                annual_electricity_costs_EV2A=to_number(annual_costs['EV2-A']),
+                annual_electricity_costs_EELEC=to_number(annual_costs['E-ELEC']),
+                annual_electricity_costs_solarstorage_ETOUC=to_number(annual_costs_solarstorage['E-TOU-C']),
+                annual_electricity_costs_solarstorage_ETOUD=to_number(annual_costs_solarstorage['E-TOU-D']),
+                annual_electricity_costs_solarstorage_EV2A=to_number(annual_costs_solarstorage['EV2-A']),
+                annual_electricity_costs_solarstorage_EELEC=to_number(annual_costs_solarstorage['E-ELEC']),
+                saved_to=output_file_path
+            )
 
-                if os.path.exists(output_file_path):
-                    existing_df = pd.read_csv(output_file_path, index_col="scenario")
+            combined_df.to_csv(output_file_path, index_label="scenario")
 
-                    # Overwrite overlapping columns with the new data
-                    for col in results_df.columns:
-                        existing_df[col] = results_df[col]
-
-                    combined_df = existing_df
-                else:
-                    combined_df = results_df
-
-                log(
-                    at="step11_evaluate_electricity_rates",
-                    county=county,
-                    load_type=load_type,
-                    annual_electricity_cost_ETOUC=to_number(annual_costs['E-TOU-C']),
-                    annual_electricity_costs_ETOUD=to_number(annual_costs['E-TOU-D']),
-                    annual_electricity_costs_EV2A=to_number(annual_costs['EV2-A']),
-                    annual_electricity_costs_EELEC=to_number(annual_costs['E-ELEC']),
-                    saved_to=output_file_path
-                )
-                combined_df.to_csv(output_file_path, index_label="scenario")
 
 # base_input_dir = "data"
 # base_output_dir = "data"

@@ -3,20 +3,9 @@ import pandas as pd
 from helpers import get_counties, get_scenario_path, is_valid_csv, log
 
 END_USE_COLUMNS = {
-    "heating": [
-        'out.electricity.heating.energy_consumption',
-        'out.electricity.heating_fans_pumps.energy_consumption',
-        'out.electricity.heating_hp_bkup.energy_consumption',
-    ],
     "cooling": [
         'out.electricity.cooling.energy_consumption',
         'out.electricity.cooling_fans_pumps.energy_consumption',
-    ],
-    "cooking": [
-        'out.electricity.range_oven.energy_consumption',
-    ],
-    "hot_water": [
-        'out.electricity.hot_water.energy_consumption',
     ],
     "appliances": [
         'out.electricity.ceiling_fan.energy_consumption',
@@ -125,6 +114,10 @@ def process(scenarios, housing_types, counties, base_input_dir, base_output_dir,
     }
 
     for scenario, end_use_categories in scenarios.items():
+        if scenario != "baseline":
+            log(at="step3_build_electricity_load_profiles", message="no new electricity profiles needed to be downloaded")
+            return
+    
         for housing_type in housing_types:
             scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
             counties = get_counties(scenario_path, counties)

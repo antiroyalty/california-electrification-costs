@@ -9,7 +9,7 @@ import statistics
 from helpers import get_counties, get_scenario_path, log, format_load_profile
 
 # LOADPROFILE_FILE_PREFIX = "electricity_loads"
-LOADPROFILE_FILE_PREFIX = "combined_profiles_baseline"
+LOADPROFILE_FILE_PREFIX = "combined_profiles"
 TOTAL_LOAD_COLUMN_NAME = "electricity.real_and_simulated.for_typical_county_home.kwh"
 OUTPUT_LOADPROFILE_FILE_PREFIX = "sam_optimized_load_profiles"
 
@@ -139,8 +139,10 @@ def process(base_input_dir, base_output_dir, scenarios, housing_types, counties=
     
             for county in counties_to_run:
                 try:
+                    log(at="step8", scenario=scenario, scenario_path=scenario_path, county=county)
+
                     weather_file = os.path.join(base_input_dir, scenario, housing_type, county, f"weather_TMY_{county}.csv")
-                    load_file = os.path.join(scenario_path, county, f"{LOADPROFILE_FILE_PREFIX}_{county}.csv")
+                    load_file = os.path.join(scenario_path, county, f"{LOADPROFILE_FILE_PREFIX}_{scenario}_{county}.csv")
                     output_file = os.path.join(base_output_dir, scenario, housing_type, county, f"{OUTPUT_LOADPROFILE_FILE_PREFIX}_{county}.csv")
 
                     if not os.path.exists(weather_file):

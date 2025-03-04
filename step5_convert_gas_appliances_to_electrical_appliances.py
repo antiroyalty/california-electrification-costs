@@ -11,8 +11,13 @@ from helpers import get_counties, get_scenario_path, log, to_number
 # TODO: Consider a "low efficiency" and "high efficiency" household appliance adopter
 EFFICIENCY_GAS_STOVE = 0.45  # Average efficiency (40-50%)
 EFFICIENCY_INDUCTION_STOVE = 0.875  # Average efficiency (85-90%)
+
+# TODO: How does heat pump COP vary over the year? in winter vs. summer?
+# different COP for "AC" style operation vs. "heating" style
 COP_HEAT_PUMP = 2.75  # Average effective COP (2.0-3.0 for ducted, 2.5-4.0 for non-ducted)
 EFFICIENCY_GAS_HEATING = 0.875  # Average efficiency (80-95%)
+
+# TODO: Combined heat pump and water heater system benefits?
 COP_HPWH = 2.75  # Average effective COP (2.0-3.5)
 EFFICIENCY_GAS_WATER_HEATER = 0.75  # Average efficiency (60-90%)
 
@@ -109,6 +114,10 @@ def convert_appliances_for_county(county, base_input_dir, base_output_dir, scena
 def process(base_input_dir, base_output_dir, counties, scenarios, housing_types):
     for housing_type in housing_types:
         for scenario in scenarios:
+            if scenario != "baseline":
+                log(at="step5_convert_gas_appliances_to_electrical_appliances", message="all appliances already converted in baseline run")
+                return
+        
             scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
             counties = get_counties(scenario_path, counties)
 
