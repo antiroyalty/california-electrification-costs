@@ -5,7 +5,7 @@ import folium
 import requests
 from zipfile import ZipFile
 from datetime import datetime
-from helpers import get_counties, get_scenario_path, log, to_decimal_number, norcal_counties
+from helpers import get_counties, get_scenario_path, log, to_decimal_number, norcal_counties, central_counties, socal_counties
 
 def download_and_extract_shapefile():
     url = "https://www2.census.gov/geo/tiger/GENZ2018/shp/cb_2018_us_county_20m.zip"
@@ -77,6 +77,10 @@ def generate_geojson(merged_gdf, output_path, file_prefix, rate):
 def generate_html(merged_gdf, output_path, file_prefix, rate):
     merged_gdf[f"{rate}_fmt"] = merged_gdf[rate].apply(lambda x: to_decimal_number(x) if pd.notnull(x) else "N/A")
     m = folium.Map(location=[37.8, -120], zoom_start=6)
+    title_html = f'''
+             <h3 align="center" style="font-size:20px"><b>{file_prefix}.{rate}</b></h3>
+             '''
+    m.get_root().html.add_child(folium.Element(title_html))
 
     folium.Choropleth(
         geo_data=merged_gdf,
@@ -87,7 +91,7 @@ def generate_html(merged_gdf, output_path, file_prefix, rate):
         fill_opacity=0.7,
         line_opacity=0.2,
         legend_name=f"Total Costs ({rate})",
-        threshold_scale=[0, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 5500, 6000, 6500]
+        threshold_scale=[0, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 5500, 6000, 6500, 7000]
     ).add_to(m)
 
     folium.GeoJson(
@@ -117,7 +121,7 @@ def process(base_input_dir, base_output_dir, scenario, housing_types, counties):
     for housing_type in housing_types:
         scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
         valid_counties = get_counties(scenario_path, counties)
-        data_combined, data_solar, data_elec, data_gas = {}, {}, {}, {}
+        data_combined, data_solar, data_elec, data_gas, data_elec_solarstorage = {}, {}, {}, {}, {}
 
         for county in valid_counties:
             county_dir = os.path.join(scenario_path, county)
@@ -157,10 +161,15 @@ def process(base_input_dir, base_output_dir, scenario, housing_types, counties):
         generate_service_maps(merged_gas, output_maps_path, "annual_costs_map.gas")
         generate_service_maps(merged_solar, output_maps_path, "annual_costs_map.solarstorage")
 
-# base_input_dir = "data/loadprofiles"
-# base_output_dir = "data/loadprofiles"
-# counties = norcal_counties
-# scenarios = ["baseline"]
-# housing_types = ["single-family-detached"]
+        # open the generated maps in default browser
+        os.system(f"open {output_maps_path}/html/annual_costs_map.total.total.usd+gas.usd.html")
+        os.system(f"open {output_maps_path}/html/annual_costs_map.solarstorage.total.usd+gas.usd.html")
+        os.system(f"open {output_maps_path}/html/annual_costs_map.electricity+solarstorage.total.usd+gas.usd.html")
 
-# process(base_input_dir, base_output_dir, scenarios, housing_types, counties)
+base_input_dir = "data/loadprofiles"
+base_output_dir = "data/loadprofiles"
+# counties = norcal_counties + central_counties + socal_counties
+scenarios = "baseline"
+housing_types = ["single-family-detached"]
+
+process(base_input_dir, base_output_dir, scenarios, housing_types, norcal_counties + central_counties + socal_counties)
