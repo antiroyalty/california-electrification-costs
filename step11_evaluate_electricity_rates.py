@@ -14,14 +14,14 @@ import pandas as pd
 from collections import defaultdict
 from datetime import datetime, timedelta
 from helpers import get_counties, get_scenario_path, log, to_number, get_timestamp, norcal_counties, socal_counties, central_counties, slugify_county_name
-from electricity_rate_helpers import PGE_COUNTIES, PGE_RATE_PLANS, SCE_RATE_PLANS, SDGE_RATE_PLANS
+from electricity_rate_helpers import PGE_COUNTIES, SCE_COUNTIES, SDGE_COUNTIES, PGE_RATE_PLANS, SCE_RATE_PLANS, SDGE_RATE_PLANS
 
 utility_to_counties = {
     # No California utilities serve: Del Norte, Siskiyou, Modoc
     # https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_MAPS_Service%20Area%20Map.pdf
     "PG&E": PGE_COUNTIES, # note that PG&E doesn't serve: Del Norte, Siskiyou, Modoc, Trinity, Lassen, Sierra, Mono, Inyo, San Bernadino, Los Angeles, Ventura, Orange, Riverside, San Diego, Imperial
-    "SCE": central_counties,
-    "SDG&E": socal_counties,
+    "SCE": SCE_COUNTIES,
+    "SDG&E": SDGE_COUNTIES,
 }
 
 RATE_PLANS = {
@@ -285,23 +285,23 @@ def process_county_scenario(file_path, county, utility, selected_rate_plan, load
 
     return calculate_annual_costs_electricity(load_profile, utility, selected_rate_plan)
 
-def build_results_df(scenario, annual_costs, annual_costs_solarstorage):
+def build_results_df(scenario, utility, annual_costs, annual_costs_solarstorage):
     """
     Creates a DataFrame with two rows: 
     one for the default tariffs (row name = {scenario})
     one for the solarstorage tariffs (row name = '{scenario}.solarstorage')
     """
-    columns = [f"electricity.{tariff}.usd" for tariff in annual_costs.keys()]
+    columns = [f"electricity.{utility}.{tariff}.usd" for tariff in annual_costs.keys()]
     df = pd.DataFrame(columns=columns, index=[scenario, f"{scenario}.solarstorage"])
 
     # Default tarrifs
     for tariff, cost in annual_costs.items():
-        col_name = f"electricity.{tariff}.usd"
+        col_name = f"electricity.{utility}.{tariff}.usd"
         df.loc[scenario, col_name] = cost
 
     # Solarstorage tarrifs
     for tariff, cost in annual_costs_solarstorage.items():
-        col_name = f"electricity.{tariff}.usd"
+        col_name = f"electricity.{utility}.{tariff}.usd"
         df.loc[f"{scenario}.solarstorage", col_name] = cost
 
     return df
@@ -337,7 +337,27 @@ def update_csv_with_results(output_file_path, results_df):
     else:
         return results_df
     
-def process(base_input_dir, base_output_dir, scenario, housing_type, counties, pge_rate_plan_name, sce_rate_plan_name, sdge_rate_plan_name):
+def update_df_with_results(orig_df, new_df):
+    """
+    Update the original DataFrame with new results.
+    """
+    for idx in new_df.index:
+        for col in new_df.columns:
+            orig_df.loc[idx, col] = new_df.loc[idx, col]
+    return orig_df
+
+def utility_to_rate_plans(utility: str):
+    match utility:
+        case "PG&E":
+            return PGE_RATE_PLANS
+        case "SCE":
+            return SCE_RATE_PLANS
+        case "SDG&E":
+            return SDGE_RATE_PLANS
+        case _:
+            raise ValueError(f"Unknown utility: {utility}")
+    
+def process(base_input_dir, base_output_dir, scenario, housing_type, counties):
     timestamp = get_timestamp()
     build_utilities_to_counties()
 
@@ -345,49 +365,40 @@ def process(base_input_dir, base_output_dir, scenario, housing_type, counties, p
     scenario_counties = get_counties(scenario_path, counties)
 
     for county in scenario_counties:
+        results_df = pd.DataFrame()
         utility = get_utility_for_county(county)
+        rate_plans = utility_to_rate_plans(utility)
+        
+        log_kwargs = {}
+        for rate_plan in rate_plans:
+            # Process the county's scenario using the selected rate plan.
+            annual_costs = process_county_scenario(scenario_path, county, utility, rate_plan, "default")
+            annual_costs_solarstorage = process_county_scenario(scenario_path, county, utility, rate_plan, "solarstorage")
+            annual_costs_results = build_results_df(scenario, utility, annual_costs, annual_costs_solarstorage) #  utility)
 
-        # select appropriate rate plan for utility
-        if utility == "PG&E":
-            selected_rate_plan = pge_rate_plan_name
-        elif utility == "SCE":
-            selected_rate_plan = sce_rate_plan_name
-        elif utility == "SDG&E":
-            selected_rate_plan = sdge_rate_plan_name
-        else:
-            selected_rate_plan = None
+            results_df = update_df_with_results(results_df, annual_costs_results)
 
-        # Process the county's scenario using the selected rate plan.
-        annual_costs = process_county_scenario(scenario_path, county, utility, selected_rate_plan, "default")
-        annual_costs_solarstorage = process_county_scenario(scenario_path, county, utility, selected_rate_plan, "solarstorage")
-        annual_costs_results = build_results_df(scenario, annual_costs, annual_costs_solarstorage) #  utility)
+            log_kwargs.update({
+                f"annual_electricity_costs_{rate_plan}": to_number(annual_costs[rate_plan]),
+                f"annual_electricity_costs_solarstorage_{rate_plan}": to_number(annual_costs_solarstorage[rate_plan])
+            })
 
         output_file_path = get_output_file_path(base_output_dir, scenario, housing_type, county, timestamp)
-        combined_df = update_csv_with_results(output_file_path, annual_costs_results)
+        combined_df = update_csv_with_results(output_file_path, results_df)
+        combined_df.to_csv(output_file_path, index_label="scenario")
 
         log(
             at="step11_evaluate_electricity_rates",
             county=county,
             utility=utility,
-            selected_rate_plan=selected_rate_plan,
-            annual_electricity_costs_ETOUC=to_number(annual_costs['E-TOU-C']),
-            annual_electricity_costs_ETOUD=to_number(annual_costs['E-TOU-D']),
-            annual_electricity_costs_EV2A=to_number(annual_costs['EV2-A']),
-            annual_electricity_costs_EELEC=to_number(annual_costs['E-ELEC']),
-            annual_electricity_costs_solarstorage_ETOUC=to_number(annual_costs_solarstorage['E-TOU-C']),
-            annual_electricity_costs_solarstorage_ETOUD=to_number(annual_costs_solarstorage['E-TOU-D']),
-            annual_electricity_costs_solarstorage_EV2A=to_number(annual_costs_solarstorage['EV2-A']),
-            annual_electricity_costs_solarstorage_EELEC=to_number(annual_costs_solarstorage['E-ELEC']),
-            saved_to=output_file_path
+            **log_kwargs,
+            saved_to=output_file_path,
         )
-
-        combined_df.to_csv(output_file_path, index_label="scenario")
-
 
 base_input_dir = "data/loadprofiles"
 base_output_dir = "data/loadprofiles"
-counties = ['Alameda County']
+counties = ['Alameda County', 'San Bernardino County', 'San Diego County']
 scenario = "baseline"
 housing_type = "single-family-detached"
 
-process(base_input_dir, base_output_dir, scenario, housing_type, counties, "EV2-A", "", "")
+process(base_input_dir, base_output_dir, scenario, housing_type, counties)
