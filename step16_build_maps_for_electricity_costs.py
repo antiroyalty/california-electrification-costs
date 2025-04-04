@@ -7,6 +7,8 @@ from zipfile import ZipFile
 from datetime import datetime
 from helpers import get_counties, get_scenario_path, log, to_decimal_number, norcal_counties, central_counties, socal_counties
 
+electricity_costs_file_prefix = "RESULTS_electricity_annual_costs"
+
 def download_and_extract_shapefile():
     url = "https://www2.census.gov/geo/tiger/GENZ2018/shp/cb_2018_us_county_20m.zip"
     zip_name = "cb_2018_us_county_20m.zip"
@@ -59,12 +61,6 @@ def load_cost_data(county_dir, subfolder, prefix):
 
 def get_electricity_costs(county_dir):
     return load_cost_data(county_dir, "electricity", "RESULTS_electricity_annual_costs")
-
-def get_gas_costs(county_dir):
-    return load_cost_data(county_dir, "gas", "RESULTS_gas_annual_costs")
-
-def get_total_costs(county_dir):
-    return load_cost_data(county_dir, "totals", "RESULTS_total_annual_costs")
 
 def get_solarstorage_total_costs(county_dir):
     return load_cost_data(county_dir, "solarstorage", "RESULTS_total_annual_costs")
@@ -136,10 +132,8 @@ def process(base_input_dir, base_output_dir, scenario, housing_types, counties):
         for county in valid_counties:
             county_dir = os.path.join(scenario_path, county)
             try:
-                combined = get_total_costs(county_dir)
                 solar_totals = get_solarstorage_total_costs(county_dir)
                 elec = get_electricity_costs(county_dir)
-                gas = get_gas_costs(county_dir)
 
                 name = county.replace("-", " ").title()
                 data_combined[name] = combined.to_dict()
@@ -152,24 +146,22 @@ def process(base_input_dir, base_output_dir, scenario, housing_types, counties):
         if not data_combined:
             continue
 
-        df_combined = pd.DataFrame.from_dict(data_combined, orient="index")
         df_solar = pd.DataFrame.from_dict(data_solar, orient="index")
         df_elec = pd.DataFrame.from_dict(data_elec, orient="index")
-        df_gas = pd.DataFrame.from_dict(data_gas, orient="index")
 
         gdf = initialize_map()
 
-        merged_combined = gdf.merge(df_combined, left_on="NAME", right_index=True, how="left")
         merged_solar = gdf.merge(df_solar, left_on="NAME", right_index=True, how="left")
         merged_elec = gdf.merge(df_elec, left_on="NAME", right_index=True, how="left")
-        merged_gas = gdf.merge(df_gas, left_on="NAME", right_index=True, how="left")
 
         output_maps_path = os.path.join(scenario_path, "RESULTS", "visualizations")
 
-        generate_service_maps(merged_combined, output_maps_path, "annual_costs_map.total")
         generate_service_maps(merged_elec, output_maps_path, "annual_costs_map.electricity")
-        generate_service_maps(merged_gas, output_maps_path, "annual_costs_map.gas")
         generate_service_maps(merged_solar, output_maps_path, "annual_costs_map.solarstorage")
+
+        # we actually want difference maps
+        # How much lower are annual costs if we just compare the costs of electricity without solar and storage, with the costs of electricity WITH solarstorage
+        # can't make the costs with solar and storage go to 0
 
         # open the generated maps in default browser
         os.system(f"open {output_maps_path}/html/annual_costs_map.total.total.usd+gas.usd.html")

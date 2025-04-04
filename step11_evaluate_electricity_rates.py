@@ -11,126 +11,23 @@
 from datetime import datetime, timedelta
 import os
 import pandas as pd
-from helpers import get_counties, get_scenario_path, log, to_number, get_timestamp
+from collections import defaultdict
+from datetime import datetime, timedelta
+from helpers import get_counties, get_scenario_path, log, to_number, get_timestamp, norcal_counties, socal_counties, central_counties, slugify_county_name
+from electricity_rate_helpers import PGE_COUNTIES, PGE_RATE_PLANS, SCE_RATE_PLANS, SDGE_RATE_PLANS
 
-BASELINE_ALLOWANCES = {
-    "PGE": {
-        "E-TOU-C": {
-            "territories": {
-                "P": {"summer": 13.5, "winter": 11.0},
-                "Q": {"summer": 9.8,  "winter": 11.0},
-                "R": {"summer": 17.7, "winter": 10.4},
-                "S": {"summer": 15.0, "winter": 10.2},
-                "T": {"summer": 6.5,  "winter": 7.5},
-                "V": {"summer": 7.1,  "winter": 8.1},
-                "W": {"summer": 19.2, "winter": 9.8},
-                "X": {"summer": 9.8,  "winter": 9.7},
-                "Y": {"summer": 10.5, "winter": 11.1},
-                "Z": {"summer": 5.9,  "winter": 7.8},
-            }
-        }
-    }
+utility_to_counties = {
+    # No California utilities serve: Del Norte, Siskiyou, Modoc
+    # https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_MAPS_Service%20Area%20Map.pdf
+    "PG&E": PGE_COUNTIES, # note that PG&E doesn't serve: Del Norte, Siskiyou, Modoc, Trinity, Lassen, Sierra, Mono, Inyo, San Bernadino, Los Angeles, Ventura, Orange, Riverside, San Diego, Imperial
+    "SCE": central_counties,
+    "SDG&E": socal_counties,
 }
 
-# Total Usage rates for E-TOU-C are:
-#   Summer: Peak = $0.60729, Off-Peak = $0.50429, with a baseline credit of $0.10135.
-#   Winter: Peak = $0.49312, Off-Peak = $0.46312, with the same baseline credit.
-# Note: The baseline credit applies only to baseline usage.
 RATE_PLANS = {
-    "PGE": {
-        "E-TOU-C": { # https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_E-TOU-C.pdf
-            "summer": {
-                "peak": 0.60729,
-                "offPeak": 0.50429,
-                "peakHours": list(range(16, 21)),  # 4:00 p.m. to 9:00 p.m.
-                "offPeakHours": [h for h in range(24) if h not in range(16, 21)],
-                "fixedCharge": 0.00,
-                "baseline_credit": 0.10135,
-                # Defaulting to territory T baseline allowance;
-                # In practice this should be chosen per the customer's territory
-                "baseline_allowance": BASELINE_ALLOWANCES["PGE"]["E-TOU-C"]["territories"]["T"]["summer"],
-            },
-            "winter": {
-                "peak": 0.49312,
-                "offPeak": 0.46312,
-                "peakHours": list(range(16, 21)),
-                "offPeakHours": [h for h in range(24) if h not in range(16, 21)],
-                "fixedCharge": 0.00,
-                "baseline_credit": 0.10135,
-                "baseline_allowance": BASELINE_ALLOWANCES["PGE"]["E-TOU-C"]["territories"]["T"]["winter"],
-            }
-        },
-        "E-TOU-D": { # https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_E-TOU-D.pdf
-            "summer": {
-                # Updated from 0.55/0.42 to the PDF's Total Usage rates:
-                "peak": 0.56462, 
-                "offPeak": 0.42966, 
-                # Peak period: 5:00 p.m. to 8:00 p.m. (i.e., hours 17, 18, 19)
-                "peakHours": [17, 18, 19], 
-                # Off-peak: All other hours (note: this does not account for holidays)
-                "offPeakHours": [h for h in range(24) if h not in [17, 18, 19]],
-                "fixedCharge": 0.00,
-            },
-            "winter": {
-                # Updated from 0.46/0.42 to the PDF's Total Usage rates:
-                "peak": 0.47502, 
-                "offPeak": 0.43641, 
-                "peakHours": [17, 18, 19], 
-                "offPeakHours": [h for h in range(24) if h not in [17, 18, 19]],
-                "fixedCharge": 0.00,
-            }
-        },
-        "EV2-A": {  # https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_EV2%20(Sch).pdf EV2 bills are issued as EV2-A
-            "summer": {
-                "peak": 0.61590,      # Peak rate ($ per kWh)
-                "partPeak": 0.50541,  # Partial-Peak rate ($ per kWh)
-                "offPeak": 0.30339,   # Off-Peak rate ($ per kWh)
-                # Peak: 4:00 p.m. to 9:00 p.m. every day (hours 16–20)
-                "peakHours": [16, 17, 18, 19, 20],
-                # Partial-Peak: 3:00 p.m. (15:00) and 9:00 p.m. to midnight (21–23)
-                "partPeakHours": [15, 21, 22, 23],
-                # Off-Peak: All other hours
-                "offPeakHours": [h for h in range(24) if h not in [15, 16, 17, 18, 19, 20, 21, 22, 23]],
-                # Delivery Minimum Bill Amount per meter per day:
-                "fixedCharge": 0.39167,
-            },
-            "winter": {
-                "peak": 0.48879,      # Peak rate ($ per kWh)
-                "partPeak": 0.47209,  # Partial-Peak rate ($ per kWh)
-                "offPeak": 0.30339,   # Off-Peak rate ($ per kWh)
-                "peakHours": [16, 17, 18, 19, 20],
-                "partPeakHours": [15, 21, 22, 23],
-                "offPeakHours": [h for h in range(24) if h not in [15, 16, 17, 18, 19, 20, 21, 22, 23]],
-                "fixedCharge": 0.39167,
-            }
-        },
-        "E-ELEC": { # https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_E-ELEC.pdf
-            "summer": {
-                "peak": 0.60728,      # Peak rate (4:00–9:00 p.m.)
-                "partPeak": 0.44540,  # Partial-Peak rate (3:00–4:00 p.m. and 9:00–12:00 a.m.)
-                "offPeak": 0.38872,   # Off-Peak rate (all other hours)
-                # Time periods based on the PDF’s special conditions:
-                # Peak: 4:00 p.m. to 9:00 p.m. every day
-                "peakHours": [16, 17, 18, 19, 20],
-                # Partial-Peak: 3:00 p.m. (15) and 9:00 p.m. to midnight (21, 22, 23)
-                "partPeakHours": [15, 21, 22, 23],
-                # Off-Peak: All other hours
-                "offPeakHours": [h for h in range(24) if h not in [15, 16, 17, 18, 19, 20, 21, 22, 23]],
-                # Base Services Charge per meter per day
-                "fixedCharge": 0.49281,
-            },
-            "winter": {
-                # Winter Total Energy Rates per the PDF:
-                "peak": 0.37577,      # Peak rate (4:00–9:00 p.m.)
-                "partPeak": 0.35368,  # Partial-Peak rate (3:00–4:00 p.m. and 9:00–12:00 a.m.)
-                "offPeak": 0.33982,   # Off-Peak rate (all other hours)
-                "peakHours": [16, 17, 18, 19, 20],
-                "partPeakHours": [15, 21, 22, 23],
-                "offPeakHours": [h for h in range(24) if h not in [15, 16, 17, 18, 19, 20, 21, 22, 23]],
-                "fixedCharge": 0.49281,
-            }
-        },
-    }
+    "PG&E": PGE_RATE_PLANS,
+    "SCE": SCE_RATE_PLANS,
+    "SDG&E": SDGE_RATE_PLANS,
 }
 
 INPUT_FILE_NAME = "loadprofiles_for_rates"
@@ -144,39 +41,238 @@ def get_season(hour_index):
     month = current_datetime.month
     return 'summer' if 6 <= month <= 9 else 'winter'
 
-def calculate_annual_costs_electricity(load_profile):
-    from collections import defaultdict
+# Build the mapping from utility to counties
+county_slug_to_utility = {}
+def build_utilities_to_counties():
+    for utility, county_list in utility_to_counties.items():
+        for county in county_list:
+            slug = slugify_county_name(county)
+            county_slug_to_utility[slug] = utility
 
+def get_utility_for_county(county_slug):
+    return county_slug_to_utility.get(county_slug, "PG&E")
+
+def is_weekend(dt):
+    return dt.weekday() >= 5
+
+def select_rate_section(plan_details, season, dt):
+    """
+    Given a rate plan's details and a season (e.g., "summer" or "winter"),
+    select and return the rate section that applies for the given datetime dt.
+    
+    If the season's rates are divided into day types (e.g., "weekdays" and "weekend"),
+    this function returns the corresponding sub-dictionary; otherwise, it returns
+    the season's flat rate configuration.
+    """
+    season_rates = plan_details.get(season)
+    if not season_rates:
+        return None
+
+    if "weekdays" in season_rates or "weekend" in season_rates:
+        return season_rates.get("weekend") if is_weekend(dt) else season_rates.get("weekdays")
+    return season_rates
+
+def get_hourly_rate(rate_section, hour):
+    if "peakHours" in rate_section and hour in rate_section["peakHours"]:
+        return rate_section["peak"]
+    elif "partPeakHours" in rate_section and hour in rate_section["partPeakHours"]:
+        return rate_section["partPeak"]
+    elif "superOffPeakHours" in rate_section and hour in rate_section["superOffPeakHours"]:
+        return rate_section["superOffPeak"]
+    else:
+        return rate_section["offPeak"]
+    
+# def compute_hourly_cost(plan_details, season, current_dt, hourly_load):
+#     """
+#     Given a rate plan's details, the season, a datetime (current_dt), and the hourly load,
+#     return the cost for that hour. This includes the energy cost and the prorated fixed charge.
+    
+#     """
+#     # Get the rate section for the current day (weekday/weekend) if applicable.
+#     rate_section = select_rate_section(plan_details, season, current_dt)
+#     if not rate_section:
+#         return 0.0
+
+#     hour = current_dt.hour
+#     rate = get_hourly_rate(rate_section, hour)
+#     energy_cost = hourly_load * rate
+
+#     # Retrieve the fixed charge from the rate section if present, else from the season level.
+#     fixed_charge = rate_section.get("fixedCharge", plan_details.get(season, {}).get("fixedCharge", 0.0)) # is fixed 
+#     # Spread the fixed charge over 24 hours.
+#     return energy_cost + (fixed_charge / 24)
+
+# def apply_minimum_daily_charge(daily_costs, utility):
+#     """
+#     For each rate plan and each day, apply the minimum daily charge if it is defined.
+#     Daily minimum is a floor, ensuring that the total daily bill does not drop below this threshold
+    
+#     Returns an adjusted daily costs dictionary with the minimum applied.
+#     """
+#     adjusted_daily_costs = {}
+#     for plan_name, days in daily_costs.items():
+#         # Get the plan's minimum daily charge, if defined.
+#         min_daily_charge = RATE_PLANS[utility][plan_name].get("minimumDailyCharge")
+#         adjusted_daily_costs[plan_name] = {
+#             day: max(day_cost, min_daily_charge) if min_daily_charge is not None else day_cost
+#             for day, day_cost in days.items()
+#         }
+#     return adjusted_daily_costs
+
+# def sum_daily_costs(adjusted_daily_costs):
+#     annual_costs = {}
+#     for plan_name, days in adjusted_daily_costs.items():
+#         annual_costs[plan_name] = sum(days.values())
+#     return annual_costs
+
+# def accumulate_daily_costs(load_profile, utility):
+#     """
+#     Iterate over the hourly load profile, calculate hourly costs for each plan,
+#     and accumulate these into daily totals.
+    
+#     Returns a dictionary structured as:
+#       { plan_name: { day_index: total_cost_for_day, ... }, ... }
+#     """
+#     daily_costs = defaultdict(lambda: defaultdict(float))
+#     start_dt = datetime(year=2023, month=1, day=1)
+    
+#     for hour_index, hourly_load in enumerate(load_profile):
+#         day_index = hour_index // 24  # integer day index
+#         current_dt = start_dt + timedelta(hours=hour_index)
+#         season = get_season(hour_index)
+        
+#         for plan_name, plan_details in RATE_PLANS[utility].items():
+#             hourly_cost = compute_hourly_cost(plan_details, season, current_dt, hourly_load)
+#             daily_costs[plan_name][day_index] += hourly_cost
+
+#     return daily_costs
+    
+# def calculate_annual_costs_electricity(load_profile, utility):
+#     """
+#     Calculates the annual electricity costs for a given hourly load profile and utility.
+    
+#     This function:
+#       1. Accumulates hourly costs into daily totals.
+#       2. Applies the minimum daily charge on a per‑day basis.
+#       3. Sums up the adjusted daily totals to produce annual costs.
+#     """
+#     daily_costs = accumulate_daily_costs(load_profile, utility)
+#     adjusted_daily_costs = apply_minimum_daily_charge(daily_costs, utility)
+#     annual_costs = sum_daily_costs(adjusted_daily_costs)
+
+#     return annual_costs
+
+# def calculate_annual_costs_electricity(load_profile, utility, rate_plan_name):
+#     from collections import defaultdict
+
+#     annual_costs = defaultdict(float)
+#     for hour_index, hourly_load in enumerate(load_profile):
+#         season = get_season(hour_index)
+#         current_datetime = datetime(year=2023, month=1, day=1) + timedelta(hours=hour_index)
+#         hour = current_datetime.hour
+
+#         for plan_details in RATE_PLANS[utility][rate_plan_name]:
+#             breakpoint()
+#             day_rates = plan_details.get(season)["weekdays"]
+#             if not day_rates:
+#                 continue
+
+#             # Determine hourly rate
+#             if hour in day_rates["peakHours"]:
+#                 rate = day_rates["peak"]
+#             elif hour in day_rates.get("partPeakHours", []):
+#                 rate = day_rates["partPeak"]
+#             else:
+#                 rate = day_rates["offPeak"]
+
+#             # Calculate hourly cost
+#             energy_cost = hourly_load * rate
+#             annual_costs[rate_plan_name] += energy_cost
+
+#             # Add fixed charges
+#             fixed_charge = day_rates.get("fixedCharge", 0.0)
+#             annual_costs[rate_plan_name] += fixed_charge / 12  # Spread across months
+
+#     return annual_costs
+
+# def calculate_annual_costs_electricity(load_profile, utility, rate_plan_name):
+#     from collections import defaultdict
+#     from datetime import datetime, timedelta
+
+#     annual_costs = defaultdict(float)
+#     plan_details = RATE_PLANS[utility][rate_plan_name]  # This is a dict with "summer" and "winter"
+
+#     for hour_index, hourly_load in enumerate(load_profile):
+#         season = get_season(hour_index)
+#         current_datetime = datetime(year=2023, month=1, day=1) + timedelta(hours=hour_index)
+#         hour = current_datetime.hour
+
+#         # Get the rates for the current season
+#         day_rates = plan_details.get(season)
+#         if not day_rates:
+#             continue
+
+#         # Determine hourly rate
+#         if hour in day_rates["peakHours"]:
+#             rate = day_rates["peak"]
+#         elif "partPeakHours" in day_rates and hour in day_rates.get("partPeakHours", []):
+#             rate = day_rates["partPeak"]
+#         else:
+#             rate = day_rates["offPeak"]
+
+#         # Calculate hourly cost
+#         energy_cost = hourly_load * rate
+#         annual_costs[rate_plan_name] += energy_cost
+
+#         # Add fixed charges (spread monthly)
+#         fixed_charge = day_rates.get("fixedCharge", 0.0)
+#         annual_costs[rate_plan_name] += fixed_charge / 12
+
+#     return annual_costs
+
+# TODO: Implement minimum daily charge, baseline credits
+def calculate_annual_costs_electricity(load_profile, utility, rate_plan_name):
     annual_costs = defaultdict(float)
+    # Now plan_details has a nested structure: season -> {weekdays, weekends}
+    plan_details = RATE_PLANS[utility][rate_plan_name]
+
     for hour_index, hourly_load in enumerate(load_profile):
         season = get_season(hour_index)
         current_datetime = datetime(year=2023, month=1, day=1) + timedelta(hours=hour_index)
         hour = current_datetime.hour
 
-        for plan_name, plan_details in RATE_PLANS["PGE"].items():
-            season_rates = plan_details.get(season)
-            if not season_rates:
-                continue
+        # Determine whether the current day is a weekday (Monday-Friday) or weekend (Saturday-Sunday)
+        dayotw_type = "weekdays" # if current_datetime.weekday() < 5 else "weekends"
 
-            # Determine hourly rate
-            if hour in season_rates["peakHours"]:
-                rate = season_rates["peak"]
-            elif hour in season_rates.get("partPeakHours", []):
-                rate = season_rates["partPeak"]
-            else:
-                rate = season_rates["offPeak"]
+        # Retrieve the seasonal rates and then the appropriate day type rates
+        season_rates = plan_details.get(season)
+        if not season_rates:
+            continue
 
-            # Calculate hourly cost
-            energy_cost = hourly_load * rate
-            annual_costs[plan_name] += energy_cost
+        dayotw_rates = season_rates.get(dayotw_type)
+        if not dayotw_rates:
+            continue
 
-            # Add fixed charges
-            fixed_charge = season_rates.get("fixedCharge", 0.0)
-            annual_costs[plan_name] += fixed_charge / 12  # Spread across months
+        if hour in dayotw_rates.get("peakHours", []):
+            rate = dayotw_rates.get("peak", 0.0)
+        elif "partPeakHours" in dayotw_rates and hour in dayotw_rates.get("partPeakHours", []):
+            rate = dayotw_rates["partPeak"]
+        elif "superOffPeakHours" in dayotw_rates and hour in dayotw_rates.get("superOffPeakHours", []):
+            rate = dayotw_rates["superOffPeak"]
+        else:
+            rate = dayotw_rates.get("offPeak", 0.0)
+
+        # Calculate the cost for the hour
+        energy_cost = hourly_load * rate
+        annual_costs[rate_plan_name] += energy_cost
+
+        # Include fixed charges if available (spread monthly)
+        fixed_charge = dayotw_rates.get("fixedCharge", 0.0)
+        annual_costs[rate_plan_name] += fixed_charge / 12
 
     return annual_costs
-
-def process_county_scenario(file_path, county, load_type):
+    
+def process_county_scenario(file_path, county, utility, selected_rate_plan, load_type):
     file = os.path.join(file_path, county, f"{INPUT_FILE_NAME}_{county}.csv")
 
     if not os.path.exists(file):
@@ -187,7 +283,7 @@ def process_county_scenario(file_path, county, load_type):
 
     load_profile = df[column_name].tolist()
 
-    return calculate_annual_costs_electricity(load_profile)
+    return calculate_annual_costs_electricity(load_profile, utility, selected_rate_plan)
 
 def build_results_df(scenario, annual_costs, annual_costs_solarstorage):
     """
@@ -241,43 +337,57 @@ def update_csv_with_results(output_file_path, results_df):
     else:
         return results_df
     
-def process(base_input_dir, base_output_dir, scenario, housing_types, counties):
+def process(base_input_dir, base_output_dir, scenario, housing_type, counties, pge_rate_plan_name, sce_rate_plan_name, sdge_rate_plan_name):
     timestamp = get_timestamp()
+    build_utilities_to_counties()
 
-    for housing_type in housing_types:
-        scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
-        scenario_counties = get_counties(scenario_path, counties)
+    scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
+    scenario_counties = get_counties(scenario_path, counties)
 
-        for county in scenario_counties:
-            annual_costs = process_county_scenario(scenario_path, county, "default")
-            annual_costs_solarstorage = process_county_scenario(scenario_path, county, "solarstorage")
-            annual_costs_results = build_results_df(scenario, annual_costs, annual_costs_solarstorage)
+    for county in scenario_counties:
+        utility = get_utility_for_county(county)
 
-            output_file_path = get_output_file_path(base_output_dir, scenario, housing_type, county, timestamp)
-            combined_df = update_csv_with_results(output_file_path, annual_costs_results)
+        # select appropriate rate plan for utility
+        if utility == "PG&E":
+            selected_rate_plan = pge_rate_plan_name
+        elif utility == "SCE":
+            selected_rate_plan = sce_rate_plan_name
+        elif utility == "SDG&E":
+            selected_rate_plan = sdge_rate_plan_name
+        else:
+            selected_rate_plan = None
 
-            log(
-                at="step11_evaluate_electricity_rates",
-                county=county,
-                annual_electricity_costs_ETOUC=to_number(annual_costs['E-TOU-C']),
-                annual_electricity_costs_ETOUD=to_number(annual_costs['E-TOU-D']),
-                annual_electricity_costs_EV2A=to_number(annual_costs['EV2-A']),
-                annual_electricity_costs_EELEC=to_number(annual_costs['E-ELEC']),
-                annual_electricity_costs_solarstorage_ETOUC=to_number(annual_costs_solarstorage['E-TOU-C']),
-                annual_electricity_costs_solarstorage_ETOUD=to_number(annual_costs_solarstorage['E-TOU-D']),
-                annual_electricity_costs_solarstorage_EV2A=to_number(annual_costs_solarstorage['EV2-A']),
-                annual_electricity_costs_solarstorage_EELEC=to_number(annual_costs_solarstorage['E-ELEC']),
-                saved_to=output_file_path
-            )
+        # Process the county's scenario using the selected rate plan.
+        annual_costs = process_county_scenario(scenario_path, county, utility, selected_rate_plan, "default")
+        annual_costs_solarstorage = process_county_scenario(scenario_path, county, utility, selected_rate_plan, "solarstorage")
+        annual_costs_results = build_results_df(scenario, annual_costs, annual_costs_solarstorage) #  utility)
 
-            combined_df.to_csv(output_file_path, index_label="scenario")
+        output_file_path = get_output_file_path(base_output_dir, scenario, housing_type, county, timestamp)
+        combined_df = update_csv_with_results(output_file_path, annual_costs_results)
+
+        log(
+            at="step11_evaluate_electricity_rates",
+            county=county,
+            utility=utility,
+            selected_rate_plan=selected_rate_plan,
+            annual_electricity_costs_ETOUC=to_number(annual_costs['E-TOU-C']),
+            annual_electricity_costs_ETOUD=to_number(annual_costs['E-TOU-D']),
+            annual_electricity_costs_EV2A=to_number(annual_costs['EV2-A']),
+            annual_electricity_costs_EELEC=to_number(annual_costs['E-ELEC']),
+            annual_electricity_costs_solarstorage_ETOUC=to_number(annual_costs_solarstorage['E-TOU-C']),
+            annual_electricity_costs_solarstorage_ETOUD=to_number(annual_costs_solarstorage['E-TOU-D']),
+            annual_electricity_costs_solarstorage_EV2A=to_number(annual_costs_solarstorage['EV2-A']),
+            annual_electricity_costs_solarstorage_EELEC=to_number(annual_costs_solarstorage['E-ELEC']),
+            saved_to=output_file_path
+        )
+
+        combined_df.to_csv(output_file_path, index_label="scenario")
 
 
-# base_input_dir = "data"
-# base_output_dir = "data"
-# counties = ["alameda"]
-# scenarios = ["baseline"]
-# housing_types = ["single-family-detached"]
-# load_type = "default" # default, solarstorage
+base_input_dir = "data/loadprofiles"
+base_output_dir = "data/loadprofiles"
+counties = ['Alameda County']
+scenario = "baseline"
+housing_type = "single-family-detached"
 
-# process(base_input_dir, base_output_dir, scenarios, housing_types, counties, load_type)
+process(base_input_dir, base_output_dir, scenario, housing_type, counties, "EV2-A", "", "")

@@ -12,6 +12,7 @@ import step11_evaluate_electricity_rates as EvaluateElectricityRates
 # import step12_evaluate_capital_costs
 import step13_combine_total_annual_costs as CombineTotalAnnualCosts
 import step14_build_maps as BuildMaps
+import step15_build_difference_maps as BuildDifferenceMaps
 
 class CostService:
     SCENARIOS = {
@@ -22,8 +23,7 @@ class CostService:
         # "heat_pump_heating_cooling_water_heater_and_induction_stove": ["heating", "cooling", "hot_water", "appliances", "cooking", "misc"]
     }
 
-    def __init__(self, initial_csv, scenario, housing_type, counties, input_dir, output_dir):
-        self.csv_file = initial_csv
+    def __init__(self, scenario, housing_type, counties, input_dir, output_dir):
         self.scenario = scenario
         self.housing_type = housing_type
         self.counties = counties
@@ -35,14 +35,14 @@ class CostService:
 
     def run(self):
         self.log_step(1)
-        result = IdentifySuitableBuildings.process(self.scenario, self.housing_type, output_base_dir="data", target_counties=self.counties, force_recompute=True)
+        IdentifySuitableBuildings.process(self.scenario, self.housing_type, output_base_dir="data", target_counties=self.counties, force_recompute=True)
 
         self.log_step(2)
-        result = PullBuildings.process(self.scenario, self.housing_type, self.counties, output_base_dir="data", download_new_files=True) # output directory should just be 'data', not 'loadprofiles'
+        PullBuildings.process(self.scenario, self.housing_type, self.counties, output_base_dir="data", download_new_files=True) # output directory should just be 'data', not 'loadprofiles'
     
         self.log_step(3)
         # Make sure I don't pull load profiles on every run, only if they don't already exist
-        result = BuildElectricityLoadProfiles.process(self.SCENARIOS, [self.housing_type], self.counties, "data", "data/loadprofiles", force_recompute=False)
+        result = BuildElectricityLoadProfiles.process(self.SCENARIOS, [self.housing_type], self.counties, "data", "data/loadprofiles", force_recompute=True)
 
         self.log_step(4)
         result = BuildGasLoadProfiles.process(self.SCENARIOS, [self.housing_type], "data", "data/loadprofiles", self.counties)
@@ -54,10 +54,10 @@ class CostService:
         result = CombineRealAndSimulatedProfiles.process("data/loadprofiles", "data/loadprofiles", list(self.SCENARIOS.keys()), [self.housing_type], self.counties)
     
         self.log_step(7)
-        result = WeatherFiles.process("data/loadprofiles", "data/loadprofiles", list(self.SCENARIOS.keys()), [self.housing_type], self.counties)
+        result = WeatherFiles.process("data/loadprofiles", "data/loadprofiles", list(self.SCENARIOS.keys()), [self.housing_type], 2018, self.counties)
 
         self.log_step(8)
-        result = RunSamModelForSolarStorage.process("data/loadprofiles", "data/loadprofiles", list(self.SCENARIOS.keys()), [self.housing_type], self.counties)
+        result = RunSamModelForSolarStorage.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties)
 
         self.log_step(9)
         result = GetLoadsForRates.process("data/loadprofiles", "data/loadprofiles", list(self.SCENARIOS.keys()), [self.housing_type], self.counties)
@@ -66,22 +66,20 @@ class CostService:
         result = EvaluateGasRates.process("data/loadprofiles", "data/loadprofiles", scenario, [self.housing_type], self.counties)
 
         self.log_step(11)
-        result = EvaluateElectricityRates.process("data/loadprofiles", "data/loadprofiles", scenario, [self.housing_type], self.counties)
+        result = EvaluateElectricityRates.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties)
 
         CombineTotalAnnualCosts.process("data/loadprofiles", "data/loadprofiles", scenario, [self.housing_type], self.counties)
 
         BuildMaps.process("data/loadprofiles", "data/loadprofiles", scenario, [self.housing_type], self.counties)
         
-        return self.csv_file
+        BuildDifferenceMaps.process("data/loadprofiles", "data/loadprofiles", housing_type, counties, "baseline", "baseline", "baseline", "baseline.solarstorage")
     
 
-initial_csv = "initial_data.csv" # TODO: update
-
-# scenario = "baseline"
-scenario = "heat_pump"
+scenario = "baseline"
+# scenario = "heat_pump"
 # scenario = "induction_stove"
 housing_type = "single-family-detached"
-counties = ["Marin County"]
+counties = ["Colusa County"]
 input_dir = "data"
 output_dir = "data/loadprofiles"
 
@@ -110,7 +108,7 @@ socal_counties = [
     "San Diego County", "Imperial County"  # San Diego & Imperial
 ]
 # norcal_counties + central_counties
-cost_service = CostService(initial_csv, scenario, housing_type, counties=norcal_counties + central_counties + socal_counties, input_dir=input_dir, output_dir=output_dir)
+cost_service = CostService(scenario, housing_type, counties=norcal_counties + central_counties + socal_counties, input_dir=input_dir, output_dir=output_dir)
 
 final_csv = cost_service.run()
 

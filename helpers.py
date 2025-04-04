@@ -9,9 +9,10 @@ norcal_counties = [
     "Alameda County", "Contra Costa County", "Marin County", "Napa County", 
     "San Francisco County", "San Mateo County", "Santa Clara County", "Solano County", "Sonoma County",  # Bay Area
     "Del Norte County", "Humboldt County", "Lake County", "Mendocino County", "Trinity County",  # North Coast
-    "Butte County", "Colusa County", "Glenn County", "Lassen County", "Modoc County", 
-    "Nevada County", "Plumas County", "Shasta County", "Sierra County", "Siskiyou County", "Tehama County",  # North Valley & Sierra
+    "Butte County", "Colusa County", # "Glenn County", "Lassen County", "Modoc County", 
+    "Nevada County", "Plumas County", "Shasta County", "Sierra County", "Tehama County",  # "Siskiyou County", # North Valley & Sierra
 ]
+# Counties with no buildings: Glenn, Modoc, Siskiyou
 
 central_counties = [
     "Fresno County", "Kern County", "Kings County", "Madera County", "Merced County", 
@@ -135,5 +136,4 @@ def to_decimal_number(number):
 
 
 def format_load_profile(load_profile):
-    return [round(x, 2) for x in load_profile[:24]]
-    
+    return [round(x, 3) for x in load_profile[5:20]]

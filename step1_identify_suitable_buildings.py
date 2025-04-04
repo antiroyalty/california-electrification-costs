@@ -3,14 +3,20 @@ import os
 import re
 from helpers import LOADPROFILES, slugify_county_name, log, norcal_counties, socal_counties, central_counties
 
+# Metadata downloaded from:
+# 2024 edition of Resstock_AMY2018_release_2
+# https://data.openei.org/s3_viewer?bucket=oedi-data-lake&prefix=nrel-pds-building-stock%2Fend-use-load-profiles-for-us-building-stock%2F2024%2Fresstock_amy2018_release_2%2Fmetadata_and_annual_results%2Fby_state%2Fstate%3DCA%2Fcsv%2F
+# Instead, I could try 2024 TMY data available here:
+# https://data.openei.org/s3_viewer?bucket=oedi-data-lake&prefix=nrel-pds-building-stock%2Fend-use-load-profiles-for-us-building-stock%2F2024%2Fresstock_dataset_2024.1%2Fresstock_tmy3%2Fmetadata_and_annual_results%2Fby_state%2Fstate%3DCA%2Fcsv%2FBaseline%2F
+# But currently I use AMY2018
 SCENARIOS = {
     "baseline": {
-        # "in.vacancy_status": "Occupied",
+        "in.vacancy_status": "Occupied",
         "in.cooking_range": ["Gas"],
         "in.heating_fuel": "Natural Gas",
         "in.water_heater_fuel": "Natural Gas",
-        "in.has_pv": "No",
-        "in.hvac_cooling_type": None, # May not apply for central valley / socal
+        # "in.has_pv": "No",
+        # "in.hvac_cooling_type": None, # May not apply for central valley / socal
         "in.tenure": "Owner",
         # TODO: Ana, investigate whether we can get results for Owned vs. Rented
     },
@@ -86,6 +92,7 @@ def save_building_ids(filtered_metadata, scenario, county, output_dir):
 
 def process(scenario, housing_type, output_base_dir="data", target_counties=None, force_recompute=True):
     if scenario != "baseline":
+        log(at="step1_identify_suitable_buildings", message="not baseline scenario, no need to download new files", scenario=scenario)
         return [] # Early return; we only need to filter metadata for baseline -- for all other runs, use baseline metadata and buildings, and convert them using thermo properties
 
     metadata = get_metadata(scenario)
