@@ -5,3 +5,7 @@ wip-outputs
 images
 .DS_Store
 .env
+visualizations/
+SAM_configuration/
+cb_2018_us_county_20m
+cb_2018_us_county_20m.zip

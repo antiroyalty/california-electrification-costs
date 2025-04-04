@@ -1,4 +1,4 @@
-Number of buildings matching current metadata:
+Number of buildings matching metadata:
 
     "baseline": {
         "in.cooking_range": ["Gas"],
