@@ -14,15 +14,9 @@ import pandas as pd
 from collections import defaultdict
 from datetime import datetime, timedelta
 from helpers import get_counties, get_scenario_path, log, to_number, get_timestamp, norcal_counties, socal_counties, central_counties, slugify_county_name
-from electricity_rate_helpers import PGE_COUNTIES, SCE_COUNTIES, SDGE_COUNTIES, PGE_RATE_PLANS, SCE_RATE_PLANS, SDGE_RATE_PLANS
+from electricity_rate_helpers import PGE_RATE_PLANS, SCE_RATE_PLANS, SDGE_RATE_PLANS
+from utility_helpers import get_utility_for_county
 
-utility_to_counties = {
-    # No California utilities serve: Del Norte, Siskiyou, Modoc
-    # https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_MAPS_Service%20Area%20Map.pdf
-    "PG&E": PGE_COUNTIES, # note that PG&E doesn't serve: Del Norte, Siskiyou, Modoc, Trinity, Lassen, Sierra, Mono, Inyo, San Bernadino, Los Angeles, Ventura, Orange, Riverside, San Diego, Imperial
-    "SCE": SCE_COUNTIES,
-    "SDG&E": SDGE_COUNTIES,
-}
 
 RATE_PLANS = {
     "PG&E": PGE_RATE_PLANS,
@@ -41,16 +35,6 @@ def get_season(hour_index):
     month = current_datetime.month
     return 'summer' if 6 <= month <= 9 else 'winter'
 
-# Build the mapping from utility to counties
-county_slug_to_utility = {}
-def build_utilities_to_counties():
-    for utility, county_list in utility_to_counties.items():
-        for county in county_list:
-            slug = slugify_county_name(county)
-            county_slug_to_utility[slug] = utility
-
-def get_utility_for_county(county_slug):
-    return county_slug_to_utility.get(county_slug, "PG&E")
 
 def is_weekend(dt):
     return dt.weekday() >= 5
@@ -81,154 +65,6 @@ def get_hourly_rate(rate_section, hour):
         return rate_section["superOffPeak"]
     else:
         return rate_section["offPeak"]
-    
-# def compute_hourly_cost(plan_details, season, current_dt, hourly_load):
-#     """
-#     Given a rate plan's details, the season, a datetime (current_dt), and the hourly load,
-#     return the cost for that hour. This includes the energy cost and the prorated fixed charge.
-    
-#     """
-#     # Get the rate section for the current day (weekday/weekend) if applicable.
-#     rate_section = select_rate_section(plan_details, season, current_dt)
-#     if not rate_section:
-#         return 0.0
-
-#     hour = current_dt.hour
-#     rate = get_hourly_rate(rate_section, hour)
-#     energy_cost = hourly_load * rate
-
-#     # Retrieve the fixed charge from the rate section if present, else from the season level.
-#     fixed_charge = rate_section.get("fixedCharge", plan_details.get(season, {}).get("fixedCharge", 0.0)) # is fixed 
-#     # Spread the fixed charge over 24 hours.
-#     return energy_cost + (fixed_charge / 24)
-
-# def apply_minimum_daily_charge(daily_costs, utility):
-#     """
-#     For each rate plan and each day, apply the minimum daily charge if it is defined.
-#     Daily minimum is a floor, ensuring that the total daily bill does not drop below this threshold
-    
-#     Returns an adjusted daily costs dictionary with the minimum applied.
-#     """
-#     adjusted_daily_costs = {}
-#     for plan_name, days in daily_costs.items():
-#         # Get the plan's minimum daily charge, if defined.
-#         min_daily_charge = RATE_PLANS[utility][plan_name].get("minimumDailyCharge")
-#         adjusted_daily_costs[plan_name] = {
-#             day: max(day_cost, min_daily_charge) if min_daily_charge is not None else day_cost
-#             for day, day_cost in days.items()
-#         }
-#     return adjusted_daily_costs
-
-# def sum_daily_costs(adjusted_daily_costs):
-#     annual_costs = {}
-#     for plan_name, days in adjusted_daily_costs.items():
-#         annual_costs[plan_name] = sum(days.values())
-#     return annual_costs
-
-# def accumulate_daily_costs(load_profile, utility):
-#     """
-#     Iterate over the hourly load profile, calculate hourly costs for each plan,
-#     and accumulate these into daily totals.
-    
-#     Returns a dictionary structured as:
-#       { plan_name: { day_index: total_cost_for_day, ... }, ... }
-#     """
-#     daily_costs = defaultdict(lambda: defaultdict(float))
-#     start_dt = datetime(year=2023, month=1, day=1)
-    
-#     for hour_index, hourly_load in enumerate(load_profile):
-#         day_index = hour_index // 24  # integer day index
-#         current_dt = start_dt + timedelta(hours=hour_index)
-#         season = get_season(hour_index)
-        
-#         for plan_name, plan_details in RATE_PLANS[utility].items():
-#             hourly_cost = compute_hourly_cost(plan_details, season, current_dt, hourly_load)
-#             daily_costs[plan_name][day_index] += hourly_cost
-
-#     return daily_costs
-    
-# def calculate_annual_costs_electricity(load_profile, utility):
-#     """
-#     Calculates the annual electricity costs for a given hourly load profile and utility.
-    
-#     This function:
-#       1. Accumulates hourly costs into daily totals.
-#       2. Applies the minimum daily charge on a per‑day basis.
-#       3. Sums up the adjusted daily totals to produce annual costs.
-#     """
-#     daily_costs = accumulate_daily_costs(load_profile, utility)
-#     adjusted_daily_costs = apply_minimum_daily_charge(daily_costs, utility)
-#     annual_costs = sum_daily_costs(adjusted_daily_costs)
-
-#     return annual_costs
-
-# def calculate_annual_costs_electricity(load_profile, utility, rate_plan_name):
-#     from collections import defaultdict
-
-#     annual_costs = defaultdict(float)
-#     for hour_index, hourly_load in enumerate(load_profile):
-#         season = get_season(hour_index)
-#         current_datetime = datetime(year=2023, month=1, day=1) + timedelta(hours=hour_index)
-#         hour = current_datetime.hour
-
-#         for plan_details in RATE_PLANS[utility][rate_plan_name]:
-#             breakpoint()
-#             day_rates = plan_details.get(season)["weekdays"]
-#             if not day_rates:
-#                 continue
-
-#             # Determine hourly rate
-#             if hour in day_rates["peakHours"]:
-#                 rate = day_rates["peak"]
-#             elif hour in day_rates.get("partPeakHours", []):
-#                 rate = day_rates["partPeak"]
-#             else:
-#                 rate = day_rates["offPeak"]
-
-#             # Calculate hourly cost
-#             energy_cost = hourly_load * rate
-#             annual_costs[rate_plan_name] += energy_cost
-
-#             # Add fixed charges
-#             fixed_charge = day_rates.get("fixedCharge", 0.0)
-#             annual_costs[rate_plan_name] += fixed_charge / 12  # Spread across months
-
-#     return annual_costs
-
-# def calculate_annual_costs_electricity(load_profile, utility, rate_plan_name):
-#     from collections import defaultdict
-#     from datetime import datetime, timedelta
-
-#     annual_costs = defaultdict(float)
-#     plan_details = RATE_PLANS[utility][rate_plan_name]  # This is a dict with "summer" and "winter"
-
-#     for hour_index, hourly_load in enumerate(load_profile):
-#         season = get_season(hour_index)
-#         current_datetime = datetime(year=2023, month=1, day=1) + timedelta(hours=hour_index)
-#         hour = current_datetime.hour
-
-#         # Get the rates for the current season
-#         day_rates = plan_details.get(season)
-#         if not day_rates:
-#             continue
-
-#         # Determine hourly rate
-#         if hour in day_rates["peakHours"]:
-#             rate = day_rates["peak"]
-#         elif "partPeakHours" in day_rates and hour in day_rates.get("partPeakHours", []):
-#             rate = day_rates["partPeak"]
-#         else:
-#             rate = day_rates["offPeak"]
-
-#         # Calculate hourly cost
-#         energy_cost = hourly_load * rate
-#         annual_costs[rate_plan_name] += energy_cost
-
-#         # Add fixed charges (spread monthly)
-#         fixed_charge = day_rates.get("fixedCharge", 0.0)
-#         annual_costs[rate_plan_name] += fixed_charge / 12
-
-#     return annual_costs
 
 # TODO: Implement minimum daily charge, baseline credits
 def calculate_annual_costs_electricity(load_profile, utility, rate_plan_name):
@@ -359,7 +195,6 @@ def utility_to_rate_plans(utility: str):
     
 def process(base_input_dir, base_output_dir, scenario, housing_type, counties):
     timestamp = get_timestamp()
-    build_utilities_to_counties()
 
     scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
     scenario_counties = get_counties(scenario_path, counties)
@@ -367,6 +202,7 @@ def process(base_input_dir, base_output_dir, scenario, housing_type, counties):
     for county in scenario_counties:
         results_df = pd.DataFrame()
         utility = get_utility_for_county(county)
+        assert utility is not None, f"Utility not found for county: {county}"
         rate_plans = utility_to_rate_plans(utility)
         
         log_kwargs = {}

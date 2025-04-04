@@ -1,128 +1,29 @@
 # PG&E October 2024 Gas Rate Structure
 import os
 import pandas as pd
+from typing import Any
 
 from helpers import get_counties, get_scenario_path, slugify_county_name, log, to_number, get_timestamp
+from gas_rate_helpers import BASELINE_ALLOWANCES, GAS_RATE_PLANS, PGE_RATE_TERRITORY_COUNTY_MAPPING
+from utility_helpers import  get_utility_for_county
 
-# Need mapping from county to service region
-# Need other utilities gas rates
-
-# Baseline Allowance for Residential Gas Rates (in therms/day)
-# TODO: Ana, go more granular in the data so that we can more easily map to the PG&E and SCE climate zones / tarrif regions
-# Gas rates also have baseline summer / winter allowances
-# https://www.pge.com/tariffs/assets/pdf/tariffbook/GAS_SCHEDS_G-1.pdf
-# https://www.pge.com/tariffs/assets/pdf/tariffbook/GAS_MAPS_Service_Area_Map.pdf
-# https://www.cpuc.ca.gov/news-and-updates/all-news/breaking-down-pges-natural-gas-costs-and-rates
-BASELINE_ALLOWANCES = {
-    "PGE": {
-        "G-1": {
-            "territories": {
-                "P": {
-                    "summer": 0.39,  # therms/day/dwelling unit
-                    "winter_offpeak": 1.88,
-                    "winter_onpeak": 2.19,
-                },
-                "Q": {
-                    "summer": 0.56,
-                    "winter_offpeak": 1.48,
-                    "winter_onpeak": 2.00,
-                },
-                "R": {
-                    "summer": 0.36,
-                    "winter_offpeak": 1.24,
-                    "winter_onpeak": 1.81,
-                },
-                "S": {
-                    "summer": 0.39,
-                    "winter_offpeak": 1.38,
-                    "winter_onpeak": 1.94,
-                },
-                "T": {
-                    "summer": 0.56,
-                    "winter_offpeak": 1.31,
-                    "winter_onpeak": 1.68,
-                },
-                "V": {
-                    "summer": 0.59,
-                    "winter_offpeak": 1.51,
-                    "winter_onpeak": 1.71,
-                },
-                "W": {
-                    "summer": 0.39,
-                    "winter_offpeak": 1.14,
-                    "winter_onpeak": 1.68,
-                },
-                "X": {
-                    "summer": 0.49,
-                    "winter_offpeak": 1.48,
-                    "winter_onpeak": 2.00,
-                },
-                "Y&Z": {
-                    "summer": 0.72,
-                    "winter_offpeak": 2.22,
-                    "winter_onpeak": 2.58,
-                }
-            }
-        }
-    }
-}
-
-# Residential gas rates have baseline allowances:
-# https://www.pge.com/tariffs/assets/pdf/tariffbook/GAS_SCHEDS_G-1.pdf
-RATE_PLANS = {
-    "PGE": {
-        "G-1": {
-            "baseline": {
-                "procurement_charge": 0.35402,  # per therm
-                "transportation_charge": 1.94995,  # per therm
-                "total_charge": 2.30397,  # per therm
-            },
-            "excess": {
-                "procurement_charge": 0.35402,  # per therm
-                "transportation_charge": 2.44371,  # per therm
-                "total_charge": 2.79773,  # per therm
-            }
-        },
-    } # TODO: There is also a gas public purpose program (G-PPPS) that comes with surcharges
-}
-
-# Baseline allowance map
-PGE_RATE_TERRITORY_COUNTY_MAPPING = {
-    "T": [slugify_county_name(county) for county in ["Marin", "San Francisco", "San Mateo"]],
-    "Q": [slugify_county_name(county) for county in ["Santa Cruz", "Monterey"]],
-    "X": [slugify_county_name(county) for county in [
-        "San Luis Obispo", "San Benito", "Santa Clara", 
-        "Alameda", "Contra Costa", "Napa", "Sonoma", 
-        "Mendocino", "Santa Barbara", "Solano", "Del Norte"
-    ]], # TODO: Ana, Double check whether Solano and Del Norte are correctly placed here
-    "P": [slugify_county_name(county) for county in [
-        "Placer", "El Dorado", "Amador", "Calaveras", "Lake"
-    ]],
-    "S": [slugify_county_name(county) for county in [
-        "Glenn", "Colusa", "Yolo", "Sutter", "Butte", "Yuba",
-        "Sacramento", "Stanislaus", "San Joaquin", "Solano", "Sutter"
-    ]],
-    "R": [slugify_county_name(county) for county in [
-        "Merced", "Fresno", "Madera", "Mariposa", "Tehama"
-    ]],
-    "Y&Z": [slugify_county_name(county) for county in [
-        "Nevada", "Plumas", "Humboldt", "Trinity", "Tulare", "Lassen"
-        "Lake", "Shasta", "Sierra", "Alpine", "Mono", "Toulumne"
-    ]],
-    "W": [slugify_county_name(county) for county in [
-        "Kings", 
-        # Revisit these
-        "Kern", "Inyo", "Mono", "Los Angeles", "Ventura", "San Bernadino", "Sierra", "Plumas", "Modoc", "Sisikiyou"
-    ]]
-}
-
-# Revisit these (SCE or SDGE): Kern, Inyo, Mono, Los Angeles, Ventura, San Bernadino, Sierra, Plumas, Modoc, Sisikiyou
 
 INPUT_FILE_NAME = "loadprofiles_for_rates"
 OUTPUT_FILE_NAME = "RESULTS_gas_annual_costs"
 OUTPUT_COLUMNS = ["county", "scenario", "housing_type", "territory", "annual_cost"]
 
 LOAD_FOR_RATE_GAS_COLUMN_SUFFIX = ".gas.therms"
+
+def utility_to_rate_plans(utility: str) -> dict[str, Any]:
+    match utility:
+        case "PG&E":
+            return GAS_RATE_PLANS["PG&E"]
+        case "SCE":
+            return GAS_RATE_PLANS["SCE"]
+        case "SDG&E":
+            return GAS_RATE_PLANS["SDG&E"]
+        case _:
+            raise ValueError(f"Unknown utility: {utility}")
 
 def categorize_season(month_number):
     # TODO, Ana: Make sure that these season categorizations are the same for each utility
@@ -145,19 +46,20 @@ def sum_therms_by_season(gas_data, load_type):
     return therms_by_season, total_therms
 
 # TODO, Ana: this currently only works for PG&E rates. Add SCE and SDGE rates too.
-def calculate_annual_costs_gas(load_profile_df, territory, load_type):
+def calculate_annual_costs_gas(load_profile_df, territory, load_type, utility, rate_plan: str) -> float:
     seasonal_therms, total_therms = sum_therms_by_season(load_profile_df, load_type)
     
     total_cost = 0.0
     
     for season, therms_used in seasonal_therms.items():
         # Retrieve the baseline allowance for the season
-        baseline = BASELINE_ALLOWANCES["PGE"]["G-1"]["territories"][territory][season]
+
+        baseline = BASELINE_ALLOWANCES[utility][rate_plan]["territories"][territory][season]
         
         if therms_used <= baseline:
-            rate = RATE_PLANS["PGE"]["G-1"]["baseline"]["total_charge"]
+            rate = GAS_RATE_PLANS[utility][rate_plan]["baseline"]["total_charge"]
         else:
-            rate = RATE_PLANS["PGE"]["G-1"]["excess"]["total_charge"]
+            rate = GAS_RATE_PLANS[utility][rate_plan]["excess"]["total_charge"]
         
         seasonal_cost = therms_used * rate
         total_cost += seasonal_cost
@@ -178,7 +80,7 @@ def get_territory_for_county(county):
         log(message="Step10@get_territory_for_county: County to gas territory mapping not specified", county=county)
         return "T" # use T as default for now
 
-def process_county_scenario(scenario_path, county, load_type):
+def process_county_scenario(scenario_path, county, load_type, utility, rate_plan: str):
     file = os.path.join(scenario_path, county, f"{INPUT_FILE_NAME}_{county}.csv")
 
     if not os.path.exists(file):
@@ -192,7 +94,7 @@ def process_county_scenario(scenario_path, county, load_type):
     load_profile_df["month"] = load_profile_df["timestamp"].dt.month
     territory = get_territory_for_county(county)
     
-    return calculate_annual_costs_gas(load_profile_df, territory, load_type)
+    return calculate_annual_costs_gas(load_profile_df, territory, load_type=load_type, utility=utility, rate_plan=rate_plan)
 
 def get_output_file_path(base_output_dir, scenario, housing_type, county, timestamp):
     output_path = os.path.join(
@@ -220,6 +122,15 @@ def update_csv_with_results(output_file_path, results_df):
     else:
         return results_df
     
+def update_df_with_results(orig_df, new_df):
+    """
+    Update the original DataFrame with new results.
+    """
+    for idx in new_df.index:
+        for col in new_df.columns:
+            orig_df.loc[idx, col] = new_df.loc[idx, col]
+    return orig_df
+    
 def build_results_df(scenario, annual_costs, annual_costs_solarstorage):
     data = {"gas.usd": [annual_costs, annual_costs_solarstorage]}
     index = [scenario, f"{scenario}.solarstorage"]
@@ -235,29 +146,41 @@ def process(base_input_dir, base_output_dir, scenario, housing_types, counties):
         scenario_counties = get_counties(scenario_path, counties)
 
         for county in scenario_counties:
+            results_df = pd.DataFrame()
+            utility = get_utility_for_county(county)
+            assert utility is not None, f"Utility not found for county: {county}"
+            rate_plans = utility_to_rate_plans(utility)
 
-            annual_costs = process_county_scenario(scenario_path, county, "default")
-            annual_costs_solarstorage = process_county_scenario(scenario_path, county, "solarstorage")
-            annual_costs_results = build_results_df(scenario, annual_costs, annual_costs_solarstorage)
+            log_kwargs = {}
+            for rate_plan in rate_plans:
+                annual_costs = process_county_scenario(scenario_path, county, load_type="default", utility=utility, rate_plan=rate_plan)
+                annual_costs_solarstorage = process_county_scenario(scenario_path, county, load_type="solarstorage", utility=utility, rate_plan=rate_plan)
+                annual_costs_results = build_results_df(scenario, annual_costs, annual_costs_solarstorage)
+
+                results_df = update_df_with_results(results_df, annual_costs_results)
+
+                log_kwargs.update({
+                    f"annual_electricity_costs_{rate_plan}": to_number(annual_costs or 0.0),
+                    f"annual_electricity_costs_solarstorage_{rate_plan}": to_number(annual_costs_solarstorage or 0.0)
+                })  
 
             output_file_path = get_output_file_path(base_output_dir, scenario, housing_type, county, timestamp)
-            combined_df = update_csv_with_results(output_file_path, annual_costs_results)
+            combined_df = update_csv_with_results(output_file_path, results_df)
+            combined_df.to_csv(output_file_path, index_label="scenario")
 
             log(
                 at="step10_evaluate_gas_rates",
                 county=county,
-                annual_gas_costs=to_number(annual_costs),
-                annual_gas_costs_solarstorage=to_number(annual_costs_solarstorage),
+                **log_kwargs,
                 saved_to=output_file_path,
             )
 
-            combined_df.to_csv(output_file_path, index_label="scenario")
 
-# base_input_dir = "data"
-# base_output_dir = "data"
-# counties = ["alameda"] # , "alpine", "riverside"]
-# scenarios = ["baseline"]
-# housing_types = ["single-family-detached"]
-# load_type = "solarstorage" # default, solarstorage
 
-# process(base_input_dir, base_output_dir, scenarios, housing_types, counties, load_type)
+base_input_dir = "data/loadprofiles"
+base_output_dir = "data/loadprofiles"
+counties = ["alameda", "orange", "san diego"] # , "alpine", "riverside"]
+scenarios = "baseline"
+housing_types = ["single-family-detached"]
+
+process(base_input_dir, base_output_dir, scenarios, housing_types, counties)
