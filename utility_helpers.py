@@ -10,11 +10,12 @@ full_pge_counties = [ # https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_M
     "Calaveras County",
     "Colusa County",
     "Contra Costa County",
+    "Del Norte County",
     "El Dorado County",
     "Fresno County",
     "Glenn County",
     "Humboldt County",
-    "Kern County",
+    "Kings County",
     "Lake County",
     "Lassen County",
     "Madera County",
@@ -31,7 +32,6 @@ full_pge_counties = [ # https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_M
     "San Benito County",
     "San Francisco County",
     "San Joaquin County",
-    "San Luis Obispo County",
     "San Mateo County",
     "Santa Barbara County", # Also SCE
     "Santa Clara County",
@@ -55,16 +55,18 @@ full_sce_counties = [
     "Mono County",
     "Inyo County",
     "San Bernardino County",
+    "San Luis Obispo County",
     "Orange County",
     "Los Angeles County",
     "Ventura County",
     "Tulare County",
+    "Riverside County",
+    "Imperial County",
+    "Kern County",
 ]
 
 full_sdge_counties = [
     "San Diego County",
-    "Riverside County",
-    "Imperial County",
 ]
 
 PGE_COUNTIES = [slugify_county_name(county) for county in full_pge_counties]

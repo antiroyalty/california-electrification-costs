@@ -3,10 +3,9 @@ import os
 import pandas as pd
 from typing import Any
 
-from helpers import get_counties, get_scenario_path, slugify_county_name, log, to_number, get_timestamp
-from gas_rate_helpers import BASELINE_ALLOWANCES, GAS_RATE_PLANS, PGE_RATE_TERRITORY_COUNTY_MAPPING
+from helpers import get_counties, get_scenario_path, slugify_county_name, log, to_number, get_timestamp, norcal_counties, socal_counties, central_counties
+from gas_rate_helpers import BASELINE_ALLOWANCES, GAS_RATE_PLANS, PGE_RATE_TERRITORY_COUNTY_MAPPING, SCE_RATE_TERRITORY_COUNTY_MAPPING, SDGE_RATE_TERRITORY_COUNTY_MAPPING
 from utility_helpers import  get_utility_for_county
-
 
 INPUT_FILE_NAME = "loadprofiles_for_rates"
 OUTPUT_FILE_NAME = "RESULTS_gas_annual_costs"
@@ -22,6 +21,17 @@ def utility_to_rate_plans(utility: str) -> dict[str, Any]:
             return GAS_RATE_PLANS["SCE"]
         case "SDG&E":
             return GAS_RATE_PLANS["SDG&E"]
+        case _:
+            raise ValueError(f"Unknown utility: {utility}")
+        
+def utility_to_county_territory_mapping(utility):
+    match utility:
+        case "PG&E":
+            return PGE_RATE_TERRITORY_COUNTY_MAPPING
+        case "SCE":
+            return SCE_RATE_TERRITORY_COUNTY_MAPPING
+        case "SDG&E":
+            return SDGE_RATE_TERRITORY_COUNTY_MAPPING
         case _:
             raise ValueError(f"Unknown utility: {utility}")
 
@@ -66,19 +76,19 @@ def calculate_annual_costs_gas(load_profile_df, territory, load_type, utility, r
     
     return total_cost
 
-def get_territory_for_county(county):
+def get_territory_for_county(county, utility):
     # TODO: Ana, establish key-value pair of mapping for all counties to gas rate territories
     # Currently implemented for SOME PG&E territories
     # This assumes that each county can only belong to one territory, but this is not necessarily the case
     # The allocation is done visually, roughly by area
     # County that has the largest area in a territory gets attributed to that territory
-    # Yet to add support for SCE and SDGE
-    for territory, counties in PGE_RATE_TERRITORY_COUNTY_MAPPING.items():
+    utility_county_mapping = utility_to_county_territory_mapping(utility)
+
+    for territory, counties in utility_county_mapping.items():
         if county in counties:
             return territory
     else:
-        log(message="Step10@get_territory_for_county: County to gas territory mapping not specified", county=county)
-        return "T" # use T as default for now
+        raise ValueError(f"County to gas territory mapping not specified for: {county}, {utility}")
 
 def process_county_scenario(scenario_path, county, load_type, utility, rate_plan: str):
     file = os.path.join(scenario_path, county, f"{INPUT_FILE_NAME}_{county}.csv")
@@ -92,7 +102,7 @@ def process_county_scenario(scenario_path, county, load_type, utility, rate_plan
 
     load_profile_df = pd.read_csv(file, parse_dates=["timestamp"])
     load_profile_df["month"] = load_profile_df["timestamp"].dt.month
-    territory = get_territory_for_county(county)
+    territory = get_territory_for_county(county, utility)
     
     return calculate_annual_costs_gas(load_profile_df, territory, load_type=load_type, utility=utility, rate_plan=rate_plan)
 
@@ -131,8 +141,8 @@ def update_df_with_results(orig_df, new_df):
             orig_df.loc[idx, col] = new_df.loc[idx, col]
     return orig_df
     
-def build_results_df(scenario, annual_costs, annual_costs_solarstorage):
-    data = {"gas.usd": [annual_costs, annual_costs_solarstorage]}
+def build_results_df(scenario, annual_costs, annual_costs_solarstorage, utility, rate_plan):
+    data = {f"gas.{utility}.{rate_plan}": [annual_costs, annual_costs_solarstorage]}
     index = [scenario, f"{scenario}.solarstorage"]
     df = pd.DataFrame(data, index=index)
 
@@ -155,7 +165,7 @@ def process(base_input_dir, base_output_dir, scenario, housing_types, counties):
             for rate_plan in rate_plans:
                 annual_costs = process_county_scenario(scenario_path, county, load_type="default", utility=utility, rate_plan=rate_plan)
                 annual_costs_solarstorage = process_county_scenario(scenario_path, county, load_type="solarstorage", utility=utility, rate_plan=rate_plan)
-                annual_costs_results = build_results_df(scenario, annual_costs, annual_costs_solarstorage)
+                annual_costs_results = build_results_df(scenario, annual_costs, annual_costs_solarstorage, utility=utility, rate_plan=rate_plan)
 
                 results_df = update_df_with_results(results_df, annual_costs_results)
 
@@ -175,12 +185,11 @@ def process(base_input_dir, base_output_dir, scenario, housing_types, counties):
                 saved_to=output_file_path,
             )
 
+if __name__ == '__main__':
+    base_input_dir = "data/loadprofiles"
+    base_output_dir = "data/loadprofiles"
+    counties = ["Los Angeles County"] # , "alpine", "riverside"]
+    scenarios = "baseline"
+    housing_types = ["single-family-detached"]
 
-
-base_input_dir = "data/loadprofiles"
-base_output_dir = "data/loadprofiles"
-counties = ["alameda", "orange", "san diego"] # , "alpine", "riverside"]
-scenarios = "baseline"
-housing_types = ["single-family-detached"]
-
-process(base_input_dir, base_output_dir, scenarios, housing_types, counties)
+    process(base_input_dir, base_output_dir, scenarios, housing_types, norcal_counties + socal_counties + central_counties)

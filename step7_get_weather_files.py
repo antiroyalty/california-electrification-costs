@@ -175,4 +175,5 @@ def process(base_input_dir, output_dir, scenarios, housing_types, year, counties
                 except Exception as e:
                     print(f"Error processing {county}: {e}")
 
-process("data", "data/loadprofiles", ["baseline"], ["single-family-detached"], 2018, norcal_counties)
+if __name__ == '__main__':
+    process("data", "data/loadprofiles", ["baseline"], ["single-family-detached"], 2018, norcal_counties)

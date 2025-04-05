@@ -127,17 +127,17 @@ def build_results_df(scenario, utility, annual_costs, annual_costs_solarstorage)
     one for the default tariffs (row name = {scenario})
     one for the solarstorage tariffs (row name = '{scenario}.solarstorage')
     """
-    columns = [f"electricity.{utility}.{tariff}.usd" for tariff in annual_costs.keys()]
+    columns = [f"electricity.{utility}.{tariff}" for tariff in annual_costs.keys()]
     df = pd.DataFrame(columns=columns, index=[scenario, f"{scenario}.solarstorage"])
 
     # Default tarrifs
     for tariff, cost in annual_costs.items():
-        col_name = f"electricity.{utility}.{tariff}.usd"
+        col_name = f"electricity.{utility}.{tariff}"
         df.loc[scenario, col_name] = cost
 
     # Solarstorage tarrifs
     for tariff, cost in annual_costs_solarstorage.items():
-        col_name = f"electricity.{utility}.{tariff}.usd"
+        col_name = f"electricity.{utility}.{tariff}"
         df.loc[f"{scenario}.solarstorage", col_name] = cost
 
     return df
@@ -231,10 +231,11 @@ def process(base_input_dir, base_output_dir, scenario, housing_type, counties):
             saved_to=output_file_path,
         )
 
-base_input_dir = "data/loadprofiles"
-base_output_dir = "data/loadprofiles"
-counties = ['Alameda County', 'San Bernardino County', 'San Diego County']
-scenario = "baseline"
-housing_type = "single-family-detached"
+if __name__ == '__main__':
+    base_input_dir = "data/loadprofiles"
+    base_output_dir = "data/loadprofiles"
+    counties = ['Los Angeles']
+    scenario = "baseline"
+    housing_type = "single-family-detached"
 
-process(base_input_dir, base_output_dir, scenario, housing_type, counties)
+    process(base_input_dir, base_output_dir, scenario, housing_type, norcal_counties+socal_counties+central_counties)

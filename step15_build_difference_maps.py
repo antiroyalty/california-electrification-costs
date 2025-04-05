@@ -152,7 +152,6 @@ def load_cost_data(county_dir, subfolder, prefix, row_name):
     df = pd.read_csv(file_path, index_col="scenario")
 
     row_idx = df.index.get_loc(row_name)
-    # return df.at[row_name, "total.usd+gas.usd"]
     return df.iloc[row_idx]
     
 def process(base_input_dir, base_output_dir, housing_type, counties, left_scenario, left_row, right_scenario, right_row):
@@ -201,13 +200,14 @@ def process(base_input_dir, base_output_dir, housing_type, counties, left_scenar
     os.makedirs(output_diff_dir, exist_ok=True)
     generate_diff_maps(diff_gdf, output_diff_dir)
 
-base_input_dir = "data/loadprofiles"
-base_output_dir = "data/loadprofiles"
-counties = norcal_counties + central_counties
-housing_type = "single-family-detached"
+if __name__ == '__main__':
+    base_input_dir = "data/loadprofiles"
+    base_output_dir = "data/loadprofiles"
+    counties = norcal_counties + central_counties
+    housing_type = "single-family-detached"
 
-process(base_input_dir, base_output_dir, "single-family-detached", counties, "baseline", "baseline", "baseline", "baseline.solarstorage")
-process(base_input_dir, base_output_dir, "single-family-detached", counties, "baseline", "baseline", "heat_pump", "heat_pump")
-process(base_input_dir, base_output_dir, "single-family-detached", counties, "baseline", "baseline.solarstorage", "heat_pump", "heat_pump.solarstorage")
-process(base_input_dir, base_output_dir, "single-family-detached", counties, "heat_pump", "heat_pump", "heat_pump", "heat_pump.solarstorage") # baseline vs. baseline solarstorage
-process(base_input_dir, base_output_dir, "single-family-detached", counties, "baseline", "baseline", "heat_pump", "heat_pump.solarstorage")
+    process(base_input_dir, base_output_dir, "single-family-detached", counties, "baseline", "baseline", "baseline", "baseline.solarstorage")
+    process(base_input_dir, base_output_dir, "single-family-detached", counties, "baseline", "baseline", "heat_pump", "heat_pump")
+    process(base_input_dir, base_output_dir, "single-family-detached", counties, "baseline", "baseline.solarstorage", "heat_pump", "heat_pump.solarstorage")
+    process(base_input_dir, base_output_dir, "single-family-detached", counties, "heat_pump", "heat_pump", "heat_pump", "heat_pump.solarstorage") # baseline vs. baseline solarstorage
+    process(base_input_dir, base_output_dir, "single-family-detached", counties, "baseline", "baseline", "heat_pump", "heat_pump.solarstorage")

@@ -2,7 +2,7 @@ import os
 import pandas as pd
 from datetime import datetime
 
-from helpers import get_counties, get_scenario_path, log, norcal_counties
+from helpers import get_counties, get_scenario_path, log, norcal_counties, socal_counties, central_counties
 
 ELECTRICITY_PREFIX = "RESULTS_electricity_annual_costs"
 GAS_PREFIX = "RESULTS_gas_annual_costs"
@@ -47,9 +47,12 @@ def calculate_total_annual_costs(elec_df, gas_df):
     for col in elec_df.columns:
         if col.startswith("electricity."):
             # Extract a plan identifier from column name (e.g., "E-TOU-C")
-            plan = col.split('.')[2]
-            new_col = f"total.{plan}+gas.usd"
-            totals[new_col] = elec_df[col] + gas_df["gas.usd"]
+            service_type, utility, plan = col.split('.')
+            for gascol in gas_df.columns:
+                if gascol.startswith("gas."):
+                    gas_service_type, gas_utility, gas_plan = gascol.split('.')
+                    new_col = f"total.{utility}.{plan}+{gas_utility}.{gas_plan}"
+                    totals[new_col] = elec_df[col] + gas_df[gascol]
 
     return totals
 
@@ -90,10 +93,11 @@ def process(base_input_dir, base_output_dir, scenario, housing_types, counties):
         for county in valid_counties:
             process_each_county(county, scenario_path, base_output_dir, scenario, housing_type)
 
-# base_input_dir = "data/loadprofiles"
-# base_output_dir = "data/loadprofiles"
-# counties = norcal_counties
-# scenarios = ["baseline"]
-# housing_types = ["single-family-detached"]
+if __name__ == '__main__':
+    base_input_dir = "data/loadprofiles"
+    base_output_dir = "data/loadprofiles"
+    counties = ['Los Angeles County']
+    scenarios = "baseline"
+    housing_types = ["single-family-detached"]
 
-# process(base_input_dir, base_output_dir, scenarios, housing_types, counties)
+    process(base_input_dir, base_output_dir, scenarios, housing_types, norcal_counties+socal_counties+central_counties)

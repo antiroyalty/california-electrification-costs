@@ -260,4 +260,5 @@ housing_type = "single-family-detached" # "single-family-attached"]
 
 # # rate_plan = ...
 
-process("data/loadprofiles", "data/loadprofiles", scenario, housing_type, norcal_counties + central_counties + socal_counties)
+if __name__ == '__main__':
+    process("data/loadprofiles", "data/loadprofiles", scenario, housing_type, norcal_counties + central_counties + socal_counties)

@@ -53,7 +53,6 @@ def load_cost_data(county_dir, subfolder, prefix):
     df = pd.read_csv(file_path, index_col="scenario")
 
     if subfolder == "solarstorage":
-        # return df.at["baseline.solarstorage", "total.usd+gas.usd"] # solarstorage only makes sense for total cost comparison
         return df.iloc[1] # janky but we want to keep the column name so return the full row details
     else:
         # return df.iloc[df.index.get_loc("baseline"), 0] # column names may vary

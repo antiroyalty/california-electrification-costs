@@ -51,7 +51,6 @@ def load_cost_data(county_dir, subfolder, prefix):
     df = pd.read_csv(file_path, index_col="scenario")
 
     if subfolder == "solarstorage":
-        # return df.at["baseline.solarstorage", "total.usd+gas.usd"] # solarstorage only makes sense for total cost comparison
         return df.iloc[1] # janky but we want to keep the column name so return the full row details
     else:
         # return df.iloc[df.index.get_loc("baseline"), 0] # column names may vary
@@ -74,7 +73,7 @@ def generate_geojson(merged_gdf, output_path, file_prefix, rate):
     filename = os.path.join(output_path, f"{file_prefix}.{rate}.geojson")
     subset.to_file(filename, driver="GeoJSON")
 
-def generate_html(merged_gdf, output_path, file_prefix, rate):
+def generate_html(merged_gdf, output_path, file_prefix, rate) -> str:
     merged_gdf[f"{rate}_fmt"] = merged_gdf[rate].apply(lambda x: to_decimal_number(x) if pd.notnull(x) else "N/A")
     m = folium.Map(location=[37.8, -120], zoom_start=6)
     title_html = f'''
@@ -114,8 +113,9 @@ def generate_html(merged_gdf, output_path, file_prefix, rate):
     log(saved_to=filename)
 
     m.save(filename)
+    return filename
 
-def generate_service_maps(merged_gdf, base_output_dir, file_prefix):
+def generate_service_maps(merged_gdf, base_output_dir, file_prefix, desired_rate_plans) -> list[str]:
     html_dir = os.path.join(base_output_dir, "html")
     geojson_dir = os.path.join(base_output_dir, "geojson")
     os.makedirs(html_dir, exist_ok=True)
@@ -123,11 +123,37 @@ def generate_service_maps(merged_gdf, base_output_dir, file_prefix):
 
     rates = [col for col in merged_gdf.columns if col not in ["NAME", "geometry"]]
 
+    eligible_rates = []
     for rate in rates:
-        generate_geojson(merged_gdf, geojson_dir, file_prefix, rate)
-        generate_html(merged_gdf, html_dir, file_prefix, rate)
+        scenario, utility, plans  = rate.split('.', maxsplit=2)
 
-def process(base_input_dir, base_output_dir, scenario, housing_types, counties):
+        if scenario == "total":
+            electricity_plan, gas_plan = plans.split('+')
+            gas_utility, gas_plan = gas_plan.split('.')
+        elif scenario == "electricity":
+            electricity_plan = plans
+            gas_plan = None
+        elif scenario == "gas":
+            electricity_plan = None
+            gas_plan = plans
+        else:
+            raise ValueError(f"Unknown scenario: {scenario}")
+
+        if (electricity_plan is None or electricity_plan == desired_rate_plans[utility]["electricity"]) and (gas_plan is None or gas_plan == desired_rate_plans[utility]["gas"]):
+            eligible_rates.append(rate)
+
+
+    print("step14_build_maps rates:")
+    print(eligible_rates)
+
+    html_files = []
+    for rate in eligible_rates:
+        generate_geojson(merged_gdf, geojson_dir, file_prefix, rate)
+        filename = generate_html(merged_gdf, html_dir, file_prefix, rate)
+        html_files.append(filename)
+    return html_files
+
+def process(base_input_dir, base_output_dir, scenario, housing_types, counties, desired_rate_plans):
     for housing_type in housing_types:
         scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
         valid_counties = get_counties(scenario_path, counties)
@@ -166,20 +192,40 @@ def process(base_input_dir, base_output_dir, scenario, housing_types, counties):
 
         output_maps_path = os.path.join(scenario_path, "RESULTS", "visualizations")
 
-        generate_service_maps(merged_combined, output_maps_path, "annual_costs_map.total")
-        generate_service_maps(merged_elec, output_maps_path, "annual_costs_map.electricity")
-        generate_service_maps(merged_gas, output_maps_path, "annual_costs_map.gas")
-        generate_service_maps(merged_solar, output_maps_path, "annual_costs_map.solarstorage")
+        html_files = []
+
+        html_files.extend(generate_service_maps(merged_combined, output_maps_path, f"annual_costs_map.{scenario}", desired_rate_plans=desired_rate_plans))
+        html_files.extend(generate_service_maps(merged_elec, output_maps_path, "annual_costs_map.electricity", desired_rate_plans=desired_rate_plans))
+        html_files.extend(generate_service_maps(merged_gas, output_maps_path, "annual_costs_map.gas", desired_rate_plans=desired_rate_plans))
+        html_files.extend(generate_service_maps(merged_solar, output_maps_path, f"annual_costs_map.{scenario}.solarstorage", desired_rate_plans=desired_rate_plans))
 
         # open the generated maps in default browser
-        os.system(f"open {output_maps_path}/html/annual_costs_map.total.total.usd+gas.usd.html")
-        os.system(f"open {output_maps_path}/html/annual_costs_map.solarstorage.total.usd+gas.usd.html")
-        os.system(f"open {output_maps_path}/html/annual_costs_map.electricity_w_solarstorage.total.usd+gas.usd.html")
+        for file in html_files:
+            os.system(f"open \"{file}\"")
 
-base_input_dir = "data/loadprofiles"
-base_output_dir = "data/loadprofiles"
-# counties = norcal_counties + central_counties + socal_counties
-scenarios = "heat_pump"
-housing_types = ["single-family-detached"]
+if __name__ == '__main__': 
+    base_input_dir = "data/loadprofiles"
+    base_output_dir = "data/loadprofiles"
+    counties = ["Los Angeles County"]
+    scenarios = "baseline"
+    housing_types = ["single-family-detached"]
+    pge_rate_plan = "E-TOU-D"
+    sce_rate_plan = "TOU-D-4-9PM"
+    sdge_rate_plan = "TOU-DR1"
 
-process(base_input_dir, base_output_dir, scenarios, housing_types, norcal_counties + central_counties + socal_counties)
+    desired_rate_plans = {
+        "PG&E": {
+            "electricity": "E-TOU-D",
+            "gas": "G-1"
+        },
+        "SCE": {
+            "electricity": "TOU-D-4-9PM",
+            "gas": "GR"
+        },
+        "SDG&E": {
+            "electricity": "TOU-DR1",
+            "gas": "GR"
+        }
+    }
+
+    process(base_input_dir, base_output_dir, scenarios, housing_types, norcal_counties+socal_counties+central_counties, desired_rate_plans=desired_rate_plans)
