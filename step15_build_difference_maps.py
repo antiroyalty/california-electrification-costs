@@ -1,84 +1,14 @@
 import os
 import pandas as pd
-import geopandas as gpd
 import folium
-import requests
-from zipfile import ZipFile
-from datetime import datetime
-from helpers import get_counties, get_scenario_path, log, to_decimal_number, norcal_counties, central_counties
-from decimal import Decimal, ROUND_HALF_UP
+from helpers import get_counties, get_scenario_path, log, to_decimal_number, norcal_counties, central_counties, socal_counties
+from maps_helpers import initialize_map, get_latest_csv_file, get_difference_color
 # import itertools # TODO: Ana, use to get permutations of each scenario, etc.
-
-def download_and_extract_shapefile():
-    url = "https://www2.census.gov/geo/tiger/GENZ2018/shp/cb_2018_us_county_20m.zip"
-    zip_name = "cb_2018_us_county_20m.zip"
-    folder = "cb_2018_us_county_20m"
-    if not os.path.exists(folder):
-        response = requests.get(url, stream=True)
-        with open(zip_name, "wb") as f:
-            for chunk in response.iter_content(chunk_size=1024):
-                f.write(chunk)
-        with ZipFile(zip_name, "r") as zip_ref:
-            zip_ref.extractall(folder)
-    return folder
-
-def format_2_sig(x):
-    if x is None or pd.isnull(x):
-        return "N/A"
-
-    d = Decimal(str(x))
-    exp = d.adjusted()  # exponent of the number (number of digits minus 1)
-    # To get 2 significant figures, quantize to 10^(exp - 1)
-    quantize_exp = Decimal("1e{}".format(exp - 1))
-    rounded = d.quantize(quantize_exp, rounding=ROUND_HALF_UP)
-    # Convert to fixed-point string (without scientific notation)
-    return format(rounded, "f")
-
-def initialize_map():
-    folder = download_and_extract_shapefile()
-    shp_file = [os.path.join(folder, f) for f in os.listdir(folder) if f.endswith(".shp")][0]
-    gdf = gpd.read_file(shp_file)
-    gdf = gdf[gdf["STATEFP"] == "06"][["NAME", "geometry"]].copy()
-    return gdf
-
-def extract_timestamp_from_filename(filename):
-    parts = filename.rstrip(".csv").split("_")
-    ts = parts[-2] + "_" + parts[-1]
-    return datetime.strptime(ts, "%Y%m%d_%H")
-
-def get_latest_csv_file(directory, prefix):
-    files = [f for f in os.listdir(directory) if f.startswith(prefix) and f.endswith(".csv")]
-    if not files:
-        raise FileNotFoundError(f"No file found in {directory} with prefix {prefix}")
-    latest_file = max(files, key=lambda f: extract_timestamp_from_filename(f))
-    return os.path.join(directory, latest_file)
-
-def get_color(diff, min_val, max_val):
-    # If the difference is zero or missing, return white.
-    if diff is None or pd.isnull(diff) or diff == 0:
-        return "#ffffff"
-    # For negative differences (heatpump cheaper), interpolate from white to green.
-    if diff < 0:
-        # Since min_val is negative, diff/min_val gives a proportion between 0 and 1.
-        proportion = diff / min_val if min_val != 0 else 0
-        # White: (255,255,255), Green: (0,128,0)
-        r = int(255 + (0 - 255) * proportion)
-        g = int(255 + (128 - 255) * proportion)
-        b = int(255 + (0 - 255) * proportion)
-        return f"#{r:02x}{g:02x}{b:02x}"
-    else:
-        # For positive differences (heatpump more expensive), interpolate from white to red.
-        proportion = diff / max_val if max_val != 0 else 0
-        # White: (255,255,255), Red: (255,0,0)
-        r = 255
-        g = int(255 + (0 - 255) * proportion)
-        b = int(255 + (0 - 255) * proportion)
-        return f"#{r:02x}{g:02x}{b:02x}"
 
 def style_function(feature, rate, min_val, max_val):
     diff = feature["properties"].get(rate)
     return {
-        "fillColor": get_color(diff, min_val, max_val),
+        "fillColor": get_difference_color(diff, min_val, max_val),
         "color": "black",
         "weight": 1,
         "fillOpacity": 0.7,
@@ -203,11 +133,11 @@ def process(base_input_dir, base_output_dir, housing_type, counties, left_scenar
 if __name__ == '__main__':
     base_input_dir = "data/loadprofiles"
     base_output_dir = "data/loadprofiles"
-    counties = norcal_counties + central_counties
+    counties = norcal_counties + central_counties + socal_counties
     housing_type = "single-family-detached"
 
     process(base_input_dir, base_output_dir, "single-family-detached", counties, "baseline", "baseline", "baseline", "baseline.solarstorage")
-    process(base_input_dir, base_output_dir, "single-family-detached", counties, "baseline", "baseline", "heat_pump", "heat_pump")
-    process(base_input_dir, base_output_dir, "single-family-detached", counties, "baseline", "baseline.solarstorage", "heat_pump", "heat_pump.solarstorage")
-    process(base_input_dir, base_output_dir, "single-family-detached", counties, "heat_pump", "heat_pump", "heat_pump", "heat_pump.solarstorage") # baseline vs. baseline solarstorage
-    process(base_input_dir, base_output_dir, "single-family-detached", counties, "baseline", "baseline", "heat_pump", "heat_pump.solarstorage")
+    # process(base_input_dir, base_output_dir, "single-family-detached", counties, "baseline", "baseline", "heat_pump", "heat_pump")
+    # process(base_input_dir, base_output_dir, "single-family-detached", counties, "baseline", "baseline.solarstorage", "heat_pump", "heat_pump.solarstorage")
+    # process(base_input_dir, base_output_dir, "single-family-detached", counties, "heat_pump", "heat_pump", "heat_pump", "heat_pump.solarstorage") # baseline vs. baseline solarstorage
+    # process(base_input_dir, base_output_dir, "single-family-detached", counties, "baseline", "baseline", "heat_pump", "heat_pump.solarstorage")

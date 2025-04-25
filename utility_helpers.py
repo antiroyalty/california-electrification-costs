@@ -73,7 +73,6 @@ PGE_COUNTIES = [slugify_county_name(county) for county in full_pge_counties]
 SCE_COUNTIES = [slugify_county_name(county) for county in full_sce_counties]
 SDGE_COUNTIES = [slugify_county_name(county) for county in full_sdge_counties]
 
-
 utility_to_counties = {
     # No California utilities serve: Del Norte, Siskiyou, Modoc
     # https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_MAPS_Service%20Area%20Map.pdf

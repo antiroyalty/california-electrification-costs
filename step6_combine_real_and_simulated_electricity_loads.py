@@ -59,6 +59,22 @@ SCENARIO_DATA_MAP = {
             }
         },
     },
+    "heat_pump_and_induction_stove": {
+        "default": {
+            "electricity": {
+                "file_prefix": "electricity_loads_",
+                "columns": ["total_load"]
+            },
+            "electricity_simulated": {
+                "file_prefix": "electricity_loads_simulated_",
+                "columns": ["simulated.electricity.induction_stove.energy_consumption.electricity.kwh", "simulated.electricity.heat_pump.energy_consumption.electricity.kwh"]
+            },
+            "gas": {
+                "file_prefix": "gas_loads_",
+                "columns":  ["out.natural_gas.hot_water.energy_consumption.gas.building_avg.therms"],
+            }
+        },
+    }
 }
 
 # Gas data is every 15 minutes

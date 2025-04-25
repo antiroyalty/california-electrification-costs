@@ -9,26 +9,28 @@ import step8_run_sam_model_for_solar_storage as RunSamModelForSolarStorage
 import step9_get_loads_for_rates as GetLoadsForRates
 import step10_evaluate_gas_rates as EvaluateGasRates
 import step11_evaluate_electricity_rates as EvaluateElectricityRates
-# import step12_evaluate_capital_costs
+import step12_evaluate_capital_costs as EvaluateCapitalCosts
 import step13_combine_total_annual_costs as CombineTotalAnnualCosts
 import step14_build_maps as BuildMaps
 import step15_build_difference_maps as BuildDifferenceMaps
+import step17_build_payback_period_maps as MapPaybackVisualization
 
 class CostService:
     SCENARIOS = {
         "baseline": {"gas": {"heating", "hot_water", "cooking"}, "electric": {"appliances", "misc"}}, # Almost everything is gas, except normal electrical appliances
         # "heat_pump": {"gas": {"hot_water", "cooking"}, "electric": {"appliances", "misc", "heating"}},
         # "induction_stove": {"gas": {"hot_water", "heating"}, "electric": {"appliances", "misc", "cooking"}}
-        # "heat_pump_water_heater_and_induction_stove": ["heating", "cooling", "hot_water", "appliances", "cooking", "misc"],
+        "heat_pump_and_induction_stove": {"gas": {"hot_water"}, "electric": {"appliances", "misc", "cooking", "heating"}}
         # "heat_pump_heating_cooling_water_heater_and_induction_stove": ["heating", "cooling", "hot_water", "appliances", "cooking", "misc"]
     }
 
-    def __init__(self, scenario, housing_type, counties, input_dir, output_dir):
+    def __init__(self, scenario, housing_type, counties, rate_plans, input_dir, output_dir):
         self.scenario = scenario
         self.housing_type = housing_type
         self.counties = counties
         self.input_dir = input_dir
         self.output_dir = output_dir
+        self.desired_rate_plans = rate_plans
 
     def log_step(self, step):
         print("-" * 15, f" Step {step} ", "-" * 15)
@@ -42,7 +44,7 @@ class CostService:
     
         self.log_step(3)
         # Make sure I don't pull load profiles on every run, only if they don't already exist
-        BuildElectricityLoadProfiles.process(self.SCENARIOS, [self.housing_type], self.counties, "data", "data/loadprofiles", force_recompute=False)
+        BuildElectricityLoadProfiles.process(self.SCENARIOS, self.housing_type, self.counties, "data", "data/loadprofiles", force_recompute=False)
 
         self.log_step(4)
         BuildGasLoadProfiles.process(self.SCENARIOS, [self.housing_type], "data", "data/loadprofiles", self.counties, force_recompute=False)
@@ -70,14 +72,15 @@ class CostService:
 
         CombineTotalAnnualCosts.process("data/loadprofiles", "data/loadprofiles", scenario, [self.housing_type], self.counties)
 
-        BuildMaps.process("data/loadprofiles", "data/loadprofiles", scenario, [self.housing_type], self.counties)
+        BuildMaps.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties, self.desired_rate_plans)
         
-        BuildDifferenceMaps.process("data/loadprofiles", "data/loadprofiles", housing_type, counties, "baseline", "baseline", "baseline", "baseline.solarstorage")
+        # BuildDifferenceMaps.process("data/loadprofiles", "data/loadprofiles", housing_type, counties, "baseline", "baseline", "baseline", "baseline.solarstorage")
     
+        MapPaybackVisualization.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties, self.desired_rate_plans)
 
-scenario = "baseline"
+# scenario = "heat_pump_and_induction_stove"
 # scenario = "heat_pump"
-# scenario = "induction_stove"
+scenario = "baseline"
 housing_type = "single-family-detached"
 counties = ["Colusa County"]
 input_dir = "data"
@@ -107,8 +110,22 @@ socal_counties = [
     "Riverside County", "Ventura County",  # Greater Los Angeles
     "San Diego County", "Imperial County"  # San Diego & Imperial
 ]
+rate_plans = {
+        "PG&E": {
+            "electricity": "E-TOU-D",
+            "gas": "G-1"
+        },
+        "SCE": {
+            "electricity": "TOU-D-4-9PM",
+            "gas": "GR"
+        },
+        "SDG&E": {
+            "electricity": "TOU-DR1",
+            "gas": "GR"
+        }
+    }
 # norcal_counties + central_counties
-cost_service = CostService(scenario, housing_type, counties=norcal_counties + central_counties + socal_counties, input_dir=input_dir, output_dir=output_dir)
+cost_service = CostService(scenario, housing_type, counties=norcal_counties + central_counties + socal_counties, rate_plans=rate_plans, input_dir=input_dir, output_dir=output_dir)
 
 final_csv = cost_service.run()
 

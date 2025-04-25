@@ -14,8 +14,9 @@ EFFICIENCY_INDUCTION_STOVE = 0.875  # Average efficiency (85-90%)
 
 # TODO: How does heat pump COP vary over the year? in winter vs. summer?
 # different COP for "AC" style operation vs. "heating" style
-COP_HEAT_PUMP = 2.75  # Average effective COP (2.0-3.0 for ducted, 2.5-4.0 for non-ducted)
-EFFICIENCY_GAS_HEATING = 0.875  # Average efficiency (80-95%)
+# Cristina uses Heat Pump COP of 3.375 in her paper
+COP_HEAT_PUMP = 3.5  # Average effective COP (2.0-3.0 for ducted, 2.5-4.0 for non-ducted)
+EFFICIENCY_GAS_HEATING = 0.88  # Average efficiency (80-95%)
 
 # TODO: Combined heat pump and water heater system benefits?
 COP_HPWH = 2.75  # Average effective COP (2.0-3.5)

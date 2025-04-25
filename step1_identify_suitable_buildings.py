@@ -20,12 +20,24 @@ SCENARIOS = {
         "in.tenure": "Owner",
         # TODO: Ana, investigate whether we can get results for Owned vs. Rented
     },
+    "special_cooking_heating_water": {
+        "in.vacancy_status": "Occupied",
+        "in.cooking_range": ["Electric Resistance", "Electric Induction"],
+        # "in.heating_fuel": ["Electricity"],
+        # "in.water_heater_fuel": "Electricity",
+    }
+}
+
+SPECIAL_COUNTIES_CONDITIONS_NEEDED_TO_RETURN_AT_LEAST_ONE_BUILDING = {
+    "Inyo County": "special_cooking_heating_water",
 }
 
 HOUSING_NAME_MAP = {
     "single-family-detached": "Single-Family Detached",
     "single-family-attached": "Single-Family Attached",
 }
+
+SPECIAL_CASE_COUNTIES = ["Inyo County"]
 
 def get_metadata(scenario):
     metadata_path = os.path.join(
@@ -90,6 +102,16 @@ def save_building_ids(filtered_metadata, scenario, county, output_dir):
     
     return output_csv_path
 
+def get_metadata_for_counties_including_special_case_counties(metadata, housing_type, county_code, county_name, scenario):
+    # if county_name in SPECIAL_CASE_COUNTIES:
+    #     print("inside the special case")
+    #     special_conditions = SPECIAL_COUNTIES_CONDITIONS_NEEDED_TO_RETURN_AT_LEAST_ONE_BUILDING[county_name]
+    #     print(special_conditions)
+
+    #     return filter_metadata(metadata, housing_type, county_code, county_name, special_conditions)
+    # else:
+        return filter_metadata(metadata, housing_type, county_code, county_name, scenario)
+
 def process(scenario, housing_type, output_base_dir="data", target_counties=None, force_recompute=True):
     if scenario != "baseline":
         log(at="step1_identify_suitable_buildings", message="not baseline scenario, no need to download new files", scenario=scenario)
@@ -123,7 +145,8 @@ def process(scenario, housing_type, output_base_dir="data", target_counties=None
             continue  # Skip processing
 
         # Step 2: Generate metadata
-        filtered_metadata = filter_metadata(metadata, housing_type, county_code, county_name, scenario)
+        filtered_metadata = get_metadata_for_counties_including_special_case_counties(metadata, housing_type, county_code, county_name, scenario)
+        # filtered_metadata = filter_metadata(metadata, housing_type, county_code, county_name, scenario)
         num_buildings = filtered_metadata.shape[0]
         total_buildings += num_buildings
 
@@ -145,3 +168,6 @@ def process(scenario, housing_type, output_base_dir="data", target_counties=None
 # Done: single-family-detached: norcal, socal, central
 # Done: Single-family-attached: norcal, socal, central
 # process("baseline", "single-family-attached", output_base_dir="data", target_counties=central_counties, force_recompute=True)
+
+if __name__ == '__main__':
+    process("baseline", "single-family-detached", output_base_dir="data", target_counties=["Inyo County"], force_recompute=True)

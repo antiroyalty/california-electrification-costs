@@ -5,12 +5,14 @@ import PySAM.ResourceTools as tools
 import pandas as pd
 import statistics
 
-from helpers import get_counties, get_scenario_path, log, format_load_profile, norcal_counties, central_counties, socal_counties
+from helpers import get_counties, get_scenario_path, log, format_load_profile, to_decimal_number, norcal_counties, central_counties, socal_counties
 
 # LOADPROFILE_FILE_PREFIX = "electricity_loads"
 LOADPROFILE_FILE_PREFIX = "combined_profiles"
 TOTAL_LOAD_COLUMN_NAME = "electricity.real_and_simulated.for_typical_county_home.kwh"
 OUTPUT_LOADPROFILE_FILE_PREFIX = "sam_optimized_load_profiles"
+SOLAR_STORAGE_CAPACITY_PREFIX = "electrified_assets"
+CAPITAL_COSTS_FOLDER_NAME = "CAPITAL_COSTS"
 
 def prepare_data_and_compute_system_capacity(weather_file, load_file, years_of_analysis):
     solar_resource_data = tools.SAM_CSV_to_solar_data(weather_file)
@@ -31,10 +33,10 @@ def prepare_data_and_compute_system_capacity(weather_file, load_file, years_of_a
     mean_gh_w_per_m2 = statistics.mean(gh_w_per_m2)
 
     # convert average GHI to daily energy [kWh/m2/day]
-    average_daily_irradiance_kWh_per_m2 = mean_gh_w_per_m2 * 24 / 1000 # 24 = hours in a day, 1000 = w to kw conversion
+    average_daily_irradiance_kWh_per_m2 = mean_gh_w_per_m2 * 24 / 10000 # 24 = hours in a day, 1000 = w to kw conversion
 
     # oversize factor for extra buffer (1.2x = 20% more)
-    oversizing_factor = 1.2
+    oversizing_factor = 1 # not 1.2
 
     # panel power density [kW/m2] (how much DC power is produced per unit area)
     # wikipedia suggests most efficient mass-produced solar modules have power density values of up to 175 W/m2 or 0.175 kw/m2
@@ -62,7 +64,7 @@ def prepare_data_and_compute_system_capacity(weather_file, load_file, years_of_a
     # convert required panel area to DC capacity [kW] using the panel power density:
     required_dc_capacity_kw = required_panel_area_m2 * panel_power_density_kw_per_m2
 
-    log(solar_dc_capacity_kw = required_dc_capacity_kw, solar_area_m2 = required_panel_area_m2)
+    # log(solar_dc_capacity_kw = required_dc_capacity_kw, solar_area_m2 = required_panel_area_m2)
 
     return solar_resource_data, load_profile, required_dc_capacity_kw
 
@@ -82,6 +84,7 @@ def create_solar_model(solar_resource_data, system_capacity, years_of_analysis):
     # solar.SystemDesign.tilt = 20 # 
     # solar.SystemDesign.azimuth = 180 # Angle in degrees. Can be E=90; S=180, W=270
     solar.Lifetime.dc_degradation = [0.5] * years_of_analysis
+    log(solar_system_capacity=system_capacity) # measured in kW
 
     return solar
 
@@ -92,23 +95,23 @@ def create_battery_model(solar, load_profile, years_of_analysis):
 
     # ---- Initialize Battery model
     battery = battery_model.from_existing(solar, "CustomGenerationBatteryResidential") # StandaloneBatteryResidential
-
     # ---- BatteryCell
     # ['LeadAcid_q10_computed', 'LeadAcid_q20_computed', 'LeadAcid_qn_computed', 'LeadAcid_tn', 'batt_C_rate', 'batt_Cp', 'batt_Qexp', 'batt_Qfull', 'batt_Qfull_flow', 'batt_Qnom', 'batt_Vcut', 'batt_Vexp', 'batt_Vfull', 'batt_Vnom', 'batt_Vnom_default', 'batt_calendar_a', 'batt_calendar_b', 'batt_calendar_c', 'batt_calendar_choice', 'batt_calendar_lifetime_matrix', 'batt_calendar_q0', 'batt_chem', 'batt_h_to_ambient', 'batt_initial_SOC', 'batt_life_model', 'batt_lifetime_matrix', 'batt_maximum_SOC', 'batt_minimum_SOC', 'batt_minimum_modetime', 'batt_minimum_outage_SOC', 'batt_resistance', 'batt_room_temperature_celsius', 'batt_voltage_choice', 'batt_voltage_matrix', 'cap_vs_temp']
     battery.BatteryCell.batt_Vnom_default = 50.0 # Nominal voltage of the battery [V]
     # Convert usable energy (13.5 kWh) to ampere-hours:
     # Capacity [Ah] = 13500 Wh / 50 V = 270 Ah.
-    battery.BatteryCell.batt_Qfull = 1000.0      # Fully charged cell capacity [Ah] # 270 for powerwall
-    battery.BatteryCell.batt_Qnom = 1000.0       # Nominal (usable) capacity [Ah] # 270 for powerwall
-    battery.BatteryCell.batt_initial_SOC = 97.0 # default 50
-    battery.BatteryCell.batt_minimum_SOC = 5.0 # default 30
-    battery.BatteryCell.batt_maximum_SOC = 97.0 # default 30
+    battery.BatteryCell.batt_Qfull = 293.5      # Fully charged cell capacity [Ah] # 270 for powerwall, but set to be 293.5 so we get full 13.5 kWh of usable Tesla battery capacity
+    battery.BatteryCell.batt_Qnom = 293.5    # Nominal (usable) capacity [Ah] # 270 for powerwall, but set to 293.5 so we get full 13.5 kWh of usable battery capacity as Tesla advertises
+    battery.BatteryCell.batt_initial_SOC = 50.0 # default 50
+    battery.BatteryCell.batt_minimum_SOC = 0 # default 30
+    battery.BatteryCell.batt_maximum_SOC = 1 # default 30
+    # Usable energy = 293.5 Ah * 50 V * 0.92 = 13.5 kWh
 
     # --- BatterySystem
     # dict_keys(['batt_ac_dc_efficiency', 'batt_ac_or_dc', 'batt_computed_bank_capacity', 'batt_computed_series', 'batt_computed_strings', 'batt_current_charge_max', 'batt_current_choice', 'batt_current_discharge_max', 'batt_dc_ac_efficiency', 'batt_dc_dc_efficiency', 'batt_inverter_efficiency_cutoff', 'batt_loss_choice', 'batt_losses', 'batt_losses_charging', 'batt_losses_discharging', 'batt_losses_idle', 'batt_mass', 'batt_meter_position', 'batt_power_charge_max_kwac', 'batt_power_charge_max_kwdc', 'batt_power_discharge_max_kwac', 'batt_power_discharge_max_kwdc', 'batt_replacement_capacity', 'batt_replacement_option', 'batt_replacement_schedule_percent', 'batt_surface_area', 'en_batt', 'en_standalone_batt'])
     battery.BatterySystem.batt_meter_position = 0 # 0=behind the meter, 1=front of the meter
-    battery.BatterySystem.batt_ac_dc_efficiency = 0.95
-    battery.BatterySystem.batt_dc_ac_efficiency = 0.95
+    battery.BatterySystem.batt_ac_dc_efficiency = 1
+    battery.BatterySystem.batt_dc_ac_efficiency = 1
 
     # ---- Load
     # dict_keys(['crit_load', 'crit_load_escalation', 'grid_outage', 'load', 'load_escalation', 'run_resiliency_calcs'])
@@ -136,9 +139,9 @@ def create_battery_model(solar, load_profile, years_of_analysis):
 
 def run_models_and_extract_outputs(solar, battery, load_profile):
     solar.execute(0)
-    print(solar.Outputs.export().keys()) 
-    print(solar.Outputs.annual_energy)
-    print(solar.Outputs.ac_monthly)
+    # print(solar.Outputs.export().keys()) 
+    # print(solar.Outputs.annual_energy)
+    # print(solar.Outputs.ac_monthly)
     battery.execute(0)
 
     load = battery.Load.load
@@ -151,11 +154,11 @@ def run_models_and_extract_outputs(solar, battery, load_profile):
     system_to_grid = battery.Outputs.system_to_grid
     battery_soc = battery.Outputs.batt_SOC
 
-    if any(val != 0 for val in batt_to_load):
-        print("At least one value is non-zero.")
-    else:
-        print("All values are zero.")
-    
+    # if any(val != 0 for val in batt_to_load):
+    #     # print("At least one value is non-zero.")
+    # else:
+    #     print("All values are zero.")
+
     non_zero_count = sum(1 for x in batt_to_load if x != 0)
     print("Number of non-zero values:", non_zero_count)
 
@@ -169,7 +172,7 @@ def run_models_and_extract_outputs(solar, battery, load_profile):
     total_supply = [s + b + g for s, b, g in zip(system_to_load, batt_to_load, grid_to_load)]
     difference = [l - t for l, t in zip(load_profile, total_supply)]
 
-    return system_to_load, batt_to_load, grid_to_load, solar_battery_to_load, total_supply, difference, grid_to_batt, system_to_batt, system_to_batt_dc, system_to_grid, load, battery_soc
+    return system_to_load, batt_to_load, grid_to_load, solar_battery_to_load, total_supply, difference, grid_to_batt, system_to_batt, system_to_batt_dc, system_to_grid, load, battery_soc, solar.SystemDesign.system_capacity, battery.Outputs.batt_bank_installed_capacity
 
 # def configure_rate_plan(battery, rate_plan):
     # battery.UtilityRateStructure.elec_rate = rate_plan
@@ -222,10 +225,12 @@ def process(base_input_dir, base_output_dir, scenario, housing_type, counties=No
     # Define the scenario path to dynamically list counties
     scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
     counties_to_run = get_counties(scenario_path, counties)
+    capacity_dict = {}
 
     for county in counties_to_run:
         try:
-            log(at="step8", scenario=scenario, scenario_path=scenario_path, county=county)
+            log(county=county)
+            # log(at="step8", scenario=scenario, scenario_path=scenario_path, county=county)
 
             weather_file = os.path.join(base_input_dir, scenario, housing_type, county, f"weather_TMY_{county}.csv")
             load_file = os.path.join(scenario_path, county, f"{LOADPROFILE_FILE_PREFIX}_{scenario}_{county}.csv")
@@ -245,13 +250,26 @@ def process(base_input_dir, base_output_dir, scenario, housing_type, counties=No
             battery = create_battery_model(solar, load_profile, years_of_analysis)
             # configure_rate_plan(battery, some_rate_plan)
 
-            system_to_load, batt_to_load, grid_to_load, solar_battery_to_load, total_supply, difference, grid_to_batt, system_to_batt, system_to_batt_dc, system_to_grid, load, battery_soc = run_models_and_extract_outputs(solar, battery, load_profile)
+            system_to_load, batt_to_load, grid_to_load, solar_battery_to_load, total_supply, difference, grid_to_batt, system_to_batt, system_to_batt_dc, system_to_grid, load, battery_soc, solar_capacity, battery_capacity = run_models_and_extract_outputs(solar, battery, load_profile)
+
+            capacity_dict[county] = {
+                "Solar Capacity (kW)": to_decimal_number(solar_capacity),
+                "Battery Capacity (kWh)": to_decimal_number(battery_capacity)
+            }
+
             validate_and_save_results(county, load_profile, system_to_load, batt_to_load, grid_to_load, solar_battery_to_load, total_supply, difference, output_file, grid_to_batt, system_to_batt, system_to_batt_dc, system_to_grid, load, battery_soc)
         except Exception as e:
             print(f"Error processing {county}: {e}")
+    
+    capital_costs_folder = f"{base_input_dir}/{scenario}/{housing_type}/{CAPITAL_COSTS_FOLDER_NAME}"
+    os.makedirs(capital_costs_folder, exist_ok=True)
+
+    capacity_df = pd.DataFrame.from_dict(capacity_dict, orient='index').rename_axis('County')
+    output_csv_path = f"{capital_costs_folder}/{SOLAR_STORAGE_CAPACITY_PREFIX}.csv"
+    capacity_df.to_csv(output_csv_path)
 
 # # Example usage
-scenario = "baseline" # "heat_pump_and_water_heater", 
+scenario = "induction_stove" # "heat_pump_and_water_heater", 
              # "heat_pump_water_heater_and_induction_stove",
              # "heat_pump_heating_cooling_water_heater_and_induction_stove"]
 housing_type = "single-family-detached" # "single-family-attached"]
@@ -261,4 +279,5 @@ housing_type = "single-family-detached" # "single-family-attached"]
 # # rate_plan = ...
 
 if __name__ == '__main__':
-    process("data/loadprofiles", "data/loadprofiles", scenario, housing_type, norcal_counties + central_counties + socal_counties)
+    process("data/loadprofiles", "data/loadprofiles", scenario, housing_type, norcal_counties + socal_counties + central_counties) # ["Alameda County"])
+    # norcal_counties + central_counties + socal_counties

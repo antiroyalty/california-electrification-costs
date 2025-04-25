@@ -163,9 +163,9 @@ def process(base_input_dir, base_output_dir, scenario, housing_types, counties):
         # can't make the costs with solar and storage go to 0
 
         # open the generated maps in default browser
-        os.system(f"open {output_maps_path}/html/annual_costs_map.total.total.usd+gas.usd.html")
-        os.system(f"open {output_maps_path}/html/annual_costs_map.solarstorage.total.usd+gas.usd.html")
-        os.system(f"open {output_maps_path}/html/annual_costs_map.electricity_w_solarstorage.total.usd+gas.usd.html")
+        # os.system(f"open {output_maps_path}/html/annual_costs_map.total.total.usd+gas.usd.html")
+        # os.system(f"open {output_maps_path}/html/annual_costs_map.solarstorage.total.usd+gas.usd.html")
+        # os.system(f"open {output_maps_path}/html/annual_costs_map.electricity_w_solarstorage.total.usd+gas.usd.html")
 
 base_input_dir = "data/loadprofiles"
 base_output_dir = "data/loadprofiles"

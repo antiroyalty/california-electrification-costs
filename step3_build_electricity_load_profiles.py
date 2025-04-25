@@ -1,6 +1,6 @@
 import os
 import pandas as pd
-from helpers import get_counties, get_scenario_path, is_valid_csv, log, to_number
+from helpers import get_counties, get_scenario_path, is_valid_csv, log, to_number, slugify_county_name
 
 END_USE_COLUMNS = {
     "cooling": [
@@ -28,6 +28,7 @@ END_USE_COLUMNS = {
 
 INPUT_FOLDER_NAME = "buildings"
 OUTPUT_FILE_PREFIX = "electricity_loads"
+SPECIAL_CASE_COUNTIES = [] # [slugify_county_name(county) for county in ["Inyo County", "Lassen County", "Mariposa County", "Placer County", "Tuolumne County", "El Dorado County", "Yuba County", "Glenn County", "Modoc County", "Siskiyou County"]]
 
 def get_end_use_columns(end_use_categories):
     end_uses = []
@@ -176,7 +177,11 @@ def should_skip_processing(output_path, force_recompute):
 
     return os.path.exists(output_path) and is_valid_csv(output_path)
 
-def process(scenarios, housing_types, counties, base_input_dir, base_output_dir, force_recompute=True):
+# def special_case_counties(county, end_uses):
+#     if county not in SPECIAL_CASE_COUNTIES:
+#         return end_uses
+    
+def process(scenarios, housing_type, counties, base_input_dir, base_output_dir, force_recompute=True):
     """
     Returns a summary dict with structure:
       {
@@ -196,46 +201,49 @@ def process(scenarios, housing_types, counties, base_input_dir, base_output_dir,
             log(at="step3_build_electricity_load_profiles", message="no new electricity profiles needed to be downloaded")
             return
     
-        for housing_type in housing_types:
-            scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
-            counties = get_counties(scenario_path, counties)
+        scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
+        counties = get_counties(scenario_path, counties)
 
-            for county in counties:
-                # Record info about this county's run
-                county_info = {
-                    "county": county,
-                    "scenario": scenario,
-                    "housing_type": housing_type,
-                    "status": None,
-                    "num_files": 0
-                }
+        for county in counties:
+            # Record info about this county's run
+            county_info = {
+                "county": county,
+                "scenario": scenario,
+                "housing_type": housing_type,
+                "status": None,
+                "num_files": 0
+            }
 
-                input_dir = os.path.join(base_input_dir, scenario, housing_type, county, INPUT_FOLDER_NAME)
-                output_path = os.path.join(base_output_dir, scenario, housing_type, county, f"{OUTPUT_FILE_PREFIX}_{county}.csv")
-                
-                # 1. Make sure processing is necessary
-                if should_skip_processing(output_path, force_recompute):
-                    county_info["status"] = "skipped_existing"
-                    summary["skipped"].append(county_info)
-                    continue  # Skip processing
+            input_dir = os.path.join(base_input_dir, scenario, housing_type, county, INPUT_FOLDER_NAME)
+            output_path = os.path.join(base_output_dir, scenario, housing_type, county, f"{OUTPUT_FILE_PREFIX}_{county}.csv")
+            
+            # 1. Make sure processing is necessary
+            if should_skip_processing(output_path, force_recompute):
+                county_info["status"] = "skipped_existing"
+                summary["skipped"].append(county_info)
+                continue  # Skip processing
 
-                # 2. Make sure input directory exists
-                if not os.path.exists(input_dir):
-                    county_info["status"] = "directory_not_found"
-                    summary["skipped"].append(county_info)
-                    continue
+            # 2. Make sure input directory exists
+            if not os.path.exists(input_dir):
+                county_info["status"] = "directory_not_found"
+                summary["skipped"].append(county_info)
+                continue
 
-                # 3. Process data
-                end_uses = get_end_use_columns(end_use_categories)
-                status, num_files = process_county_data(county, input_dir, output_path, end_uses)
+            # 3. Process data
+            end_uses = get_end_use_columns(end_use_categories)
 
-                county_info["status"] = status
-                county_info["num_files"] = num_files
+            # 4. Special case special counties: add additional end-uses for them
+            # end_uses = special_case_counties(county, end_uses)
 
-                if status == "processed":
-                    summary["processed"].append(county_info)
-                else:
-                    summary["skipped"].append(county_info)
+            status, num_files = process_county_data(county, input_dir, output_path, end_uses)
+
+            county_info["status"] = status
+            county_info["num_files"] = num_files
+
+            if status == "processed":
+                summary["processed"].append(county_info)
+            else:
+                summary["skipped"].append(county_info)
 
     log(
         step=3,
@@ -247,7 +255,9 @@ def process(scenarios, housing_types, counties, base_input_dir, base_output_dir,
 
     return summary
 
-# BASELINE_SCENARIO = {
-#     "baseline": {"gas": {"heating", "hot_water", "cooking"}, "electric": {"appliances", "misc"}}
-# }
-# process(BASELINE_SCENARIO, ["single-family-detached"], ["Alpine County", "Marin County"], "data", "data/loadprofiles", force_recompute=True)
+if __name__ == '__main__':
+    BASELINE_SCENARIO = {
+        "baseline": {"gas": {"heating", "hot_water", "cooking"}, "electric": {"appliances", "misc"}}
+    }
+
+    process(BASELINE_SCENARIO, "single-family-detached", ["Inyo County"], "data", "data/loadprofiles", force_recompute=True)

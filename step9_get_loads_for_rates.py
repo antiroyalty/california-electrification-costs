@@ -54,7 +54,6 @@ SCENARIO_DATA_MAP = {
         }
     },
     "induction_stove": {
-        # household adopted heat pump
         "default": {
             "electricity": {
                 "file_prefix": "combined_profiles_induction_stove_", # or "sam_optimized_load_profiles_"
@@ -65,7 +64,6 @@ SCENARIO_DATA_MAP = {
                 "column": "gas.hourly_total.for_typical_county_home.therms"
             }
         },
-        # household adopted heat pump w/ solar + storage
         "solar_storage": {
             "electricity": {
                 "file_prefix": "sam_optimized_load_profiles_",
@@ -73,6 +71,30 @@ SCENARIO_DATA_MAP = {
             },
             "gas": {
                 "file_prefix": "combined_profiles_induction_stove_",
+                "column": "gas.hourly_total.for_typical_county_home.therms",
+            }
+        }
+    },
+    "heat_pump_and_induction_stove": {
+        # household adopted heat pump
+        "default": {
+            "electricity": {
+                "file_prefix": "combined_profiles_heat_pump_and_induction_stove_", # or "sam_optimized_load_profiles_"
+                "column": "electricity.real_and_simulated.for_typical_county_home.kwh" # or + "Total Load"
+            },
+            "gas": {
+                "file_prefix": "combined_profiles_heat_pump_and_induction_stove_",
+                "column": "gas.hourly_total.for_typical_county_home.therms"
+            }
+        },
+        # household adopted heat pump w/ solar + storage
+        "solar_storage": {
+            "electricity": {
+                "file_prefix": "sam_optimized_load_profiles_",
+                "column": "Grid to Load"
+            },
+            "gas": {
+                "file_prefix": "combined_profiles_heat_pump_and_induction_stove_",
                 "column": "gas.hourly_total.for_typical_county_home.therms",
             }
         }
