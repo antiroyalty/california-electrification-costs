@@ -24,67 +24,6 @@ from utility_helpers import get_utility_for_county
 # Utility reform to support electrification rather than expanding their natural gas infrastructure
 # Workforce training
 
-CAPITAL_COSTS = {
-    "solar": {
-        # Back-calculated from PG&E's cost estimator website: https://pge.wattplan.com/PV/Wizard/?sector=residential&
-        "dollars_per_watt": 0.95,          # $/W for panels https://www.tesla.com/learn/solar-panel-cost-breakdown
-        "installation_labor": 0.07,         # 7% extra cost for labor
-        "design_eng_overhead_percent": 0.28 # 28% extra cost for design/engineering
-    },
-    "storage": {
-        # Other papers suggest: 1200–$1600 per kilowatt-hour which would = $16320 - $21600 https://www.mdpi.com/2071-1050/16/23/10320#:~:text=residential%20solar%20and%20BESS%2C%20the,6%2FWh%20in%20Texas%20%28Figure%203d
-        # https://energylibrary.tesla.com/docs/Public/EnergyStorage/Powerwall/3/Datasheet/en-us/Powerwall-3-Datasheet.pdf
-        "powerwall_13.5kwh": 16853          # Cost for one Tesla Powerwall 3 before incentives. https://www.tesla.com/powerwall/design/overview
-    },
-    "heat_pump": {
-        # Rewiring america: $19,000 https://www.rewiringamerica.org/research/home-electrification-cost-estimates
-        # "average": 19000, # https://www.nrel.gov/docs/fy24osti/84775.pdf#:~:text=dwelling%20units,9%2C000%2C%20%2420%2C000%2C%20and%20%2424%2C000%20for
-        # https://incentives.switchison.org/residents/incentives?state=CA&field_zipcode=90001&_gl=1*1ck7fcj*_gcl_au*OTAxNTQyNjA3LjE3NDQ1NjYxNzg.*_ga*MTEwMTk5ODQ0LjE3NDQ1NjYxNzg.*_ga_8NM1W0PLNN*MTc0NDU2NjE3OC4xLjEuMTc0NDU2NjIwNC4zNC4wLjA.
-        # E3 cites single family residential heat pump cost to be $19,000 https://www.ethree.com/wp-content/uploads/2023/12/E3_Benefit-Cost-Analysis-of-Targeted-Electrification-and-Gas-Decommissioning-in-California.pdf#:~:text=%2419k%20%2415k%20%24154k%20The%20significant,commercial%20customers%20and%20therefore%20see
-        "average": 19000,
-    },
-    "induction_stove": {
-        # PG&E appliance guide also says $2000 https://guide.pge.com/browse/induction
-        "average": 2000 # https://www.sce.com/factsheet/InductionCookingFactSheet
-    }
-}
-
-# Consider low, medium, and high subsidy levels
-# no one is installing standalone PV anymore with NEM 3.0
-INCENTIVES = {
-    "federal_tax_credit_2023_2032": 0.3, # 30% credit https://www.irs.gov/credits-deductions/residential-clean-energy-credit
-    # Federal tax incentives will decline in later years
-    "federal_tax_credit_2033": 0.26,
-    "federal_tax_credit_2034": 0.22,
-    "federal_tax_credit_2035": 0,
-    "PGE_SCE_SDGE_General_SGIP_Rebate": 3375, #  General Market SGIP rebate of
-        # approximately $250/kilowatt-hour https://www.cpuc.ca.gov/-/media/cpuc-website/files/uploadedfiles/cpucwebsite/content/news_room/newsupdates/2020/sgip-residential-web-120420.pdf
-    "storage": {
-        # "PG&E": {
-            # "storage_rebate": 7500, # Only for homes in wildfire-prone areas, as deemed by PG&E https://www.tesla.com/support/incentives#california-local-incentives
-        # },
-        # "SCE": {
-
-        # },
-        # "SDG&E": {
-        #     # https://www.sdge.com/solar/considering-solar
-        # }
-    },
-    "heat_pump": {
-        "other_rebates": 10000, # needed to make it worthwhile
-        "max_federal_annual_tax_rebate": 2000,
-        "california_TECH_incentive": 1500, # https://incentives.switchison.org/rebate-profile/tech-clean-california-single-family-hvac
-    },
-    "induction_stove": {
-        "max_federal_annual_tax_rebate": 420, # https://www.geappliances.com/inflation-reduction-act
-    },
-    "water_heater": {
-        "54-55gal": 700, # $700 rebate
-        "55-75gal": 900 # $900 rebate https://incentives.switchison.org/residents/incentives?state=CA&field_zipcode=90001&_gl=1*1ck7fcj*_gcl_au*OTAxNTQyNjA3LjE3NDQ1NjYxNzg.*_ga*MTEwMTk5ODQ0LjE3NDQ1NjYxNzg.*_ga_8NM1W0PLNN*MTc0NDU2NjE3OC4xLjEuMTc0NDU2NjIwNC4zNC4wLjA.
-    },
-    "whole_building_electrification": 4250 # must include heat pump space heating, heat pump water heating, induction cooking, electric dryer https://caenergysmarthomes.com/alterations/#whole-building-eligibility
-}
-
 LIFETIMES = {
     "solar": 25, # https://www.energysage.com/solar/how-long-do-solar-panels-last/
     "storage": 15, # years
@@ -95,15 +34,17 @@ LIFETIMES = {
 
 FIXED_BINS = {
     "Payback Period": [-500, -100, -80, -60, -40, -20, 0, 20, 40, 60, 80, 100, 500], # ❌ Negative Payback = No Payback Ever
-    "Annual Savings": [-2000, -1750, -1500, -1250, -1000, -750, -500, -250, 0, 0.1, 250, 500, 750, 1000, 1250, 1500, 1750, 2000],
+    "Annual Savings": [-2000, -1750, -1500, -1250, -1000, -750, -500, -250, 0, 0.1, 250, 500, 750, 1000, 1250, 1500, 1750, 2000, 2500, 3000, 3500],
     "Total Cost": [0, 10000, 20000, 30000, 40000, 50000, 60000, 80000, 100000],
-    "Annual Savings % Change": [-200, -100, -50, -25, 0, 0.001, 25, 50, 100, 200, 2500],
+    "Annual Savings % Change": [-200, -100, -50, -25, 0, 0.001, 25, 50, 100, 200],
+    "Solar Size (kW)": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]   # kW buckets
 }
 
 COLOR_SCHEMES = {
     "Annual Savings": {"positive": "YlGn", "negative": "OrRd_r"},
     "Annual Savings % Change": { "positive": "YlGn",  "negative": "OrRd_r"},
-    "Total Cost": {"default": "YlOrRd"}
+    "Total Cost": {"default": "YlOrRd"},
+    "Solar Size (kW)": {"default": "YlOrBr"}
 }
 
 def load_cost_data(county_dir, subfolder, prefix):
@@ -165,6 +106,7 @@ def prepare_data_columns(merged_gdf, desired_rate_plans, metric, variant, title_
         "Payback Period": f"Payback Period {suffix}",
         "Annual Savings": f"Annual Savings {suffix}",
         "Total Cost": f"Total Cost {suffix}",
+        "Solar Size (kW)": "Solar Size (kW)",
         # "Annual Savings % Change": "Annual Savings % Change",
     }
 
@@ -223,6 +165,8 @@ def add_labels_and_title(map_obj, gdf, label_field, title_text):
     map_obj.get_root().html.add_child(folium.Element(title_html))
 
 def build_metric_map(merged_gdf, desired_rate_plans, metric, variant, title_prefix=""):
+    print("*******")
+    print(metric)
     data_column, label_field, legend_name, title_text, suffix = prepare_data_columns(merged_gdf, desired_rate_plans, metric, variant, title_prefix)
 
     m = folium.Map(
@@ -274,6 +218,7 @@ def build_metric_map(merged_gdf, desired_rate_plans, metric, variant, title_pref
         if not gdf_neg.empty:
             add_choropleth_layer(m, gdf_neg, data_column, COLOR_SCHEMES[metric]["negative"], bins_neg, f"{legend_name} (Loss)")
     else:
+        # Total cost, solar capacity
         add_choropleth_layer(m, merged_gdf, data_column, COLOR_SCHEMES[metric]["default"], FIXED_BINS[metric], legend_name)
 
     # Tooltip layer

@@ -87,7 +87,13 @@ def build_metric_map(
     If diverging=True, expect diffs and use a diverging scale (e.g. 'RdBu').  
     threshold_scale overrides the auto‐bins.
     """
-    m = folium.Map(location=[37.8, -120], zoom_start=6)
+    m = folium.Map(
+        location=[37.8, -120],
+        zoom_start=6,
+        width="550px",      # or 900
+        height="700px",     # or "60vh"
+        zoom_control=False,
+    )
 
     # 1) Choropleth layer
     folium.Choropleth(
@@ -115,15 +121,29 @@ def build_metric_map(
     # 3) Title
     m.get_root().html.add_child(folium.Element(f'<h3 align="center">{title_text}</h3>'))
 
-    # 4) Centroid labels (optional)
+    # 4) Centroid labels
+    label_col = f"{column}_fmt" if f"{column}_fmt" in gdf.columns else column
+
     for _, r in gdf.iterrows():
+        label = r[label_col]
+
+        # --- skip empty / missing values so "nan" never shows up ---
+        if pd.isnull(label) or str(label).upper() == "N/A":
+            continue
+
         cent = r.geometry.centroid
         folium.map.Marker(
-          [cent.y, cent.x],
-          icon=folium.DivIcon(html=f"<div style='font-size:6pt'>{r[column]}</div>")
+            [cent.y, cent.x],
+            icon=folium.DivIcon(
+                html=f"<div style='font-size:6pt'>{label}</div>"
+            ),
         ).add_to(m)
 
     folium.LayerControl().add_to(m)
+
+    m.get_root().html.add_child(folium.Element(
+        '<style>.leaflet-control-layers{display:none !important;}</style>'
+    ))
 
     return m
 

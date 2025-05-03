@@ -1,9 +1,10 @@
 import os
 import PySAM.Pvwattsv8 as pvwatts # https://nrel-pysam.readthedocs.io/en/main/modules/Pvwattsv8.html
-import PySAM.Battery as battery_model # https://nrel-pysam.readthedocs.io/en/main/modules/Battery.html
+import PySAM.Battwatts as battery_model # https://nrel-pysam.readthedocs.io/en/main/modules/Battery.html
 import PySAM.ResourceTools as tools
 import pandas as pd
 import statistics
+import json
 
 from helpers import get_counties, get_scenario_path, log, format_load_profile, to_decimal_number, norcal_counties, central_counties, socal_counties
 
@@ -70,7 +71,20 @@ def prepare_data_and_compute_system_capacity(weather_file, load_file, years_of_a
 
 def create_solar_model(solar_resource_data, system_capacity, years_of_analysis):
     # Initialize PV system
-    solar = pvwatts.default("PVWattsResidential") # Or could use FlatPlatePVResidential
+    solar = pvwatts.new() # Or could use FlatPlatePVResidential
+
+    dir = "./SAM_configuration/"
+    file_names = ["untitled__1__pvwattsv8"]
+    modules = [solar]
+
+    for f, m in zip(file_names, modules):
+        with open(dir + f + ".json", 'r') as file:
+            data = json.load(file)
+            print(file)
+            for k, v in data.items():
+                if k not in ["number_inputs", "batt_adjust_constant", "batt_adjust_en_timeindex", "batt_adjust_en_periods", "batt_adjust_timeindex", "batt_adjust_periods"]:
+                    m.value(k, v)
+
     solar.SolarResource.solar_resource_data = solar_resource_data 
     # TODO, Ana: only allow solar panels of specific sizes that actually exist on the market
     # this would require looking at the load profile / system_capacity, and finding the solar
@@ -94,46 +108,59 @@ def create_battery_model(solar, load_profile, years_of_analysis):
     # Battery configuration: https://github.com/NREL/ssc/blob/patch/ssc/cmod_battery.cpp
 
     # ---- Initialize Battery model
-    battery = battery_model.from_existing(solar, "CustomGenerationBatteryResidential") # StandaloneBatteryResidential
+    battery = battery_model.from_existing(solar) # StandaloneBatteryResidential
+
+    dir = "./SAM_configuration/"
+    file_names = ["untitled__1__battwatts"]
+
+    for f, m in zip(file_names, [battery]):
+        with open(dir + f + ".json", 'r') as file:
+            data = json.load(file)
+            print(file)
+            for k, v in data.items():
+                if k not in ["number_inputs", "batt_adjust_constant", "batt_adjust_en_timeindex", "batt_adjust_en_periods", "batt_adjust_timeindex", "batt_adjust_periods"]:
+                    m.value(k, v)
+
     # ---- BatteryCell
     # ['LeadAcid_q10_computed', 'LeadAcid_q20_computed', 'LeadAcid_qn_computed', 'LeadAcid_tn', 'batt_C_rate', 'batt_Cp', 'batt_Qexp', 'batt_Qfull', 'batt_Qfull_flow', 'batt_Qnom', 'batt_Vcut', 'batt_Vexp', 'batt_Vfull', 'batt_Vnom', 'batt_Vnom_default', 'batt_calendar_a', 'batt_calendar_b', 'batt_calendar_c', 'batt_calendar_choice', 'batt_calendar_lifetime_matrix', 'batt_calendar_q0', 'batt_chem', 'batt_h_to_ambient', 'batt_initial_SOC', 'batt_life_model', 'batt_lifetime_matrix', 'batt_maximum_SOC', 'batt_minimum_SOC', 'batt_minimum_modetime', 'batt_minimum_outage_SOC', 'batt_resistance', 'batt_room_temperature_celsius', 'batt_voltage_choice', 'batt_voltage_matrix', 'cap_vs_temp']
-    battery.BatteryCell.batt_Vnom_default = 50.0 # Nominal voltage of the battery [V]
+    # battery.BatteryCell.batt_Vnom_default = 50.0 # Nominal voltage of the battery [V]
     # Convert usable energy (13.5 kWh) to ampere-hours:
     # Capacity [Ah] = 13500 Wh / 50 V = 270 Ah.
-    battery.BatteryCell.batt_Qfull = 293.5      # Fully charged cell capacity [Ah] # 270 for powerwall, but set to be 293.5 so we get full 13.5 kWh of usable Tesla battery capacity
-    battery.BatteryCell.batt_Qnom = 293.5    # Nominal (usable) capacity [Ah] # 270 for powerwall, but set to 293.5 so we get full 13.5 kWh of usable battery capacity as Tesla advertises
-    battery.BatteryCell.batt_initial_SOC = 50.0 # default 50
-    battery.BatteryCell.batt_minimum_SOC = 0 # default 30
-    battery.BatteryCell.batt_maximum_SOC = 1 # default 30
+    # battery.BatteryCell.batt_Qfull = 293.5      # Fully charged cell capacity [Ah] # 270 for powerwall, but set to be 293.5 so we get full 13.5 kWh of usable Tesla battery capacity
+    # battery.BatteryCell.batt_Qnom = 293.5    # Nominal (usable) capacity [Ah] # 270 for powerwall, but set to 293.5 so we get full 13.5 kWh of usable battery capacity as Tesla advertises
+    # battery.BatteryCell.batt_initial_SOC = 50.0 # default 50
+    # battery.BatteryCell.batt_minimum_SOC = 0 # default 30
+    # battery.BatteryCell.batt_maximum_SOC = 1 # default 30
     # Usable energy = 293.5 Ah * 50 V * 0.92 = 13.5 kWh
 
     # --- BatterySystem
     # dict_keys(['batt_ac_dc_efficiency', 'batt_ac_or_dc', 'batt_computed_bank_capacity', 'batt_computed_series', 'batt_computed_strings', 'batt_current_charge_max', 'batt_current_choice', 'batt_current_discharge_max', 'batt_dc_ac_efficiency', 'batt_dc_dc_efficiency', 'batt_inverter_efficiency_cutoff', 'batt_loss_choice', 'batt_losses', 'batt_losses_charging', 'batt_losses_discharging', 'batt_losses_idle', 'batt_mass', 'batt_meter_position', 'batt_power_charge_max_kwac', 'batt_power_charge_max_kwdc', 'batt_power_discharge_max_kwac', 'batt_power_discharge_max_kwdc', 'batt_replacement_capacity', 'batt_replacement_option', 'batt_replacement_schedule_percent', 'batt_surface_area', 'en_batt', 'en_standalone_batt'])
-    battery.BatterySystem.batt_meter_position = 0 # 0=behind the meter, 1=front of the meter
-    battery.BatterySystem.batt_ac_dc_efficiency = 1
-    battery.BatterySystem.batt_dc_ac_efficiency = 1
+    # battery.BatterySystem.batt_meter_position = 0 # 0=behind the meter, 1=front of the meter
+    # battery.BatterySystem.batt_ac_dc_efficiency = 1
+    # battery.BatterySystem.batt_dc_ac_efficiency = 1
 
     # ---- Load
     # dict_keys(['crit_load', 'crit_load_escalation', 'grid_outage', 'load', 'load_escalation', 'run_resiliency_calcs'])
-    battery.Load.load = load_profile # NEED to overwrite this because some default modules provide a load eg GenericBatteryResidential does this
+    # battery.Load.load = load_profile # NEED to overwrite this because some default modules provide a load eg GenericBatteryResidential does this
+
+    battery.Battery.assign({'load': load_profile})
 
     # ---- BatteryDispatch
     # dict_keys(['batt_custom_dispatch', 'batt_cycle_cost', 'batt_cycle_cost_choice', 'batt_dispatch_auto_btm_can_discharge_to_grid', 'batt_dispatch_auto_can_gridcharge', 'batt_dispatch_choice', 'batt_dispatch_load_forecast_choice', 'batt_dispatch_wf_forecast_choice', 'batt_load_ac_forecast', 'batt_load_ac_forecast_escalation', 'batt_pv_ac_forecast', 'batt_pv_clipping_forecast', 'batt_target_choice', 'batt_target_power', 'batt_target_power_monthly', 'dispatch_manual_btm_discharge_to_grid', 'dispatch_manual_charge', 'dispatch_manual_discharge', 'dispatch_manual_gridcharge', 'dispatch_manual_percent_discharge', 'dispatch_manual_percent_gridcharge', 'dispatch_manual_sched', 'dispatch_manual_sched_weekend', 'dispatch_manual_system_charge_first'])
-    battery.BatteryDispatch.batt_target_choice = 0 # Behind the meter = 0
-    battery.BatteryDispatch.batt_dispatch_choice = 5 # 0=PeakShaving,1=InputGridTarget,2=InputBatteryPower,3=ManualDispatch,4=RetailRateDispatch,5=SelfConsumption
-    # battery.BatteryDispatch.batt_dispatch_auto_btm_can_discharge_to_grid = 0 # No discharge to grid
-    battery.BatteryDispatch.batt_dispatch_charge_only_system_exceeds_load = 0
-    battery.BatteryDispatch.batt_dispatch_auto_can_charge = 1 # Is battery charging allowed from solar? Yes
-    battery.BatteryDispatch.batt_dispatch_auto_can_gridcharge = 1 # Is battery allowed to charge from grid? Yes
-    battery.BatteryDispatch.batt_dispatch_auto_can_clipcharge = 0
-    battery.BatteryDispatch.batt_dispatch_auto_can_curtailcharge = 0
-    battery.BatteryDispatch.batt_dispatch_auto_btm_can_discharge_to_grid = 0
-    battery.BatteryDispatch.batt_dispatch_charge_only_system_exceeds_load = 1
-    battery.BatteryDispatch.batt_dispatch_discharge_only_load_exceeds_system = 1
+    # battery.BatteryDispatch.batt_target_choice = 0 # Behind the meter = 0
+    # battery.BatteryDispatch.batt_dispatch_choice = 5 # 0=PeakShaving,1=InputGridTarget,2=InputBatteryPower,3=ManualDispatch,4=RetailRateDispatch,5=SelfConsumption
+    # # battery.BatteryDispatch.batt_dispatch_auto_btm_can_discharge_to_grid = 0 # No discharge to grid
+    # battery.BatteryDispatch.batt_dispatch_auto_can_charge = 1 # Is battery charging allowed from solar? Yes
+    # battery.BatteryDispatch.batt_dispatch_auto_can_gridcharge = 1 # Is battery allowed to charge from grid? Yes
+    # battery.BatteryDispatch.batt_dispatch_auto_can_clipcharge = 1
+    # battery.BatteryDispatch.batt_dispatch_auto_can_curtailcharge = 1
+    # battery.BatteryDispatch.batt_dispatch_auto_btm_can_discharge_to_grid = 1
+    # battery.BatteryDispatch.batt_dispatch_charge_only_system_exceeds_load = 1
+    # battery.BatteryDispatch.batt_dispatch_discharge_only_load_exceeds_system = 1
 
     # ---- Lifetime
     # dict_keys(['analysis_period', 'inflation_rate', 'system_use_lifetime_output'])
-    battery.Lifetime.analysis_period = years_of_analysis
+    # battery.Lifetime.analysis_period = years_of_analysis
 
     return battery
 
@@ -144,7 +171,7 @@ def run_models_and_extract_outputs(solar, battery, load_profile):
     # print(solar.Outputs.ac_monthly)
     battery.execute(0)
 
-    load = battery.Load.load
+    load = battery.Battery.load
     system_to_load = battery.Outputs.system_to_load
     batt_to_load = battery.Outputs.batt_to_load
     grid_to_load = battery.Outputs.grid_to_load
@@ -269,7 +296,7 @@ def process(base_input_dir, base_output_dir, scenario, housing_type, counties=No
     capacity_df.to_csv(output_csv_path)
 
 # # Example usage
-scenario = "induction_stove" # "heat_pump_and_water_heater", 
+scenario = "heat_pump" # "heat_pump_and_water_heater", 
              # "heat_pump_water_heater_and_induction_stove",
              # "heat_pump_heating_cooling_water_heater_and_induction_stove"]
 housing_type = "single-family-detached" # "single-family-attached"]

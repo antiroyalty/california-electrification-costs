@@ -1,9 +1,73 @@
 import os
 import pandas as pd
+import geopandas as gpd
 from helpers import get_counties, get_scenario_path, slugify_county_name, norcal_counties, socal_counties, central_counties, log
 from utility_helpers import get_utility_for_county
 from maps_helpers import initialize_map, get_latest_csv_file
-from capital_costs_helper import CAPITAL_COSTS, INCENTIVES, LIFETIMES, build_metric_map
+from capital_costs_helper import LIFETIMES, build_metric_map
+
+
+CAPITAL_COSTS = {
+    "solar": {
+        # Back-calculated from PG&E's cost estimator website: https://pge.wattplan.com/PV/Wizard/?sector=residential&
+        # https://www.energysage.com/local-data/solar-panel-cost/ca/
+        "dollars_per_watt": 2.8,          # $/W for panels https://www.tesla.com/learn/solar-panel-cost-breakdown
+        "installation_labor": 0,         # 7% extra cost for labor
+        "design_eng_overhead_percent": 0 # 28% extra cost for design/engineering
+    },
+    "storage": {
+        # Other papers suggest: 1200–$1600 per kilowatt-hour which would = $16320 - $21600 https://www.mdpi.com/2071-1050/16/23/10320#:~:text=residential%20solar%20and%20BESS%2C%20the,6%2FWh%20in%20Texas%20%28Figure%203d
+        # https://energylibrary.tesla.com/docs/Public/EnergyStorage/Powerwall/3/Datasheet/en-us/Powerwall-3-Datasheet.pdf
+        # https://www.solarreviews.com/blog/is-the-tesla-powerwall-the-best-solar-battery-available?utm_source=chatgpt.com
+        # https://www.selfgenca.com/home/program_metrics/
+        "powerwall_13.5kwh": 16853          # $16853 Cost for one Tesla Powerwall 3 before incentives. https://www.tesla.com/powerwall/design/overview
+    },
+    "heat_pump": {
+        # Rewiring america: $19,000 https://www.rewiringamerica.org/research/home-electrification-cost-estimates
+        # "average": 19000, # https://www.nrel.gov/docs/fy24osti/84775.pdf#:~:text=dwelling%20units,9%2C000%2C%20%2420%2C000%2C%20and%20%2424%2C000%20for
+        # https://incentives.switchison.org/residents/incentives?state=CA&field_zipcode=90001&_gl=1*1ck7fcj*_gcl_au*OTAxNTQyNjA3LjE3NDQ1NjYxNzg.*_ga*MTEwMTk5ODQ0LjE3NDQ1NjYxNzg.*_ga_8NM1W0PLNN*MTc0NDU2NjE3OC4xLjEuMTc0NDU2NjIwNC4zNC4wLjA.
+        # E3 cites single family residential heat pump cost to be $19,000 https://www.ethree.com/wp-content/uploads/2023/12/E3_Benefit-Cost-Analysis-of-Targeted-Electrification-and-Gas-Decommissioning-in-California.pdf#:~:text=%2419k%20%2415k%20%24154k%20The%20significant,commercial%20customers%20and%20therefore%20see
+        "average": 19000,
+    },
+    "induction_stove": {
+        # PG&E appliance guide also says $2000 https://guide.pge.com/browse/induction
+        "average": 2000 # https://www.sce.com/factsheet/InductionCookingFactSheet
+    }
+}
+
+INCENTIVES = {
+    "federal_tax_credit_2023_2032": 0.3, # 30% credit https://www.irs.gov/credits-deductions/residential-clean-energy-credit
+    # Federal tax incentives will decline in later years
+    "federal_tax_credit_2033": 0.26,
+    "federal_tax_credit_2034": 0.22,
+    "federal_tax_credit_2035": 0,
+    "PGE_SCE_SDGE_General_SGIP_Rebate": 2025, #  General Market SGIP rebate of
+        # approximately $150/kilowatt-hour https://www.cpuc.ca.gov/-/media/cpuc-website/files/uploadedfiles/cpucwebsite/content/news_room/newsupdates/2020/sgip-residential-web-120420.pdf
+    "storage": {
+        # "PG&E": {
+            # "storage_rebate": 7500, # Only for homes in wildfire-prone areas, as deemed by PG&E https://www.tesla.com/support/incentives#california-local-incentives
+        # },
+        # "SCE": {
+
+        # },
+        # "SDG&E": {
+        #     # https://www.sdge.com/solar/considering-solar
+        # }
+    },
+    "heat_pump": {
+        "other_rebates": 9500, # 9500, # 15200, # 10000, # needed to make it worthwhile
+        "max_federal_annual_tax_rebate": 0, # 2000,
+        "california_TECH_incentive": 0, #1500, # https://incentives.switchison.org/rebate-profile/tech-clean-california-single-family-hvac
+    },
+    "induction_stove": {
+        "max_federal_annual_tax_rebate": 420, # 420, # 1000, # 420, # https://www.geappliances.com/inflation-reduction-act
+    },
+    "water_heater": {
+        "54-55gal": 700, # $700 rebate
+        "55-75gal": 900 # $900 rebate https://incentives.switchison.org/residents/incentives?state=CA&field_zipcode=90001&_gl=1*1ck7fcj*_gcl_au*OTAxNTQyNjA3LjE3NDQ1NjYxNzg.*_ga*MTEwMTk5ODQ0LjE3NDQ1NjYxNzg.*_ga_8NM1W0PLNN*MTc0NDU2NjE3OC4xLjEuMTc0NDU2NjIwNC4zNC4wLjA.
+    },
+    "whole_building_electrification": 4250 # must include heat pump space heating, heat pump water heating, induction cooking, electric dryer https://caenergysmarthomes.com/alterations/#whole-building-eligibility
+}
 
 def apply_incentives(total_cost, utility):
     total_cost_after_incentives = total_cost * (1 - INCENTIVES["federal_tax_credit_2023_2032"]) - INCENTIVES["PGE_SCE_SDGE_General_SGIP_Rebate"] # 30% federal incentive, and $250/kwh SGIP rebate
@@ -46,10 +110,9 @@ def apply_solar_storage_incentives(cost, utility):
 
 def calculate_heat_pump_cost():
     base_cost = CAPITAL_COSTS["heat_pump"]["average"]
-    rebate = min(base_cost * 0.3, INCENTIVES["heat_pump"]["max_federal_annual_tax_rebate"]) - INCENTIVES["heat_pump"]["california_TECH_incentive"] - INCENTIVES["heat_pump"]["other_rebates"]
-    print("******")
-    print(base_cost)
-    print(rebate)
+    federal_tax_credit = min(base_cost * 0.3, INCENTIVES["heat_pump"]["max_federal_annual_tax_rebate"]) 
+    rebate = federal_tax_credit + INCENTIVES["heat_pump"]["california_TECH_incentive"] + INCENTIVES["heat_pump"]["other_rebates"]
+
     return base_cost - rebate
 
 def calculate_induction_stove_cost():
@@ -61,69 +124,6 @@ def calculate_water_heater_cost(tank_size: str = "55-75gal"):
     base_cost = CAPITAL_COSTS["water_heater"]["average"]
     rebate = INCENTIVES["water_heater"].get(tank_size, 0)
     return base_cost - rebate
-
-def calculate_total_electrification_cost(scenario, utility, solar_kw=None):
-    total_cost = 0
-    
-    if scenario.startswith("solar_storage") and solar_kw is not None:
-        base_solar_cost, _ = calculate_solar_storage_cost(
-            solar_kw,
-            CAPITAL_COSTS["solar"]["dollars_per_watt"],
-            CAPITAL_COSTS["solar"]["installation_labor"],
-            CAPITAL_COSTS["solar"]["design_eng_overhead_percent"],
-            CAPITAL_COSTS["storage"]["powerwall_13.5kwh"]
-        )
-        total_cost += apply_solar_storage_incentives(base_solar_cost, utility)
-
-    match scenario:
-        case "heat_pump":
-            total_cost += calculate_heat_pump_cost()
-        case "induction_stove":
-            total_cost += calculate_induction_stove_cost()
-        case "heat_pump_and_induction_stove":
-            total_cost += calculate_heat_pump_cost() + calculate_induction_stove_cost()
-        case _:
-            pass  # other or custom scenarios
-
-    return total_cost
-
-def evaluate_electrification_with_solar_storage(solar_kw, annual_savings, utility):
-    base_cost, _ = calculate_solar_storage_cost(
-        solar_kw,
-        CAPITAL_COSTS["solar"]["dollars_per_watt"],
-        CAPITAL_COSTS["solar"]["installation_labor"],
-        CAPITAL_COSTS["solar"]["design_eng_overhead_percent"],
-        CAPITAL_COSTS["storage"]["powerwall_13.5kwh"]
-    )
-    cost_after_incentives = apply_solar_storage_incentives(base_cost, utility)
-    payback = calculate_payback_period(cost_after_incentives, annual_savings)
-
-    return {
-        "capital_cost": cost_after_incentives,
-        "annual_savings": annual_savings,
-        "payback_period": payback,
-    }
-
-def evaluate_electrification_without_solar_storage(scenario, utility, annual_savings):
-    electrification_cost = 0
-
-    match scenario:
-        case "heat_pump":
-            electrification_cost += calculate_heat_pump_cost()
-        case "induction_stove":
-            electrification_cost += calculate_induction_stove_cost()
-        case "heat_pump_and_induction_stove":
-            electrification_cost += (
-                calculate_heat_pump_cost() + calculate_induction_stove_cost()
-            )
-
-    payback = calculate_payback_period(electrification_cost, annual_savings)
-
-    return {
-        "capital_cost": electrification_cost,
-        "annual_savings": annual_savings,
-        "payback_period": payback,
-    }
 
 def evaluate_custom_combo(
     include_solar: bool,
@@ -170,6 +170,7 @@ def evaluate_custom_combo(
             CAPITAL_COSTS["storage"]["powerwall_13.5kwh"]
         )
         solar_cost_after_incentives = apply_solar_storage_incentives(base_solar_cost, utility)
+        print("Solar cost: ", solar_cost_after_incentives)
         total_cost += solar_cost_after_incentives
         components["solar_storage"] = solar_cost_after_incentives
         lifetimes.append(LIFETIMES["solar"])
@@ -177,18 +178,21 @@ def evaluate_custom_combo(
 
     if include_heat_pump:
         hp_cost = calculate_heat_pump_cost()
+        print("Heat pump cost: ", hp_cost)
         total_cost += hp_cost
         components["heat_pump"] = hp_cost
         lifetimes.append(LIFETIMES["heat_pump"])
 
     if include_induction:
         stove_cost = calculate_induction_stove_cost()
+        print("Stove cost: ", stove_cost)
         total_cost += stove_cost
         components["induction_stove"] = stove_cost
         lifetimes.append(LIFETIMES["induction_stove"])
 
     if include_water_heater:
         water_heater_cost = calculate_water_heater_cost(water_heater_tank_size)
+        print("Water heater cost: ", water_heater_cost)
         total_cost += water_heater_cost
         components["water_heater"] = water_heater_cost
         lifetimes.append(LIFETIMES["water_heater"])
@@ -258,16 +262,16 @@ def process(base_input_dir, base_output_dir, scenario, housing_type, counties, d
             baseline_cost = baseline_df.loc["baseline", cost_column]
 
             # 2. Heat pump only
-            hp_dir = os.path.join(base_input_dir, "heat_pump", housing_type, county, "results", "totals")
+            hp_dir = os.path.join(base_input_dir, scenario, housing_type, county, "results", "totals")
             hp_path = get_latest_csv_file(hp_dir, f"RESULTS_total_annual_costs_{county_slug}_")
             hp_df = pd.read_csv(hp_path, index_col="scenario")
-            hp_cost = hp_df.loc["heat_pump", cost_column]
+            hp_cost = hp_df.loc[scenario, cost_column]
 
             # 3. Heat pump + solar
-            hp_solar_dir = os.path.join(base_input_dir, "heat_pump", housing_type, county, "results", "solarstorage")
+            hp_solar_dir = os.path.join(base_input_dir, scenario, housing_type, county, "results", "solarstorage")
             hp_solar_path = get_latest_csv_file(hp_solar_dir, f"RESULTS_total_annual_costs_{county_slug}_")
             hp_solar_df = pd.read_csv(hp_solar_path, index_col="scenario")
-            hp_solar_cost = hp_solar_df.loc["heat_pump.solarstorage", cost_column]
+            hp_solar_cost = hp_solar_df.loc[f"{scenario}.solarstorage", cost_column]
 
             # === Annual savings relative to true baseline ===
             savings_hp_only = baseline_cost - hp_cost
@@ -354,8 +358,15 @@ def process(base_input_dir, base_output_dir, scenario, housing_type, counties, d
     # Create directories if they don't exist
     os.makedirs(maps_dir, exist_ok=True)
     os.makedirs(geojson_dir, exist_ok=True)
+
+    geojson_path = os.path.join(
+        geojson_dir,
+        f"{scenario}.geojson"             # e.g. induction_stove.geojson
+    )
+    merged_gdf.to_file(geojson_path, driver="GeoJSON")
+    print(f"🗺️  Saved GeoJSON to {geojson_path}")
         
-    metrics = ["Payback Period", "Annual Savings", "Total Cost"] # "Annual Savings % Change", 
+    metrics = ["Payback Period", "Total Cost", "Annual Savings", ] # "Total Cost", "Solar Size (kW)"] # "Annual Savings % Change", 
     variants = [f"{scenario}_only", f"{scenario}_solar"]
 
     for metric in metrics:

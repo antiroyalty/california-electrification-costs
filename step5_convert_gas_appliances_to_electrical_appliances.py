@@ -10,7 +10,7 @@ from helpers import get_counties, get_scenario_path, log, to_number
 # Conversion constants
 # TODO: Consider a "low efficiency" and "high efficiency" household appliance adopter
 EFFICIENCY_GAS_STOVE = 0.45  # Average efficiency (40-50%)
-EFFICIENCY_INDUCTION_STOVE = 0.875  # Average efficiency (85-90%)
+EFFICIENCY_INDUCTION_STOVE = 0.85  # Average efficiency (85-90%)
 
 # TODO: How does heat pump COP vary over the year? in winter vs. summer?
 # different COP for "AC" style operation vs. "heating" style

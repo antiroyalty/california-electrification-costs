@@ -10,16 +10,15 @@ def generate_diff_html_maps(
     diff_geojson_fp: str,
     scenario_a: str,
     scenario_b: str,
-    out_dir: str
+    out_dir: str,
+    column_name: str
 ) -> None:
     diff = gpd.read_file(diff_geojson_fp)
     os.makedirs(out_dir, exist_ok=True)
 
     # (column, legend title, palette)
     metrics = [
-        ("Total Cost After Incentives diff", "∆ Total Cost ($)", "RdBu"),
-        ("Annual Savings diff",           "∆ Annual Savings ($)", "PiYG"),
-        ("Payback Period diff",           "∆ Payback Period (yrs)",  "PuOr"),
+        (f"{column_name} diff",           f"∆ {column_name}",  "PuOr_r"),
     ]
 
     for col, legend_name, palette in metrics:
@@ -102,8 +101,7 @@ def diff_scenarios(
     scn_a_fp: str,
     scn_b_fp: str,
     out_dir: str,
-    metrics: Sequence[str] = 
-        ("Total Cost After Incentives","Annual Savings","Payback Period")
+    metrics: Sequence[str]
     ) -> gpd.GeoDataFrame:
     """
     Compute per‑county differences between two scenario GeoJSONs.
@@ -144,39 +142,58 @@ def diff_scenarios(
     diff = diff.drop(columns=drop_cols)
 
     # 6) Write out
-    diff.to_file(os.path.join(out_dir, "difference_metrics.geojson"),
-                 driver="GeoJSON")
+    base_a = os.path.splitext(os.path.basename(scn_a_fp))[0]
+    base_b = os.path.splitext(os.path.basename(scn_b_fp))[0]
+    out_fp = os.path.join(out_dir, f"diff_{base_a}_{base_b}.geojson")
+    diff.to_file(out_fp, driver="GeoJSON")
+
     return diff
 
 if __name__ == '__main__':
     base_input_dir = "data/loadprofiles"
-    base_output_dir = "data/results"
+    base_output_dir = "data/loadprofiles"
     housing_type = "single-family-detached"
 
-    scenario_a = "baseline" 
+    scenario_a = "heat_pump"
+    scenario_b = "heat_pump"
+
+    file_a = "heat_pump_normal_subsidies" 
+    # file_b = "heat_pump_50_percent_subsidies"
+    file_b = "heat_pump_50_percent_subsidies"
+
+    scenario_a = "induction_stove"
     scenario_b = "induction_stove"
+
+    file_a = "induction_stove_normal_subsidies" 
+    file_b = "induction_stove_0_subsidies"
+    # file_b = "induction_stove_0_subsidies"
+
+    column_name = "Payback Period (Electrification + Solar + Storage)"
+    metric = ("Payback Period (Electrification + Solar + Storage)",)
 
     scenario_path_a = get_scenario_path(base_input_dir, scenario_a, housing_type)
     scenario_path_b = get_scenario_path(base_input_dir, scenario_b, housing_type)
 
-    results_output_path = os.path.join(base_output_dir, housing_type, "diffs")
+    results_output_path = os.path.join(base_output_dir, scenario_a, housing_type, "RESULTS", "geojson")
 
     # 1) compute & write the diff GeoJSON
     diff = diff_scenarios(
-      os.path.join(scenario_path_a, "CAPITAL_COSTS/visualizations/metrics_geojson", f"{scenario_a}.geojson"),
-      os.path.join(scenario_path_b, "CAPITAL_COSTS/visualizations/metrics_geojson", f"{scenario_b}.geojson"),
-      results_output_path
+      os.path.join(scenario_path_a, "RESULTS/geojson", f"{file_a}.geojson"),
+      os.path.join(scenario_path_b, "RESULTS/geojson", f"{file_b}.geojson"),
+      results_output_path,
+      metric
     )
     # Positive “Annual Savings diff” -> county gets a “positive” color (e.g. blue in RdBu, green in RdYlGn) -> saved more in the heat‑pump case than in baseline.
     # Negative -> county gets a “negative” color (e.g. red) -> you actually saved less under heat pump than under baseline.
 
     # 2) point to the file diff_scenarios just created
-    diff_geojson_fp = os.path.join(results_output_path, "difference_metrics.geojson")
+    diff_geojson_fp = os.path.join(results_output_path, f"diff_{file_a}_{file_b}.geojson")
 
     # 3) generate the HTML maps for each diff‑metric
     generate_diff_html_maps(
         diff_geojson_fp=diff_geojson_fp,
         scenario_a=scenario_a,
         scenario_b=scenario_b,
-        out_dir=os.path.join(results_output_path, "html_maps")
+        out_dir=os.path.join(results_output_path, "html_maps"),
+        column_name=column_name
     )

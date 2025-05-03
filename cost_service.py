@@ -17,11 +17,10 @@ import step17_build_payback_period_maps as MapPaybackVisualization
 
 class CostService:
     SCENARIOS = {
-        "baseline": {"gas": {"heating", "hot_water", "cooking"}, "electric": {"appliances", "misc"}}, # Almost everything is gas, except normal electrical appliances
+        # "baseline": {"gas": {"heating", "hot_water", "cooking"}, "electric": {"appliances", "misc"}}, # Almost everything is gas, except normal electrical appliances
         # "heat_pump": {"gas": {"hot_water", "cooking"}, "electric": {"appliances", "misc", "heating"}},
-        # "induction_stove": {"gas": {"hot_water", "heating"}, "electric": {"appliances", "misc", "cooking"}}
-        "heat_pump_and_induction_stove": {"gas": {"hot_water"}, "electric": {"appliances", "misc", "cooking", "heating"}}
-        # "heat_pump_heating_cooling_water_heater_and_induction_stove": ["heating", "cooling", "hot_water", "appliances", "cooking", "misc"]
+        "induction_stove": {"gas": {"hot_water", "heating"}, "electric": {"appliances", "misc", "cooking"}},
+        # "heat_pump_and_induction_stove": {"gas": {"hot_water"}, "electric": {"appliances", "misc", "cooking", "heating"}},
     }
 
     def __init__(self, scenario, housing_type, counties, rate_plans, input_dir, output_dir):
@@ -80,13 +79,11 @@ class CostService:
 
 # scenario = "heat_pump_and_induction_stove"
 # scenario = "heat_pump"
-scenario = "baseline"
+scenario = "induction_stove"
+# scenario = "heat_pump"
 housing_type = "single-family-detached"
-counties = ["Colusa County"]
 input_dir = "data"
 output_dir = "data/loadprofiles"
-
-sample_counties = ["San Francisco County"]
 
 norcal_counties = [
     "Alameda County", "Contra Costa County", "Marin County", "Napa County", 
@@ -124,17 +121,6 @@ rate_plans = {
             "gas": "GR"
         }
     }
-# norcal_counties + central_counties
 cost_service = CostService(scenario, housing_type, counties=norcal_counties + central_counties + socal_counties, rate_plans=rate_plans, input_dir=input_dir, output_dir=output_dir)
 
 final_csv = cost_service.run()
-
-# Next steps:
-# For Gas and Electricity rates, model more regions
-# Run for PG&E counties
-
-
-# # Todo:
-# - adjust load profiles to be housed in a single folder
-# - why are electricity loads so far off when the simulated loads are incorporated in baseline values? Debug whether this is a units issue, or a conversion issue
-# - Annual total electricity loads seem too low for berkeley. Should be around 6K, but getting 1K. 
