@@ -9,18 +9,18 @@ from helpers import get_counties, get_scenario_path, log, to_number
 # TODO: Add climate-dependent (county-dependent?) COP values
 # Conversion constants
 # TODO: Consider a "low efficiency" and "high efficiency" household appliance adopter
-EFFICIENCY_GAS_STOVE = 0.45  # Average efficiency (40-50%)
-EFFICIENCY_INDUCTION_STOVE = 0.85  # Average efficiency (85-90%)
+EFFICIENCY_GAS_STOVE = 0.50  # Average efficiency (40-50%)
+EFFICIENCY_INDUCTION_STOVE = 0.80  # Average efficiency (85-90%)
 
 # TODO: How does heat pump COP vary over the year? in winter vs. summer?
 # different COP for "AC" style operation vs. "heating" style
 # Cristina uses Heat Pump COP of 3.375 in her paper
 COP_HEAT_PUMP = 3.5  # Average effective COP (2.0-3.0 for ducted, 2.5-4.0 for non-ducted)
-EFFICIENCY_GAS_HEATING = 0.88  # Average efficiency (80-95%)
+EFFICIENCY_GAS_HEATING = 0.80  # Average efficiency (80-95%)
 
 # TODO: Combined heat pump and water heater system benefits?
 COP_HPWH = 2.75  # Average effective COP (2.0-3.5)
-EFFICIENCY_GAS_WATER_HEATER = 0.75  # Average efficiency (60-90%)
+EFFICIENCY_GAS_WATER_HEATER = 0.70  # Average efficiency (60-90%) # Federal register of standards moving forward: https://www.federalregister.gov/documents/2024/05/06/2024-09209/energy-conservation-program-energy-conservation-standards-for-consumer-water-heaters
 
 INPUT_FILE_PREFIX = "gas_loads" # from output of Step 4
 OUTPUT_FILE_PREFIX = "electricity_loads_simulated"

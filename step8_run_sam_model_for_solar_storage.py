@@ -57,13 +57,13 @@ def prepare_data_and_compute_system_capacity(weather_file, load_file, years_of_a
 
     # annual energy production per square meter [kWh/m2/year]:
     # (daily energy [kWh/m2/day] * days in a year * performance ratio)
-    energy_per_m2_year_kWh = average_daily_irradiance_kWh_per_m2 * 365 * system_performance_ratio
+    energy_per_m2_year_kWh = average_daily_irradiance_kWh_per_m2 * 365 # * system_performance_ratio # avoid double counting
 
     # compute the solar panel area [m2] needed to cover the annual load with oversizing:
     required_panel_area_m2 = (annual_load_kWh * oversizing_factor) / energy_per_m2_year_kWh
 
     # convert required panel area to DC capacity [kW] using the panel power density:
-    required_dc_capacity_kw = required_panel_area_m2 * panel_power_density_kw_per_m2
+    required_dc_capacity_kw = required_panel_area_m2 * panel_power_density_kw_per_m2 # avoid double counting the efficiency
 
     # log(solar_dc_capacity_kw = required_dc_capacity_kw, solar_area_m2 = required_panel_area_m2)
 
@@ -180,6 +180,12 @@ def run_models_and_extract_outputs(solar, battery, load_profile):
     system_to_batt_dc = battery.Outputs.system_to_batt_dc
     system_to_grid = battery.Outputs.system_to_grid
     battery_soc = battery.Outputs.batt_SOC
+
+    print()
+    print()
+
+    print(battery.Outputs.average_battery_roundtrip_efficiency)   # e.g. 0.0–1.0 or 0–100
+    # print(battery.Outputs.batt_DOD)
 
     # if any(val != 0 for val in batt_to_load):
     #     # print("At least one value is non-zero.")

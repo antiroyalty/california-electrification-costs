@@ -55,9 +55,9 @@ INCENTIVES = {
         # }
     },
     "heat_pump": {
-        "other_rebates": 9500, # 9500, # 15200, # 10000, # needed to make it worthwhile
-        "max_federal_annual_tax_rebate": 0, # 2000,
-        "california_TECH_incentive": 0, #1500, # https://incentives.switchison.org/rebate-profile/tech-clean-california-single-family-hvac
+        "other_rebates": 0, # 9500, # 9500, # 15200, # 10000, # needed to make it worthwhile
+        "max_federal_annual_tax_rebate": 2000, # 2000,
+        "california_TECH_incentive": 1500, #1500, # https://incentives.switchison.org/rebate-profile/tech-clean-california-single-family-hvac
     },
     "induction_stove": {
         "max_federal_annual_tax_rebate": 420, # 420, # 1000, # 420, # https://www.geappliances.com/inflation-reduction-act
@@ -366,7 +366,7 @@ def process(base_input_dir, base_output_dir, scenario, housing_type, counties, d
     merged_gdf.to_file(geojson_path, driver="GeoJSON")
     print(f"🗺️  Saved GeoJSON to {geojson_path}")
         
-    metrics = ["Payback Period", "Total Cost", "Annual Savings", ] # "Total Cost", "Solar Size (kW)"] # "Annual Savings % Change", 
+    metrics = ["Payback Period", "Total Cost", "Annual Savings", "Solar Size (kW)" ] # "Total Cost", "Solar Size (kW)"] # "Annual Savings % Change", 
     variants = [f"{scenario}_only", f"{scenario}_solar"]
 
     for metric in metrics:
@@ -387,7 +387,8 @@ def process(base_input_dir, base_output_dir, scenario, housing_type, counties, d
 if __name__ == '__main__':
     base_input_dir = "data/loadprofiles"
     base_output_dir = "data/loadprofiles"
-    scenario = "heat_pump" 
+    # scenario = "heat_pump_and_induction_stove" 
+    scenario = "baseline"
     housing_type = "single-family-detached"
     # List counties to process, these names must match the directory names in the scenario path.
     # counties = ["Los Angeles County", "Alameda County", "Contra Costa"]

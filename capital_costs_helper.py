@@ -5,7 +5,7 @@ import folium
 import numpy as np
 
 from maps_helpers import get_latest_csv_file
-from helpers import to_number
+from helpers import to_number, to_decimal_number
 from utility_helpers import get_utility_for_county
 
 # Personal notes for CAB meeting
@@ -34,10 +34,10 @@ LIFETIMES = {
 
 FIXED_BINS = {
     "Payback Period": [-500, -100, -80, -60, -40, -20, 0, 20, 40, 60, 80, 100, 500], # ❌ Negative Payback = No Payback Ever
-    "Annual Savings": [-2000, -1750, -1500, -1250, -1000, -750, -500, -250, 0, 0.1, 250, 500, 750, 1000, 1250, 1500, 1750, 2000, 2500, 3000, 3500],
-    "Total Cost": [0, 10000, 20000, 30000, 40000, 50000, 60000, 80000, 100000],
+    "Annual Savings": [-600, -450, -300, -150, 0, 0.1, 250, 500, 750, 1000, 1250, 1500, 1750, 2000, 2500, 3000, 3500],
+    "Total Cost": [0, 5000, 10000, 15000, 20000, 25000, 30000, 35000, 40000, 45000, 50000],
     "Annual Savings % Change": [-200, -100, -50, -25, 0, 0.001, 25, 50, 100, 200],
-    "Solar Size (kW)": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]   # kW buckets
+    "Solar Size (kW)": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]   # kW buckets
 }
 
 COLOR_SCHEMES = {
@@ -123,7 +123,7 @@ def prepare_data_columns(merged_gdf, desired_rate_plans, metric, variant, title_
         if u and u in desired_rate_plans else "N/A"
     )
     merged_gdf[f"{data_column}_fmt"] = merged_gdf[data_column].apply(
-        lambda x: to_number(x) if pd.notnull(x) else "N/A"
+        lambda x: to_decimal_number(x) if pd.notnull(x) else "N/A"
     )
 
     return data_column, label_field, legend_name, title_text, suffix

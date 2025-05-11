@@ -19,8 +19,8 @@ class CostService:
     SCENARIOS = {
         # "baseline": {"gas": {"heating", "hot_water", "cooking"}, "electric": {"appliances", "misc"}}, # Almost everything is gas, except normal electrical appliances
         # "heat_pump": {"gas": {"hot_water", "cooking"}, "electric": {"appliances", "misc", "heating"}},
-        "induction_stove": {"gas": {"hot_water", "heating"}, "electric": {"appliances", "misc", "cooking"}},
-        # "heat_pump_and_induction_stove": {"gas": {"hot_water"}, "electric": {"appliances", "misc", "cooking", "heating"}},
+        # "induction_stove": {"gas": {"hot_water", "heating"}, "electric": {"appliances", "misc", "cooking"}},
+        "heat_pump_and_induction_stove": {"gas": {"hot_water"}, "electric": {"appliances", "misc", "cooking", "heating"}},
     }
 
     def __init__(self, scenario, housing_type, counties, rate_plans, input_dir, output_dir):
@@ -79,8 +79,9 @@ class CostService:
 
 # scenario = "heat_pump_and_induction_stove"
 # scenario = "heat_pump"
-scenario = "induction_stove"
+# scenario = "induction_stove"
 # scenario = "heat_pump"
+scenario = "heat_pump_and_induction_stove"
 housing_type = "single-family-detached"
 input_dir = "data"
 output_dir = "data/loadprofiles"

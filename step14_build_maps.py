@@ -85,7 +85,7 @@ def generate_html(merged_gdf, output_path, scenario, file_prefix, all_rates_for_
     merged_gdf["selected_rate"] = [info[0] for info in selected_info]
     merged_gdf["selected_rate_label"] = [info[1] for info in selected_info]
     merged_gdf["selected_rate_fmt"] = merged_gdf["selected_rate"].apply(
-        lambda x: to_decimal_number(x) if pd.notnull(x) else "N/A"
+        lambda x: to_decimal_number(x) if pd.notnull(x) else ""
     )
 
     num_bins = 10  
@@ -260,7 +260,7 @@ if __name__ == '__main__':
     base_input_dir = "data/loadprofiles"
     base_output_dir = "data/loadprofiles"
     counties = ["Los Angeles County"]
-    scenarios = "baseline"
+    scenarios = "heat_pump_and_induction_stove"
     housing_types = "single-family-detached"
     pge_rate_plan = "E-TOU-D"
     sce_rate_plan = "TOU-D-4-9PM"
