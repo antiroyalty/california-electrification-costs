@@ -20,7 +20,9 @@ class CostService:
         # "baseline": {"gas": {"heating", "hot_water", "cooking"}, "electric": {"appliances", "misc"}}, # Almost everything is gas, except normal electrical appliances
         # "heat_pump": {"gas": {"hot_water", "cooking"}, "electric": {"appliances", "misc", "heating"}},
         # "induction_stove": {"gas": {"hot_water", "heating"}, "electric": {"appliances", "misc", "cooking"}},
-        "heat_pump_and_induction_stove": {"gas": {"hot_water"}, "electric": {"appliances", "misc", "cooking", "heating"}},
+        # "heat_pump_and_induction_stove": {"gas": {"hot_water"}, "electric": {"appliances", "misc", "cooking", "heating"}},
+        # "water_heating": {"gas": {"cooking", "heating"}, "electric": {"hot_water", "appliances", "misc"}},
+        "heat_pump_and_induction_stove_and_water_heating": {"gas": {}, "electric": {"hot_water", "cooking", "heating", "appliances", "misc"}}
     }
 
     def __init__(self, scenario, housing_type, counties, rate_plans, input_dir, output_dir):
@@ -71,7 +73,7 @@ class CostService:
 
         CombineTotalAnnualCosts.process("data/loadprofiles", "data/loadprofiles", scenario, [self.housing_type], self.counties)
 
-        BuildMaps.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties, self.desired_rate_plans)
+        # BuildMaps.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties, self.desired_rate_plans)
         
         # BuildDifferenceMaps.process("data/loadprofiles", "data/loadprofiles", housing_type, counties, "baseline", "baseline", "baseline", "baseline.solarstorage")
     
@@ -81,7 +83,8 @@ class CostService:
 # scenario = "heat_pump"
 # scenario = "induction_stove"
 # scenario = "heat_pump"
-scenario = "heat_pump_and_induction_stove"
+# scenario = "heat_pump_and_induction_stove"
+scenario = "heat_pump_and_induction_stove_and_water_heating"
 housing_type = "single-family-detached"
 input_dir = "data"
 output_dir = "data/loadprofiles"

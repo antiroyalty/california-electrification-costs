@@ -136,7 +136,7 @@ if __name__ == '__main__':
     counties = norcal_counties + central_counties + socal_counties
     housing_type = "single-family-detached"
 
-    process(base_input_dir, base_output_dir, "single-family-detached", counties, "baseline", "baseline", "baseline", "baseline.solarstorage")
+    process(base_input_dir, base_output_dir, "single-family-detached", counties, "baseline", "baseline", "induction_stove", "induction_stove")
     # process(base_input_dir, base_output_dir, "single-family-detached", counties, "baseline", "baseline", "heat_pump", "heat_pump")
     # process(base_input_dir, base_output_dir, "single-family-detached", counties, "baseline", "baseline.solarstorage", "heat_pump", "heat_pump.solarstorage")
     # process(base_input_dir, base_output_dir, "single-family-detached", counties, "heat_pump", "heat_pump", "heat_pump", "heat_pump.solarstorage") # baseline vs. baseline solarstorage

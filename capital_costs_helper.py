@@ -28,16 +28,16 @@ LIFETIMES = {
     "solar": 25, # https://www.energysage.com/solar/how-long-do-solar-panels-last/
     "storage": 15, # years
     "heat_pump": 15, # https://www.energysage.com/heat-pumps/how-long-do-heat-pumps-last/
-    "induction_stove": 10, # https://www.greenbuildermedia.com/blog/dont-throw-out-that-old-electric-coil-stove-for-an-induction-top-yet
+    "induction_stove": 15, # https://www.greenbuildermedia.com/blog/dont-throw-out-that-old-electric-coil-stove-for-an-induction-top-yet
     "water_heater": 15, # https://www.oliverheatcool.com/about/blog/news-for-homeowners/the-average-lifespan-of-water-heaters/
 }
 
 FIXED_BINS = {
-    "Payback Period": [-500, -100, -80, -60, -40, -20, 0, 20, 40, 60, 80, 100, 500], # ❌ Negative Payback = No Payback Ever
+    "Payback Period": [-500, -100, -80, -60, -40, -20, 0, 20, 40, 60, 80, 100, 500],
     "Annual Savings": [-600, -450, -300, -150, 0, 0.1, 250, 500, 750, 1000, 1250, 1500, 1750, 2000, 2500, 3000, 3500],
     "Total Cost": [0, 5000, 10000, 15000, 20000, 25000, 30000, 35000, 40000, 45000, 50000],
     "Annual Savings % Change": [-200, -100, -50, -25, 0, 0.001, 25, 50, 100, 200],
-    "Solar Size (kW)": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]   # kW buckets
+    "Solar Size (kW)": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]   # kW buckets
 }
 
 COLOR_SCHEMES = {
@@ -240,6 +240,29 @@ def build_metric_map(merged_gdf, desired_rate_plans, metric, variant, title_pref
     m.get_root().html.add_child(folium.Element(
         "<style>.leaflet-control-color-scale{display:none!important;}</style>"
     ))
+
+    # ------------- Statistics panel
+    stats_series = merged_gdf[data_column].dropna()
+
+    if not stats_series.empty:
+        stats = {
+            "Min":    to_decimal_number(stats_series.min()),
+            "Median": to_decimal_number(stats_series.median()),
+            "Mean":   to_decimal_number(stats_series.mean()),
+            "Max":    to_decimal_number(stats_series.max())
+        }
+
+        stats_html = (
+            '<div style="width:550px; margin:20px auto 20px;'
+            'padding:4px 6px;font-size:10pt;'
+            'background:#f7f7f7;border:1px solid #bbb;'
+            'border-radius:4px;text-align:center;" display="inline">'
+            f'<b>{metric} summary:</b> '
+            + ' &nbsp;|&nbsp; '.join(f'{k}: {v}' for k, v in stats.items())
+            + '</div>'
+        )
+
+        m.get_root().html.add_child(folium.Element(stats_html))
 
     folium.LayerControl().add_to(m)
     return m

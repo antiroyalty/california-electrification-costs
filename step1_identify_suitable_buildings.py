@@ -20,16 +20,17 @@ SCENARIOS = {
         "in.tenure": "Owner",
         # TODO: Ana, investigate whether we can get results for Owned vs. Rented
     },
-    "special_cooking_heating_water": {
+}
+
+SPECIAL_COUNTIES_CONDITIONS_NEEDED_TO_RETURN_AT_LEAST_ONE_BUILDING = {
+    "Inyo County": "special_cooking_heating_water",
+
+        "special_cooking_heating_water": {
         "in.vacancy_status": "Occupied",
         "in.cooking_range": ["Electric Resistance", "Electric Induction"],
         # "in.heating_fuel": ["Electricity"],
         # "in.water_heater_fuel": "Electricity",
     }
-}
-
-SPECIAL_COUNTIES_CONDITIONS_NEEDED_TO_RETURN_AT_LEAST_ONE_BUILDING = {
-    "Inyo County": "special_cooking_heating_water",
 }
 
 HOUSING_NAME_MAP = {

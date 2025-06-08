@@ -74,6 +74,38 @@ SCENARIO_DATA_MAP = {
                 "columns":  ["out.natural_gas.hot_water.energy_consumption.gas.building_avg.therms"],
             }
         },
+    },
+    "water_heating": {
+        "default": {
+            "electricity": {
+                "file_prefix": "electricity_loads_",
+                "columns": ["total_load"]
+            },
+            "electricity_simulated": {
+                "file_prefix": "electricity_loads_simulated_",
+                "columns": ["simulated.electricity.hot_water.energy_consumption.electricity.kwh"]
+            },
+            "gas": {
+                "file_prefix": "gas_loads_",
+                "columns":  ["out.natural_gas.range_oven.energy_consumption.gas.building_avg.therms", "out.natural_gas.heating.energy_consumption.gas.building_avg.therms"],
+            }
+        },
+    },
+    "heat_pump_and_induction_stove_and_water_heating": {
+        "default": {
+            "electricity": {
+                "file_prefix": "electricity_loads_",
+                "columns": ["total_load"]
+            },
+            "electricity_simulated": {
+                "file_prefix": "electricity_loads_simulated_",
+                "columns": ["simulated.electricity.induction_stove.energy_consumption.electricity.kwh", "simulated.electricity.heat_pump.energy_consumption.electricity.kwh", "simulated.electricity.hot_water.energy_consumption.electricity.kwh"]
+            },
+            "gas": {
+                "file_prefix": "gas_loads_",
+                "columns":  [],
+            }
+        },
     }
 }
 

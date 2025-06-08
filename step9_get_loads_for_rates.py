@@ -99,6 +99,54 @@ SCENARIO_DATA_MAP = {
             }
         }
     },
+    "water_heating": {
+        # household adopted water heating
+        "default": {
+            "electricity": {
+                "file_prefix": "combined_profiles_water_heating_", # or "sam_optimized_load_profiles_"
+                "column": "electricity.real_and_simulated.for_typical_county_home.kwh" # or + "Total Load"
+            },
+            "gas": {
+                "file_prefix": "combined_profiles_water_heating_",
+                "column": "gas.hourly_total.for_typical_county_home.therms"
+            }
+        },
+        # household adopted water heating w/ solar + storage
+        "solar_storage": {
+            "electricity": {
+                "file_prefix": "sam_optimized_load_profiles_",
+                "column": "Grid to Load"
+            },
+            "gas": {
+                "file_prefix": "combined_profiles_water_heating_",
+                "column": "gas.hourly_total.for_typical_county_home.therms",
+            }
+        }
+    },
+    "heat_pump_and_induction_stove_and_water_heating": {
+        # household adopted water heating
+        "default": {
+            "electricity": {
+                "file_prefix": "combined_profiles_heat_pump_and_induction_stove_and_water_heating_", # or "sam_optimized_load_profiles_"
+                "column": "electricity.real_and_simulated.for_typical_county_home.kwh" # or + "Total Load"
+            },
+            "gas": {
+                "file_prefix": "combined_profiles_heat_pump_and_induction_stove_and_water_heating_",
+                "column": "gas.hourly_total.for_typical_county_home.therms"
+            }
+        },
+        # household adopted water heating w/ solar + storage
+        "solar_storage": {
+            "electricity": {
+                "file_prefix": "sam_optimized_load_profiles_",
+                "column": "Grid to Load"
+            },
+            "gas": {
+                "file_prefix": "combined_profiles_heat_pump_and_induction_stove_and_water_heating_",
+                "column": "gas.hourly_total.for_typical_county_home.therms",
+            }
+        }
+    },
 }
 
 OUTPUT_FILE_NAME = "loadprofiles_for_rates"

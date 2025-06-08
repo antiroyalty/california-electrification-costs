@@ -69,6 +69,30 @@ def get_total_costs(county_dir):
 def get_solarstorage_total_costs(county_dir):
     return load_cost_data(county_dir, "solarstorage", "RESULTS_total_annual_costs")
 
+# ──────────────────────────────────────────────────────────────
+# Load a single row (scenario tag) from the service CSV
+# ──────────────────────────────────────────────────────────────
+def load_service_cost(county_dir, service, scenario_tag="baseline"):
+    """
+    service  : "electricity" | "gas" | "totals"
+    scenario_tag : row label, e.g. "baseline", "baseline.solarstorage"
+    """
+    
+    path    = os.path.join(county_dir, "results", service)
+    prefix  = f"RESULTS_{service}_annual_costs"
+    county  = os.path.basename(county_dir)
+    file    = get_latest_csv_file(path, f"{prefix}_{county}_")
+
+    df      = pd.read_csv(file, index_col="scenario")
+
+    return df.loc[scenario_tag]
+
+def get_electricity_costs_solarstorage(county_dir, scenario):
+    return load_service_cost(county_dir, "electricity", f"{scenario}.solarstorage")
+
+def get_gas_costs_solarstorage(county_dir, scenario):
+    return load_service_cost(county_dir, "gas", f"{scenario}.solarstorage")
+
 def generate_geojson(merged_gdf, output_path, file_prefix, rate):
     subset = merged_gdf[["NAME", "geometry", rate]]
     filename = os.path.join(output_path, f"{file_prefix}.{rate}.geojson")
@@ -93,7 +117,23 @@ def generate_html(merged_gdf, output_path, scenario, file_prefix, all_rates_for_
     max_val = merged_gdf["selected_rate"].max()
     threshold_scale = list(np.linspace(min_val, max_val, num_bins)) # np.linspace ensures max value is included
     
-    m = folium.Map(location=[37.8, -120], zoom_start=6)
+    m = folium.Map(
+        location=[37.8, -120], 
+        zoom_start=6,
+        width="550px",
+        height="700px",
+        zoom_control=False
+    )
+    css = f"""
+        <style>
+        /* #{m.get_name()} is the map’s <div> */
+        #{m.get_name()} {{
+            margin: 0 auto;         /* left & right auto = centred */
+        }}
+        </style>
+        """
+    m.get_root().html.add_child(folium.Element(css))
+    
     title_html = f'''
              <h3 align="center" style="font-size:16px"><b>Total annual costs: {file_prefix}</b></h3>
              '''
@@ -157,6 +197,48 @@ def generate_html(merged_gdf, output_path, scenario, file_prefix, all_rates_for_
     
     # Add the custom legend to the map.
     m.get_root().html.add_child(folium.Element(legend_html))
+
+    # -------------- Statistics panel
+    stats_series = merged_gdf["selected_rate"].dropna()
+
+    if not stats_series.empty:
+        stats = {
+            "Min":    to_decimal_number(stats_series.min()),
+            "Median": to_decimal_number(stats_series.median()),
+            "Mean":   to_decimal_number(stats_series.mean()),
+            "Max":    to_decimal_number(stats_series.max())
+        }
+
+        stats_id = f"{m.get_name()}_stats"
+
+        stats_html = (
+            f'<div id="{stats_id}" '
+            'style="width:100%;max-width:550px;'
+            'margin:50px auto 50px;'
+            'padding:4px 6px;'
+            'font-size:10pt;'
+            'background:#f7f7f7;'
+            'border:1px solid #bbb;'
+            'border-radius:4px;'
+            'text-align:center;">'
+            f'<b>{file_prefix} — summary of annual cost ($):</b> '
+            + ' &nbsp;|&nbsp; '.join(f"{k}: {v}" for k, v in stats.items())
+            + '</div>'
+            # Move the div outside the map container so it sits below
+            f'''
+            <script>
+            (function(){{
+            var mapDiv   = document.getElementById('{m.get_name()}');
+            var statsDiv = document.getElementById('{stats_id}');
+            if (mapDiv && statsDiv) {{
+                mapDiv.parentNode.insertBefore(statsDiv, mapDiv.nextSibling);
+            }}
+            }})();
+            </script>
+            '''
+        )
+
+        m.get_root().html.add_child(folium.Element(stats_html))
     
     filename = os.path.join(output_path, f"{file_prefix}.html")
     # Assuming log is defined elsewhere; if not, you can print or remove it.
@@ -212,7 +294,7 @@ def generate_service_maps(merged_gdf, base_output_dir, scenario, file_prefix, de
 def process(base_input_dir, base_output_dir, scenario, housing_type, counties, desired_rate_plans):
     scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
     valid_counties = get_counties(scenario_path, counties)
-    data_combined, data_solar, data_elec, data_gas, data_elec_solarstorage = {}, {}, {}, {}, {}
+    data_combined, data_solar, data_elec, data_gas, data_elec_ss, data_gas_ss = {}, {}, {}, {}, {}, {}
 
     for county in valid_counties:
         county_dir = os.path.join(scenario_path, county)
@@ -221,12 +303,18 @@ def process(base_input_dir, base_output_dir, scenario, housing_type, counties, d
             solar_totals = get_solarstorage_total_costs(county_dir)
             elec = get_electricity_costs(county_dir)
             gas = get_gas_costs(county_dir)
+            elec_ss = get_electricity_costs_solarstorage(county_dir, scenario)
+            gas_ss = get_gas_costs_solarstorage(county_dir, scenario)
 
             name = county.replace("-", " ").title()
             data_combined[name] = combined.to_dict()
             data_solar[name] = solar_totals.to_dict()
             data_elec[name] = elec.to_dict()
             data_gas[name] = gas.to_dict()
+
+            data_elec_ss[name]  = elec_ss.to_dict()
+            data_gas_ss[name]   = gas_ss.to_dict()
+
         except Exception as e:
             log(county=county, message=f"Skipping county", error=e)
             continue
@@ -235,6 +323,8 @@ def process(base_input_dir, base_output_dir, scenario, housing_type, counties, d
     df_solar = pd.DataFrame.from_dict(data_solar, orient="index")
     df_elec = pd.DataFrame.from_dict(data_elec, orient="index")
     df_gas = pd.DataFrame.from_dict(data_gas, orient="index")
+    df_elec_ss = pd.DataFrame.from_dict(data_elec_ss, orient="index")
+    df_gas_ss  = pd.DataFrame.from_dict(data_gas_ss,  orient="index")
 
     gdf = initialize_map()
 
@@ -242,6 +332,8 @@ def process(base_input_dir, base_output_dir, scenario, housing_type, counties, d
     merged_solar = gdf.merge(df_solar, left_on="NAME", right_index=True, how="left")
     merged_elec = gdf.merge(df_elec, left_on="NAME", right_index=True, how="left")
     merged_gas = gdf.merge(df_gas, left_on="NAME", right_index=True, how="left")
+    merged_elec_ss = gdf.merge(df_elec_ss, left_on="NAME", right_index=True, how="left")
+    merged_gas_ss  = gdf.merge(df_gas_ss,  left_on="NAME", right_index=True, how="left")
 
     output_maps_path = os.path.join(scenario_path, "RESULTS", "visualizations")
 
@@ -251,6 +343,10 @@ def process(base_input_dir, base_output_dir, scenario, housing_type, counties, d
     html_files.extend(generate_service_maps(merged_elec, output_maps_path, scenario, "electricity", desired_rate_plans=desired_rate_plans))
     html_files.extend(generate_service_maps(merged_gas, output_maps_path, scenario, "gas", desired_rate_plans=desired_rate_plans))
     html_files.extend(generate_service_maps(merged_solar, output_maps_path, scenario, f"{scenario}.solarstorage", desired_rate_plans=desired_rate_plans))
+    
+    html_files.extend(generate_service_maps(merged_elec_ss, output_maps_path, scenario, "electricity.solarstorage", desired_rate_plans))
+
+    html_files.extend(generate_service_maps(merged_gas_ss, output_maps_path, scenario, "gas.solarstorage", desired_rate_plans))
 
     # open the generated maps in default browser
     for file in html_files:
@@ -259,8 +355,7 @@ def process(base_input_dir, base_output_dir, scenario, housing_type, counties, d
 if __name__ == '__main__': 
     base_input_dir = "data/loadprofiles"
     base_output_dir = "data/loadprofiles"
-    counties = ["Los Angeles County"]
-    scenarios = "heat_pump_and_induction_stove"
+    scenarios = "baseline"
     housing_types = "single-family-detached"
     pge_rate_plan = "E-TOU-D"
     sce_rate_plan = "TOU-D-4-9PM"

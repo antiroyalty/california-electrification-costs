@@ -34,43 +34,44 @@ CAPITAL_COSTS = {
         "average": 2000 # https://www.sce.com/factsheet/InductionCookingFactSheet
     },
     "water_heater": { # 55 gal
-        "average": 2637,
+        "average": 1637,
     }
 }
 
-INCENTIVES = {
-    "federal_tax_credit_2023_2032": 0.3, # 30% credit https://www.irs.gov/credits-deductions/residential-clean-energy-credit
-    # Federal tax incentives will decline in later years
-    "federal_tax_credit_2033": 0.26,
-    "federal_tax_credit_2034": 0.22,
-    "federal_tax_credit_2035": 0,
-    "PGE_SCE_SDGE_General_SGIP_Rebate": 2025, #  General Market SGIP rebate of
-        # approximately $150/kilowatt-hour https://www.cpuc.ca.gov/-/media/cpuc-website/files/uploadedfiles/cpucwebsite/content/news_room/newsupdates/2020/sgip-residential-web-120420.pdf
-    "storage": {
-        # "PG&E": {
-            # "storage_rebate": 7500, # Only for homes in wildfire-prone areas, as deemed by PG&E https://www.tesla.com/support/incentives#california-local-incentives
-        # },
-        # "SCE": {
+# INCENTIVES = {
+#     "federal_tax_credit_2023_2032": 0.3, # 30% credit https://www.irs.gov/credits-deductions/residential-clean-energy-credit
+#     # Federal tax incentives will decline in later years
+#     "federal_tax_credit_2033": 0.26,
+#     "federal_tax_credit_2034": 0.22,
+#     "federal_tax_credit_2035": 0,
+#     "PGE_SCE_SDGE_General_SGIP_Rebate": 2025, #  General Market SGIP rebate of
+#         # approximately $150/kilowatt-hour https://www.cpuc.ca.gov/-/media/cpuc-website/files/uploadedfiles/cpucwebsite/content/news_room/newsupdates/2020/sgip-residential-web-120420.pdf
+#     "storage": {
+#         # "PG&E": {
+#             # "storage_rebate": 7500, # Only for homes in wildfire-prone areas, as deemed by PG&E https://www.tesla.com/support/incentives#california-local-incentives
+#         # },
+#         # "SCE": {
 
-        # },
-        # "SDG&E": {
-        #     # https://www.sdge.com/solar/considering-solar
-        # }
-    },
-    "heat_pump": {
-        "other_rebates": 0, # 9500, # 9500, # 15200, # 10000, # needed to make it worthwhile
-        "max_federal_annual_tax_rebate": 2000, # 2000,
-        "california_TECH_incentive": 1500, #1500, # https://incentives.switchison.org/rebate-profile/tech-clean-california-single-family-hvac
-    },
-    "induction_stove": {
-        "max_federal_annual_tax_rebate": 420, # 420, # 1000, # 420, # https://www.geappliances.com/inflation-reduction-act
-    },
-    "water_heater": {
-        "max_federal_annual_tax_rebate": 2000,
-        "45-55gal": 700, # $700 rebate
-        # "55-75gal": 900 # $900 rebate https://incentives.switchison.org/residents/incentives?state=CA&field_zipcode=90001&_gl=1*1ck7fcj*_gcl_au*OTAxNTQyNjA3LjE3NDQ1NjYxNzg.*_ga*MTEwMTk5ODQ0LjE3NDQ1NjYxNzg.*_ga_8NM1W0PLNN*MTc0NDU2NjE3OC4xLjEuMTc0NDU2NjIwNC4zNC4wLjA.
-    },
-}
+#         # },
+#         # "SDG&E": {
+#         #     # https://www.sdge.com/solar/considering-solar
+#         # }
+#     },
+#     "heat_pump": {
+#         "other_rebates": 0, # 9500, # 9500, # 15200, # 10000, # needed to make it worthwhile
+#         "max_federal_annual_tax_rebate": 2000, # 2000,
+#         "california_TECH_incentive": 1500, #1500, # https://incentives.switchison.org/rebate-profile/tech-clean-california-single-family-hvac
+#     },
+#     "induction_stove": {
+#         "max_federal_annual_tax_rebate": 420, # 420, # 1000, # 420, # https://www.geappliances.com/inflation-reduction-act
+#     },
+#     "water_heater": {
+#         "max_federal_annual_tax_rebate": 2000,
+#         "45-55gal": 700, # $700 rebate
+#         # "55-75gal": 900 # $900 rebate https://incentives.switchison.org/residents/incentives?state=CA&field_zipcode=90001&_gl=1*1ck7fcj*_gcl_au*OTAxNTQyNjA3LjE3NDQ1NjYxNzg.*_ga*MTEwMTk5ODQ0LjE3NDQ1NjYxNzg.*_ga_8NM1W0PLNN*MTc0NDU2NjE3OC4xLjEuMTc0NDU2NjIwNC4zNC4wLjA.
+#     },
+#     # "whole_building_electrification": 4250 # must include heat pump space heating, heat pump water heating, induction cooking, electric dryer https://caenergysmarthomes.com/alterations/#whole-building-eligibility
+# }
 
 # NO INCENTIVES
 # INCENTIVES = {
@@ -108,11 +109,45 @@ INCENTIVES = {
 #     # "whole_building_electrification": 4250 # must include heat pump space heating, heat pump water heating, induction cooking, electric dryer https://caenergysmarthomes.com/alterations/#whole-building-eligibility
 # }
 
+# FIFTY_PERCENT_INCENTIVES
+INCENTIVES = {
+    "federal_tax_credit_2023_2032": 0.5, # 30% credit https://www.irs.gov/credits-deductions/residential-clean-energy-credit
+    # Federal tax incentives will decline in later years
+    # "federal_tax_credit_2033": 0.26,
+    # "federal_tax_credit_2034": 0.22,
+    # "federal_tax_credit_2035": 0,
+    "PGE_SCE_SDGE_General_SGIP_Rebate": 0, #  General Market SGIP rebate of
+        # approximately $150/kilowatt-hour https://www.cpuc.ca.gov/-/media/cpuc-website/files/uploadedfiles/cpucwebsite/content/news_room/newsupdates/2020/sgip-residential-web-120420.pdf
+    "storage": {
+        # "PG&E": {
+            # "storage_rebate": 7500, # Only for homes in wildfire-prone areas, as deemed by PG&E https://www.tesla.com/support/incentives#california-local-incentives
+        # },
+        # "SCE": {
+
+        # },
+        # "SDG&E": {
+        #     # https://www.sdge.com/solar/considering-solar
+        # }
+    },
+    "heat_pump": {
+        "other_rebates": 0, # 9500, # 9500, # 15200, # 10000, # needed to make it worthwhile
+        "max_federal_annual_tax_rebate": 100000, # 2000,
+        "california_TECH_incentive": 0, #1500, # https://incentives.switchison.org/rebate-profile/tech-clean-california-single-family-hvac
+    },
+    "induction_stove": {
+        "max_federal_annual_tax_rebate": 100000, # 420, # 1000, # 420, # https://www.geappliances.com/inflation-reduction-act
+    },
+    "water_heater": {
+        "max_federal_annual_tax_rebate": 100000,
+        "45-55gal": 0, # $700 rebate
+        # "55-75gal": 900 # $900 rebate https://incentives.switchison.org/residents/incentives?state=CA&field_zipcode=90001&_gl=1*1ck7fcj*_gcl_au*OTAxNTQyNjA3LjE3NDQ1NjYxNzg.*_ga*MTEwMTk5ODQ0LjE3NDQ1NjYxNzg.*_ga_8NM1W0PLNN*MTc0NDU2NjE3OC4xLjEuMTc0NDU2NjIwNC4zNC4wLjA.
+    },
+    # "whole_building_electrification": 4250 # must include heat pump space heating, heat pump water heating, induction cooking, electric dryer https://caenergysmarthomes.com/alterations/#whole-building-eligibility
+}
+
 def apply_incentives(total_cost, utility):
     total_cost_after_incentives = total_cost * (1 - INCENTIVES["federal_tax_credit_2023_2032"]) - INCENTIVES["PGE_SCE_SDGE_General_SGIP_Rebate"] # 30% federal incentive, and $250/kwh SGIP rebate
 
-    if utility in INCENTIVES["storage"]:
-        total_cost_after_incentives -= INCENTIVES["storage"][utility]["storage_rebate"]
     return total_cost_after_incentives
 
 def calculate_payback_period(total_cost, annual_savings, lifetime_limit=None):
@@ -145,25 +180,31 @@ def apply_solar_storage_incentives(cost, utility):
 
     if utility in INCENTIVES["storage"]:
         cost -= INCENTIVES["storage"][utility]["storage_rebate"]
+
+    print("Solar storage incentives: ", cost)
     return cost
 
 def calculate_heat_pump_cost():
     base_cost = CAPITAL_COSTS["heat_pump"]["average"]
-    federal_tax_credit = min(base_cost * 0.3, INCENTIVES["heat_pump"]["max_federal_annual_tax_rebate"]) 
+    federal_tax_credit = min(base_cost * INCENTIVES["federal_tax_credit_2023_2032"], INCENTIVES["heat_pump"]["max_federal_annual_tax_rebate"]) 
     rebate = federal_tax_credit + INCENTIVES["heat_pump"]["california_TECH_incentive"] + INCENTIVES["heat_pump"]["other_rebates"]
 
+    print("Heat pump rebate: ", rebate)
     return base_cost - rebate
 
 def calculate_induction_stove_cost():
     base_cost = CAPITAL_COSTS["induction_stove"]["average"]
-    rebate = INCENTIVES["induction_stove"]["max_federal_annual_tax_rebate"]
+    rebate = min(base_cost * INCENTIVES["federal_tax_credit_2023_2032"], INCENTIVES["induction_stove"]["max_federal_annual_tax_rebate"])
+
+    print("Induction stove rebate: ", rebate)
     return base_cost - rebate
 
 def calculate_water_heater_cost(tank_size: str = "55-75gal"):
     base_cost = CAPITAL_COSTS["water_heater"]["average"]
-    federal_tax_credit = min(base_cost * 0.3, INCENTIVES["water_heater"]["max_federal_annual_tax_rebate"]) 
+    federal_tax_credit = min(base_cost * INCENTIVES["federal_tax_credit_2023_2032"], INCENTIVES["water_heater"]["max_federal_annual_tax_rebate"]) 
     rebate = federal_tax_credit + INCENTIVES["water_heater"]["45-55gal"]
-    print("REBATE: ", rebate)
+
+    print("Water heater rebate: ", rebate)
     return base_cost - rebate
 
 def evaluate_custom_combo(
@@ -407,7 +448,7 @@ def process(base_input_dir, base_output_dir, scenario, housing_type, counties, d
     merged_gdf.to_file(geojson_path, driver="GeoJSON")
     print(f"🗺️  Saved GeoJSON to {geojson_path}")
         
-    metrics = ["Payback Period", "Solar Size (kW)"] # , "Annual Savings"] # "Solar Size (kW)"] # "Total Cost", "Solar Size (kW)"] # "Annual Savings % Change", 
+    metrics = ["Payback Period"] # , "Annual Savings"] # "Solar Size (kW)"] # "Total Cost", "Solar Size (kW)"] # "Annual Savings % Change", 
     variants = [f"{scenario}_only", f"{scenario}_solar"]
 
     for metric in metrics:
@@ -428,8 +469,8 @@ def process(base_input_dir, base_output_dir, scenario, housing_type, counties, d
 if __name__ == '__main__':
     base_input_dir = "data/loadprofiles"
     base_output_dir = "data/loadprofiles"
-    scenario = "heat_pump_and_induction_stove_and_water_heating" 
-    # scenario = "water_heating"
+    # scenario = "heat_pump_and_induction_stove" 
+    scenario = "heat_pump_and_induction_stove_and_water_heating"
     housing_type = "single-family-detached"
     # List counties to process, these names must match the directory names in the scenario path.
     # counties = ["Los Angeles County", "Alameda County", "Contra Costa"]
