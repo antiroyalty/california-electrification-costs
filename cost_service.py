@@ -38,13 +38,12 @@ class CostService:
 
     def run(self):
         self.log_step(1)
-        IdentifySuitableBuildings.process(self.scenario, self.housing_type, output_base_dir="data", target_counties=self.counties, force_recompute=False)
+        IdentifySuitableBuildings.process(scenario, self.housing_type, output_base_dir="data", target_counties=self.counties, force_recompute=False)
 
         self.log_step(2)
-        PullBuildings.process(self.scenario, self.housing_type, self.counties, output_base_dir="data", download_new_files=False) # output directory should just be 'data', not 'loadprofiles'
+        PullBuildings.process(scenario, self.housing_type, self.counties, output_base_dir="data", download_new_files=False) # output directory should just be 'data', not 'loadprofiles'
     
         self.log_step(3)
-        # Make sure I don't pull load profiles on every run, only if they don't already exist
         BuildElectricityLoadProfiles.process(self.SCENARIOS, self.housing_type, self.counties, "data", "data/loadprofiles", force_recompute=False)
 
         self.log_step(4)
