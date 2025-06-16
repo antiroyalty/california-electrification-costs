@@ -6,12 +6,6 @@ from helpers import get_scenario_path, get_counties, log, to_number
 # Conversion factor
 KWH_TO_THERMS = 0.0341296
 
-# TODO: Ana, deduplicate
-# Define scenarios and natural gas end uses
-SCENARIOS = {
-    "baseline": ["heating", "hot_water", "cooking", "appliances", "misc"],
-}
-
 # Define natural gas end use columns
 END_USE_COLUMNS = {
     "heating": ['out.natural_gas.heating.energy_consumption'],
@@ -99,7 +93,6 @@ def average_county_gas_profiles(county_gas_totals, building_count, end_uses):
     return county_gas_totals
 
 def save_county_gas_profiles(county_gas_totals, county, output_file):
-
     log(
         at="step4_build_gas_profiles#save_county_gas_profiles",
         gas_heating_kwh=to_number(county_gas_totals['out.natural_gas.heating.energy_consumption.gas.building_avg.kwh'].sum()),
@@ -129,37 +122,42 @@ def should_skip_processing(output_path, force_recompute):
 
     return os.path.exists(output_path)
 
-def process(scenarios, housing_types, base_input_dir, base_output_dir, counties=None, force_recompute=True):
-    for scenario in scenarios:
-        if scenario != "baseline":
-            log(at="step4_build_gas_load_profiles", message="no new electricity profiles needed to be downloaded")
-            return
+def process(scenario, scenario_mapping, housing_type, base_input_dir, base_output_dir, counties=None, force_recompute=True):
+    if scenario != "baseline":
+        log(at="step4_build_gas_load_profiles", message="no new electricity profiles needed to be downloaded")
+        return
 
-        for housing_type in housing_types:
-            scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
-            counties = get_counties(scenario_path, counties)
-            
-            for county in counties:
-                log(
-                    at="step4_build_gas_load_profiles#process",
-                    details=f"Processing gas load profile in {county} for {scenario}, {housing_type}",
-                )
-            
-                county_dir = os.path.join(scenario_path, county, "buildings")
-                output_dir = os.path.join(base_output_dir, scenario, housing_type, county)
-                os.makedirs(output_dir, exist_ok=True)
-                output_file = os.path.join(output_dir, f"{OUTPUT_FILE_PREFIX}_{county}.csv")
+    scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
+    counties = get_counties(scenario_path, counties)
+    
+    for county in counties:
+        log(
+            at="step4_build_gas_load_profiles#process",
+            details=f"Processing gas load profile in {county} for {scenario}, {housing_type}",
+        )
+    
+        county_dir = os.path.join(scenario_path, county, "buildings")
+        output_dir = os.path.join(base_output_dir, scenario, housing_type, county)
+        os.makedirs(output_dir, exist_ok=True)
+        output_file = os.path.join(output_dir, f"{OUTPUT_FILE_PREFIX}_{county}.csv")
 
-                if should_skip_processing(output_file, force_recompute):
-                    continue
-                
-                if not os.path.exists(county_dir):
-                    log(details=f"County directory not found: {county_dir}")
-                    continue
-                
-                # Collect all GAS end use columns relevant to the scenario
-                # Scenarios should be defined by constant in CostService and passed as an argument here
-                end_use_categories = scenarios[scenario]['gas']
-                end_uses = [col for category in end_use_categories for col in END_USE_COLUMNS[category]]
-                
-                build_county_gas_profile(scenario, housing_type, county, county_dir, output_file, end_uses)
+        if should_skip_processing(output_file, force_recompute):
+            continue
+        
+        if not os.path.exists(county_dir):
+            log(details=f"County directory not found: {county_dir}")
+            continue
+        
+        # Collect all GAS end use columns relevant to the scenario
+        # Scenarios should be defined by constant in CostService and passed as an argument here
+        end_use_categories = scenario_mapping[scenario]['gas']
+        end_uses = [col for category in end_use_categories for col in END_USE_COLUMNS[category]]
+        
+        build_county_gas_profile(scenario, housing_type, county, county_dir, output_file, end_uses)
+
+if __name__ == '__main__':
+    SCENARIOS = {
+        "baseline": {"gas": {"heating", "hot_water", "cooking"}, "electric": {"appliances", "misc"}}
+    }
+
+    process("baseline", SCENARIOS, "single-family-detached", "data", "data/loadprofiles", ["Alameda County"], force_recompute=True)

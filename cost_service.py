@@ -15,6 +15,8 @@ import step14_build_maps as BuildMaps
 import step15_build_difference_maps as BuildDifferenceMaps
 import step17_build_payback_period_maps as MapPaybackVisualization
 
+from typing import ClassVar, Final, Dict, Set
+
 class CostService:
     SCENARIOS = {
         # "baseline": {"gas": {"heating", "hot_water", "cooking"}, "electric": {"appliances", "misc"}}, # Almost everything is gas, except normal electrical appliances
@@ -47,7 +49,7 @@ class CostService:
         BuildElectricityLoadProfiles.process(scenario, self.SCENARIOS[scenario], self.housing_type, self.counties, "data", "data/loadprofiles", force_recompute=False)
 
         self.log_step(4)
-        BuildGasLoadProfiles.process(self.SCENARIOS, [self.housing_type], "data", "data/loadprofiles", self.counties, force_recompute=False)
+        BuildGasLoadProfiles.process(scenario, self.SCENARIOS, self.housing_type, "data", "data/loadprofiles", self.counties, force_recompute=False)
 
         self.log_step(5)
         ConvertGasToElectric.process("data/loadprofiles", "data/loadprofiles", self.counties, list(self.SCENARIOS.keys()), [self.housing_type] )
