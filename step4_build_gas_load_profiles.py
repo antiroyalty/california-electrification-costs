@@ -122,7 +122,7 @@ def should_skip_processing(output_path, force_recompute):
 
     return os.path.exists(output_path)
 
-def process(scenario, scenario_mapping, housing_type, base_input_dir, base_output_dir, counties=None, force_recompute=True):
+def process(base_input_dir, base_output_dir, scenario, scenario_mapping, housing_type, counties=None, force_recompute=True):
     if scenario != "baseline":
         log(at="step4_build_gas_load_profiles", message="no new electricity profiles needed to be downloaded")
         return

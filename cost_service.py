@@ -49,7 +49,7 @@ class CostService:
         BuildElectricityLoadProfiles.process(scenario, self.SCENARIOS[scenario], self.housing_type, self.counties, "data", "data/loadprofiles", force_recompute=False)
 
         self.log_step(4)
-        BuildGasLoadProfiles.process(scenario, self.SCENARIOS, self.housing_type, "data", "data/loadprofiles", self.counties, force_recompute=False)
+        BuildGasLoadProfiles.process("data", "data/loadprofiles", scenario, self.SCENARIOS, self.housing_type, self.counties, force_recompute=False)
 
         self.log_step(5)
         ConvertGasToElectric.process("data/loadprofiles", "data/loadprofiles", self.counties, list(self.SCENARIOS.keys()), [self.housing_type] )
@@ -80,52 +80,47 @@ class CostService:
     
         MapPaybackVisualization.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties, self.desired_rate_plans)
 
-# scenario = "heat_pump_and_induction_stove"
-# scenario = "heat_pump"
-# scenario = "induction_stove"
-# scenario = "heat_pump"
-# scenario = "heat_pump_and_induction_stove"
-scenario = "heat_pump_and_induction_stove_and_water_heating"
-housing_type = "single-family-detached"
-input_dir = "data"
-output_dir = "data/loadprofiles"
+if __name__ == '__main__':
+    scenario = "heat_pump_and_induction_stove_and_water_heating"
+    housing_type = "single-family-detached"
+    input_dir = "data"
+    output_dir = "data/loadprofiles"
 
-norcal_counties = [
-    "Alameda County", "Contra Costa County", "Marin County", "Napa County", 
-    "San Francisco County", "San Mateo County", "Santa Clara County", "Solano County", "Sonoma County",  # Bay Area
-    "Del Norte County", "Humboldt County", "Lake County", "Mendocino County", "Trinity County",  # North Coast
-    "Butte County", "Colusa County", 
-    "Nevada County", "Plumas County", "Shasta County", "Sierra County", "Tehama County",  # North Valley & Sierra
-] # "Modoc County", "Glenn County", "Siskiyou County", "Lassen County"
+    norcal_counties = [
+        "Alameda County", "Contra Costa County", "Marin County", "Napa County", 
+        "San Francisco County", "San Mateo County", "Santa Clara County", "Solano County", "Sonoma County",  # Bay Area
+        "Del Norte County", "Humboldt County", "Lake County", "Mendocino County", "Trinity County",  # North Coast
+        "Butte County", "Colusa County", 
+        "Nevada County", "Plumas County", "Shasta County", "Sierra County", "Tehama County",  # North Valley & Sierra
+    ] # "Modoc County", "Glenn County", "Siskiyou County", "Lassen County"
 
-central_counties = [
-    "Fresno County", "Kern County", "Kings County", "Madera County", "Merced County", 
-    "Sacramento County", "San Joaquin County", "Stanislaus County", "Sutter County", 
-    "Tulare County", "Yolo County",  # Central Valley
-    "Monterey County", "San Benito County", "San Luis Obispo County", "Santa Barbara County", 
-    "Santa Cruz County", "Ventura County",  # Central Coast
-    "Alpine County", "Amador County", "Mono County",  # Eastern Sierra & Inland
-]
+    central_counties = [
+        "Fresno County", "Kern County", "Kings County", "Madera County", "Merced County", 
+        "Sacramento County", "San Joaquin County", "Stanislaus County", "Sutter County", 
+        "Tulare County", "Yolo County",  # Central Valley
+        "Monterey County", "San Benito County", "San Luis Obispo County", "Santa Barbara County", 
+        "Santa Cruz County", "Ventura County",  # Central Coast
+        "Alpine County", "Amador County", "Mono County",  # Eastern Sierra & Inland
+    ]
 
-socal_counties = [
-    "Los Angeles County", "Orange County", "San Bernardino County", 
-    "Riverside County", "Ventura County",  # Greater Los Angeles
-    "San Diego County", "Imperial County"  # San Diego & Imperial
-]
-rate_plans = {
-        "PG&E": {
-            "electricity": "E-TOU-D",
-            "gas": "G-1"
-        },
-        "SCE": {
-            "electricity": "TOU-D-4-9PM",
-            "gas": "GR"
-        },
-        "SDG&E": {
-            "electricity": "TOU-DR1",
-            "gas": "GR"
+    socal_counties = [
+        "Los Angeles County", "Orange County", "San Bernardino County", 
+        "Riverside County", "Ventura County",  # Greater Los Angeles
+        "San Diego County", "Imperial County"  # San Diego & Imperial
+    ]
+    rate_plans = {
+            "PG&E": {
+                "electricity": "E-TOU-D",
+                "gas": "G-1"
+            },
+            "SCE": {
+                "electricity": "TOU-D-4-9PM",
+                "gas": "GR"
+            },
+            "SDG&E": {
+                "electricity": "TOU-DR1",
+                "gas": "GR"
+            }
         }
-    }
-cost_service = CostService(scenario, housing_type, counties=norcal_counties + central_counties + socal_counties, rate_plans=rate_plans, input_dir=input_dir, output_dir=output_dir)
-
-final_csv = cost_service.run()
+    cost_service = CostService(scenario, housing_type, counties=norcal_counties + central_counties + socal_counties, rate_plans=rate_plans, input_dir=input_dir, output_dir=output_dir)
+    cost_service.run()
