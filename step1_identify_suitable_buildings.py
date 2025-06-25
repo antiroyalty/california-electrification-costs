@@ -58,7 +58,7 @@ def filter_metadata(metadata, housing_type, county_code, county_name, scenario):
     # Because we are doing an apples-to-apples comparison
     # So we have to be converting existing buildings via thermo / phyiscs properties
     
-# Initial conditions based on upgrade, county and housing type
+    # Initial conditions based on upgrade, county and housing type
     upgrade = (metadata["upgrade"] == 0) # baseline, no housing upgrades
     county_condition = metadata["in.county"] == county_code
     county_name_condition = metadata["in.county_name"] == county_name
@@ -76,8 +76,6 @@ def filter_metadata(metadata, housing_type, county_code, county_name, scenario):
             conditions &= metadata[column].isin(condition)
         else:
             conditions &= (metadata[column] == condition)
-
-        filtered_count = metadata[conditions].shape[0]
 
     filtered_metadata = metadata[conditions]
 
@@ -116,7 +114,8 @@ def get_metadata_for_counties_including_special_case_counties(metadata, housing_
 def process(scenario, housing_type, output_base_dir="data", target_counties=None, force_recompute=True):
     if scenario != "baseline":
         log(at="step1_identify_suitable_buildings", message="not baseline scenario, no need to download new files", scenario=scenario)
-        return [] # Early return; we only need to filter metadata for baseline -- for all other runs, use baseline metadata and buildings, and convert them using thermo properties
+        # Early return; we only need to filter metadata for baseline -- for all other runs, use baseline metadata and buildings, and convert them using thermo properties
+        return [] 
 
     metadata = get_metadata(scenario)
     unique_counties = metadata[['in.county', 'in.county_name']].drop_duplicates()
