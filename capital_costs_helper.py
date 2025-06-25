@@ -8,22 +8,6 @@ from maps_helpers import get_latest_csv_file
 from helpers import to_number, to_decimal_number
 from utility_helpers import get_utility_for_county
 
-# Personal notes for CAB meeting
-# workforce is a big part of electfiication adoption
-# contractor availability is a big factor, especially in rural areas
-# subsidies scenarios to look at the EBB subsidies
-# electrical pricing: a really big painpoint is the V&M charge, the $5 charge
-# AB 306 is a direct threat to the deployment of heat pumps, PV, EV, energy efficiency and any other energy code requirements.
-# Education, education, education! Safety of battery storage, climate change, incentives, faster charging access for EV’s, rural access to DC fast charging, etc
-# Doing indoor air quality testing, so that people give up the value of giving up their gas stove
-# https://www.law.berkeley.edu/research/clee/research/climate/projectclimate/projects/los-angeles-fire-recovery
-# Incentives for developers who are building affordable housing to incorporate these items. To that end, education for developers.
-# Disconnection fees by PG&E are problematic.
-# Rebuilding for speed: faster with just electric
-# Supply chain: evenly split between gas and electric
-# Utility reform to support electrification rather than expanding their natural gas infrastructure
-# Workforce training
-
 LIFETIMES = {
     "solar": 25, # https://www.energysage.com/solar/how-long-do-solar-panels-last/
     "storage": 15, # years
