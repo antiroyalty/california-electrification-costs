@@ -15,8 +15,6 @@ import step14_build_maps as BuildMaps
 import step15_build_difference_maps as BuildDifferenceMaps
 import step17_build_payback_period_maps as MapPaybackVisualization
 
-from typing import ClassVar, Final, Dict, Set
-
 class CostService:
     SCENARIOS = {
         # "baseline": {"gas": {"heating", "hot_water", "cooking"}, "electric": {"appliances", "misc"}}, # Almost everything is gas, except normal electrical appliances
