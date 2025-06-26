@@ -5,7 +5,7 @@ from helpers import get_counties, get_scenario_path, slugify_county_name, norcal
 from utility_helpers import get_utility_for_county
 from maps_helpers import initialize_map, get_latest_csv_file
 from capital_costs_helper import LIFETIMES, build_metric_map
-from payback_period_helper import INCENTIVES, CAPITAL_COSTS_REFACTORED
+from payback_period_helper import CAPITAL_COSTS, INCENTIVES
 
 def apply_incentives(total_cost, utility):
     total_cost_after_incentives = total_cost * (1 - INCENTIVES["federal_tax_credit_2023_2032"]) - INCENTIVES["PGE_SCE_SDGE_General_SGIP_Rebate"] # 30% federal incentive, and $250/kwh SGIP rebate
@@ -47,19 +47,19 @@ def apply_solar_storage_incentives(cost, utility):
     return cost
 
 def calculate_heat_pump_cost():
-    base_cost = CAPITAL_COSTS_REFACTORED["heat_pump"]["average_residential"]["base"]["value"]
+    base_cost = CAPITAL_COSTS["heat_pump"]["average"]
     federal_tax_credit = min(base_cost * 0.3, INCENTIVES["heat_pump"]["max_federal_annual_tax_rebate"]) 
     rebate = federal_tax_credit + INCENTIVES["heat_pump"]["california_TECH_incentive"] + INCENTIVES["heat_pump"]["other_rebates"]
 
     return base_cost - rebate
 
 def calculate_induction_stove_cost():
-    base_cost = CAPITAL_COSTS_REFACTORED["induction_stove"]["average_residential"]["base"]["value"]
+    base_cost = CAPITAL_COSTS["induction_stove"]["average"]
     rebate = INCENTIVES["induction_stove"]["max_federal_annual_tax_rebate"]
     return base_cost - rebate
 
 def calculate_water_heater_cost(tank_size: str = "55-75gal"):
-    base_cost = CAPITAL_COSTS_REFACTORED["water_heater"]["electric_55gal"]["base"]["value"]
+    base_cost = CAPITAL_COSTS["water_heater"]["average"]
     federal_tax_credit = min(base_cost * 0.3, INCENTIVES["water_heater"]["max_federal_annual_tax_rebate"]) 
     rebate = federal_tax_credit + INCENTIVES["water_heater"]["45-55gal"]
     print("REBATE: ", rebate)
@@ -79,7 +79,7 @@ def evaluate_custom_combo(
     Evaluate total capital cost, annual savings, and payback period for a flexible combination
     of upgrades: solar + storage, heat pump, induction stove, water heater.
     
-    USING NEW CAPITAL_COSTS_REFACTORED STRUCTURE
+    USING OLD CAPITAL_COSTS STRUCTURE FOR COMPARISON
     
     Parameters:
         include_solar (bool): Include solar + storage upgrade
@@ -106,13 +106,13 @@ def evaluate_custom_combo(
     if include_solar:
         base_solar_cost, _ = calculate_solar_storage_cost(
             solar_kw,
-            CAPITAL_COSTS_REFACTORED["solar"]["panel"]["base"]["value"],
-            CAPITAL_COSTS_REFACTORED["solar"]["panel"]["markup"]["installation_labor"]["value"] / 100,
-            CAPITAL_COSTS_REFACTORED["solar"]["panel"]["markup"]["design_engineering"]["value"] / 100,
-            CAPITAL_COSTS_REFACTORED["storage"]["tesla_powerwall_3"]["base"]["value"]
+            CAPITAL_COSTS["solar"]["dollars_per_watt"],
+            CAPITAL_COSTS["solar"]["installation_labor"],
+            CAPITAL_COSTS["solar"]["design_eng_overhead_percent"],
+            CAPITAL_COSTS["storage"]["powerwall_13.5kwh"]
         )
         solar_cost_after_incentives = apply_solar_storage_incentives(base_solar_cost, utility)
-        print("Solar cost (NEW): ", solar_cost_after_incentives)
+        print("Solar cost (OLD): ", solar_cost_after_incentives)
         total_cost += solar_cost_after_incentives
         components["solar_storage"] = solar_cost_after_incentives
         lifetimes.append(LIFETIMES["solar"])
@@ -120,21 +120,21 @@ def evaluate_custom_combo(
 
     if include_heat_pump:
         hp_cost = calculate_heat_pump_cost()
-        print("Heat pump cost (NEW): ", hp_cost)
+        print("Heat pump cost (OLD): ", hp_cost)
         total_cost += hp_cost
         components["heat_pump"] = hp_cost
         lifetimes.append(LIFETIMES["heat_pump"])
 
     if include_induction:
         stove_cost = calculate_induction_stove_cost()
-        print("Stove cost (NEW): ", stove_cost)
+        print("Stove cost (OLD): ", stove_cost)
         total_cost += stove_cost
         components["induction_stove"] = stove_cost
         lifetimes.append(LIFETIMES["induction_stove"])
 
     if include_water_heater:
         water_heater_cost = calculate_water_heater_cost(water_heater_tank_size)
-        print("Water heater cost (NEW): ", water_heater_cost)
+        print("Water heater cost (OLD): ", water_heater_cost)
         total_cost += water_heater_cost
         components["water_heater"] = water_heater_cost
         lifetimes.append(LIFETIMES["water_heater"])
@@ -168,7 +168,7 @@ def process(base_input_dir, base_output_dir, scenario, housing_type, counties, d
     Constructs three individual maps (for payback period, total cost, and annual savings) based on the solar+storage system economics.
     Each map contains its choropleth layer as well as the county outlines with tooltip.
     
-    USING NEW CAPITAL_COSTS_REFACTORED STRUCTURE
+    USING OLD CAPITAL_COSTS STRUCTURE FOR COMPARISON
     
     For each county, the script will:
         1. Look up the solar capacity from the electrified assets file.
@@ -248,7 +248,7 @@ def process(base_input_dir, base_output_dir, scenario, housing_type, counties, d
             )
 
             # === Display Results ===
-            print(f"--- {county} (NEW CAPITAL COSTS) ---")
+            print(f"--- {county} (OLD CAPITAL COSTS) ---")
             print(f"1) {scenario} Only")
             print(f"   Annual Cost: ${hp_cost:.2f}")
             print(f"   Annual Savings vs Baseline: ${savings_hp_only:.2f}")
@@ -295,7 +295,7 @@ def process(base_input_dir, base_output_dir, scenario, housing_type, counties, d
     # Merge metrics with GeoDataFrame
     merged_gdf = gdf.merge(df_metrics, left_on="county_slug", right_index=True, how="left")
 
-    scenario_output_dir = os.path.join(base_output_dir, scenario, housing_type, "RESULTS_NEW_CAPITAL_COSTS")
+    scenario_output_dir = os.path.join(base_output_dir, scenario, housing_type, "RESULTS_OLD_CAPITAL_COSTS")
     maps_dir = os.path.join(scenario_output_dir, "maps")
     geojson_dir = os.path.join(scenario_output_dir, "geojson")
 
@@ -305,11 +305,11 @@ def process(base_input_dir, base_output_dir, scenario, housing_type, counties, d
 
     geojson_path = os.path.join(
         geojson_dir,
-        f"{scenario}_new_capital_costs.geojson"
+        f"{scenario}_old_capital_costs.geojson"
     )
 
     merged_gdf.to_file(geojson_path, driver="GeoJSON")
-    print(f"🗺️  Saved NEW CAPITAL COSTS GeoJSON to {geojson_path}")
+    print(f"🗺️  Saved OLD CAPITAL COSTS GeoJSON to {geojson_path}")
         
     metrics = ["Payback Period", "Solar Size (kW)"] # , "Annual Savings"] # "Solar Size (kW)"] # "Total Cost", "Solar Size (kW)"] # "Annual Savings % Change", 
     variants = [f"{scenario}_only", f"{scenario}_solar"]
@@ -321,12 +321,12 @@ def process(base_input_dir, base_output_dir, scenario, housing_type, counties, d
                 desired_rate_plans,
                 metric=metric,
                 variant=variant,
-                title_prefix=f"{scenario.replace('_', ' ').title()} (NEW Capital Costs): "
+                title_prefix=f"{scenario.replace('_', ' ').title()} (OLD Capital Costs): "
             )
-            filename = f"{metric.lower().replace(' ', '_')}_{variant}_new_capital_costs.html"
+            filename = f"{metric.lower().replace(' ', '_')}_{variant}_old_capital_costs.html"
             output_path = os.path.join(maps_dir, filename)
             m.save(output_path)
-            print(f"Saved NEW CAPITAL COSTS map: {output_path}")
+            print(f"Saved OLD CAPITAL COSTS map: {output_path}")
             os.system(f'open "{output_path}"')
 
 if __name__ == '__main__':
