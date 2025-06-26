@@ -5,7 +5,7 @@ from helpers import get_counties, get_scenario_path, slugify_county_name, norcal
 from utility_helpers import get_utility_for_county
 from maps_helpers import initialize_map, get_latest_csv_file
 from capital_costs_helper import LIFETIMES, build_metric_map
-from payback_period_helper import CAPITAL_COSTS, INCENTIVES
+from payback_period_helper import INCENTIVES, CAPITAL_COSTS_REFACTORED
 
 def apply_incentives(total_cost, utility):
     total_cost_after_incentives = total_cost * (1 - INCENTIVES["federal_tax_credit_2023_2032"]) - INCENTIVES["PGE_SCE_SDGE_General_SGIP_Rebate"] # 30% federal incentive, and $250/kwh SGIP rebate
@@ -47,19 +47,19 @@ def apply_solar_storage_incentives(cost, utility):
     return cost
 
 def calculate_heat_pump_cost():
-    base_cost = CAPITAL_COSTS["heat_pump"]["average"]
+    base_cost = CAPITAL_COSTS_REFACTORED["heat_pump"]["average_residential"]["base"]["value"]
     federal_tax_credit = min(base_cost * 0.3, INCENTIVES["heat_pump"]["max_federal_annual_tax_rebate"]) 
     rebate = federal_tax_credit + INCENTIVES["heat_pump"]["california_TECH_incentive"] + INCENTIVES["heat_pump"]["other_rebates"]
 
     return base_cost - rebate
 
 def calculate_induction_stove_cost():
-    base_cost = CAPITAL_COSTS["induction_stove"]["average"]
+    base_cost = CAPITAL_COSTS_REFACTORED["induction_stove"]["average_residential"]["base"]["value"]
     rebate = INCENTIVES["induction_stove"]["max_federal_annual_tax_rebate"]
     return base_cost - rebate
 
 def calculate_water_heater_cost(tank_size: str = "55-75gal"):
-    base_cost = CAPITAL_COSTS["water_heater"]["average"]
+    base_cost = CAPITAL_COSTS_REFACTORED["water_heater"]["electric_55gal"]["base"]["value"]
     federal_tax_credit = min(base_cost * 0.3, INCENTIVES["water_heater"]["max_federal_annual_tax_rebate"]) 
     rebate = federal_tax_credit + INCENTIVES["water_heater"]["45-55gal"]
     print("REBATE: ", rebate)
@@ -104,10 +104,10 @@ def evaluate_custom_combo(
     if include_solar:
         base_solar_cost, _ = calculate_solar_storage_cost(
             solar_kw,
-            CAPITAL_COSTS["solar"]["dollars_per_watt"],
-            CAPITAL_COSTS["solar"]["installation_labor"],
-            CAPITAL_COSTS["solar"]["design_eng_overhead_percent"],
-            CAPITAL_COSTS["storage"]["powerwall_13.5kwh"]
+            CAPITAL_COSTS_REFACTORED["solar"]["panel"]["base"]["value"],
+            CAPITAL_COSTS_REFACTORED["solar"]["panel"]["markup"]["installation_labor"]["value"] / 100,
+            CAPITAL_COSTS_REFACTORED["solar"]["panel"]["markup"]["design_engineering"]["value"] / 100,
+            CAPITAL_COSTS_REFACTORED["storage"]["tesla_powerwall_3"]["base"]["value"]
         )
         solar_cost_after_incentives = apply_solar_storage_incentives(base_solar_cost, utility)
         print("Solar cost: ", solar_cost_after_incentives)
@@ -302,6 +302,7 @@ def process(base_input_dir, base_output_dir, scenario, housing_type, counties, d
     geojson_path = os.path.join(
         geojson_dir,
         f"{scenario}.geojson"
+    )
 
     merged_gdf.to_file(geojson_path, driver="GeoJSON")
     print(f"🗺️  Saved GeoJSON to {geojson_path}")

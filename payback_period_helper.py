@@ -1,3 +1,84 @@
+CAPITAL_COSTS_REFACTORED = {
+    "solar": {
+        "panel": {
+            "base": {                       # the headline cost
+                "value": 2.8,
+                "unit": "$/W"
+            },
+            "markup": {
+                "installation_labor": {
+                    "value": 0, # Usually considered 7.0%, but this is included in the headline cost,
+                    "unit": "%"
+                },
+                "design_engineering": {
+                    "value": 0, # Usually considered 28.%, but this is included in the headline cost too.,
+                    "unit": "%"
+                }
+            },
+            "sources": [
+                "https://pge.wattplan.com/PV/Wizard/?sector=residential", # Back-calculated from PG&E's cost estimator website
+                "https://www.energysage.com/local-data/solar-panel-cost/ca/",
+                "https://www.tesla.com/learn/solar-panel-cost-breakdown"
+            ],
+            "last_verified": "2025-06-24"
+        }
+    },
+
+    "storage": {
+        "tesla_powerwall_3": {
+            "capacity_kwh": 13.5,           # non-monetary attribute lives here too
+            "base": {
+                "value": 16_853,
+                "unit": "$"
+            },
+            "sources": [
+                "https://www.tesla.com/powerwall/design/overview"
+            ],
+            "notes": "Cost before incentives; MSRP.",
+            "last_verified": "2025-02-15"
+        }
+    },
+
+    "heat_pump": {
+        "average_residential": {
+            "base": {
+                "value": 19_000,
+                "unit": "$"
+            },
+            "sources": [
+                "https://www.rewiringamerica.org/research/home-electrification-cost-estimates",
+                "https://www.ethree.com/wp-content/uploads/2023/12/E3_Benefit-Cost-Analysis-of-Targeted-Electrification-and-Gas-Decommissioning-in-California.pdf"
+            ],
+            "last_verified": "2025-06-01"
+        }
+    },
+
+    "induction_stove": {
+        "average_residential": {
+            "base": {
+                "value": 2_000,
+                "unit": "$"
+            },
+            "sources": [
+                "https://guide.pge.com/browse/induction",
+                "https://www.sce.com/factsheet/InductionCookingFactSheet"
+            ],
+            "last_verified": "2025-06-24"
+        }
+    },
+
+    "water_heater": {
+        "electric_55gal": {
+            "base": {
+                "value": 2_637,
+                "unit": "$"
+            },
+            "sources": [],
+            "last_verified": "2025-06-24"
+        }
+    }
+}
+
 CAPITAL_COSTS = {
     "solar": {
         # Back-calculated from PG&E's cost estimator website: https://pge.wattplan.com/PV/Wizard/?sector=residential&
@@ -24,8 +105,8 @@ CAPITAL_COSTS = {
         # PG&E appliance guide also says $2000 https://guide.pge.com/browse/induction
         "average": 2000 # https://www.sce.com/factsheet/InductionCookingFactSheet
     },
-    "water_heater": { # 55 gal
-        "average": 2637,
+    "water_heater": {
+        "average": 2637, # for 55 gal capacity header
     }
 }
 
