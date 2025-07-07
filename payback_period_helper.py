@@ -1,4 +1,4 @@
-CAPITAL_COSTS_REFACTORED = {
+CAPITAL_COSTS_NEW = {
     "solar": {
         "panel": {
             "base": {                       # the headline cost

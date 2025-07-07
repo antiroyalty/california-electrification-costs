@@ -17,12 +17,12 @@ import step17_build_payback_period_maps as MapPaybackVisualization
 
 class CostService:
     SCENARIOS = {
-        # "baseline": {"gas": {"heating", "hot_water", "cooking"}, "electric": {"appliances", "misc"}}, # Almost everything is gas, except normal electrical appliances
+        "baseline": {"gas": {"heating", "hot_water", "cooking"}, "electric": {"appliances", "misc"}}, # Almost everything is gas, except normal electrical appliances
         # "heat_pump": {"gas": {"hot_water", "cooking"}, "electric": {"appliances", "misc", "heating"}},
         # "induction_stove": {"gas": {"hot_water", "heating"}, "electric": {"appliances", "misc", "cooking"}},
         # "heat_pump_and_induction_stove": {"gas": {"hot_water"}, "electric": {"appliances", "misc", "cooking", "heating"}},
         # "water_heating": {"gas": {"cooking", "heating"}, "electric": {"hot_water", "appliances", "misc"}},
-        "heat_pump_and_induction_stove_and_water_heating": {"gas": {}, "electric": {"hot_water", "cooking", "heating", "appliances", "misc"}}
+        # "heat_pump_and_induction_stove_and_water_heating": {"gas": {}, "electric": {"hot_water", "cooking", "heating", "appliances", "misc"}}
     }
 
     def __init__(self, scenario, housing_type, counties, rate_plans, input_dir, output_dir):
@@ -38,16 +38,16 @@ class CostService:
 
     def run(self):
         self.log_step(1)
-        IdentifySuitableBuildings.process(scenario, self.housing_type, output_base_dir="data", target_counties=self.counties, force_recompute=False)
+        IdentifySuitableBuildings.process(scenario, self.housing_type, output_base_dir="data", target_counties=self.counties, force_recompute=True)
 
         self.log_step(2)
-        PullBuildings.process(scenario, self.housing_type, self.counties, output_base_dir="data", download_new_files=False) # output directory should just be 'data', not 'loadprofiles'
+        PullBuildings.process(scenario, self.housing_type, self.counties, output_base_dir="data", download_new_files=True) # output directory should just be 'data', not 'loadprofiles'
     
         self.log_step(3)
-        BuildElectricityLoadProfiles.process(scenario, self.SCENARIOS[scenario], self.housing_type, self.counties, "data", "data/loadprofiles", force_recompute=False)
+        BuildElectricityLoadProfiles.process(scenario, self.SCENARIOS[scenario], self.housing_type, self.counties, "data", "data/loadprofiles", force_recompute=True)
 
         self.log_step(4)
-        BuildGasLoadProfiles.process("data", "data/loadprofiles", scenario, self.SCENARIOS, self.housing_type, self.counties, force_recompute=False)
+        BuildGasLoadProfiles.process("data", "data/loadprofiles", scenario, self.SCENARIOS, self.housing_type, self.counties, force_recompute=True)
 
         self.log_step(5)
         ConvertGasToElectric.process("data/loadprofiles", "data/loadprofiles", self.counties, list(self.SCENARIOS.keys()), [self.housing_type] )
@@ -79,7 +79,7 @@ class CostService:
         MapPaybackVisualization.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties, self.desired_rate_plans)
 
 if __name__ == '__main__':
-    scenario = "heat_pump_and_induction_stove_and_water_heating"
+    scenario = "baseline"
     housing_type = "single-family-detached"
     input_dir = "data"
     output_dir = "data/loadprofiles"
