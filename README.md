@@ -22,6 +22,11 @@ This project requires Python 3 with the following external dependencies:
 - **geopy** - Geocoding library
 - **python-dotenv** - Environment variable management
 
+#### Additional files and applications
+- Get the NREL metadata CSV from Ana (too big to include on Github)
+- Get the PVWatts JSON files from SAM_configuration (now should be included as part of Github)
+- Download and install the System Advisor Model from NREL for some SAM computational dependencies
+
 #### Development Dependencies
 - **pytest** - Testing framework
 - **matplotlib** - Plotting library (for notebooks)
