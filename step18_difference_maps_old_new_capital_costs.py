@@ -4,7 +4,7 @@ import geopandas as gpd
 from helpers import get_counties, get_scenario_path, slugify_county_name, norcal_counties, socal_counties, central_counties, log
 from utility_helpers import get_utility_for_county
 from maps_helpers import initialize_map, get_latest_csv_file
-from capital_costs_helper import LIFETIMES, build_metric_map
+from capital_cost_map_builder import LIFETIMES, build_metric_map
 from payback_period_helper import CAPITAL_COSTS, INCENTIVES, CAPITAL_COSTS_REFACTORED
 import step17_build_payback_period_maps as new_capital_costs
 import step17_old_build_payback_period_capital_costs as old_capital_costs
