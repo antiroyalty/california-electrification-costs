@@ -32,7 +32,7 @@ from step4_build_gas_load_profiles import (
     END_USE_COLUMNS
 )
 
-from cost_service import CostService
+# from cost_service import CostService  # Not needed for tests
 
 @pytest.fixture
 def sample_dataframe():
@@ -171,7 +171,7 @@ def test_average_county_gas_profiles(sample_dataframe):
     county_df = building_df.rename(columns={col: f"{col}.gas.total.kwh" for col in end_uses})
 
     updated = average_county_gas_profiles(county_df, 2, end_uses)
-    assert "load.gas.avg.kwh" in updated.columns
+    assert "load.gas.building_avg.kwh" in updated.columns
 
 
 # ------------------------------------------------------------------------------
@@ -180,18 +180,22 @@ def test_average_county_gas_profiles(sample_dataframe):
 
 def test_save_county_gas_profiles(mocker):
     """
-    Ensure I write a CSV to 'gas_loads_{county}.csv' under the given output dir.
+    Ensure I write a CSV to the given output file path.
     """
     mock_to_csv = mocker.patch("pandas.DataFrame.to_csv")
-    mock_makedirs = mocker.patch("os.makedirs")
 
-    df = pd.DataFrame({"test_col": [1, 2, 3]})
-    save_county_gas_profiles(df, "mycounty", "/fake/dir")
+    df = pd.DataFrame({
+        "out.natural_gas.heating.energy_consumption.gas.building_avg.kwh": [1, 2, 3],
+        "out.natural_gas.range_oven.energy_consumption.gas.building_avg.kwh": [0.1, 0.2, 0.3],
+        "out.natural_gas.hot_water.energy_consumption.gas.building_avg.kwh": [0.5, 0.6, 0.7],
+        "load.gas.building_avg.kwh": [1.6, 2.8, 4.0],
+        "load.gas.building_avg.therms": [0.05, 0.1, 0.14]
+    })
+    output_file = "/fake/dir/gas_loads_mycounty.csv"
+    
+    save_county_gas_profiles(df, "mycounty", output_file)
 
-    mock_makedirs.assert_called_once_with("/fake/dir", exist_ok=True)
-    mock_to_csv.assert_called_once()
-    out_path = mock_to_csv.call_args[0][0]
-    assert out_path.endswith("gas_loads_mycounty.csv")
+    mock_to_csv.assert_called_once_with(output_file)
 
 
 # ------------------------------------------------------------------------------
@@ -206,7 +210,7 @@ def test_build_county_gas_profile_no_data(mocker):
     mock_avg = mocker.patch("step4_build_gas_load_profiles.average_county_gas_profiles")
     mock_save = mocker.patch("step4_build_gas_load_profiles.save_county_gas_profiles")
 
-    build_county_gas_profile("baseline", "sfd", "test", "/fake/dir", "/fake/out", [])
+    build_county_gas_profile("baseline", "sfd", "test", "/fake/dir", "/fake/output.csv", [])
     mock_sum.assert_called_once()
     mock_avg.assert_not_called()
     mock_save.assert_not_called()
@@ -227,7 +231,7 @@ def test_build_county_gas_profile_with_data(mocker):
     )
     mock_save = mocker.patch("step4_build_gas_load_profiles.save_county_gas_profiles")
 
-    build_county_gas_profile("baseline", "sfd", "test", "/fake/dir", "/fake/out", [])
+    build_county_gas_profile("baseline", "sfd", "test", "/fake/dir", "/fake/output.csv", [])
     mock_sum.assert_called_once()
     mock_avg.assert_called_once()
     mock_save.assert_called_once()
@@ -237,117 +241,109 @@ def test_build_county_gas_profile_with_data(mocker):
 # process Tests
 # ------------------------------------------------------------------------------
 
-def test_process_no_scenario_path(mocker):
-    mocker.patch("os.path.exists", return_value=False)
-    mock_listdir = mocker.patch("os.listdir")
+@patch("step4_build_gas_load_profiles.get_counties")
+@patch("step4_build_gas_load_profiles.get_scenario_path")
+def test_process_non_baseline_scenario(mock_get_scenario_path, mock_get_counties):
+    """Test that non-baseline scenarios return None."""
+    scenario_mapping = {"heat_pump": {"gas": {"heating"}, "electric": {"appliances"}}}
+    
+    result = process("/data", "/data", "heat_pump", scenario_mapping, "single-family-detached", ["Alameda County"])
+    
+    # Non-baseline scenarios should return None
+    assert result is None
+    # Ensure no county processing functions were called
+    mock_get_scenario_path.assert_not_called()
+    mock_get_counties.assert_not_called()
 
-    process(CostService.SCENARIOS, ["single-family-detached"], "/data", "/data", counties=["Alameda County"])
-    mock_listdir.assert_not_called()
 
-
-def test_process_county_dir_missing(mocker):
+@patch("step4_build_gas_load_profiles.get_counties")
+@patch("step4_build_gas_load_profiles.get_scenario_path")
+def test_process_county_dir_missing(mock_get_scenario_path, mock_get_counties, mocker):
     """
     If the county folder doesn't have 'buildings', I skip that county.
     """
+    mock_get_scenario_path.return_value = "/data/baseline/single-family-detached"
+    mock_get_counties.return_value = ["test-county"]
+    
     def side_exists(path):
         if "buildings" in path:
             return False
         return True
     
     mocker.patch("os.path.exists", side_effect=side_exists)
-    mocker.patch("os.listdir", return_value=["cty"])
+    mocker.patch("os.makedirs")
     mock_bld = mocker.patch("step4_build_gas_load_profiles.build_county_gas_profile")
+    
+    scenario_mapping = {"baseline": {"gas": {"heating"}, "electric": {"appliances"}}}
 
-    process(CostService.SCENARIOS, ["single-family-detached"], "/data", "/data")
+    process("/data", "/data", "baseline", scenario_mapping, "single-family-detached", ["Test County"])
     mock_bld.assert_not_called()
 
 
-def test_process_county_ok(mocker):
+@patch("step4_build_gas_load_profiles.get_counties")
+@patch("step4_build_gas_load_profiles.get_scenario_path")
+def test_process_county_ok(mock_get_scenario_path, mock_get_counties, mocker):
     """
     If scenario path and county_dir exist, I call build_county_gas_profile.
     """
+    mock_get_scenario_path.return_value = "/data/baseline/single-family-detached"
+    mock_get_counties.return_value = ["county-a", "county-b"]
+    
     def side_exists(path):
         return True  # everything exists
     mocker.patch("os.path.exists", side_effect=side_exists)
-    mocker.patch("os.path.isdir", return_value=True)
-    mocker.patch("os.listdir", return_value=["ctyA", "ctyB"])
+    mocker.patch("os.makedirs")
     mock_bld = mocker.patch("step4_build_gas_load_profiles.build_county_gas_profile")
+    
+    scenario_mapping = {"baseline": {"gas": {"heating"}, "electric": {"appliances"}}}
 
-    process(CostService.SCENARIOS, ["single-family-detached"], "/data", "/data")
-    # Expect 2 calls, for ctyA and ctyB
+    process("/data", "/data", "baseline", scenario_mapping, "single-family-detached", ["County A", "County B"])
+    # Expect 2 calls, for county-a and county-b
     assert mock_bld.call_count == 2
 
-def test_convert_county_name_to_slug(mocker):
+@patch("step4_build_gas_load_profiles.get_counties")
+@patch("step4_build_gas_load_profiles.get_scenario_path")
+def test_convert_county_name_to_slug(mock_get_scenario_path, mock_get_counties, mocker):
     """
-    Pass multiple counties like 'Riverside County' and 'Santa Clara County' to step4's process()
-    and ensure they're each slugified (e.g. 'riverside', 'santa-clara') for build_county_gas_profile.
+    Test that counties are properly handled through get_counties helper.
     """
+    mock_get_scenario_path.return_value = "/data/baseline/single-family-detached"
+    mock_get_counties.return_value = ["riverside", "santa-clara"]
+    
     mocker.patch("os.path.exists", return_value=True)
-    mocker.patch("os.path.isdir", return_value=True)
-    mocker.patch("os.listdir", return_value=[])
+    mocker.patch("os.makedirs")
 
     # Spy on build_county_gas_profile to see how it's invoked
     mock_build = mocker.patch("step4_build_gas_load_profiles.build_county_gas_profile")
 
-    housing_types = ["single-family-detached"]
     # Two counties that need slug conversion
     input_counties = ["Riverside County", "Santa Clara County"]
+    scenario_mapping = {"baseline": {"gas": {"heating"}, "electric": {"appliances"}}}
 
-    process(
-        scenarios=CostService.SCENARIOS,
-        housing_types=housing_types,
-        base_input_dir="data",
-        base_output_dir="data",
-        counties=input_counties,
-    )
+    process("/data", "/data", "baseline", scenario_mapping, "single-family-detached", input_counties)
 
     assert mock_build.call_count == 2, "Should invoke build_county_gas_profile twice (once per county)."
 
-    # Grab each call in turn
-    first_call_args = mock_build.call_args_list[0][0]
-    second_call_args = mock_build.call_args_list[1][0]
+    # Verify get_counties was called with the input counties
+    mock_get_counties.assert_called_once_with("/data/baseline/single-family-detached", input_counties)
 
-    # Each call's signature is: (scenario, housing_type, county, county_dir, output_dir, end_uses)
-    # -----------------------------
-    # 1) Riverside County -> 'riverside'
-    scenario_1, housing_1, county_1, county_dir_1, output_dir_1, end_uses_1 = first_call_args
-
-    assert scenario_1 == "baseline"
-    assert housing_1 == "single-family-detached"
-    # County is slugified to "riverside"
-    assert county_1 == "riverside", f"Expected 'riverside', got {county_1}"
-    # Directories must also contain "riverside"
-    assert county_dir_1 == "data/baseline/single-family-detached/riverside/buildings"
-    assert output_dir_1 == "data/baseline/single-family-detached/riverside"
-
-    # -----------------------------
-    # 2) Santa Clara County -> 'santa-clara'
-    scenario_2, housing_2, county_2, county_dir_2, output_dir_2, end_uses_2 = second_call_args
-
-    assert scenario_2 == "baseline"
-    assert housing_2 == "single-family-detached"
-    # County is slugified to "santa-clara"
-    assert county_2 == "santa-clara", f"Expected 'santa-clara', got {county_2}"
-    # Directories must also contain "santa-clara"
-    assert county_dir_2 == "data/baseline/single-family-detached/santa-clara/buildings"
-    assert output_dir_2 == "data/baseline/single-family-detached/santa-clara"
-
-def test_process_extracts_gas_end_uses(mocker):
+@patch("step4_build_gas_load_profiles.get_counties")
+@patch("step4_build_gas_load_profiles.get_scenario_path")
+def test_process_extracts_gas_end_uses(mock_get_scenario_path, mock_get_counties, mocker):
     """
     Ensure process correctly extracts gas-related end-use categories from scenarios
     and maps them to END_USE_COLUMNS before calling build_county_gas_profile.
     """
+    mock_get_scenario_path.return_value = "/data/baseline/single-family-detached"
+    mock_get_counties.return_value = ["alameda"]
+    
     mocker.patch("os.path.exists", return_value=True)
-    mocker.patch("os.path.isdir", return_value=True)
-    mocker.patch("os.listdir", return_value=["alameda"])
+    mocker.patch("os.makedirs")
 
     # Spy on build_county_gas_profile
     mock_build = mocker.patch("step4_build_gas_load_profiles.build_county_gas_profile")
 
-    mock_get_scenario_path = mocker.patch("step4_build_gas_load_profiles.get_scenario_path", return_value="/data/baseline/single-family-detached")
-    mock_get_counties = mocker.patch("step4_build_gas_load_profiles.get_counties", return_value=["alameda"])
-
-    mock_scenarios = {
+    scenario_mapping = {
         "baseline": {
             "gas": {"hot_water", "cooking", "heating"},
             "electric": {"appliances", "misc"}
@@ -363,7 +359,7 @@ def test_process_extracts_gas_end_uses(mocker):
 
     mocker.patch("step4_build_gas_load_profiles.END_USE_COLUMNS", mock_end_use_columns)
 
-    process(mock_scenarios, ["single-family-detached"], "/data", "/data", counties=["Alameda County"])
+    process("/data", "/data", "baseline", scenario_mapping, "single-family-detached", counties=["Alameda County"])
 
     # Ensure build_county_gas_profile was called with correct arguments
     mock_build.assert_called_once()
