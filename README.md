@@ -37,21 +37,53 @@ Install all dependencies using pip:
 pip install PySAM pandas geopandas folium numpy requests boto3 botocore geopy python-dotenv pytest matplotlib
 ```
 
-### Getting started
+### Getting Started
 1. Clone the Github repos locally.
 2. Install Python 3 and the required dependencies listed above.
 3. Obtain an API key for NREL Weather access, and place it in a .env file in the root directory under the variable `NREL_WEATHER_API_KEY`. An NREL Weather API key can be obtained from NREL here: https://developer.nrel.gov/signup/
-4. Run `python3 cost_service.py` and explore the results, which should automatically open in your browser. 
-5. If you wish to change the scenario that you are running, this can be done in `cost_service.py`. 
+4. Run the cost analysis for your desired scenario:
+   ```bash
+   python3 cost_service.py <scenario_name>
+   ```
+   Replace `<scenario_name>` with one of the available scenarios listed below.
+5. The results will automatically open in your browser when the analysis is complete.
 
-### Possible Scenarios
-Are currently defined in `cost_service.py`'s SCENARIOS: 
+#### Example Usage
+```bash
+# Run analysis for different electrification scenarios
+python3 cost_service.py baseline
+python3 cost_service.py heat_pump
+python3 cost_service.py heat_pump_and_induction_stove
+python3 cost_service.py heat_pump_and_induction_stove_and_water_heating
 
-- baseline
-- heat_pump
-- induction_stove
-- heat_pump_and_induction_stove
-- water_heating
-- heat_pump_and_induction_stove_and_water_heating
+# Get help and see all available scenarios
+python3 cost_service.py --help
+``` 
 
-If you wish to add a new scenario, you may need to update several other files where these scenarios are used as keys to reference file construction or other behaviors. 
+### Available Scenarios
+
+The following electrification scenarios are available for analysis:
+
+- **baseline** - Gas heating, cooking, and water heating (reference case)
+- **heat_pump** - Electric heating with gas cooking and water heating
+- **induction_stove** - Electric cooking with gas heating and water heating
+- **heat_pump_and_induction_stove** - Electric heating and cooking with gas water heating
+- **water_heating** - Electric water heating with gas heating and cooking
+- **heat_pump_and_induction_stove_and_water_heating** - Fully electric (all appliances)
+
+Each scenario analyzes the costs and benefits of different combinations of electric appliances compared to the gas baseline.
+
+#### Scenario Descriptions
+
+| Scenario | Heating | Cooking | Water Heating | Description |
+|----------|---------|---------|---------------|--------------|
+| baseline | Gas | Gas | Gas | Current standard configuration |
+| heat_pump | Electric | Gas | Gas | Heat pump space heating only |
+| induction_stove | Gas | Electric | Gas | Induction cooking only |
+| heat_pump_and_induction_stove | Electric | Electric | Gas | Space heating + cooking |
+| water_heating | Gas | Gas | Electric | Heat pump water heater only |
+| heat_pump_and_induction_stove_and_water_heating | Electric | Electric | Electric | Full electrification |
+
+#### Adding New Scenarios
+
+To add a new scenario, update the `SCENARIOS` dictionary in `cost_service.py` and ensure consistency across other files that reference scenario names. 

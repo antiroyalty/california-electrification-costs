@@ -1,3 +1,5 @@
+import sys
+import argparse
 import step1_identify_suitable_buildings as IdentifySuitableBuildings
 import step2_pull_buildings as PullBuildings
 import step3_build_electricity_load_profiles as BuildElectricityLoadProfiles
@@ -17,11 +19,11 @@ import step17_build_payback_period_maps as MapPaybackVisualization
 
 class CostService:
     SCENARIOS = {
-        # "baseline": {"gas": {"heating", "hot_water", "cooking"}, "electric": {"appliances", "misc"}}, # Almost everything is gas, except normal electrical appliances
-        # "heat_pump": {"gas": {"hot_water", "cooking"}, "electric": {"appliances", "misc", "heating"}},
-        # "induction_stove": {"gas": {"hot_water", "heating"}, "electric": {"appliances", "misc", "cooking"}},
-        # "heat_pump_and_induction_stove": {"gas": {"hot_water"}, "electric": {"appliances", "misc", "cooking", "heating"}},
-        # "water_heating": {"gas": {"cooking", "heating"}, "electric": {"hot_water", "appliances", "misc"}},
+        "baseline": {"gas": {"heating", "hot_water", "cooking"}, "electric": {"appliances", "misc"}}, # Almost everything is gas, except normal electrical appliances
+        "heat_pump": {"gas": {"hot_water", "cooking"}, "electric": {"appliances", "misc", "heating"}},
+        "induction_stove": {"gas": {"hot_water", "heating"}, "electric": {"appliances", "misc", "cooking"}},
+        "heat_pump_and_induction_stove": {"gas": {"hot_water"}, "electric": {"appliances", "misc", "cooking", "heating"}},
+        "water_heating": {"gas": {"cooking", "heating"}, "electric": {"hot_water", "appliances", "misc"}},
         "heat_pump_and_induction_stove_and_water_heating": {"gas": {}, "electric": {"hot_water", "cooking", "heating", "appliances", "misc"}}
     }
 
@@ -78,8 +80,46 @@ class CostService:
     
         MapPaybackVisualization.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties, self.desired_rate_plans)
 
+def parse_arguments():
+    """
+    Parse command-line arguments for the cost service.
+    """
+    parser = argparse.ArgumentParser(
+        description="Run cost analysis for residential electrification scenarios in California",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""Available scenarios:
+  - baseline
+  - heat_pump
+  - induction_stove
+  - heat_pump_and_induction_stove
+  - water_heating
+  - heat_pump_and_induction_stove_and_water_heating
+
+Example usage:
+  python3 cost_service.py heat_pump_and_induction_stove
+  python3 cost_service.py water_heating
+  python3 cost_service.py baseline"""
+    )
+    
+    parser.add_argument(
+        "scenario",
+        help="Electrification scenario to analyze"
+    )
+    
+    return parser.parse_args()
+
+
 if __name__ == '__main__':
-    scenario = "heat_pump_and_induction_stove_and_water_heating"
+    # Parse command-line arguments
+    args = parse_arguments()
+    scenario = args.scenario
+    
+    # Validate scenario
+    if scenario not in CostService.SCENARIOS:
+        print(f"Error: Unknown scenario '{scenario}'")
+        print(f"Available scenarios: {', '.join(CostService.SCENARIOS.keys())}")
+        sys.exit(1)
+    
     housing_type = "single-family-detached"
     input_dir = "data"
     output_dir = "data/loadprofiles"
@@ -106,6 +146,7 @@ if __name__ == '__main__':
         "Riverside County", "Ventura County",  # Greater Los Angeles
         "San Diego County", "Imperial County"  # San Diego & Imperial
     ]
+    
     rate_plans = {
             "PG&E": {
                 "electricity": "E-TOU-D",
@@ -120,5 +161,14 @@ if __name__ == '__main__':
                 "gas": "GR"
             }
         }
+    
+    print(f"\nRunning cost analysis for scenario: {scenario}")
+    print(f"Housing type: {housing_type}")
+    print(f"Counties: {len(norcal_counties + central_counties + socal_counties)} total counties")
+    print("-" * 60)
+    
     cost_service = CostService(scenario, housing_type, counties=norcal_counties + central_counties + socal_counties, rate_plans=rate_plans, input_dir=input_dir, output_dir=output_dir)
     cost_service.run()
+    
+    print("\nCost analysis completed successfully!")
+    print(f"Results saved to: {output_dir}")
