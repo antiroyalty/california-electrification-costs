@@ -116,8 +116,8 @@ def test_process_county_data_no_files(mock_os_path_exists, mock_os_listdir):
     mock_os_path_exists.return_value = True
     mock_os_listdir.return_value = []  # No files
 
-    status, num_files = process_county_data("some_input_dir", "output.csv", ["energy"])
-    assert status == "no_files"
+    status, num_files = process_county_data("test_county", "some_input_dir", "output.csv", ["energy"])
+    assert status == "empty_data"
     assert num_files == 0
 
 
@@ -134,7 +134,7 @@ def test_process_county_data_valid_files(
     })
     mock_read_parquet.return_value = df
 
-    status, num_files = process_county_data("some_input_dir", "output.csv", ["energy"])
+    status, num_files = process_county_data("test_county", "some_input_dir", "output.csv", ["energy"])
     assert status == "processed"
     assert num_files == 2
     mock_to_csv.assert_called_once()
@@ -155,16 +155,20 @@ def test_process_county_data_some_invalid_files(
 
     mock_read_parquet.side_effect = [df_valid, df_invalid]
 
-    status, num_files = process_county_data("some_input_dir", "output.csv", ["energy"])
+    status, num_files = process_county_data("test_county", "some_input_dir", "output.csv", ["energy"])
     assert status == "processed"
-    assert num_files == 2
+    assert num_files == 1  # Only 1 valid file processed
     mock_to_csv.assert_called_once()
 
 
+@patch("step3_build_electricity_load_profiles.get_counties")
+@patch("step3_build_electricity_load_profiles.get_scenario_path")
 def test_process_full_pipeline(
-    mock_os_path_exists, mock_os_listdir, mock_read_parquet, mock_to_csv, mock_makedirs
+    mock_get_scenario_path, mock_get_counties, mock_os_path_exists, mock_os_listdir, mock_read_parquet, mock_to_csv, mock_makedirs
 ):
-    """Test the full process function with multiple scenarios and housing types."""
+    """Test the full process function for baseline scenario."""
+    mock_get_scenario_path.return_value = "data/baseline/single-family-detached"
+    mock_get_counties.return_value = ["test-county"]
     mock_os_path_exists.return_value = True
     mock_os_listdir.return_value = ["valid.parquet"]
 
@@ -179,11 +183,9 @@ def test_process_full_pipeline(
 
     mock_read_parquet.return_value = df
     
-    scenarios = {"baseline": end_use_categories}
-    housing_types = ["single-family"]
     counties = ["test_county"]
 
-    summary = process(scenarios, housing_types, counties, "input_dir", "output_dir")
+    summary = process("baseline", end_use_categories, "single-family-detached", counties, "input_dir", "output_dir")
 
     assert len(summary["processed"]) == 1  # Expect 1 processed county
     assert summary["processed"][0]["status"] == "processed"
@@ -200,8 +202,22 @@ def test_process_county_data_all_invalid_files(
     df_invalid = pd.DataFrame({"some_other_column": [1, 2]})
     mock_read_parquet.return_value = df_invalid
 
-    status, num_files = process_county_data("some_input_dir", "output.csv", ["energy"])
+    status, num_files = process_county_data("test_county", "some_input_dir", "output.csv", ["energy"])
 
     assert status == "empty_data"
     assert num_files == 0
     mock_to_csv.assert_not_called()
+
+@patch("step3_build_electricity_load_profiles.get_counties")
+@patch("step3_build_electricity_load_profiles.get_scenario_path")
+def test_process_non_baseline_scenario(mock_get_scenario_path, mock_get_counties):
+    """Test that non-baseline scenarios return None."""
+    end_use_categories = {"electric": ["appliances", "misc"]}
+    
+    result = process("heat_pump", end_use_categories, "single-family-detached", ["test_county"], "input_dir", "output_dir")
+    
+    # Non-baseline scenarios should return None
+    assert result is None
+    # Ensure no county processing functions were called
+    mock_get_scenario_path.assert_not_called()
+    mock_get_counties.assert_not_called()
