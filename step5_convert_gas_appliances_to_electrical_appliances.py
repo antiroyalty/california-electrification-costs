@@ -60,10 +60,23 @@ def save_converted_load_profiles(simulated_electricity_loads, output_file):
         saved_to=output_file,
     )
 
-def convert_appliances_for_county(county, base_input_dir, base_output_dir, scenarios, housing_type):
+def should_skip_processing(output_file, force_recompute):
+    """Check if processing should be skipped based on existing files and force_recompute flag."""
+    if force_recompute:
+        return False  # Always regenerate if forced
+    
+    return os.path.exists(output_file)
+
+def convert_appliances_for_county(county, base_input_dir, base_output_dir, scenarios, housing_type, force_recompute=True):
     for scenario in scenarios:
         input_file = os.path.join(base_input_dir, scenario, housing_type, county, f"{INPUT_FILE_PREFIX}_{county}.csv")
         output_file = os.path.join(base_output_dir, scenario, housing_type, county, f"{OUTPUT_FILE_PREFIX}_{county}.csv")
+
+        # Skip processing if file exists and force_recompute is False
+        if should_skip_processing(output_file, force_recompute):
+            log(at="step5_convert_gas_appliances_to_electrical_appliances", 
+                county=county, scenario=scenario, status="skipped_existing", output_file=output_file)
+            continue
 
         if not os.path.exists(input_file):
             print(f"Gas load profile not found for {county} in scenario {scenario}. Looked in: {input_file}. Skipping...")
@@ -112,7 +125,7 @@ def convert_appliances_for_county(county, base_input_dir, base_output_dir, scena
             print(f"An unexpected error occurred while processing {county} in scenario {scenario}: {e}")
             continue
 
-def process(base_input_dir, base_output_dir, counties, scenarios, housing_types):
+def process(base_input_dir, base_output_dir, counties, scenarios, housing_types, force_recompute=True):
     for housing_type in housing_types:
         for scenario in scenarios:
             if scenario != "baseline":
@@ -123,7 +136,7 @@ def process(base_input_dir, base_output_dir, counties, scenarios, housing_types)
             counties = get_counties(scenario_path, counties)
 
             for county in counties:
-                convert_appliances_for_county(county, base_input_dir, base_output_dir, scenarios, housing_type)
+                convert_appliances_for_county(county, base_input_dir, base_output_dir, scenarios, housing_type, force_recompute)
 
 # base_input_dir = "data"
 # base_output_dir = "data"

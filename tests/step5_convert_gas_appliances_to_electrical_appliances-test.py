@@ -80,9 +80,9 @@ def mock_gas_loads_df():
     """
     return pd.DataFrame({
         "timestamp": pd.date_range("2022-01-01", periods=3, freq="H"),
-        "out.natural_gas.heating.energy_consumption.gas.total.kwh": [10.0, 11.0, 12.0],
-        "out.natural_gas.range_oven.energy_consumption.gas.total.kwh": [3.0, 2.5, 2.0],
-        "out.natural_gas.hot_water.energy_consumption.gas.total.kwh": [5.0, 5.5, 6.0]
+        "out.natural_gas.heating.energy_consumption.gas.building_avg.kwh": [10.0, 11.0, 12.0],
+        "out.natural_gas.range_oven.energy_consumption.gas.building_avg.kwh": [3.0, 2.5, 2.0],
+        "out.natural_gas.hot_water.energy_consumption.gas.building_avg.kwh": [5.0, 5.5, 6.0]
     })
 
 def test_convert_appliances_for_county_no_file(mocker):
@@ -99,7 +99,8 @@ def test_convert_appliances_for_county_no_file(mocker):
         base_input_dir="/data",
         base_output_dir="/data",
         scenarios=["baseline"],
-        housing_type="single-family-detached"
+        housing_type="single-family-detached",
+        force_recompute=True
     )
     mock_read_csv.assert_not_called()
     mock_to_csv.assert_not_called()
@@ -110,7 +111,7 @@ def test_convert_appliances_for_county_missing_column(mocker, mock_gas_loads_df)
     """
     # Remove a required column
     mock_gas_loads_df.drop(
-        columns=["out.natural_gas.hot_water.energy_consumption.gas.total.kwh"],
+        columns=["out.natural_gas.hot_water.energy_consumption.gas.building_avg.kwh"],
         inplace=True
     )
 
@@ -123,10 +124,11 @@ def test_convert_appliances_for_county_missing_column(mocker, mock_gas_loads_df)
         base_input_dir="/data",
         base_output_dir="/data",
         scenarios=["baseline"],
-        housing_type="sfd"
+        housing_type="sfd",
+        force_recompute=True
     )
 
-    # Because 'out.natural_gas.hot_water.energy_consumption.gas.total.kwh' is missing
+    # Because 'out.natural_gas.hot_water.energy_consumption.gas.building_avg.kwh' is missing
     # expect a KeyError to be caught, so no .to_csv call.
     mock_to_csv.assert_not_called()
 
@@ -152,7 +154,8 @@ def test_convert_appliances_for_county_success(mocker, mock_gas_loads_df):
         base_input_dir="data",
         base_output_dir="data",
         scenarios=["baseline"],
-        housing_type="single-family-detached"
+        housing_type="single-family-detached",
+        force_recompute=True
     )
 
     mock_read_csv.assert_called_once()
@@ -161,9 +164,9 @@ def test_convert_appliances_for_county_success(mocker, mock_gas_loads_df):
     written_df = saved_dataframes[0]
 
     # Confirm the new columns exist
-    assert "simulated.electricity.heat_pump.energy_consumption.electricity.total.kwh" in written_df.columns
-    assert "simulated.electricity.induction_stove.energy_consumption.electricity.total.kwh" in written_df.columns
-    assert "simulated.electricity.hot_water.energy_consumption.electricity.total.kwh" in written_df.columns
+    assert "simulated.electricity.heat_pump.energy_consumption.electricity.kwh" in written_df.columns
+    assert "simulated.electricity.induction_stove.energy_consumption.electricity.kwh" in written_df.columns
+    assert "simulated.electricity.hot_water.energy_consumption.electricity.kwh" in written_df.columns
 
 # ------------------------------------------------------------------------------
 # 3. process
@@ -193,7 +196,7 @@ def test_process_no_counties(mocker):
 
     scenarios = ["baseline"]
     housing_types = ["single-family-detached"]
-    process("data", "data", counties=None, scenarios=scenarios, housing_types=housing_types)
+    process("data", "data", counties=None, scenarios=scenarios, housing_types=housing_types, force_recompute=True)
 
     assert mock_convert_county.call_count == 2
 
@@ -216,7 +219,8 @@ def test_process_explicit_counties(mocker):
         "data", "data",
         counties=["alameda", "riverside"],
         scenarios=scenarios,
-        housing_types=housing_types
+        housing_types=housing_types,
+        force_recompute=True
     )
     # Should call convert_appliances_for_county for alameda + riverside
     assert mock_convert_county.call_count == 2
@@ -244,9 +248,9 @@ def test_convert_county_name_to_slug(mocker, county_in, expected_slug):
     # Patch read_csv so I don't fail on missing CSV or missing columns
     dummy_df = pd.DataFrame({
         "timestamp": [1,2],
-        "out.natural_gas.heating.energy_consumption.gas.total.kwh": [5.0, 6.0],
-        "out.natural_gas.range_oven.energy_consumption.gas.total.kwh": [1.0, 2.0],
-        "out.natural_gas.hot_water.energy_consumption.gas.total.kwh": [2.5, 3.0],
+        "out.natural_gas.heating.energy_consumption.gas.building_avg.kwh": [5.0, 6.0],
+        "out.natural_gas.range_oven.energy_consumption.gas.building_avg.kwh": [1.0, 2.0],
+        "out.natural_gas.hot_water.energy_consumption.gas.building_avg.kwh": [2.5, 3.0],
     })
     mocker.patch("pandas.read_csv", return_value=dummy_df)
 
@@ -263,13 +267,14 @@ def test_convert_county_name_to_slug(mocker, county_in, expected_slug):
         base_output_dir="data",
         counties=[county_in],  # e.g. "Riverside County" or "Santa Clara County"
         scenarios=scenarios,
-        housing_types=housing_types
+        housing_types=housing_types,
+        force_recompute=True
     )
 
     # Expect a single call to convert_appliances_for_county
     mock_convert.assert_called_once()
-    # The call signature is: (county, base_input_dir, base_output_dir, scenarios, housing_type)
-    (actual_county_arg, actual_in, actual_out, actual_scen, actual_htype) = mock_convert.call_args[0]
+    # The call signature is: (county, base_input_dir, base_output_dir, scenarios, housing_type, force_recompute)
+    (actual_county_arg, actual_in, actual_out, actual_scen, actual_htype, actual_force_recompute) = mock_convert.call_args[0]
 
     # Confirm the county got slugified
     assert actual_county_arg == expected_slug, f"Expected {expected_slug}, got {actual_county_arg}"

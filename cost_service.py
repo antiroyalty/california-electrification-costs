@@ -52,7 +52,7 @@ class CostService:
         BuildGasLoadProfiles.process("data", "data/loadprofiles", scenario, self.SCENARIOS, self.housing_type, self.counties, force_recompute=False)
 
         self.log_step(5)
-        ConvertGasToElectric.process("data/loadprofiles", "data/loadprofiles", self.counties, list(self.SCENARIOS.keys()), [self.housing_type] )
+        ConvertGasToElectric.process("data/loadprofiles", "data/loadprofiles", self.counties, list(self.SCENARIOS.keys()), [self.housing_type], force_recompute=False)
 
         self.log_step(6)
         CombineRealAndSimulatedProfiles.process("data/loadprofiles", "data/loadprofiles", list(self.SCENARIOS.keys()), [self.housing_type], self.counties)
