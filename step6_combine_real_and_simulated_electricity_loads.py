@@ -220,21 +220,20 @@ def combine_profiles(input_dir, output_dir, scenario, housing_type, county, scen
 
     return combined_df
 
-def process(input_dir, output_dir, scenarios, housing_types, counties, force_recompute=True):
+def process(input_dir, output_dir, scenario, housing_types, counties, force_recompute=True):
     results = []
     
-    for scenario in scenarios:
-        for housing_type in housing_types:
-            scenario_path = get_scenario_path(input_dir, scenario, housing_type)
-            counties = get_counties(scenario_path, counties)
+    for housing_type in housing_types:
+        scenario_path = get_scenario_path(input_dir, scenario, housing_type)
+        counties = get_counties(scenario_path, counties)
 
-            for county in counties:
-                scenario_data_map = SCENARIO_DATA_MAP[scenario]
-                result = combine_profiles(
-                    input_dir, output_dir, scenario, housing_type, county, scenario_data_map, force_recompute
-                )
-                if result is not None:  # Only append non-None results
-                    results.append(result)
+        for county in counties:
+            scenario_data_map = SCENARIO_DATA_MAP[scenario]
+            result = combine_profiles(
+                input_dir, output_dir, scenario, housing_type, county, scenario_data_map, force_recompute
+            )
+            if result is not None:  # Only append non-None results
+                results.append(result)
     return results
 
 if __name__ == '__main__':
@@ -250,7 +249,7 @@ if __name__ == '__main__':
     output_dir = 'data/loadprofiles'
     housing_types = ['single-family-detached']
     counties = None  # Auto-detect all counties
-    scenarios = [args.scenario]
+    scenario = args.scenario
     
     print(f"Processing step6 with:")
     print(f"  Scenario: {args.scenario}")
@@ -262,7 +261,7 @@ if __name__ == '__main__':
     results = process(
         input_dir=input_dir,
         output_dir=output_dir,
-        scenarios=scenarios,
+        scenario=scenario,
         housing_types=housing_types,
         counties=counties,
         force_recompute=True  # Always recompute when run directly

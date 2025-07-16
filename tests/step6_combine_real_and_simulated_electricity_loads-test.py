@@ -220,11 +220,11 @@ def test_process(sample_input_output, patch_helpers):
     create_profile_csvs(input_dir, housing_type, county)
     
     # Call process with one scenario, one housing type, and one county.
-    scenarios = ["baseline"]
+    scenario = "baseline"
     housing_types = [housing_type]
     counties = [county]
     
-    results = process(str(input_dir), str(output_dir), scenarios, housing_types, counties, force_recompute=True)
+    results = process(str(input_dir), str(output_dir), scenario, housing_types, counties, force_recompute=True)
     
     assert len(results) == 1
     
