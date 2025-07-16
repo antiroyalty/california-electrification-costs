@@ -91,7 +91,7 @@ def data_only_for_year(year, county, filepath):
     print(f"Created weather file for {county} {year}: {output_csv}")
     return output_csv
 
-def process(base_input_dir, output_dir, scenarios, housing_types, year, counties=None):
+def process(base_input_dir, output_dir, scenario, housing_types, year, counties=None):
     """
     Processes weather files for given scenarios, housing types, and counties.
     The weather data is fetched from NREL and saved to disk, then filtered to retain
@@ -100,80 +100,79 @@ def process(base_input_dir, output_dir, scenarios, housing_types, year, counties
     # Initialize geolocator for dynamic centroid fetching
     geolocator = Nominatim(user_agent="county_centroid_fetcher")
 
-    for scenario in scenarios:
-        for housing_type in housing_types:
-            scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
-            counties = get_counties(scenario_path, counties)
+    for housing_type in housing_types:
+        scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
+        counties = get_counties(scenario_path, counties)
 
-            for county in counties:
-                county = slugify_county_name(county)
-                # Build the base file path for the raw weather file.
-                file_path = os.path.join(output_dir, scenario, housing_type, county, f"{FILE_PREFIX}_{county}.csv")
-                
-                if os.path.exists(file_path):
+        for county in counties:
+            county = slugify_county_name(county)
+            # Build the base file path for the raw weather file.
+            file_path = os.path.join(output_dir, scenario, housing_type, county, f"{FILE_PREFIX}_{county}.csv")
+            
+            if os.path.exists(file_path):
+                log(
+                    at="process",
+                    county=county,
+                    new_files_downloaded="F",
+                    files_at=file_path,
+                )
+                # Even if the raw file exists, we might want to generate the year-specific file.
+                data_only_for_year(year, county, file_path)
+                continue
+
+            try:
+                # Get centroid coordinates dynamically using geopy.
+                location = geolocator.geocode(f"{county}, California")
+                if location is None:
                     log(
                         at="process",
                         county=county,
-                        new_files_downloaded="F",
-                        files_at=file_path,
+                        files_downloaded="F",
+                        description="could not find centroid"
                     )
-                    # Even if the raw file exists, we might want to generate the year-specific file.
-                    data_only_for_year(year, county, file_path)
                     continue
+                latitude, longitude = location.latitude, location.longitude
 
-                try:
-                    # Get centroid coordinates dynamically using geopy.
-                    location = geolocator.geocode(f"{county}, California")
-                    if location is None:
-                        log(
-                            at="process",
-                            county=county,
-                            files_downloaded="F",
-                            description="could not find centroid"
-                        )
-                        continue
-                    latitude, longitude = location.latitude, location.longitude
+                # Fetch TMY data from NREL.
+                base_url = "https://developer.nrel.gov/api/solar/nsrdb_psm3_download.csv"
+                params = {
+                    "api_key": API_KEY,
+                    "wkt": f"POINT({longitude} {latitude})",
+                    "names": "tmy",  # Requesting Typical Meteorological Year data.
+                    "interval": "60",  # Hourly data.
+                    "utc": "true",
+                    "email": "ana.santasheva@berkeley.edu"  # TODO: Replace with appropriate email.
+                }
 
-                    # Fetch TMY data from NREL.
-                    base_url = "https://developer.nrel.gov/api/solar/nsrdb_psm3_download.csv"
-                    params = {
-                        "api_key": API_KEY,
-                        "wkt": f"POINT({longitude} {latitude})",
-                        "names": "tmy",  # Requesting Typical Meteorological Year data.
-                        "interval": "60",  # Hourly data.
-                        "utc": "true",
-                        "email": "ana.santasheva@berkeley.edu"  # TODO: Replace with appropriate email.
-                    }
+                print(f"Fetching TMY data for {county} ({latitude}, {longitude})...")
 
-                    print(f"Fetching TMY data for {county} ({latitude}, {longitude})...")
+                response = requests.get(base_url, params=params)
 
-                    response = requests.get(base_url, params=params)
+                if response.status_code == 200:
+                    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+                    with open(file_path, "w") as file:
+                        file.write(response.text)
+                    print(f"Saved TMY data for {county} to {file_path}")
+                    
+                    # Now filter the raw weather file for the desired year.
+                    data_only_for_year(year, county, file_path)
+                else:
+                    print(f"Failed to fetch TMY data for {county}: {response.status_code} {response.text}")
 
-                    if response.status_code == 200:
-                        os.makedirs(os.path.dirname(file_path), exist_ok=True)
-                        with open(file_path, "w") as file:
-                            file.write(response.text)
-                        print(f"Saved TMY data for {county} to {file_path}")
-                        
-                        # Now filter the raw weather file for the desired year.
-                        data_only_for_year(year, county, file_path)
-                    else:
-                        print(f"Failed to fetch TMY data for {county}: {response.status_code} {response.text}")
-
-                    log(
-                        at="process",
-                        title="get weather files",
-                        county=county,
-                        files_downloaded="T",
-                        latitude=latitude,
-                        longitude=longitude,
-                        response_code=response.status_code,
-                        resopnse_text=response.text,
-                        saved_to=file_path,
-                    )
-                
-                except Exception as e:
-                    print(f"Error processing {county}: {e}")
+                log(
+                    at="process",
+                    title="get weather files",
+                    county=county,
+                    files_downloaded="T",
+                    latitude=latitude,
+                    longitude=longitude,
+                    response_code=response.status_code,
+                    resopnse_text=response.text,
+                    saved_to=file_path,
+                )
+            
+            except Exception as e:
+                print(f"Error processing {county}: {e}")
 
 if __name__ == '__main__':
-    process("data", "data/loadprofiles", ["baseline"], ["single-family-detached"], 2018, norcal_counties)
+    process("data", "data/loadprofiles", "baseline", ["single-family-detached"], 2018, norcal_counties)

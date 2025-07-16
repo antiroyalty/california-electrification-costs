@@ -162,7 +162,7 @@ def test_combine_profiles(sample_input_output):
     scenario = "baseline"
     scenario_data_map = SCENARIO_DATA_MAP[scenario]
     
-    combined_df = combine_profiles(str(input_dir), str(output_dir), scenario, housing_type, county, scenario_data_map)
+    combined_df = combine_profiles(str(input_dir), str(output_dir), scenario, housing_type, county, scenario_data_map, force_recompute=True)
     
     expected_columns = [
         "timestamp",
@@ -224,7 +224,7 @@ def test_process(sample_input_output, patch_helpers):
     housing_types = [housing_type]
     counties = [county]
     
-    results = process(str(input_dir), str(output_dir), scenarios, housing_types, counties)
+    results = process(str(input_dir), str(output_dir), scenarios, housing_types, counties, force_recompute=True)
     
     assert len(results) == 1
     

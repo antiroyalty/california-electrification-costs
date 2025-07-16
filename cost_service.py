@@ -15,7 +15,7 @@ import step12_evaluate_capital_costs as EvaluateCapitalCosts
 import step13_combine_total_annual_costs as CombineTotalAnnualCosts
 import step14_build_maps as BuildMaps
 import step15_build_difference_maps as BuildDifferenceMaps
-import step17_build_payback_period_maps as MapPaybackVisualization
+import step17_old_build_payback_period_capital_costs as MapPaybackVisualization
 
 class CostService:
     SCENARIOS = {
@@ -55,10 +55,10 @@ class CostService:
         ConvertGasToElectric.process("data/loadprofiles", "data/loadprofiles", self.counties, list(self.SCENARIOS.keys()), [self.housing_type], force_recompute=False)
 
         self.log_step(6)
-        CombineRealAndSimulatedProfiles.process("data/loadprofiles", "data/loadprofiles", list(self.SCENARIOS.keys()), [self.housing_type], self.counties)
+        CombineRealAndSimulatedProfiles.process("data/loadprofiles", "data/loadprofiles", list(self.SCENARIOS.keys()), [self.housing_type], self.counties, force_recompute=False)
     
         self.log_step(7)
-        WeatherFiles.process("data/loadprofiles", "data/loadprofiles", list(self.SCENARIOS.keys()), [self.housing_type], 2018, self.counties)
+        WeatherFiles.process("data/loadprofiles", "data/loadprofiles", scenario, [self.housing_type], 2018, self.counties)
 
         self.log_step(8)
         RunSamModelForSolarStorage.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties)

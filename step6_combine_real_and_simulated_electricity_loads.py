@@ -142,7 +142,14 @@ def aggregate_columns(file_path, columns, resample_to_hourly=False):
         print(f"Error processing file {file_path}: {e}")
         return None
 
-def combine_profiles(input_dir, output_dir, scenario, housing_type, county, scenario_data_map):
+def should_skip_processing(output_file, force_recompute):
+    """Check if processing should be skipped based on existing files and force_recompute flag."""
+    if force_recompute:
+        return False  # Always regenerate if forced
+    
+    return os.path.exists(output_file)
+
+def combine_profiles(input_dir, output_dir, scenario, housing_type, county, scenario_data_map, force_recompute=True):
     county_slug = county.lower().replace(" ", "_")
     # TODO, Ana:
     # The retrieval of the profiles does not need to change based on scenario
@@ -192,6 +199,12 @@ def combine_profiles(input_dir, output_dir, scenario, housing_type, county, scen
     output_path = os.path.join(output_dir, scenario, housing_type, county_slug)
     os.makedirs(output_path, exist_ok=True)
     output_file = os.path.join(output_path, f"{OUTPUT_FILE_PREFIX}_{scenario}_{county_slug}.csv")
+    
+    # Skip processing if file exists and force_recompute is False
+    if should_skip_processing(output_file, force_recompute):
+        log(at="step6_combine_real_and_simulated_electricity_loads", 
+            scenario=scenario, county=county, status="skipped_existing", output_file=output_file)
+        return None
     combined_df.to_csv(output_file, index=False)
 
     log(
@@ -207,7 +220,7 @@ def combine_profiles(input_dir, output_dir, scenario, housing_type, county, scen
 
     return combined_df
 
-def process(input_dir, output_dir, scenarios, housing_types, counties):
+def process(input_dir, output_dir, scenarios, housing_types, counties, force_recompute=True):
     results = []
     
     for scenario in scenarios:
@@ -218,9 +231,10 @@ def process(input_dir, output_dir, scenarios, housing_types, counties):
             for county in counties:
                 scenario_data_map = SCENARIO_DATA_MAP[scenario]
                 result = combine_profiles(
-                    input_dir, output_dir, scenario, housing_type, county, scenario_data_map
+                    input_dir, output_dir, scenario, housing_type, county, scenario_data_map, force_recompute
                 )
-                results.append(result)
+                if result is not None:  # Only append non-None results
+                    results.append(result)
     return results
 
 if __name__ == '__main__':
@@ -250,7 +264,8 @@ if __name__ == '__main__':
         output_dir=output_dir,
         scenarios=scenarios,
         housing_types=housing_types,
-        counties=counties
+        counties=counties,
+        force_recompute=True  # Always recompute when run directly
     )
     
     print(f"Successfully processed {len(results)} combinations")
