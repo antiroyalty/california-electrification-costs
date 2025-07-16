@@ -223,4 +223,35 @@ def process(input_dir, output_dir, scenarios, housing_types, counties):
                 results.append(result)
     return results
 
-# process("data", "data", ["baseline"], ["single-family-detached"], ["Alameda County"])
+if __name__ == '__main__':
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Combine real and simulated electricity load profiles')
+    parser.add_argument('scenario', nargs='?', default='baseline', help='Scenario to process (default: baseline)')
+    
+    args = parser.parse_args()
+    
+    # Fixed parameters defined in code
+    input_dir = 'data/loadprofiles'
+    output_dir = 'data/loadprofiles'
+    housing_types = ['single-family-detached']
+    counties = None  # Auto-detect all counties
+    scenarios = [args.scenario]
+    
+    print(f"Processing step6 with:")
+    print(f"  Scenario: {args.scenario}")
+    print(f"  Input directory: {input_dir}")
+    print(f"  Output directory: {output_dir}")
+    print(f"  Housing types: {housing_types}")
+    print(f"  Counties: auto-detected")
+    
+    results = process(
+        input_dir=input_dir,
+        output_dir=output_dir,
+        scenarios=scenarios,
+        housing_types=housing_types,
+        counties=counties
+    )
+    
+    print(f"Successfully processed {len(results)} combinations")
+    print("Step6 complete!")
