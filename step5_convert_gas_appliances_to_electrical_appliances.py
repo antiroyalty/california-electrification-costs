@@ -125,18 +125,18 @@ def convert_appliances_for_county(county, base_input_dir, base_output_dir, scena
             print(f"An unexpected error occurred while processing {county} in scenario {scenario}: {e}")
             continue
 
-def process(base_input_dir, base_output_dir, counties, scenarios, housing_types, force_recompute=True):
+def process(base_input_dir, base_output_dir, counties, scenario, housing_types, force_recompute=True):
+    # Only process baseline scenario - other scenarios use the baseline conversions
+    if scenario != "baseline":
+        log(at="step5_convert_gas_appliances_to_electrical_appliances", message="all appliances already converted in baseline run")
+        return
+    
     for housing_type in housing_types:
-        for scenario in scenarios:
-            if scenario != "baseline":
-                log(at="step5_convert_gas_appliances_to_electrical_appliances", message="all appliances already converted in baseline run")
-                return
-        
-            scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
-            counties = get_counties(scenario_path, counties)
+        scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
+        counties = get_counties(scenario_path, counties)
 
-            for county in counties:
-                convert_appliances_for_county(county, base_input_dir, base_output_dir, scenarios, housing_type, force_recompute)
+        for county in counties:
+            convert_appliances_for_county(county, base_input_dir, base_output_dir, [scenario], housing_type, force_recompute)
 
 # base_input_dir = "data"
 # base_output_dir = "data"

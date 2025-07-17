@@ -194,9 +194,9 @@ def test_process_no_counties(mocker):
     # Patch convert_appliances_for_county where it is used
     mock_convert_county = mocker.patch("step5_convert_gas_appliances_to_electrical_appliances.convert_appliances_for_county")
 
-    scenarios = ["baseline"]
+    scenario = "baseline"
     housing_types = ["single-family-detached"]
-    process("data", "data", counties=None, scenarios=scenarios, housing_types=housing_types, force_recompute=True)
+    process("data", "data", None, scenario, housing_types, force_recompute=True)
 
     assert mock_convert_county.call_count == 2
 
@@ -213,13 +213,13 @@ def test_process_explicit_counties(mocker):
     mock_convert_county = mocker.patch("step5_convert_gas_appliances_to_electrical_appliances.convert_appliances_for_county")
     mock_exists = mocker.patch("os.path.exists", return_value=True)
 
-    scenarios = ["baseline"]
+    scenario = "baseline"
     housing_types = ["sfd"]
     process(
         "data", "data",
-        counties=["alameda", "riverside"],
-        scenarios=scenarios,
-        housing_types=housing_types,
+        ["alameda", "riverside"],
+        scenario,
+        housing_types,
         force_recompute=True
     )
     # Should call convert_appliances_for_county for alameda + riverside
@@ -258,16 +258,16 @@ def test_convert_county_name_to_slug(mocker, county_in, expected_slug):
         "step5_convert_gas_appliances_to_electrical_appliances.convert_appliances_for_county"
     )
 
-    scenarios = ["baseline"]
+    scenario = "baseline"
     housing_types = ["single-family-detached"]
 
     # Now call the step5 process function
     process(
-        base_input_dir="data",
-        base_output_dir="data",
-        counties=[county_in],  # e.g. "Riverside County" or "Santa Clara County"
-        scenarios=scenarios,
-        housing_types=housing_types,
+        "data",
+        "data",
+        [county_in],  # e.g. "Riverside County" or "Santa Clara County"
+        scenario,
+        housing_types,
         force_recompute=True
     )
 
@@ -280,5 +280,5 @@ def test_convert_county_name_to_slug(mocker, county_in, expected_slug):
     assert actual_county_arg == expected_slug, f"Expected {expected_slug}, got {actual_county_arg}"
     assert actual_in == "data"
     assert actual_out == "data"
-    assert actual_scen == scenarios
+    assert actual_scen == ["baseline"]
     assert actual_htype == "single-family-detached"
