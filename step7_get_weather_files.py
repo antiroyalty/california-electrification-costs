@@ -165,4 +165,4 @@ def process(base_input_dir, output_dir, scenario, housing_types, year, counties=
             process_county_weather(county, output_dir, scenario, housing_type, year)
 
 if __name__ == '__main__':
-    process("data", "data/loadprofiles", "baseline", ["single-family-detached"], 2018, norcal_counties)
+    process("data", "data/loadprofiles", "baseline", ["single-family-detached"], 2018, norcal_counties + central_counties + socal_counties)
