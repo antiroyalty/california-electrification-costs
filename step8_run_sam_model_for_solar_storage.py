@@ -23,6 +23,26 @@ def prepare_data_and_compute_system_capacity(weather_file, load_file, years_of_a
     # load_profile = [1.0] * 8760 # [kW] constant load example
     annual_load_kWh = sum(load_profile)
 
+    # ========== DEBUGGING: Load Profile Analysis ==========
+    log(
+        debug_load_profile_sample=load_profile[:10],  # First 10 values
+        debug_load_profile_min=min(load_profile),
+        debug_load_profile_max=max(load_profile),
+        debug_load_profile_mean=statistics.mean(load_profile),
+        debug_annual_load_kWh=annual_load_kWh,
+        debug_annual_load_typical_range="Typical home: 10,000-15,000 kWh/year"
+    )
+    
+    # Check if load profile appears to be in kW (power) vs kWh (energy)
+    # If in kW, annual sum should be ~10,000-15,000 for typical home
+    # If hourly kWh values, sum would be much smaller
+    if annual_load_kWh < 1000:
+        log(debug_load_units_likely="kWh per hour (energy intervals)")
+    elif 5000 < annual_load_kWh < 30000:
+        log(debug_load_units_likely="kW values (instantaneous power)")
+    else:
+        log(debug_load_units_likely="unclear units, unusual range")
+
     # Documentation of column names here: https://github.com/NREL/pysam/blob/8a5f6889cf2bae867d70bcff6ca408d142bd4b61/Examples/NonAnnualSimulation.ipynb#L358
     # In a solar resource file, global horizontal irradiance (gh) includes both the direct (beam) component of sunlight and the diffuse (scattered) component.
     # Diffuse irradiance (df) only includes the scattered portion of sunlight that reaches the surface.
@@ -30,44 +50,107 @@ def prepare_data_and_compute_system_capacity(weather_file, load_file, years_of_a
     # extract global horizontal irradiance across the year [W/m2]
     gh_w_per_m2 = solar_resource_data["gh"]
 
+    # ========== DEBUGGING: Irradiance Analysis ==========
+    log(
+        debug_irradiance_sample=gh_w_per_m2[:10],  # First 10 values
+        debug_irradiance_min=min(gh_w_per_m2),
+        debug_irradiance_max=max(gh_w_per_m2),
+        debug_irradiance_mean=statistics.mean(gh_w_per_m2),
+        debug_irradiance_typical_range="Typical: 0-1200 W/m² (0 at night, ~1000 peak sun)"
+    )
+
     # compute average annual GHI in [W/m2]
     mean_gh_w_per_m2 = statistics.mean(gh_w_per_m2)
 
-    # convert average GHI to daily energy [kWh/m2/day]
-    average_daily_irradiance_kWh_per_m2 = mean_gh_w_per_m2 * 24 / 10000 # 24 = hours in a day, 1000 = w to kw conversion
+    # ========== STEP 3: Solar Irradiance Analysis ==========
+    # Convert average GHI to daily energy [kWh/m²/day]
+    # Formula: (W/m²) × (24 hours/day) ÷ (1000 W/kW) = kWh/m²/day
+    daily_irradiance_kWh_per_m2_per_day = mean_gh_w_per_m2 * 24 / 1000
 
-    # oversize factor for extra buffer (1.2x = 20% more)
-    oversizing_factor = 1 # not 1.2
+    # ========== DEBUGGING: Daily Irradiance Calculation ==========
+    log(
+        debug_mean_irradiance_w_per_m2=mean_gh_w_per_m2,
+        debug_daily_irradiance_kWh_per_m2=daily_irradiance_kWh_per_m2_per_day,
+        debug_daily_irradiance_expected_range="Expected: 3-7 kWh/m²/day for CA",
+        debug_calculation_formula=f"{mean_gh_w_per_m2} W/m² * 24 h / 1000 = {daily_irradiance_kWh_per_m2_per_day} kWh/m²/day"
+    )
 
-    # panel power density [kW/m2] (how much DC power is produced per unit area)
-    # wikipedia suggests most efficient mass-produced solar modules have power density values of up to 175 W/m2 or 0.175 kw/m2
-    # https://en.wikipedia.org/wiki/Solar_panel
-    # residential solar panel power is likely a bit less
-    # example: https://www.solar.com/learn/solar-panel-efficiency/
-    # Tesla solar panels have a wattage of 420W and are 82.4 in x 40.9 in x 1.57 in, including the frame
-    # length = 2.092 m, width = 1.038 m
-    # area = 2.171 m2
-    # power density = 420 W / 2.171 m2 = 193.5 W/m2 = 0.193 kW/m2
+    # ========== STEP 4: System Configuration Parameters ==========
+    # Oversizing factor for extra buffer (1.0 = no oversizing, 1.2 = 20% more)
+    oversizing_factor = 1.0  # Currently no oversizing
+
+    # Panel nameplate power density [kW/m²] - peak DC power under standard test conditions
+    # Tesla solar panels specification:
+    # - Wattage: 420W, Dimensions: 82.4" × 40.9", Area: 2.171 m²
+    # - Power density = 420 W ÷ 2.171 m² = 193.5 W/m² = 0.193 kW/m²
     # Tesla module datasheet: 
     # https://es-media-prod.s3.amazonaws.com/media/components/panels/spec-sheets/Tesla_Module_Datasheet.pdf
-    panel_power_density_kw_per_m2 = 0.193
+    # Typical range: 0.15-0.22 kW/m² for modern panels
+    panel_nameplate_power_density_kW_per_m2 = 0.193
 
-    # system performance ratio / efficiency
-    system_performance_ratio = 0.807 # 19.3% efficiency according to Tesla spec
+    # System performance factors for real-world energy production
+    # Accounts for inverter losses, wiring losses, soiling, shading, temperature effects
+    # Typical range: 0.75-0.85 for well-designed systems
+    system_performance_ratio = 0.80  # 80% of theoretical peak performance
 
-    # annual energy production per square meter [kWh/m2/year]:
-    # (daily energy [kWh/m2/day] * days in a year * performance ratio)
-    energy_per_m2_year_kWh = average_daily_irradiance_kWh_per_m2 * 365 # * system_performance_ratio # avoid double counting
+    # Solar capacity factor - ratio of actual annual energy to theoretical maximum
+    # Varies by location: CA ~20-25%, AZ ~27%, Northeast ~15%
+    # Formula: actual kWh/year ÷ (nameplate kW × 8760 hours)
+    solar_capacity_factor = 0.22  # 22% typical for California residential
 
-    # compute the solar panel area [m2] needed to cover the annual load with oversizing:
-    required_panel_area_m2 = (annual_load_kWh * oversizing_factor) / energy_per_m2_year_kWh
+    # ========== STEP 5: Calculate Annual Energy Production Using NREL Irradiance Method ==========
+    # Method: Based on actual NREL solar irradiance data with proper PV physics
+    
+    # Step 5a: Calculate theoretical solar energy available from NREL weather data
+    annual_irradiance_kWh_per_m2 = daily_irradiance_kWh_per_m2_per_day * 365
+    
+    # Step 5b: Apply photovoltaic cell efficiency (converts sunlight to electricity)
+    # Modern silicon PV cells: ~20-22% efficiency under standard test conditions
+    # Tesla panels: ~20.6% efficiency per datasheet
+    # This is the fundamental physics conversion from solar irradiance to DC electricity
+    pv_cell_efficiency = 0.206  # 20.6% - converts solar irradiance to DC electricity
+    
+    # Step 5c: Apply system performance ratio (accounts for real-world losses)
+    # Inverter losses: ~4%, wiring losses: ~2%, soiling: ~5%, temperature derating: ~10%, etc.
+    # Combined system losses: ~20% → performance ratio of 0.80
+    # Note: This is separate from PV cell efficiency - it's the additional real-world losses
+    system_performance_ratio = 0.80  # 80% - accounts for inverter, wiring, soiling, temperature losses
+    
+    # Step 5d: Calculate actual electrical energy production per m²
+    # Formula: (solar energy [kWh/m²]) × (PV efficiency) × (system performance ratio)
+    annual_energy_production_kWh_per_m2 = (annual_irradiance_kWh_per_m2 * 
+                                          pv_cell_efficiency * 
+                                          system_performance_ratio)
 
-    # convert required panel area to DC capacity [kW] using the panel power density:
-    required_dc_capacity_kw = required_panel_area_m2 * panel_power_density_kw_per_m2 # avoid double counting the efficiency
+    log(
+        debug_annual_irradiance_kWh_per_m2=annual_irradiance_kWh_per_m2,
+        debug_pv_cell_efficiency=pv_cell_efficiency,
+        debug_system_performance_ratio=system_performance_ratio,
+        debug_annual_energy_production_kWh_per_m2=annual_energy_production_kWh_per_m2,
+        debug_expected_range="Expected: ~300-400 kWh/m²/year for CA after all losses",
+        debug_calculation_formula=f"{annual_irradiance_kWh_per_m2} × {pv_cell_efficiency} × {system_performance_ratio} = {annual_energy_production_kWh_per_m2} kWh/m²/year"
+    )
 
-    # log(solar_dc_capacity_kw = required_dc_capacity_kw, solar_area_m2 = required_panel_area_m2)
+    # ========== STEP 6: Calculate Required Panel Area ==========
+    # Solar panel area [m²] needed to cover annual load with oversizing
+    # Formula: (energy demand [kWh/year] × oversizing) ÷ (energy production [kWh/m²/year])
+    required_panel_area_m2 = (annual_load_kWh * oversizing_factor) / annual_energy_production_kWh_per_m2
 
-    return solar_resource_data, load_profile, required_dc_capacity_kw
+    # ========== STEP 7: Convert Area to DC Nameplate Capacity ==========
+    # Convert required panel area to DC capacity [kW] using nameplate power density
+    # Formula: (panel area [m²]) × (nameplate power density [kW/m²]) = total DC capacity [kW]
+    required_dc_capacity_kW = required_panel_area_m2 * panel_nameplate_power_density_kW_per_m2
+
+    # ========== DEBUGGING: Final Sizing Results ==========
+    log(
+        debug_required_panel_area_m2=required_panel_area_m2,
+        debug_required_dc_capacity_kW=required_dc_capacity_kW,
+        debug_typical_residential_system="Typical: 20-40 m², 4-8 kW for CA home",
+        debug_calculation_check=f"Load: {annual_load_kWh} kWh/year ÷ {annual_energy_production_kWh_per_m2} kWh/m²/year = {required_panel_area_m2} m²",
+        debug_capacity_check=f"Area: {required_panel_area_m2} m² × {panel_nameplate_power_density_kW_per_m2} kW/m² = {required_dc_capacity_kW} kW"
+    )
+
+    return solar_resource_data, load_profile, required_dc_capacity_kW
 
 def create_solar_model(solar_resource_data, system_capacity, years_of_analysis):
     # Initialize PV system
@@ -254,7 +337,7 @@ def validate_and_save_results(county, load_profile, system_to_load, batt_to_load
 
     df.to_csv(output_file)
 
-def process(base_input_dir, base_output_dir, scenario, housing_type, counties=None, years_of_analysis=1):
+def process(base_input_dir, base_output_dir, scenario, housing_type, counties=None, years_of_analysis=1, force_recompute=False):
     # Define the scenario path to dynamically list counties
     scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
     counties_to_run = get_counties(scenario_path, counties)
@@ -268,6 +351,11 @@ def process(base_input_dir, base_output_dir, scenario, housing_type, counties=No
             weather_file = os.path.join(base_input_dir, scenario, housing_type, county, f"weather_TMY_{county}.csv")
             load_file = os.path.join(scenario_path, county, f"{LOADPROFILE_FILE_PREFIX}_{scenario}_{county}.csv")
             output_file = os.path.join(base_output_dir, scenario, housing_type, county, f"{OUTPUT_LOADPROFILE_FILE_PREFIX}_{county}.csv")
+
+            # Skip if output file already exists and force_recompute is False
+            if not force_recompute and os.path.exists(output_file):
+                print(f"Output file already exists: {output_file}. Skipping... (use force_recompute=True to rebuild)")
+                continue
 
             if not os.path.exists(weather_file):
                 print(f"Weather file not found: {weather_file}. Skipping...")
@@ -312,5 +400,5 @@ housing_type = "single-family-detached" # "single-family-attached"]
 # # rate_plan = ...
 
 if __name__ == '__main__':
-    process("data/loadprofiles", "data/loadprofiles", scenario, housing_type, norcal_counties + socal_counties + central_counties) # ["Alameda County"])
+    process("data/loadprofiles", "data/loadprofiles", scenario, housing_type, norcal_counties + socal_counties + central_counties, force_recompute=True) # ["Alameda County"])
     # norcal_counties + central_counties + socal_counties
