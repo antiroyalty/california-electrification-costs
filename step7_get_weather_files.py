@@ -94,10 +94,22 @@ def fetch_weather_data(latitude, longitude, county):
     response = requests.get(NREL_BASE_URL, params=params)
     return response
 
-def process_county_weather(county, output_dir, scenario, housing_type, year):
+def should_skip_processing(file_path, year_specific_path, force_recompute):
+      """Check if processing should be skipped."""
+      if force_recompute:
+          return False
+      return os.path.exists(file_path) and os.path.exists(year_specific_path)
+
+def process_county_weather(county, output_dir, scenario, housing_type, year, force_recompute):
     """Process weather data for a single county."""
     county = slugify_county_name(county)
     file_path = os.path.join(output_dir, scenario, housing_type, county, f"{FILE_PREFIX}_{county}.csv")
+    year_specific_path = os.path.join(output_dir, scenario, housing_type, county,
+  f"{FILE_PREFIX}_{county}_{year}.csv")
+    
+    if should_skip_processing(file_path, year_specific_path, force_recompute):
+        log(at="process", county=county, status="skipped_existing", files_at=file_path)
+        return   
     
     if os.path.exists(file_path):
         log(
@@ -109,6 +121,8 @@ def process_county_weather(county, output_dir, scenario, housing_type, year):
         # Even if the raw file exists, we might want to generate the year-specific file.
         data_only_for_year(year, county, file_path)
         return
+
+ 
 
     try:
         # Get centroid coordinates dynamically using geopy.
@@ -151,7 +165,7 @@ def process_county_weather(county, output_dir, scenario, housing_type, year):
     except Exception as e:
         print(f"Error processing {county}: {e}")
 
-def process(base_input_dir, output_dir, scenario, housing_types, year, counties=None):
+def process(base_input_dir, output_dir, scenario, housing_types, year, counties=None, force_recompute=False):
     """
     Processes weather files for given scenarios, housing types, and counties.
     The weather data is fetched from NREL and saved to disk, then filtered to retain
@@ -162,7 +176,7 @@ def process(base_input_dir, output_dir, scenario, housing_types, year, counties=
         counties_list = get_counties(scenario_path, counties)
 
         for county in counties_list:
-            process_county_weather(county, output_dir, scenario, housing_type, year)
+            process_county_weather(county, output_dir, scenario, housing_type, year, force_recompute)
 
 if __name__ == '__main__':
     process("data", "data/loadprofiles", "baseline", ["single-family-detached"], 2018, norcal_counties + central_counties + socal_counties)
