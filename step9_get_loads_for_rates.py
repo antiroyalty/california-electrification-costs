@@ -210,13 +210,12 @@ def prepare_for_rates_analysis(base_input_dir, base_output_dir, housing_type, sc
         saved_to=output_file_path,
     )
 
-def process(base_input_dir, base_output_dir, scenarios, housing_types, counties=None):
-    for scenario in scenarios:
-        for housing_type in housing_types:
-            scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
-            counties_list = get_counties(scenario_path, counties)
-            for county in counties_list:
-                prepare_for_rates_analysis(base_input_dir, base_output_dir, housing_type, scenario, county)
+def process(base_input_dir, base_output_dir, scenario, housing_types, counties=None):
+    for housing_type in housing_types:
+        scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
+        counties_list = get_counties(scenario_path, counties)
+        for county in counties_list:
+            prepare_for_rates_analysis(base_input_dir, base_output_dir, housing_type, scenario, county)
 
 # base_input_dir = "data"
 # base_output_dir = "data"
@@ -226,7 +225,7 @@ def process(base_input_dir, base_output_dir, scenarios, housing_types, counties=
 # process(
 #     base_input_dir=base_input_dir,
 #     base_output_dir=base_output_dir,
-#     scenarios=["baseline"],
+#     scenario="baseline",
 #     housing_types=["single-family-detached"],
 #     counties=counties
 # )

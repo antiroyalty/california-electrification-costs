@@ -87,7 +87,7 @@ def test_process(
     process(
         base_input_dir=base_input_dir,
         base_output_dir=base_output_dir,
-        scenarios=["baseline"],
+        scenario="baseline",
         housing_types=["single-family-detached"],
         counties="alameda"
     )

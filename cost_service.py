@@ -64,7 +64,7 @@ class CostService:
         RunSamModelForSolarStorage.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties)
 
         self.log_step(9)
-        GetLoadsForRates.process("data/loadprofiles", "data/loadprofiles", list(self.SCENARIOS.keys()), [self.housing_type], self.counties)
+        GetLoadsForRates.process("data/loadprofiles", "data/loadprofiles", scenario, [self.housing_type], self.counties)
 
         self.log_step(10)
         EvaluateGasRates.process("data/loadprofiles", "data/loadprofiles", scenario, [self.housing_type], self.counties)
