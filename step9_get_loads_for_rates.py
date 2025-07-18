@@ -217,15 +217,17 @@ def process(base_input_dir, base_output_dir, scenario, housing_types, counties=N
         for county in counties_list:
             prepare_for_rates_analysis(base_input_dir, base_output_dir, housing_type, scenario, county)
 
-# base_input_dir = "data"
-# base_output_dir = "data"
-
-# counties = ['Alameda County']
-
-# process(
-#     base_input_dir=base_input_dir,
-#     base_output_dir=base_output_dir,
-#     scenario="baseline",
-#     housing_types=["single-family-detached"],
-#     counties=counties
-# )
+if __name__ == '__main__':
+    from helpers import norcal_counties, central_counties, socal_counties
+    
+    # Configuration
+    scenario = "heat_pump"
+    housing_types = ["single-family-detached"]
+    
+    process(
+        base_input_dir="data/loadprofiles",
+        base_output_dir="data/loadprofiles", 
+        scenario=scenario,
+        housing_types=housing_types,
+        counties=norcal_counties + central_counties + socal_counties
+    )
