@@ -15,7 +15,14 @@ def style_function(feature, rate, min_val, max_val):
     }
 
 def generate_diff_geojson(merged_gdf, output_path, rate):
-    subset = merged_gdf[["NAME", "geometry", rate]]
+    subset = merged_gdf[["NAME", "geometry", rate]].copy()
+    
+    # Add formatted version for consistency with HTML map
+    subset[f"{rate}_fmt"] = subset[rate].apply(lambda x: to_decimal_number(x) if pd.notnull(x) else "N/A")
+    
+    # Ensure no null geometries that could cause issues
+    subset = subset[subset.geometry.notnull()]
+    
     filename = os.path.join(output_path, f"difference_{rate}.geojson")
     subset.to_file(filename, driver="GeoJSON")
 
@@ -108,11 +115,9 @@ def process(base_input_dir, base_output_dir, housing_type, counties, left_scenar
             log(county=county, message=f"Skipping county for diff solar map: {e}")
             continue
 
-    # Build DataFrames from the dictionaries.
     df_left = pd.DataFrame.from_dict(data_left, orient="index")
     df_right = pd.DataFrame.from_dict(data_right, orient="index")
 
-    # Merge with the counties GeoDataFrame.
     gdf = initialize_map()
     merged_left = gdf.merge(df_left, left_on="NAME", right_index=True, how="left")
     merged_right = gdf.merge(df_right, left_on="NAME", right_index=True, how="left")
