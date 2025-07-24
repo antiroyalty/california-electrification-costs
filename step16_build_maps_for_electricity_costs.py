@@ -6,6 +6,7 @@ import requests
 from zipfile import ZipFile
 from datetime import datetime
 from helpers import get_counties, get_scenario_path, log, to_decimal_number, norcal_counties, central_counties, socal_counties
+from maps_helpers import create_folium_map
 
 electricity_costs_file_prefix = "RESULTS_electricity_annual_costs"
 
@@ -71,11 +72,7 @@ def generate_geojson(merged_gdf, output_path, file_prefix, rate):
 
 def generate_html(merged_gdf, output_path, file_prefix, rate):
     merged_gdf[f"{rate}_fmt"] = merged_gdf[rate].apply(lambda x: to_decimal_number(x) if pd.notnull(x) else "N/A")
-    m = folium.Map(location=[37.8, -120], zoom_start=6)
-    title_html = f'''
-             <h3 align="center" style="font-size:20px"><b>{output_path}/{file_prefix}.{rate}</b></h3>
-             '''
-    m.get_root().html.add_child(folium.Element(title_html))
+    m = create_folium_map(title=f"{output_path}/{file_prefix}.{rate}")
 
     folium.Choropleth(
         geo_data=merged_gdf,

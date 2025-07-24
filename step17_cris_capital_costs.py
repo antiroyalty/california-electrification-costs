@@ -193,7 +193,7 @@ CAPITAL_COSTS_CRIS = {
 
 def process(base_input_dir, base_output_dir, scenario, housing_type, counties, desired_rate_plans):
     """
-    Constructs maps for payback period analysis using CRIS 2025 capital costs.
+    Constructs maps for payback period analysis using Cris's 2025 capital costs.
     """
     return process_payback_analysis(
         base_input_dir, base_output_dir, scenario, housing_type, counties, desired_rate_plans,
