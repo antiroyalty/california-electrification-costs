@@ -2,7 +2,7 @@ import os
 import pandas as pd
 import folium
 from helpers import get_counties, get_scenario_path, log, to_decimal_number, norcal_counties, central_counties, socal_counties
-from maps_helpers import initialize_map, get_latest_csv_file, get_difference_color
+from maps_helpers import initialize_map, get_latest_csv_file, get_difference_color, create_folium_map
 # import itertools # TODO: Ana, use to get permutations of each scenario, etc.
 
 def style_function(feature, rate, min_val, max_val):
@@ -28,11 +28,7 @@ def generate_diff_geojson(merged_gdf, output_path, rate):
 
 def generate_diff_html(merged_gdf, output_path, rate):
     merged_gdf[f"{rate}_fmt"] = merged_gdf[rate].apply(lambda x: to_decimal_number(x) if pd.notnull(x) else "N/A")
-    m = folium.Map(location=[37.8, -120], zoom_start=6)
-    title_html = f'''
-             <h3 align="center" style="font-size:20px"><b>{output_path}.{rate}</b></h3>
-             '''
-    m.get_root().html.add_child(folium.Element(title_html))
+    m = create_folium_map(title=f"{output_path}.{rate}")
 
     # Compute the overall min and max for the cost column
     min_val = merged_gdf[rate].min()
