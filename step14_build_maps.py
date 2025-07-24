@@ -3,46 +3,9 @@ import pandas as pd
 import numpy as np
 import geopandas as gpd
 import folium
-import requests
-from zipfile import ZipFile
-from datetime import datetime
 from helpers import get_counties, get_scenario_path, log, to_decimal_number, norcal_counties, central_counties, socal_counties
+from maps_helpers import create_folium_map, initialize_map, extract_timestamp_from_filename, get_latest_csv_file
 
-def download_and_extract_shapefile():
-    url = "https://www2.census.gov/geo/tiger/GENZ2018/shp/cb_2018_us_county_20m.zip"
-    zip_name = "cb_2018_us_county_20m.zip"
-    folder = "cb_2018_us_county_20m"
-    if not os.path.exists(folder):
-        response = requests.get(url, stream=True)
-        with open(zip_name, "wb") as f:
-            for chunk in response.iter_content(chunk_size=1024):
-                f.write(chunk)
-        with ZipFile(zip_name, "r") as zip_ref:
-            zip_ref.extractall(folder)
-
-    return folder
-
-def initialize_map():
-    folder = download_and_extract_shapefile()
-    shp_file = [os.path.join(folder, f) for f in os.listdir(folder) if f.endswith(".shp")][0]
-    gdf = gpd.read_file(shp_file)
-    gdf = gdf[gdf["STATEFP"] == "06"][["NAME", "geometry"]].copy()
-
-    return gdf
-
-def extract_timestamp_from_filename(filename):
-    parts = filename.rstrip(".csv").split("_")
-    ts = parts[-2] + "_" + parts[-1]
-
-    return datetime.strptime(ts, "%Y%m%d_%H")
-
-def get_latest_csv_file(directory, prefix):
-    files = [f for f in os.listdir(directory) if f.startswith(prefix) and f.endswith(".csv")]
-    if not files:
-        raise FileNotFoundError(f"No file found in {directory} with prefix {prefix}")
-    latest_file = max(files, key=lambda f: extract_timestamp_from_filename(f))
-
-    return os.path.join(directory, latest_file)
 
 def load_cost_data(county_dir, subfolder, prefix):
     path = os.path.join(county_dir, "results", subfolder)
@@ -117,28 +80,7 @@ def generate_html(merged_gdf, output_path, scenario, file_prefix, all_rates_for_
     max_val = merged_gdf["selected_rate"].max()
     threshold_scale = list(np.linspace(min_val, max_val, num_bins)) # np.linspace ensures max value is included
     
-    m = folium.Map(
-        location=[37.8, -120], 
-        zoom_start=6,
-        width="550px",
-        height="700px",
-        zoom_control=False
-    )
-    css = f"""
-        <style>
-        /* #{m.get_name()} is the map’s <div> */
-        #{m.get_name()} {{
-            margin: 0 auto;         /* left & right auto = centred */
-        }}
-        </style>
-        """
-    m.get_root().html.add_child(folium.Element(css))
-    
-    title_html = f'''
-             <h3 align="center" style="font-size:16px"><b>Total annual costs: {file_prefix}</b></h3>
-             '''
-    m.get_root().html.add_child(folium.Element(title_html))
-    
+    m = create_folium_map(title=f"Total annual costs: {file_prefix}")
     # Add the choropleth layer using the new 'selected_rate' column.
     folium.Choropleth(
         geo_data=merged_gdf,
