@@ -5,7 +5,8 @@ from zipfile import ZipFile
 from datetime import datetime
 import pandas as pd
 import folium
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
+from helpers import to_decimal_number, log
 
 def initialize_map():
     url = "https://www2.census.gov/geo/tiger/GENZ2018/shp/cb_2018_us_county_20m.zip"
@@ -87,13 +88,7 @@ def build_metric_map(
     If diverging=True, expect diffs and use a diverging scale (e.g. 'RdBu').  
     threshold_scale overrides the auto‐bins.
     """
-    m = folium.Map(
-        location=[37.8, -120],
-        zoom_start=6,
-        width="550px",      # or 900
-        height="700px",     # or "60vh"
-        zoom_control=False,
-    )
+    m = create_folium_map(title=title_text)
 
     # 1) Choropleth layer
     folium.Choropleth(
@@ -118,8 +113,6 @@ def build_metric_map(
       name="County Info"
     ).add_to(m)
 
-    # 3) Title
-    m.get_root().html.add_child(folium.Element(f'<h3 align="center">{title_text}</h3>'))
 
     # 4) Centroid labels
     label_col = f"{column}_fmt" if f"{column}_fmt" in gdf.columns else column
@@ -145,5 +138,42 @@ def build_metric_map(
         '<style>.leaflet-control-layers{display:none !important;}</style>'
     ))
 
+    return m
+
+def create_folium_map(title: str = None) -> folium.Map:
+    """
+    Create a standardized folium map for California with consistent settings.
+    
+    Args:
+        title: Optional title to add to map
+        
+    Returns:
+        Configured folium Map object with standard California settings
+    """
+    m = folium.Map(
+        location=[37.8, -120.0],
+        zoom_start=6,
+        width="550px",
+        height="700px",
+        zoom_control=False
+    )
+    
+    css = f"""
+        <style>
+        #{m.get_name()} {{
+            margin: 0 auto;
+        }}
+        </style>
+    """
+    m.get_root().html.add_child(folium.Element(css))
+    
+    if title:
+        title_html = f'''
+            <h3 align="center" style="font-size:20px">
+                <b>{title}</b>
+            </h3>
+        '''
+        m.get_root().html.add_child(folium.Element(title_html))
+    
     return m
 
