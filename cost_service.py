@@ -11,7 +11,7 @@ import step8_run_sam_model_for_solar_storage as RunSamModelForSolarStorage
 import step9_get_loads_for_rates as GetLoadsForRates
 import step10_evaluate_gas_rates as EvaluateGasRates
 import step11_evaluate_electricity_rates as EvaluateElectricityRates
-import step12_evaluate_capital_costs as EvaluateCapitalCosts
+# import step12_evaluate_capital_costs as EvaluateCapitalCosts  # DEPRECATED: Not used in pipeline
 import step13_combine_total_annual_costs as CombineTotalAnnualCosts
 import step14_build_maps as BuildMaps
 import step15_build_difference_maps as BuildDifferenceMaps

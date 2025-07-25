@@ -1,3 +1,13 @@
+# DEPRECATED: This step is no longer used in the main processing pipeline
+# 
+# This module calculates payback periods for solar+storage systems but its results
+# are not consumed by any downstream processes. The payback analysis and visualization
+# is now handled by step17 variants (step17_old_* and step17_cris_*) which use their
+# own capital cost structures and create maps directly.
+#
+# The step12 results (system_payback_by_county.csv) are orphaned and not referenced
+# elsewhere in the codebase. Consider this legacy code that may be removed in future.
+#
 # build a table of key-value pairs for solar capacity, storage capacity, and costs
 # one entry per county? or by climate zone?
 # first start for all of california and look at the capital cost differences due to the diff sizes of solar and storage
