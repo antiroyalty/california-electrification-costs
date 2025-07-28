@@ -25,6 +25,8 @@ class CostService:
         "heat_pump_and_induction_stove": {"gas": {"hot_water"}, "electric": {"appliances", "misc", "cooking", "heating"}},
         "water_heating": {"gas": {"cooking", "heating"}, "electric": {"hot_water", "appliances", "misc"}},
         "heat_pump_and_induction_stove_and_water_heating": {"gas": {}, "electric": {"hot_water", "cooking", "heating", "appliances", "misc"}}
+        # TODO, EVs: Create a new scenario that looks *just* at EVs
+        # TODO, EVs: Create a new scenario that looks at EVs plus all other electrified appliances
     }
 
     def __init__(self, scenario, housing_type, counties, rate_plans, input_dir, output_dir):
@@ -55,32 +57,84 @@ class CostService:
         ConvertGasToElectric.process("data/loadprofiles", "data/loadprofiles", self.counties, scenario, [self.housing_type], force_recompute=False)
 
         self.log_step(6)
+        # TODO, EVs: Create a new class that processes EV load profiles for each specified county
+        # BuildElectricVehicleLoadProfiles.process(...)
+
+        self.log_step(7)
+        # Add EVs here so they get used in SAM model deployment
         CombineRealAndSimulatedProfiles.process("data/loadprofiles", "data/loadprofiles", scenario, [self.housing_type], self.counties, force_recompute=False)
     
-        self.log_step(7)
+        self.log_step(8)
         WeatherFiles.process("data/loadprofiles", "data/loadprofiles", scenario, [self.housing_type], 2018, self.counties)
 
-        self.log_step(8)
+        self.log_step(9)
         RunSamModelForSolarStorage.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties, force_recompute=True)
 
-        self.log_step(9)
+        self.log_step(10)
+        # Ensure that EV loads are captured here too
         GetLoadsForRates.process("data/loadprofiles", "data/loadprofiles", scenario, [self.housing_type], self.counties)
 
-        self.log_step(10)
+        self.log_step(11)
         EvaluateGasRates.process("data/loadprofiles", "data/loadprofiles", scenario, [self.housing_type], self.counties)
 
-        self.log_step(11)
+        self.log_step(12)
         EvaluateElectricityRates.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties)
 
+        self.log_step(13)
+        # Combine total annual costs, without capital costs
+        # Rename this to GetAnnualGasAndElectricCosts
+        # Ensure that EV electricity costs are passed through to here too, applied with the right scenario.
         CombineTotalAnnualCosts.process("data/loadprofiles", "data/loadprofiles", scenario, [self.housing_type], self.counties)
 
+        self.log_step(14)
+        # Display Maps for key metrics: 
+        # - Average solar panel size in county
+        # - Total annual load in county, in kwh
+        # - Total electricity bill annually, in $
+        # - Total gas bill annually, in $
+        # Display this as 4 maps all on one tab, if I can.
+        # Can I first make it easier to see what types of maps BuildMaps is enabled to produce? I also want it to print the file paths of these maps that were just generated so I can revisit them by clicking on the links in my terminal
         # BuildMaps.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties, self.desired_rate_plans)
+
+        self.log_step(15)
+        # Build Capital Costs, Lifetimes, Incentives for my numbers
+        # Define each technology as a class that can be configured. It has a capital cost, a lifetime, and associated incentives at the state, federal, and utility level
+        # I want the ability to configure different Component "scenarios", like No Incentives, Half Incentives, My Capital Costs, Cris's Capital Costs, EMP Capital Costs
+        self.log_step(16)
+        # Build Capital Cost classes for Cris's numbers as well
+
+        self.log_step(17)
+        # Build Capital Costs, Lifetimes, Incentives (? if they apply) for the gas counterparts of each of the components in question
         
+        self.log_step(18)
+        # Show the differences between Mine and Cris's capital costs
+        # Just component by component, create bar graphs or something
+
+        # Create a Payback Period helper
+        self.log_step(19)
+        # Calculate the Payback Period for the scenario, given the component parameters defined in the DefineElectrifiedComponents step
+        # First, do an "out of the blue", electrification 
+
+        self.log_step(20)
+        # Then, do an "end-of-device life" electrification, when the component is being swapped when the previous gas component has reached its end of life
+        # Mostly, this affects the capital costs of electrification. Now, the "capital costs" get considered as electrified_capital_costs - gas_capital_costs, so incremental increase or decrease relative to the gas counterpart
+
+        # Map how the payback periods differ across California. But before I decide which scenario to use, I will have to look at the difference maps
+
+        # Create a DifferenceMaps helper
+        self.log_step(21)
+        # Show the differences in Payback Periods between Out of the Blue electrification, and End of Life electrification.
+        # Do the same for my capital costs vs. Cris's capital costs
         # BuildDifferenceMaps.process("data/loadprofiles", "data/loadprofiles", housing_type, counties, "baseline", "baseline", "baseline", "baseline.solarstorage")
+
+        self.log_step(22)
+        # Calculate the NPV for each scenario, in addition to the payback period
+        # Define the NPV parameters here
+
     
         MapPaybackVisualization.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties, self.desired_rate_plans)
 
-def parse_arguments():
+def parse_arguments()
     """
     Parse command-line arguments for the cost service.
     """
