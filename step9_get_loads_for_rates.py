@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 
-from helpers import slugify_county_name, get_counties, get_scenario_path, log
+from main_helpers import slugify_county_name, get_counties, get_scenario_path, log
 
 # Which columns should be used to calculate electricity and gas rates based on each scenario
 SCENARIO_DATA_MAP = {
@@ -218,7 +218,7 @@ def process(base_input_dir, base_output_dir, scenario, housing_types, counties=N
             prepare_for_rates_analysis(base_input_dir, base_output_dir, housing_type, scenario, county)
 
 if __name__ == '__main__':
-    from helpers import norcal_counties, central_counties, socal_counties
+    from main_helpers import norcal_counties, central_counties, socal_counties
     
     # Configuration
     scenario = "heat_pump"

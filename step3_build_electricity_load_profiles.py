@@ -1,6 +1,6 @@
 import os
 import pandas as pd
-from helpers import get_counties, get_scenario_path, is_valid_csv, log, to_number, slugify_county_name
+from main_helpers import get_counties, get_scenario_path, is_valid_csv, log, to_number, slugify_county_name
 
 END_USE_COLUMNS = {
     "cooling": [

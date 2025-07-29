@@ -4,9 +4,9 @@ import geopandas as gpd
 import folium
 import numpy as np
 
-from maps_helpers import get_latest_csv_file
-from helpers import to_number, to_decimal_number
-from utility_helpers import get_utility_for_county
+from helpers.maps_helpers import get_latest_csv_file
+from main_helpers import to_number, to_decimal_number
+from helpers.utility_helpers import get_utility_for_county
 
 LIFETIMES = {
     "solar": 25, # https://www.energysage.com/solar/how-long-do-solar-panels-last/

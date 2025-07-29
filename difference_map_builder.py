@@ -12,9 +12,9 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Union
 from pathlib import Path
 
-from helpers import get_counties, get_scenario_path, log, to_decimal_number, slugify_county_name
+from main_helpers import get_counties, get_scenario_path, log, to_decimal_number, slugify_county_name
 from helpers.maps_helpers import initialize_map, get_latest_csv_file, build_metric_map
-from utility_helpers import get_utility_for_county
+from helpers.utility_helpers import get_utility_for_county
 
 
 @dataclass

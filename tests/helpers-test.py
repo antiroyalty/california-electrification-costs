@@ -6,7 +6,7 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 
-from helpers import slugify_county_name
+from main_helpers import slugify_county_name
 
 @pytest.mark.parametrize("input_name,expected_slug", [
     # Typical cases with "County"

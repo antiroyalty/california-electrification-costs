@@ -1,4 +1,4 @@
-from helpers import slugify_county_name
+from main_helpers import slugify_county_name
 
 # Baseline Allowance for Residential Gas Rates (in therms/day)
 # TODO: Ana, go more granular in the data so that we can more easily map to the PG&E and SCE climate zones / tarrif regions

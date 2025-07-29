@@ -2,7 +2,7 @@ import os
 import pandas as pd
 from datetime import datetime
 
-from helpers import get_counties, get_scenario_path, log, norcal_counties, socal_counties, central_counties
+from main_helpers import get_counties, get_scenario_path, log, norcal_counties, socal_counties, central_counties
 
 ELECTRICITY_PREFIX = "RESULTS_electricity_annual_costs"
 GAS_PREFIX = "RESULTS_gas_annual_costs"

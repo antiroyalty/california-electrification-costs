@@ -1,6 +1,6 @@
 import os
 import pandas as pd
-from helpers import log, norcal_counties, central_counties, socal_counties
+from main_helpers import log, norcal_counties, central_counties, socal_counties
 from difference_map_builder import DifferenceMapBuilder, DifferenceMapConfig
 
 # Legacy functions removed - now handled by DifferenceMapBuilder

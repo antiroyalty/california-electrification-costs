@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 
-from helpers import get_scenario_path, get_counties, log, to_number
+from main_helpers import get_scenario_path, get_counties, log, to_number
 
 # Conversion factor
 KWH_TO_THERMS = 0.0341296

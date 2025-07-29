@@ -7,7 +7,7 @@ import warnings
 warnings.filterwarnings("ignore", category=pd.errors.DtypeWarning) # suppress warnings
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 
-from helpers import LOADPROFILES, slugify_county_name
+from main_helpers import LOADPROFILES, slugify_county_name
 
 from step1_identify_suitable_buildings import (
     get_metadata,

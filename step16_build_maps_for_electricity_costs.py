@@ -2,8 +2,8 @@ import os
 import pandas as pd
 import geopandas as gpd
 import folium
-from helpers import get_counties, get_scenario_path, log, to_decimal_number, norcal_counties, central_counties, socal_counties
-from maps_helpers import create_folium_map, initialize_map, extract_timestamp_from_filename, get_latest_csv_file
+from main_helpers import get_counties, get_scenario_path, log, to_decimal_number, norcal_counties, central_counties, socal_counties
+from helpers.maps_helpers import create_folium_map, initialize_map, extract_timestamp_from_filename, get_latest_csv_file
 
 electricity_costs_file_prefix = "RESULTS_electricity_annual_costs"
 

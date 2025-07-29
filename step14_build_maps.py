@@ -3,8 +3,8 @@ import pandas as pd
 import numpy as np
 import geopandas as gpd
 import folium
-from helpers import get_counties, get_scenario_path, log, to_decimal_number, norcal_counties, central_counties, socal_counties
-from maps_helpers import create_folium_map, initialize_map, extract_timestamp_from_filename, get_latest_csv_file
+from main_helpers import get_counties, get_scenario_path, log, to_decimal_number, norcal_counties, central_counties, socal_counties
+from helpers.maps_helpers import create_folium_map, initialize_map, extract_timestamp_from_filename, get_latest_csv_file
 
 
 def load_cost_data(county_dir, subfolder, prefix):

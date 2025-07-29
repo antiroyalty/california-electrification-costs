@@ -3,7 +3,7 @@ import os
 import pandas as pd
 import numpy as np
 
-from helpers import get_counties, get_scenario_path, log, to_number
+from main_helpers import get_counties, get_scenario_path, log, to_number
 
 OUTPUT_FILE_PREFIX = "combined_profiles"
 
