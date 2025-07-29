@@ -134,7 +134,7 @@ class CostService:
     
         MapPaybackVisualization.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties, self.desired_rate_plans)
 
-def parse_arguments()
+def parse_arguments():
     """
     Parse command-line arguments for the cost service.
     """
