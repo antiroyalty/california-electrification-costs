@@ -8,7 +8,7 @@ from tempfile import TemporaryDirectory
 import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 
-from step6_combine_real_and_simulated_electricity_loads import (
+from step7_combine_real_and_simulated_electricity_loads import (
     aggregate_columns,
     combine_profiles,
     process,

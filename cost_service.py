@@ -5,17 +5,23 @@ import step2_pull_buildings as PullBuildings
 import step3_build_electricity_load_profiles as BuildElectricityLoadProfiles
 import step4_build_gas_load_profiles as BuildGasLoadProfiles
 import step5_convert_gas_appliances_to_electrical_appliances as ConvertGasToElectric
-import step6_combine_real_and_simulated_electricity_loads as CombineRealAndSimulatedProfiles
-import step7_get_weather_files as WeatherFiles
-import step8_run_sam_model_for_solar_storage as RunSamModelForSolarStorage
-import step9_get_loads_for_rates as GetLoadsForRates
-import step10_evaluate_gas_rates as EvaluateGasRates
-import step11_evaluate_electricity_rates as EvaluateElectricityRates
-# import step12_evaluate_capital_costs as EvaluateCapitalCosts  # DEPRECATED: Not used in pipeline
+import step6_build_electric_vehicle_load_profiles as BuildElectricVehicleLoadProfiles
+import step7_combine_real_and_simulated_electricity_loads as CombineRealAndSimulatedProfiles
+import step8_get_weather_files as WeatherFiles
+import step9_run_sam_model_for_solar_storage as RunSamModelForSolarStorage
+import step10_get_loads_for_rates as GetLoadsForRates
+import step11_evaluate_gas_rates as EvaluateGasRates
+import step12_evaluate_electricity_rates as EvaluateElectricityRates
 import step13_combine_total_annual_costs as CombineTotalAnnualCosts
-import step14_build_maps as BuildMaps
-import step15_build_difference_maps as BuildDifferenceMaps
-import step17_old_build_payback_period_capital_costs as MapPaybackVisualization
+import step14_display_key_metrics_maps as DisplayKeyMetricsMaps
+import step15_build_capital_costs_lifetimes_incentives as BuildCapitalCostsLifetimesIncentives
+import step16_build_cris_capital_costs as BuildCrisCapitalCosts
+import step17_build_gas_capital_costs as BuildGasCapitalCosts
+import step18_compare_capital_costs as CompareCapitalCosts
+import step19_calculate_payback_periods as CalculatePaybackPeriods
+import step20_calculate_end_of_life_payback as CalculateEndOfLifePayback
+import step21_build_payback_difference_maps as BuildPaybackDifferenceMaps
+import step22_calculate_npv as CalculateNPV
 
 class CostService:
     SCENARIOS = {
@@ -58,7 +64,7 @@ class CostService:
 
         self.log_step(6)
         # TODO, EVs: Create a new class that processes EV load profiles for each specified county
-        # BuildElectricVehicleLoadProfiles.process(...)
+        BuildElectricVehicleLoadProfiles.process("data/loadprofiles", "data/loadprofiles", scenario, [self.housing_type], self.counties, force_recompute=False)
 
         self.log_step(7)
         # Add EVs here so they get used in SAM model deployment
@@ -93,31 +99,37 @@ class CostService:
         # - Total electricity bill annually, in $
         # - Total gas bill annually, in $
         # Display this as 4 maps all on one tab, if I can.
-        # Can I first make it easier to see what types of maps BuildMaps is enabled to produce? I also want it to print the file paths of these maps that were just generated so I can revisit them by clicking on the links in my terminal
-        # BuildMaps.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties, self.desired_rate_plans)
+        DisplayKeyMetricsMaps.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties, self.desired_rate_plans)
 
         self.log_step(15)
         # Build Capital Costs, Lifetimes, Incentives for my numbers
         # Define each technology as a class that can be configured. It has a capital cost, a lifetime, and associated incentives at the state, federal, and utility level
         # I want the ability to configure different Component "scenarios", like No Incentives, Half Incentives, My Capital Costs, Cris's Capital Costs, EMP Capital Costs
+        BuildCapitalCostsLifetimesIncentives.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties)
+        
         self.log_step(16)
         # Build Capital Cost classes for Cris's numbers as well
+        BuildCrisCapitalCosts.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties)
 
         self.log_step(17)
         # Build Capital Costs, Lifetimes, Incentives (? if they apply) for the gas counterparts of each of the components in question
+        BuildGasCapitalCosts.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties)
         
         self.log_step(18)
         # Show the differences between Mine and Cris's capital costs
         # Just component by component, create bar graphs or something
+        CompareCapitalCosts.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties)
 
         # Create a Payback Period helper
         self.log_step(19)
         # Calculate the Payback Period for the scenario, given the component parameters defined in the DefineElectrifiedComponents step
         # First, do an "out of the blue", electrification 
+        CalculatePaybackPeriods.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties, self.desired_rate_plans)
 
         self.log_step(20)
         # Then, do an "end-of-device life" electrification, when the component is being swapped when the previous gas component has reached its end of life
         # Mostly, this affects the capital costs of electrification. Now, the "capital costs" get considered as electrified_capital_costs - gas_capital_costs, so incremental increase or decrease relative to the gas counterpart
+        CalculateEndOfLifePayback.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties, self.desired_rate_plans)
 
         # Map how the payback periods differ across California. But before I decide which scenario to use, I will have to look at the difference maps
 
@@ -125,14 +137,12 @@ class CostService:
         self.log_step(21)
         # Show the differences in Payback Periods between Out of the Blue electrification, and End of Life electrification.
         # Do the same for my capital costs vs. Cris's capital costs
-        # BuildDifferenceMaps.process("data/loadprofiles", "data/loadprofiles", housing_type, counties, "baseline", "baseline", "baseline", "baseline.solarstorage")
+        BuildPaybackDifferenceMaps.process("data/loadprofiles", "data/loadprofiles", self.housing_type, self.counties, "baseline", "baseline", "baseline", "baseline.solarstorage")
 
         self.log_step(22)
         # Calculate the NPV for each scenario, in addition to the payback period
         # Define the NPV parameters here
-
-    
-        MapPaybackVisualization.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties, self.desired_rate_plans)
+        CalculateNPV.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties, self.desired_rate_plans)
 
 def parse_arguments():
     """
