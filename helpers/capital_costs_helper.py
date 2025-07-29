@@ -4,7 +4,7 @@ import geopandas as gpd
 from main_helpers import get_counties, get_scenario_path, slugify_county_name
 from helpers.utility_helpers import get_utility_for_county
 from helpers.maps_helpers import initialize_map, get_latest_csv_file
-from capital_cost_map_builder import LIFETIMES, build_metric_map
+from capital_cost_map_builder import LIFETIMES, build_capital_cost_map
 from helpers.payback_period_helper import INCENTIVES
 
 
@@ -370,7 +370,7 @@ def process_payback_analysis(
 
     for metric in metrics:
         for variant in variants:
-            m = build_metric_map(
+            m = build_capital_cost_map(
                 merged_gdf,
                 desired_rate_plans,
                 metric=metric,

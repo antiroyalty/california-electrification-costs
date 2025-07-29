@@ -6,7 +6,6 @@ import folium
 from main_helpers import get_counties, get_scenario_path, log, to_decimal_number, norcal_counties, central_counties, socal_counties
 from helpers.maps_helpers import create_folium_map, initialize_map, extract_timestamp_from_filename, get_latest_csv_file
 
-
 def load_cost_data(county_dir, subfolder, prefix):
     path = os.path.join(county_dir, "results", subfolder)
     county = os.path.basename(county_dir)
@@ -32,9 +31,6 @@ def get_total_costs(county_dir):
 def get_solarstorage_total_costs(county_dir):
     return load_cost_data(county_dir, "solarstorage", "RESULTS_total_annual_costs")
 
-# ──────────────────────────────────────────────────────────────
-# Load a single row (scenario tag) from the service CSV
-# ──────────────────────────────────────────────────────────────
 def load_service_cost(county_dir, service, scenario_tag="baseline"):
     """
     service  : "electricity" | "gas" | "totals"

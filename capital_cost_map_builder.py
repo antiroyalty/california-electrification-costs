@@ -4,7 +4,7 @@ import geopandas as gpd
 import folium
 import numpy as np
 
-from helpers.maps_helpers import get_latest_csv_file
+from helpers.maps_helpers import get_latest_csv_file, add_choropleth_layer, add_labels_and_title
 from main_helpers import to_number, to_decimal_number
 from helpers.utility_helpers import get_utility_for_county
 
@@ -112,43 +112,7 @@ def prepare_data_columns(merged_gdf, desired_rate_plans, metric, variant, title_
 
     return data_column, label_field, legend_name, title_text, suffix
 
-def add_choropleth_layer(map_obj, gdf, data_column, fill_color, bins, legend_name):
-    choropleth = folium.Choropleth(
-        geo_data=gdf,
-        data=gdf,
-        columns=["NAME", data_column],
-        key_on="feature.properties.NAME",
-        fill_color=fill_color,
-        bins=bins,
-        fill_opacity=0.7,
-        line_opacity=0.2,
-        legend_name=legend_name,
-        nan_fill_color="white",
-        nan_fill_opacity=0.1,
-        name=legend_name,
-        legend_position="bottomright",
-    )
-
-    choropleth.add_to(map_obj)
-
-def add_labels_and_title(map_obj, gdf, label_field, title_text):
-    for _, row in gdf.iterrows():
-        if pd.notnull(row[label_field]):
-            centroid = row['geometry'].centroid
-            label_value = row[f"{label_field}_fmt"]
-            folium.map.Marker(
-                location=[centroid.y, centroid.x],
-                icon=folium.DivIcon(
-                    html=f"""<div style="font-size:6pt; font-weight:bold; color:black;">{label_value}</div>"""
-                )
-            ).add_to(map_obj)
-
-    title_html = f'''
-        <h3 align="center" style="font-size:16px; font-weight:bold; padding: 5px;">{title_text}</h3>
-    '''
-    map_obj.get_root().html.add_child(folium.Element(title_html))
-
-def build_metric_map(merged_gdf, desired_rate_plans, metric, variant, title_prefix=""):
+def build_capital_cost_map(merged_gdf, desired_rate_plans, metric, variant, title_prefix=""):
     print("*******")
     print(metric)
     data_column, label_field, legend_name, title_text, suffix = prepare_data_columns(merged_gdf, desired_rate_plans, metric, variant, title_prefix)
