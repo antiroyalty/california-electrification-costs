@@ -24,7 +24,7 @@ class CostService:
         "induction_stove": {"gas": {"hot_water", "heating"}, "electric": {"appliances", "misc", "cooking"}},
         "heat_pump_and_induction_stove": {"gas": {"hot_water"}, "electric": {"appliances", "misc", "cooking", "heating"}},
         "water_heating": {"gas": {"cooking", "heating"}, "electric": {"hot_water", "appliances", "misc"}},
-        "heat_pump_and_induction_stove_and_water_heating": {"gas": {}, "electric": {"hot_water", "cooking", "heating", "appliances", "misc"}}
+        "heat_pump_and_induction_stove_and_water_heating": {"gas": {}, "electric": {"hot_water", "cooking", "heating", "appliances", "misc"}},
         # TODO, EVs: Create a new scenario that looks *just* at EVs
         # TODO, EVs: Create a new scenario that looks at EVs plus all other electrified appliances
         "baseline_with_car": {"gas": {"heating", "hot_water", "cooking", "car"}, "electric": {"appliances", "misc"}}, #baseline with an ICE vehicle
