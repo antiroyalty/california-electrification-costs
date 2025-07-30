@@ -54,11 +54,11 @@ def convert_excel_minute_to_hourly(excel_path, output_csv_path):
     hourly_df.to_csv(output_csv_path, index=False)
     return hourly_df
 
-# Example usage
-convert_excel_minute_to_hourly(
-    excel_path="AB2127_LoadCurveData_Eleanor.xlsx",
-    output_csv_path="Figure_20_hourly_residential_L1.csv"
-)
+# # Example usage
+# convert_excel_minute_to_hourly(
+#     excel_path="AB2127_LoadCurveData_Eleanor.xlsx",
+#     output_csv_path="Figure_20_hourly_residential_L1.csv"
+# )
 
 # Divide_by_number_of_evs AND unit in kW
 
