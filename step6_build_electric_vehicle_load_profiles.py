@@ -11,6 +11,18 @@ import os
 import pandas as pd
 from main_helpers import get_counties, get_scenario_path, log
 
+def download_raw_data():
+    # TODO: get the data
+
+def cleanup_whatever_we_dont_want():
+    get_names_of_columns
+    make_sure_its_in_the_right_timezone
+
+reorganize_it_in_other_load_profiles_format
+send_it
+  append_to_file_called electricity_loads_
+  write to column name: "evs"
+
 
 def process(base_input_dir: str, base_output_dir: str, scenario: str, 
            housing_types: list, counties: list, force_recompute: bool = False):
