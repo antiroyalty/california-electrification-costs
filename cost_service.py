@@ -27,6 +27,9 @@ class CostService:
         "heat_pump_and_induction_stove_and_water_heating": {"gas": {}, "electric": {"hot_water", "cooking", "heating", "appliances", "misc"}}
         # TODO, EVs: Create a new scenario that looks *just* at EVs
         # TODO, EVs: Create a new scenario that looks at EVs plus all other electrified appliances
+        "baseline_with_car": {"gas": {"heating", "hot_water", "cooking", "car"}, "electric": {"appliances", "misc"}}, #baseline with an ICE vehicle
+        "EV": {"gas": {"heating", "hot_water", "cooking"}, "electric": {"appliances", "misc", "car"}}, #baseline with an EV
+        "heat_pump_and_induction_stove_and_water_heating_EV": {"gas": {}, "electric": {"hot_water", "cooking", "heating", "appliances", "misc", "car"}}
     }
 
     def __init__(self, scenario, housing_type, counties, rate_plans, input_dir, output_dir):
