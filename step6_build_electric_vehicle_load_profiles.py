@@ -23,6 +23,91 @@ from main_helpers import get_counties, get_scenario_path, log
 #   append_to_file_called electricity_loads_
 #   write to column name: "evs"
 
+# def download_raw_data(): 
+# we are using the CEC data from AB 2127 sent by Eleanor to start
+    # TODO: get the data
+
+# def cleanup_whatever_we_dont_want():
+#    get_names_of_columns_we_need
+#    make_sure_its_in_the_right_timezone
+    
+#def reorganize_it_in_other_load_profiles_format
+
+def convert_excel_minute_to_hourly(excel_path, output_csv_path):
+    """
+    Extracts minute-level Residential Level 1 load data from the 'Figure 20' sheet
+    in an Excel file, averages it to hourly values (based on first 1440 rows),
+    and saves as a new CSV.
+    
+    Parameters:
+    - excel_path: str, path to the Excel file
+    - output_csv_path: str, path to save the hourly-averaged CSV
+    """
+    # Load the "Figure 20" sheet, skipping header rows
+    df = pd.read_excel(excel_path, sheet_name="Figure 20", skiprows=2)
+
+    # Rename relevant columns
+    df = df.rename(columns={
+        df.columns[0]: "time",
+        df.columns[1]: "residential_L1_MW"
+    })
+
+    # Convert values to numeric and drop invalid rows
+    df["residential_L1_MW"] = pd.to_numeric(df["residential_L1_MW"], errors="coerce")
+    df = df.dropna(subset=["residential_L1_MW"])
+
+    # Keep only the first 1440 rows (exactly 24 hours)
+    df = df.iloc[:1440]
+
+    # Compute hourly averages (group every 60 minutes)
+    hourly_df = df.groupby(df.index // 60).mean(numeric_only=True)
+    hourly_df.index.name = "hour"
+    hourly_df.reset_index(inplace=True)
+
+    # Save the result
+    hourly_df.to_csv(output_csv_path, index=False)
+
+# Example usage
+convert_excel_minute_to_hourly(
+    excel_path="AB2127_LoadCurveData_Eleanor.xlsx",
+    output_csv_path="Figure_20_hourly_residential_L1.csv"
+)
+
+def scale_to_per_vehicle(hourly_df, column_name, fleet_size):
+    """
+    Adds a column with per-vehicle EV charging load in kW based on statewide MW data.
+    
+    Parameters:
+    - hourly_df: pd.DataFrame, must include a column with hourly MW values
+    - column_name: str, name of the column containing statewide MW values
+    - fleet_size: int, number of EVs (e.g., 7_100_000)
+    
+    Returns:
+    - pd.DataFrame: original DataFrame with an added per-vehicle kW column
+    """
+    # Safety check
+    if column_name not in hourly_df.columns:
+        raise ValueError(f"Column '{column_name}' not found in DataFrame.")
+
+    # New column name
+    new_col = f"{column_name}_per_vehicle_kW"
+
+    # Convert MW → kW, then divide by fleet size
+    hourly_df[new_col] = (hourly_df[column_name] / fleet_size) * 1000
+
+    return hourly_df
+
+hourly_df = scale_to_per_vehicle(hourly_df, column_name="residential_L1_MW", fleet_size=7_100_000)
+
+ #   make_sure_data_per_EV #right now we have the total charging load
+# Divide_by_number_of_evs
+  #  make_sure_data_is_in_kWh
+   # get_8760
+    #split_file_per_county #or group together the utility
+
+#def send_it
+ # append_to_file_called electricity_loads_
+ # write to column name: "evs"
 
 def process(base_input_dir: str, base_output_dir: str, scenario: str, 
            housing_types: list, counties: list, force_recompute: bool = False):
