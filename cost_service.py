@@ -16,6 +16,7 @@ import step13_combine_total_annual_costs as CombineTotalAnnualCosts
 import step14_display_key_metrics_maps as DisplayKeyMetricsMaps
 import step15_build_capital_costs_lifetimes_incentives as BuildCapitalCostsLifetimesIncentives
 import step16_build_cris_capital_costs as BuildCrisCapitalCosts
+import step17_old_build_payback_period_capital_costs as MapPaybackVisualization
 import step17_build_gas_capital_costs as BuildGasCapitalCosts
 import step18_compare_capital_costs as CompareCapitalCosts
 import step19_calculate_payback_periods as CalculatePaybackPeriods
@@ -92,6 +93,8 @@ class CostService:
         # Ensure that EV electricity costs are passed through to here too, applied with the right scenario.
         CombineTotalAnnualCosts.process("data/loadprofiles", "data/loadprofiles", scenario, [self.housing_type], self.counties)
 
+        MapPaybackVisualization.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties, self.desired_rate_plans)
+        
         self.log_step(14)
         # Display Maps for key metrics: 
         # - Average solar panel size in county
