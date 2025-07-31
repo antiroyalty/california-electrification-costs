@@ -54,7 +54,6 @@ def convert_excel_minute_to_hourly(excel_path, output_csv_path):
     hourly_df.to_csv(output_csv_path, index=False)
     return hourly_df
 
-
 def convert_all_columns_to_per_vehicle(hourly_df, output_csv_path, fleet_size=7_100_000):
     """
     Converts all MW load columns in the DataFrame to per-vehicle kW load,
@@ -78,8 +77,34 @@ def convert_all_columns_to_per_vehicle(hourly_df, output_csv_path, fleet_size=7_
 
     return hourly_df
 
+def expand_hourly_profile_to_8760_with_datetime(hourly_df, output_csv_path):
+    """
+    Expands a 24-hour load profile to 8760 hours and adds a datetime column
+    starting from Jan 1, 2030, 00:00. Saves the result to CSV.
 
-# get_8760
+    Parameters:
+    - hourly_df: pd.DataFrame with 24 rows (hourly load data)
+    - output_csv_path: str, file path to save the 8760-hour expanded CSV
+
+    Returns:
+    - pd.DataFrame with 8760 rows and a datetime column
+    """
+    if len(hourly_df) != 24:
+        raise ValueError("Input DataFrame must have exactly 24 rows (1 day of hourly data)")
+
+    # Repeat the 24-hour profile 365 times
+    repeated_df = pd.concat([hourly_df] * 365, ignore_index=True)
+
+    # Create datetime index starting Jan 1, 2030
+    timestamps = pd.date_range(start="2030-01-01 00:00", periods=8760, freq="h")
+
+    # Insert as the first column
+    repeated_df.insert(0, "datetime", timestamps)
+
+    # Save to CSV
+    repeated_df.to_csv(output_csv_path, index=False)
+
+    return repeated_df
 
 # split_file_per_county #or group together the utility
 
