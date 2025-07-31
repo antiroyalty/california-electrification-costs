@@ -54,13 +54,30 @@ def convert_excel_minute_to_hourly(excel_path, output_csv_path):
     hourly_df.to_csv(output_csv_path, index=False)
     return hourly_df
 
-# # Example usage
-# convert_excel_minute_to_hourly(
-#     excel_path="AB2127_LoadCurveData_Eleanor.xlsx",
-#     output_csv_path="Figure_20_hourly_residential_L1.csv"
-# )
 
-# Divide_by_number_of_evs AND unit in kW
+def convert_all_columns_to_per_vehicle(hourly_df, output_csv_path, fleet_size=7_100_000):
+    """
+    Converts all MW load columns in the DataFrame to per-vehicle kW load,
+    and saves the result to a new CSV.
+
+    Parameters:
+    - hourly_df: pd.DataFrame with hourly statewide EV load values in MW
+    - output_csv_path: str, path to save the updated CSV with per-vehicle columns
+    - fleet_size: int, number of EVs represented in the data (default: 7.1 million)
+
+    Returns:
+    - pd.DataFrame with added per-vehicle kW columns for each MW input column
+    """
+    for col in hourly_df.columns:
+        if col != "hour" and hourly_df[col].dtype in [float, int]:
+            new_col = f"{col}_per_vehicle_kW"
+            hourly_df[new_col] = (hourly_df[col] / fleet_size) * 1000
+
+    # Save to CSV
+    hourly_df.to_csv(output_csv_path, index=False)
+
+    return hourly_df
+
 
 # get_8760
 
