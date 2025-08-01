@@ -51,40 +51,43 @@ def load_energy_consumption_data(
     county_name: str
 ) -> tuple[float, float]:
     """
-    Load annual energy-consumption data for a county.
+    Load annual energy-consumption data for <county>.
+
+    The input file pattern is:
+        loadprofiles_for_rates_<county-slug>.csv
+
+    Expected columns in the file:
+        timestamp
+        default.electricity.kwh
+        default.gas.therms
+        (…plus any other scenario columns you may have)
 
     Returns
     -------
     tuple
         (electricity_kwh, gas_therms)
-
-        electricity_kwh – sum of all hourly electric loads (kWh)
-        gas_therms      – sum of all hourly gas loads (therms)
     """
+    # ------------------------------------------------------------------ paths
+    county_slug = slugify_county_name(f"{county_name} County")          # e.g. "alameda"
+    county_dir  = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+    file_name   = f"loadprofiles_for_rates_{county_slug}.csv"
+    file_path   = os.path.join(county_dir, file_name)
+
+    # ------------------------------------------------------------------- read
+    if not os.path.isfile(file_path):
+        raise FileNotFoundError(f"Cannot find {file_path}")
+
     try:
-        county_slug = slugify_county_name(f"{county_name} County")
-        county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+        df = pd.read_csv(file_path, low_memory=False)
 
-        electricity_kwh = 0.0
-        try:
-            electricity_file = get_latest_csv_file(county_dir, "electricity_loads_")
-            elec_df = pd.read_csv(electricity_file)
-            electricity_kwh = float(elec_df["total_load"].sum())
-        except Exception as e:
-            print(f"Warning: Could not load electricity consumption for {county_name}: {e}")
-
-        gas_therms = 0.0
-        try:
-            gas_file = get_latest_csv_file(county_dir, "gas_loads_")
-            gas_df = pd.read_csv(gas_file)
-            gas_therms = float(gas_df["load.gas.building_avg.therms"].sum())
-        except Exception as e:
-            print(f"Warning: Could not load gas consumption for {county_name}: {e}")
+        # Sum the full year (all rows) for the two default columns
+        electricity_kwh = float(df["default.electricity.kwh"].sum())
+        gas_therms      = float(df["default.gas.therms"].sum())
 
         return electricity_kwh, gas_therms
 
-    except Exception as e:
-        print(f"Warning: Could not load energy consumption data for {county_name}: {e}")
+    except Exception as exc:
+        print(f"Warning: could not parse {file_path}: {exc}")
         return 0.0, 0.0
 
 
@@ -130,16 +133,11 @@ def create_metric_map(base_input_dir: str, scenario: str, housing_type: str, cou
                     base_input_dir, scenario, housing_type, county_name
                 )
 
-                log(
-                    elec_kwh=elec_kwh,
-                    gas_thm=gas_thm
-                )
-
                 # Keep the map shading in kWh-equivalent so the existing bins work
                 value = elec_kwh + gas_thm * 29.3
 
                 # Tooltip string => “12 345 kWh / 678 therms”
-                pretty = f"{to_decimal_number(elec_kwh)} kWh / {to_decimal_number(gas_thm)} therms"
+                pretty = f"{to_decimal_number(elec_kwh)} kWh, {to_decimal_number(gas_thm)} therms"
                 gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
 
             else:
@@ -261,12 +259,12 @@ def process(base_input_dir: str, base_output_dir: str, scenario: str,
             "bins": [0, 500, 1000, 1500, 2000, 2500, 3000, 4000],
             "unit": "$"
         },
-        # "Total Energy Consumption (kWh, thermes)": {
-        #     # Special case - loaded from hourly load profile files
-        #     "color_scheme": "Greens",
-        #     "bins": [0, 10000, 20000, 30000, 40000, 50000, 60000, 80000, 100000],
-        #     "unit": "kWh"
-        # }
+        "Total Energy Consumption (kWh, thermes)": {
+            # Special case - loaded from hourly load profile files
+            "color_scheme": "Greens",
+            "bins": [0, 10000, 20000, 30000, 40000, 50000, 60000, 80000, 100000],
+            "unit": "kWh"
+        }
     }
     
     # Create maps for each metric
