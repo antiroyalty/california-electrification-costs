@@ -392,7 +392,7 @@ def load_cost_data(county_dir: str, subfolder: str, prefix: str, scenario_row: i
     
     Args:
         county_dir: County directory path (e.g., "data/loadprofiles/baseline/single-family-detached/alameda")
-        subfolder: Results subfolder (e.g., "solarstorage", "costs", "payback")
+        subfolder: Results subfolder (e.g., "solarstorage", "gas", "electricity")
         prefix: File prefix (e.g., "solar_results", "cost_results") 
         scenario_row: Which scenario row to return (0=baseline, 1=with solar+storage)
     
@@ -405,5 +405,5 @@ def load_cost_data(county_dir: str, subfolder: str, prefix: str, scenario_row: i
     file_path = get_latest_csv_file(path, full_prefix)
     df = pd.read_csv(file_path, index_col="scenario")
     
-    return df.iloc[scenario_row] # Baseline = row 0, Solar + storage = row 1
+    return df.iloc[scenario_row] # Baseline = row 0, Solar + storage = row 1. If subfolder = solarstorage, use 1.
 
