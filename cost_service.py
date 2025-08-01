@@ -32,9 +32,10 @@ class CostService:
         "heat_pump_and_induction_stove": {"gas": {"hot_water"}, "electric": {"appliances", "misc", "cooking", "heating"}},
         "water_heating": {"gas": {"cooking", "heating"}, "electric": {"hot_water", "appliances", "misc"}},
         "heat_pump_and_induction_stove_and_water_heating": {"gas": {}, "electric": {"hot_water", "cooking", "heating", "appliances", "misc"}},
-        "baseline_with_car": {"gas": {"heating", "hot_water", "cooking", "car"}, "electric": {"appliances", "misc"}},
-        "EV": {"gas": {"heating", "hot_water", "cooking"}, "electric": {"appliances", "misc", "car"}},
-        "heat_pump_and_induction_stove_and_water_heating_EV": {"gas": {}, "electric": {"hot_water", "cooking", "heating", "appliances", "misc", "car"}}
+        # EV scenarios
+        "baseline_ice_car": {"gas": {"heating", "hot_water", "cooking", "vehicle_fuel"}, "electric": {"appliances", "misc"}},
+        "baseline_ev_car": {"gas": {"heating", "hot_water", "cooking"}, "electric": {"appliances", "misc", "vehicle_charging"}},
+        "full_electric_ev": {"gas": set(), "electric": {"hot_water", "cooking", "heating", "appliances", "misc", "vehicle_charging"}},
     }
 
     def __init__(self, scenario, housing_type, counties, rate_plans, input_dir, output_dir):
@@ -65,12 +66,12 @@ class CostService:
         ConvertGasToElectric.process("data/loadprofiles", "data/loadprofiles", self.counties, scenario, [self.housing_type], force_recompute=False)
 
         self.log_step(6)
-        # TODO, EVs: Create a new class that processes EV load profiles for each specified county
-        BuildElectricVehicleLoadProfiles.process("data/loadprofiles", "data/loadprofiles", scenario, [self.housing_type], self.counties, force_recompute=False)
+        # Build vehicle load profiles (EV charging and/or ICE fuel consumption) based on scenario
+        BuildElectricVehicleLoadProfiles.process("data", "data/loadprofiles", scenario, self.SCENARIOS[scenario], [self.housing_type], self.counties, force_recompute=True)
 
         self.log_step(7)
         # Add EVs here so they get used in SAM model deployment
-        CombineRealAndSimulatedProfiles.process("data/loadprofiles", "data/loadprofiles", scenario, [self.housing_type], self.counties, force_recompute=False)
+        CombineRealAndSimulatedProfiles.process("data/loadprofiles", "data/loadprofiles", scenario, [self.housing_type], self.counties, force_recompute=True)
     
         self.log_step(8)
         WeatherFiles.process("data/loadprofiles", "data/loadprofiles", scenario, [self.housing_type], 2018, self.counties)
