@@ -3,9 +3,9 @@ Step 14: Display Key Metrics Maps
 
 Display diagnostic maps for key metrics:
 - Average solar panel size in county
-- Total annual electricity load in county, in kWh
-- Total electricity bill annually, in $
-- Total gas bill annually, in $
+- Total annual electricity bill in county, in $
+- Total annual gas bill in county, in $
+- Total annual energy consumption (electricity + gas equivalent), in kWh
 """
 
 import os
@@ -42,6 +42,50 @@ def load_solar_data(base_input_dir: str, scenario: str, housing_type: str, count
     except Exception as e:
         print(f"Warning: Could not load solar data for {county_name}: {e}")
         return 0.0
+
+
+def load_energy_consumption_data(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_name: str
+) -> tuple[float, float]:
+    """
+    Load annual energy-consumption data for a county.
+
+    Returns
+    -------
+    tuple
+        (electricity_kwh, gas_therms)
+
+        electricity_kwh – sum of all hourly electric loads (kWh)
+        gas_therms      – sum of all hourly gas loads (therms)
+    """
+    try:
+        county_slug = slugify_county_name(f"{county_name} County")
+        county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+
+        electricity_kwh = 0.0
+        try:
+            electricity_file = get_latest_csv_file(county_dir, "electricity_loads_")
+            elec_df = pd.read_csv(electricity_file)
+            electricity_kwh = float(elec_df["total_load"].sum())
+        except Exception as e:
+            print(f"Warning: Could not load electricity consumption for {county_name}: {e}")
+
+        gas_therms = 0.0
+        try:
+            gas_file = get_latest_csv_file(county_dir, "gas_loads_")
+            gas_df = pd.read_csv(gas_file)
+            gas_therms = float(gas_df["load.gas.building_avg.therms"].sum())
+        except Exception as e:
+            print(f"Warning: Could not load gas consumption for {county_name}: {e}")
+
+        return electricity_kwh, gas_therms
+
+    except Exception as e:
+        print(f"Warning: Could not load energy consumption data for {county_name}: {e}")
+        return 0.0, 0.0
 
 
 def create_metric_map(base_input_dir: str, scenario: str, housing_type: str, counties: list, 
@@ -81,6 +125,23 @@ def create_metric_map(base_input_dir: str, scenario: str, housing_type: str, cou
             # Special handling for solar data
             if metric_name == "Solar Size (kW)":
                 metric_value = load_solar_data(base_input_dir, scenario, housing_type, county_name)
+            elif metric_name == "Total Energy Consumption (kWh, thermes)":
+                elec_kwh, gas_thm = load_energy_consumption_data(
+                    base_input_dir, scenario, housing_type, county_name
+                )
+
+                log(
+                    elec_kwh=elec_kwh,
+                    gas_thm=gas_thm
+                )
+
+                # Keep the map shading in kWh-equivalent so the existing bins work
+                value = elec_kwh + gas_thm * 29.3
+
+                # Tooltip string => “12 345 kWh / 678 therms”
+                pretty = f"{to_decimal_number(elec_kwh)} kWh / {to_decimal_number(gas_thm)} therms"
+                gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
+
             else:
                 # Use load_cost_data to get metric data
                 data = load_cost_data(
@@ -199,7 +260,13 @@ def process(base_input_dir: str, base_output_dir: str, scenario: str,
             "color_scheme": "Oranges",
             "bins": [0, 500, 1000, 1500, 2000, 2500, 3000, 4000],
             "unit": "$"
-        }
+        },
+        # "Total Energy Consumption (kWh, thermes)": {
+        #     # Special case - loaded from hourly load profile files
+        #     "color_scheme": "Greens",
+        #     "bins": [0, 10000, 20000, 30000, 40000, 50000, 60000, 80000, 100000],
+        #     "unit": "kWh"
+        # }
     }
     
     # Create maps for each metric
