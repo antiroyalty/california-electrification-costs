@@ -4,32 +4,19 @@ import numpy as np
 import geopandas as gpd
 import folium
 from main_helpers import get_counties, get_scenario_path, log, to_decimal_number, norcal_counties, central_counties, socal_counties
-from helpers.maps_helpers import create_folium_map, initialize_map, extract_timestamp_from_filename, get_latest_csv_file
-
-def load_cost_data(county_dir, subfolder, prefix):
-    path = os.path.join(county_dir, "results", subfolder)
-    county = os.path.basename(county_dir)
-    full_prefix = f"{prefix}_{county}_"
-    file_path = get_latest_csv_file(path, full_prefix)
-    df = pd.read_csv(file_path, index_col="scenario")
-
-    if subfolder == "solarstorage":
-        return df.iloc[1] # janky but we want to keep the column name so return the full row details
-    else:
-        # return df.iloc[df.index.get_loc("baseline"), 0] # column names may vary
-        return df.iloc[0]
+from helpers.maps_helpers import create_folium_map, initialize_map, extract_timestamp_from_filename, get_latest_csv_file, load_cost_data
 
 def get_electricity_costs(county_dir):
-    return load_cost_data(county_dir, "electricity", "RESULTS_electricity_annual_costs")
+    return load_cost_data(county_dir, "electricity", "RESULTS_electricity_annual_costs", scenario_row=0)
 
 def get_gas_costs(county_dir):
-    return load_cost_data(county_dir, "gas", "RESULTS_gas_annual_costs")
+    return load_cost_data(county_dir, "gas", "RESULTS_gas_annual_costs", scenario_row=0)
 
 def get_total_costs(county_dir):
-    return load_cost_data(county_dir, "totals", "RESULTS_total_annual_costs")
+    return load_cost_data(county_dir, "totals", "RESULTS_total_annual_costs", scenario_row=0)
 
 def get_solarstorage_total_costs(county_dir):
-    return load_cost_data(county_dir, "solarstorage", "RESULTS_total_annual_costs")
+    return load_cost_data(county_dir, "solarstorage", "RESULTS_total_annual_costs", scenario_row=1)  # Solar+storage is row 1
 
 def load_service_cost(county_dir, service, scenario_tag="baseline"):
     """
