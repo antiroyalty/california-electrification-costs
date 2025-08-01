@@ -385,3 +385,25 @@ def add_labels_and_title(
     add_centroid_labels(map_obj, gdf, label_field)
     add_map_title(map_obj, title_text)
 
+
+def load_cost_data(county_dir: str, subfolder: str, prefix: str, scenario_row: int = 0) -> pd.Series:
+    """
+    Load results data from timestamped CSV files in county results directories.
+    
+    Args:
+        county_dir: County directory path (e.g., "data/loadprofiles/baseline/single-family-detached/alameda")
+        subfolder: Results subfolder (e.g., "solarstorage", "costs", "payback")
+        prefix: File prefix (e.g., "solar_results", "cost_results") 
+        scenario_row: Which scenario row to return (0=baseline, 1=with solar+storage)
+    
+    Returns:
+        pandas Series with all columns for the specified scenario
+    """
+    path = os.path.join(county_dir, "results", subfolder)
+    county = os.path.basename(county_dir)
+    full_prefix = f"{prefix}_{county}_"
+    file_path = get_latest_csv_file(path, full_prefix)
+    df = pd.read_csv(file_path, index_col="scenario")
+    
+    return df.iloc[scenario_row] # Baseline = row 0, Solar + storage = row 1
+

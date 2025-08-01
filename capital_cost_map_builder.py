@@ -4,7 +4,7 @@ import geopandas as gpd
 import folium
 import numpy as np
 
-from helpers.maps_helpers import get_latest_csv_file, add_choropleth_layer, add_labels_and_title
+from helpers.maps_helpers import get_latest_csv_file, add_choropleth_layer, add_labels_and_title, load_cost_data
 from main_helpers import to_number, to_decimal_number
 from helpers.utility_helpers import get_utility_for_county
 
@@ -31,19 +31,7 @@ COLOR_SCHEMES = {
     "Solar Size (kW)": {"default": "YlOrBr"}
 }
 
-def load_cost_data(county_dir, subfolder, prefix):
-    path = os.path.join(county_dir, "results", subfolder)
-    county = os.path.basename(county_dir)
-    full_prefix = f"{prefix}_{county}_"
-    file_path = get_latest_csv_file(path, full_prefix)
-    df = pd.read_csv(file_path, index_col="scenario")
-
-    if subfolder == "solarstorage":
-        # Use the second row (assumed to be the solar+storage scenario)
-        return df.iloc[1]
-    else:
-        # Baseline scenario row
-        return df.iloc[0]
+# load_cost_data function moved to helpers/maps_helpers.py for reusability
     
 def style_function(feature):
     utility = feature["properties"].get("Utility", "")
