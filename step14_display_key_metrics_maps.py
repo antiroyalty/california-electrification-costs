@@ -119,7 +119,7 @@ def create_metric_map(base_input_dir: str, scenario: str, housing_type: str, cou
     output_dir = os.path.join("visualizations", "diagnostic_maps")
     filename_prefix = f"{metric_name.lower().replace(' ', '_').replace('(', '').replace(')', '')}_{scenario}_{housing_type.replace(' ', '-').lower()}"
     
-    return export_geojson_and_html(gdf, output_dir, filename_prefix, m, open_in_browser=False)
+    return export_geojson_and_html(gdf, output_dir, filename_prefix, m, open_in_browser=True)
 
 
 def process(base_input_dir: str, base_output_dir: str, scenario: str, 
