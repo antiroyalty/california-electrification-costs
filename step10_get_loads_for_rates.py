@@ -147,6 +147,75 @@ SCENARIO_DATA_MAP = {
             }
         }
     },
+    "baseline_ice_car": {
+        # baseline with ICE car (gasoline consumption tracked separately)
+        "default": {
+            "electricity": {
+                "file_prefix": "combined_profiles_baseline_ice_car_",
+                "column": "electricity.real_and_simulated.for_typical_county_home.kwh"
+            },
+            "gas": {
+                "file_prefix": "combined_profiles_baseline_ice_car_",
+                "column": "gas.hourly_total.for_typical_county_home.therms"
+            }
+        },
+        "solar_storage": {
+            "electricity": {
+                "file_prefix": "sam_optimized_load_profiles_",
+                "column": "Grid to Load"
+            },
+            "gas": {
+                "file_prefix": "combined_profiles_baseline_ice_car_",
+                "column": "gas.hourly_total.for_typical_county_home.therms"
+            }
+        }
+    },
+    "baseline_ev_car": {
+        # baseline with EV car (includes vehicle charging in electricity)
+        "default": {
+            "electricity": {
+                "file_prefix": "combined_profiles_baseline_ev_car_",
+                "column": "electricity.real_and_simulated.for_typical_county_home.kwh"
+            },
+            "gas": {
+                "file_prefix": "combined_profiles_baseline_ev_car_",
+                "column": "gas.hourly_total.for_typical_county_home.therms"
+            }
+        },
+        "solar_storage": {
+            "electricity": {
+                "file_prefix": "sam_optimized_load_profiles_",
+                "column": "Grid to Load"
+            },
+            "gas": {
+                "file_prefix": "combined_profiles_baseline_ev_car_",
+                "column": "gas.hourly_total.for_typical_county_home.therms"
+            }
+        }
+    },
+    "full_electric_ev": {
+        # fully electric appliances with EV car
+        "default": {
+            "electricity": {
+                "file_prefix": "combined_profiles_full_electric_ev_",
+                "column": "electricity.real_and_simulated.for_typical_county_home.kwh"
+            },
+            "gas": {
+                "file_prefix": "combined_profiles_full_electric_ev_",
+                "column": "gas.hourly_total.for_typical_county_home.therms"
+            }
+        },
+        "solar_storage": {
+            "electricity": {
+                "file_prefix": "sam_optimized_load_profiles_",
+                "column": "Grid to Load"
+            },
+            "gas": {
+                "file_prefix": "combined_profiles_full_electric_ev_",
+                "column": "gas.hourly_total.for_typical_county_home.therms"
+            }
+        }
+    },
 }
 
 OUTPUT_FILE_NAME = "loadprofiles_for_rates"

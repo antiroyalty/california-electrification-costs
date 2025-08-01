@@ -19,11 +19,75 @@ SCENARIO_DATA_MAP = {
                 "file_prefix": "electricity_loads_simulated_",
                 "columns": [] # Nothing simulated
             },
+            "electricity_vehicle": {
+                "file_prefix": "vehicle_charging_profile_",
+                "columns": [] # No vehicle charging
+            },
             "gas": {
                 "file_prefix": "gas_loads_",
                 "columns": ["out.natural_gas.range_oven.energy_consumption.gas.building_avg.therms", "out.natural_gas.hot_water.energy_consumption.gas.building_avg.therms", "out.natural_gas.heating.energy_consumption.gas.building_avg.therms"],
                 # This is the TOTAL gas load column
                 # "columns": ["load.gas.building_avg.therms"] # TODO: Ana, why am I using avg therms here? Is this a miscalculation? Revisit this logic. Ans: This is because it's COUNTY average, not time average
+            },
+        },
+    },
+    "baseline_ice_car": {
+        "default": {
+            "electricity": {
+                "file_prefix": "electricity_loads_",
+                "columns": ["total_load"]
+            },
+            "electricity_simulated": {
+                "file_prefix": "electricity_loads_simulated_",
+                "columns": []
+            },
+            "electricity_vehicle": {
+                "file_prefix": "vehicle_charging_profile_",
+                "columns": [] # ICE car has no electric charging
+            },
+            "gas": {
+                "file_prefix": "gas_loads_",
+                "columns": ["out.natural_gas.range_oven.energy_consumption.gas.building_avg.therms", "out.natural_gas.hot_water.energy_consumption.gas.building_avg.therms", "out.natural_gas.heating.energy_consumption.gas.building_avg.therms"]
+            },
+        },
+    },
+    "baseline_ev_car": {
+        "default": {
+            "electricity": {
+                "file_prefix": "electricity_loads_",
+                "columns": ["total_load"]
+            },
+            "electricity_simulated": {
+                "file_prefix": "electricity_loads_simulated_",
+                "columns": []
+            },
+            "electricity_vehicle": {
+                "file_prefix": "vehicle_charging_profile_",
+                "columns": ["vehicle_charging"] # EV charging load
+            },
+            "gas": {
+                "file_prefix": "gas_loads_",
+                "columns": ["out.natural_gas.range_oven.energy_consumption.gas.building_avg.therms", "out.natural_gas.hot_water.energy_consumption.gas.building_avg.therms", "out.natural_gas.heating.energy_consumption.gas.building_avg.therms"]
+            },
+        },
+    },
+    "full_electric_ev": {
+        "default": {
+            "electricity": {
+                "file_prefix": "electricity_loads_",
+                "columns": ["total_load"]
+            },
+            "electricity_simulated": {
+                "file_prefix": "electricity_loads_simulated_",
+                "columns": ["simulated.electricity.induction_stove.energy_consumption.electricity.kwh", "simulated.electricity.heat_pump.energy_consumption.electricity.kwh", "simulated.electricity.hot_water.energy_consumption.electricity.kwh"]
+            },
+            "electricity_vehicle": {
+                "file_prefix": "vehicle_charging_profile_",
+                "columns": ["vehicle_charging"] # EV charging load
+            },
+            "gas": {
+                "file_prefix": "gas_loads_",
+                "columns": [] # Fully electric appliances
             },
         },
     },
@@ -36,6 +100,10 @@ SCENARIO_DATA_MAP = {
             "electricity_simulated": {
                 "file_prefix": "electricity_loads_simulated_",
                 "columns": ["simulated.electricity.heat_pump.energy_consumption.electricity.kwh"]
+            },
+            "electricity_vehicle": {
+                "file_prefix": "vehicle_charging_profile_",
+                "columns": [] # No vehicle charging
             },
             "gas": {
                 "file_prefix": "gas_loads_",
@@ -53,6 +121,10 @@ SCENARIO_DATA_MAP = {
                 "file_prefix": "electricity_loads_simulated_",
                 "columns": ["simulated.electricity.induction_stove.energy_consumption.electricity.kwh"]
             },
+            "electricity_vehicle": {
+                "file_prefix": "vehicle_charging_profile_",
+                "columns": [] # No vehicle charging
+            },
             "gas": {
                 "file_prefix": "gas_loads_",
                 "columns":  ["out.natural_gas.heating.energy_consumption.gas.building_avg.therms", "out.natural_gas.hot_water.energy_consumption.gas.building_avg.therms"],
@@ -68,6 +140,10 @@ SCENARIO_DATA_MAP = {
             "electricity_simulated": {
                 "file_prefix": "electricity_loads_simulated_",
                 "columns": ["simulated.electricity.induction_stove.energy_consumption.electricity.kwh", "simulated.electricity.heat_pump.energy_consumption.electricity.kwh"]
+            },
+            "electricity_vehicle": {
+                "file_prefix": "vehicle_charging_profile_",
+                "columns": [] # No vehicle charging
             },
             "gas": {
                 "file_prefix": "gas_loads_",
@@ -85,6 +161,10 @@ SCENARIO_DATA_MAP = {
                 "file_prefix": "electricity_loads_simulated_",
                 "columns": ["simulated.electricity.hot_water.energy_consumption.electricity.kwh"]
             },
+            "electricity_vehicle": {
+                "file_prefix": "vehicle_charging_profile_",
+                "columns": [] # No vehicle charging
+            },
             "gas": {
                 "file_prefix": "gas_loads_",
                 "columns":  ["out.natural_gas.range_oven.energy_consumption.gas.building_avg.therms", "out.natural_gas.heating.energy_consumption.gas.building_avg.therms"],
@@ -100,6 +180,10 @@ SCENARIO_DATA_MAP = {
             "electricity_simulated": {
                 "file_prefix": "electricity_loads_simulated_",
                 "columns": ["simulated.electricity.induction_stove.energy_consumption.electricity.kwh", "simulated.electricity.heat_pump.energy_consumption.electricity.kwh", "simulated.electricity.hot_water.energy_consumption.electricity.kwh"]
+            },
+            "electricity_vehicle": {
+                "file_prefix": "vehicle_charging_profile_",
+                "columns": [] # No vehicle charging
             },
             "gas": {
                 "file_prefix": "gas_loads_",
@@ -142,6 +226,23 @@ def aggregate_columns(file_path, columns, resample_to_hourly=False):
         print(f"Error processing file {file_path}: {e}")
         return None
 
+def aggregate_columns_from_dataframe(df, columns):
+    """
+    Aggregate specified columns from an already loaded DataFrame.
+    """
+    try:
+        # Sum the columns
+        aggregated = df[columns].sum(axis=1)
+        
+        expected_length = 8760
+        if len(aggregated) > expected_length:
+            aggregated = aggregated.iloc[:expected_length]
+        
+        return aggregated
+    except Exception as e:
+        print(f"Error aggregating columns {columns}: {e}")
+        return None
+
 def should_skip_processing(output_file, force_recompute):
     """Check if processing should be skipped based on existing files and force_recompute flag."""
     if force_recompute:
@@ -171,15 +272,48 @@ def combine_profiles(input_dir, output_dir, scenario, housing_type, county, scen
     else:
         electricity_simulated = pd.Series(0, index=electricity_real.index)  # No simulated data
 
-    # Real gas profile
+    # Vehicle electricity profile (EV charging) - using SCENARIO_DATA_MAP
+    vehicle_electricity_columns = scenario_data_map['default']['electricity_vehicle']['columns']
+    vehicle_electricity = pd.Series(0, index=electricity_real.index)  # Default to zero
+    
+    if vehicle_electricity_columns:
+        vehicle_electricity_file = os.path.join(input_dir, scenario, housing_type, county_slug, 
+                                              f"{scenario_data_map['default']['electricity_vehicle']['file_prefix']}{county_slug}_{housing_type.replace(' ', '-').lower()}.csv")
+        if os.path.exists(vehicle_electricity_file):
+            try:
+                vehicle_df = pd.read_csv(vehicle_electricity_file, parse_dates=['datetime'])
+                vehicle_df = vehicle_df.set_index('datetime')
+                vehicle_electricity = aggregate_columns_from_dataframe(vehicle_df, vehicle_electricity_columns)
+                # Align with electricity index
+                vehicle_electricity = vehicle_electricity.reindex(electricity_real.index, fill_value=0)
+            except Exception as e:
+                print(f"Warning: Could not load vehicle electricity profile for {county}: {e}")
+
+    # Real gas profile (appliances only - excludes gasoline)
     gas_real_file = os.path.join(base_path, f"{scenario_data_map['default']['gas']['file_prefix']}{county_slug}.csv")
     gas_real_columns = scenario_data_map['default']['gas']['columns']
     gas_real = aggregate_columns(gas_real_file, gas_real_columns, resample_to_hourly=True)
 
+    # Vehicle gasoline profile (separate from natural gas) - handled separately since it's not in utility rates
+    vehicle_gasoline = pd.Series(0, index=electricity_real.index)  # Default to zero
+    vehicle_gasoline_file = os.path.join(input_dir, scenario, housing_type, county_slug, 
+                                       f"vehicle_fuel_profile_{county_slug}_{housing_type.replace(' ', '-').lower()}.csv")
+    if os.path.exists(vehicle_gasoline_file):
+        try:
+            gasoline_df = pd.read_csv(vehicle_gasoline_file, parse_dates=['datetime'])
+            gasoline_df = gasoline_df.set_index('datetime')
+            vehicle_gasoline = gasoline_df['vehicle_fuel']
+            # Align with electricity index
+            vehicle_gasoline = vehicle_gasoline.reindex(electricity_real.index, fill_value=0)
+        except Exception as e:
+            print(f"Warning: Could not load vehicle gasoline profile for {county}: {e}")
+
     gas_simulated_adjustment = 0
 
-    gas_combined = gas_real + gas_simulated_adjustment
-    electricity_combined = np.array(electricity_real) + np.array(electricity_simulated)
+    # Combine profiles
+    gas_combined = gas_real + gas_simulated_adjustment  # Natural gas only (appliances)
+    electricity_combined = np.array(electricity_real) + np.array(electricity_simulated) + np.array(vehicle_electricity)  # Includes EV charging
+    gasoline_combined = np.array(vehicle_gasoline)  # Gasoline separate from natural gas
    
     # Compute total annual consumption for logs
     total_gas_real = gas_real.sum()
@@ -188,12 +322,16 @@ def combine_profiles(input_dir, output_dir, scenario, housing_type, county, scen
 
     total_electricity_real = electricity_real.sum()
     total_electricity_simulated = electricity_simulated.sum()
+    total_electricity_vehicle = vehicle_electricity.sum()
     total_electricity_consumed = electricity_combined.sum()
+
+    total_gasoline_consumed = gasoline_combined.sum()
 
     combined_df = pd.DataFrame({
         "timestamp": electricity_real.index,
         "electricity.real_and_simulated.for_typical_county_home.kwh": electricity_combined,
         "gas.hourly_total.for_typical_county_home.therms": gas_combined,
+        "gasoline.hourly_total.for_typical_county_home.gallons": gasoline_combined,
     }).reset_index(drop=True)
 
     output_path = os.path.join(output_dir, scenario, housing_type, county_slug)
@@ -208,13 +346,15 @@ def combine_profiles(input_dir, output_dir, scenario, housing_type, county, scen
     combined_df.to_csv(output_file, index=False)
 
     log(
-        at="step6_combine_real_and_simulated_electricity_profiles",
+        at="step7_combine_all_energy_profiles",
         total_electricity_real_kwh=f"{total_electricity_real:_.0f}",
         total_electricity_simulated_kwh=f"{total_electricity_simulated:_.0f}",
+        total_electricity_vehicle_kwh=f"{total_electricity_vehicle:_.0f}",
         total_electricity_consumed_kwh=f"{total_electricity_consumed:_.0f}",
         total_gas_real_therms=to_number(total_gas_real),
         total_gas_adjusted_therms=to_number(total_gas_adjusted),
         total_gas_consumed_therms=to_number(total_gas_consumed),
+        total_gasoline_consumed_gallons=f"{total_gasoline_consumed:_.1f}",
         saved_to=output_file,
     )
 
