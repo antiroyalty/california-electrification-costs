@@ -13,9 +13,35 @@ import pandas as pd
 import folium
 from helpers.maps_helpers import (
     initialize_map, load_cost_data, add_choropleth_layer, 
-    add_centroid_labels, add_map_title, export_geojson_and_html
+    add_centroid_labels, add_map_title, export_geojson_and_html,
+    get_latest_csv_file
 )
 from main_helpers import log, slugify_county_name, to_decimal_number
+
+
+def load_solar_data(base_input_dir: str, scenario: str, housing_type: str, county_name: str) -> float:
+    """
+    Load solar capacity data from annual analysis files.
+    """
+    try:
+        # Path to annual analysis directory
+        annual_analysis_path = os.path.join(base_input_dir, scenario, housing_type, "ANNUAL_ANALYSIS")
+        
+        # Find the latest solar capacity file
+        solar_file = get_latest_csv_file(annual_analysis_path, "annual_solar_capacity_")
+        
+        # Load and find the county data
+        df = pd.read_csv(solar_file)
+        county_row = df[df['county'] == county_name.lower()]
+        
+        if not county_row.empty:
+            return float(county_row['solar_capacity_kw'].iloc[0])
+        else:
+            return 0.0
+            
+    except Exception as e:
+        print(f"Warning: Could not load solar data for {county_name}: {e}")
+        return 0.0
 
 
 def create_metric_map(base_input_dir: str, scenario: str, housing_type: str, counties: list, 
@@ -52,15 +78,19 @@ def create_metric_map(base_input_dir: str, scenario: str, housing_type: str, cou
         county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
         
         try:
-            # Use load_cost_data to get metric data
-            data = load_cost_data(
-                county_dir=county_dir,
-                subfolder=data_loader_config["subfolder"],
-                prefix=data_loader_config["prefix"],
-                scenario_row=data_loader_config["scenario_row"]
-            )
+            # Special handling for solar data
+            if metric_name == "Solar Size (kW)":
+                metric_value = load_solar_data(base_input_dir, scenario, housing_type, county_name)
+            else:
+                # Use load_cost_data to get metric data
+                data = load_cost_data(
+                    county_dir=county_dir,
+                    subfolder=data_loader_config["subfolder"],
+                    prefix=data_loader_config["prefix"],
+                    scenario_row=data_loader_config["scenario_row"]
+                )
+                metric_value = float(data[data_loader_config["column"]])
             
-            metric_value = float(data[data_loader_config["column"]])
             gdf.loc[gdf["NAME"] == county_name, metric_name] = metric_value
             gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = to_decimal_number(metric_value)
             
@@ -147,10 +177,7 @@ def process(base_input_dir: str, base_output_dir: str, scenario: str,
     # Define metrics to display with their data loading configurations
     metrics_config = {
         "Solar Size (kW)": {
-            "subfolder": "solarstorage",
-            "prefix": "solar_results",
-            "column": "Solar Size (kW)",
-            "scenario_row": 1,  # Solar+storage scenario
+            # Special case - loaded from annual analysis files
             "color_scheme": "YlOrBr",
             "bins": [0, 2, 4, 6, 8, 10, 12, 15, 20],
             "unit": "kW"
@@ -158,7 +185,7 @@ def process(base_input_dir: str, base_output_dir: str, scenario: str,
         "Annual Electricity Bill ($)": {
             "subfolder": "electricity",
             "prefix": "RESULTS_electricity_annual_costs",
-            "column": "total_annual_bill",
+            "column": "electricity.PG&E.E-TOU-D",  # Use PG&E E-TOU-D rate as default
             "scenario_row": 0,  # Baseline scenario
             "color_scheme": "Reds",
             "bins": [0, 1000, 2000, 3000, 4000, 5000, 6000, 8000, 10000],
@@ -167,7 +194,7 @@ def process(base_input_dir: str, base_output_dir: str, scenario: str,
         "Annual Gas Bill ($)": {
             "subfolder": "gas",
             "prefix": "RESULTS_gas_annual_costs",
-            "column": "total_annual_bill",
+            "column": "gas.PG&E.G-1",  # Use PG&E G-1 rate as default
             "scenario_row": 0,  # Baseline scenario
             "color_scheme": "Oranges",
             "bins": [0, 500, 1000, 1500, 2000, 2500, 3000, 4000],
