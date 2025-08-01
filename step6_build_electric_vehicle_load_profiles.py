@@ -61,7 +61,7 @@ def convert_all_columns_to_per_vehicle(hourly_df, fleet_size=7_100_000):
     """
     for col in hourly_df.columns:
         if col != "hour" and hourly_df[col].dtype in [float, int]:
-            new_col = f"{col}_per_vehicle_kW"
+            new_col = f"{col}_per_vehicle_kWh"
             hourly_df[new_col] = (hourly_df[col] / fleet_size) * 1000
 
     return hourly_df
@@ -158,11 +158,14 @@ def save_vehicle_profiles_by_county(base_output_dir: str, scenario: str, scenari
                 
                 # Use the existing EV profile from Excel data
                 ev_df = hourly_df_8760.copy()
-                ev_df = ev_df.rename(columns={'residential_L1_MW': 'vehicle_charging'})
+
+                # Add new column summing the two per-vehicle kW columns
+                if 'residential_L1_MW_per_vehicle_kWh' in ev_df.columns and 'Residential Level 2_per_vehicle_kWh' in ev_df.columns:
+                    ev_df['total_vehicle_charging'] = (
+                        ev_df['residential_L1_MW_per_vehicle_kWh'] + ev_df['Residential Level 2_per_vehicle_kWh']
+                    )
                 
-                # Convert from MW to kW per vehicle (assuming 7.1M vehicles in California)
-                if 'vehicle_charging' in ev_df.columns:
-                    ev_df['vehicle_charging'] = (ev_df['vehicle_charging'] / 7_100_000) * 1000
+                ev_df = ev_df.rename(columns={'total_vehicle_charging': 'vehicle_charging'})
                 
                 ev_df.to_csv(ev_output_path, index=False)
                 
