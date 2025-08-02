@@ -276,7 +276,6 @@ def run_models_and_extract_outputs(solar, battery, load_profile):
     #     print("All values are zero.")
 
     non_zero_count = sum(1 for x in batt_to_load if x != 0)
-    print("Number of non-zero values:", non_zero_count)
 
     first_non_zero_index = next((i for i, x in enumerate(batt_to_load) if x != 0), None)
     if first_non_zero_index is not None:
