@@ -275,13 +275,13 @@ def run_models_and_extract_outputs(solar, battery, load_profile):
     # else:
     #     print("All values are zero.")
 
-    non_zero_count = sum(1 for x in batt_to_load if x != 0)
+    # non_zero_count = sum(1 for x in batt_to_load if x != 0)
 
-    first_non_zero_index = next((i for i, x in enumerate(batt_to_load) if x != 0), None)
-    if first_non_zero_index is not None:
-        print("The first non-zero value is at position:", first_non_zero_index)
-    else:
-        print("All values are zero.")
+    # first_non_zero_index = next((i for i, x in enumerate(batt_to_load) if x != 0), None)
+    # if first_non_zero_index is not None:
+    #     print("The first non-zero value is at position:", first_non_zero_index)
+    # else:
+    #     print("All values are zero.")
 
     solar_battery_to_load = [s + b for s, b in zip(system_to_load, batt_to_load)]
     total_supply = [s + b + g for s, b, g in zip(system_to_load, batt_to_load, grid_to_load)]

@@ -160,7 +160,7 @@ def process_county_data(county, input_dir, output_path, end_uses):
     # Resample the typical profile to hourly resolution.
     typical_hourly = resample_profile_to_hourly(typical_15min, agg_method="sum")
 
-    # Optionally, compute a total load column (sum across all end uses).
+    # Compute a total load column (sum across all end uses).
     typical_hourly["total_load"] = typical_hourly[end_uses].sum(axis=1)
 
     # Compute annual totals for each end use.
@@ -248,4 +248,4 @@ if __name__ == '__main__':
         "baseline": {"gas": {"heating", "hot_water", "cooking"}, "electric": {"appliances", "misc"}}
     }
 
-    process("baseline", BASELINE_SCENARIO["baseline"], "single-family-detached", ["Inyo County"], "data", "data/loadprofiles", force_recompute=True)
+    process("baseline", BASELINE_SCENARIO["baseline"], "single-family-detached", ["Alameda County"], "data", "data/loadprofiles", force_recompute=True)
