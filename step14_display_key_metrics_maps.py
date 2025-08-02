@@ -1,16 +1,17 @@
 """
 Step 14: Display Key Metrics Maps
 
-Display diagnostic maps for key metrics:
+Display diagnostic maps for key metrics in a single HTML file:
 - Average solar panel size in county
 - Total annual electricity bill in county, in $
 - Total annual gas bill in county, in $
-- Total annual energy consumption (electricity + gas equivalent), in kWh
+- Total annual energy consumption (electricity kWh, gas therms)
 """
 
 import os
 import pandas as pd
 import folium
+from folium import plugins
 from helpers.maps_helpers import (
     initialize_map, load_cost_data, add_choropleth_layer, 
     add_centroid_labels, add_map_title, export_geojson_and_html,
@@ -51,61 +52,32 @@ def load_energy_consumption_data(
     county_name: str
 ) -> tuple[float, float]:
     """
-    Load annual energy-consumption data for <county>.
-
-    The input file pattern is:
-        loadprofiles_for_rates_<county-slug>.csv
-
-    Expected columns in the file:
-        timestamp
-        default.electricity.kwh
-        default.gas.therms
-        (…plus any other scenario columns you may have)
-
-    Returns
-    -------
-    tuple
-        (electricity_kwh, gas_therms)
+    Load annual energy consumption data for county.
+    Returns (electricity_kwh, gas_therms)
     """
-    # ------------------------------------------------------------------ paths
-    county_slug = slugify_county_name(f"{county_name} County")          # e.g. "alameda"
-    county_dir  = os.path.join(base_input_dir, scenario, housing_type, county_slug)
-    file_name   = f"loadprofiles_for_rates_{county_slug}.csv"
-    file_path   = os.path.join(county_dir, file_name)
+    county_slug = slugify_county_name(f"{county_name} County")
+    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+    file_name = f"loadprofiles_for_rates_{county_slug}.csv"
+    file_path = os.path.join(county_dir, file_name)
 
-    # ------------------------------------------------------------------- read
     if not os.path.isfile(file_path):
-        raise FileNotFoundError(f"Cannot find {file_path}")
+        print(f"Warning: Cannot find {file_path}")
+        return 0.0, 0.0
 
     try:
         df = pd.read_csv(file_path, low_memory=False)
-
-        # Sum the full year (all rows) for the two default columns
         electricity_kwh = float(df["default.electricity.kwh"].sum())
-        gas_therms      = float(df["default.gas.therms"].sum())
-
+        gas_therms = float(df["default.gas.therms"].sum())
         return electricity_kwh, gas_therms
-
     except Exception as exc:
         print(f"Warning: could not parse {file_path}: {exc}")
         return 0.0, 0.0
 
 
-def create_metric_map(base_input_dir: str, scenario: str, housing_type: str, counties: list, 
-                     metric_name: str, data_loader_config: dict) -> tuple[str, str]:
+def create_single_map(base_input_dir: str, scenario: str, housing_type: str, counties: list, 
+                     metric_name: str, data_loader_config: dict) -> folium.Map:
     """
-    Create a diagnostic map for a specific metric.
-    
-    Args:
-        base_input_dir: Input directory path
-        scenario: Scenario name
-        housing_type: Housing type
-        counties: List of counties to process
-        metric_name: Name of the metric to display
-        data_loader_config: Configuration for loading the metric data
-    
-    Returns:
-        tuple: (geojson_path, html_path)
+    Create a single diagnostic map for a specific metric.
     """
     # Initialize California county boundaries
     gdf = initialize_map()
@@ -125,21 +97,20 @@ def create_metric_map(base_input_dir: str, scenario: str, housing_type: str, cou
         county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
         
         try:
-            # Special handling for solar data
+            # Special handling for different metrics
             if metric_name == "Solar Size (kW)":
                 metric_value = load_solar_data(base_input_dir, scenario, housing_type, county_name)
-            elif metric_name == "Total Energy Consumption (kWh, thermes)":
+                
+            elif metric_name == "Total Energy Consumption (kWh, therms)":
                 elec_kwh, gas_thm = load_energy_consumption_data(
                     base_input_dir, scenario, housing_type, county_name
                 )
-
-                # Keep the map shading in kWh-equivalent so the existing bins work
-                value = elec_kwh + gas_thm * 29.3
-
-                # Tooltip string => “12 345 kWh / 678 therms”
+                # Use kWh equivalent for color mapping
+                metric_value = elec_kwh + gas_thm * 29.3
+                # Display both values in tooltip
                 pretty = f"{to_decimal_number(elec_kwh)} kWh, {to_decimal_number(gas_thm)} therms"
                 gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
-
+                
             else:
                 # Use load_cost_data to get metric data
                 data = load_cost_data(
@@ -151,7 +122,10 @@ def create_metric_map(base_input_dir: str, scenario: str, housing_type: str, cou
                 metric_value = float(data[data_loader_config["column"]])
             
             gdf.loc[gdf["NAME"] == county_name, metric_name] = metric_value
-            gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = to_decimal_number(metric_value)
+            
+            # Only format if not already formatted (for energy consumption)
+            if gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"].iloc[0] == "N/A":
+                gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = to_decimal_number(metric_value)
             
         except Exception as e:
             print(f"Warning: Could not load {metric_name} data for {county_name}: {e}")
@@ -161,13 +135,9 @@ def create_metric_map(base_input_dir: str, scenario: str, housing_type: str, cou
         location=[37.8, -120], 
         zoom_start=6, 
         zoom_control=False,
-        width="900px", 
-        height="700px"
+        width="450px", 
+        height="350px"
     )
-    
-    # Add title
-    scenario_title = scenario.replace('_', ' ').title()
-    add_map_title(m, f"{metric_name} by County - {scenario_title}")
     
     # Add choropleth layer
     add_choropleth_layer(
@@ -199,30 +169,152 @@ def create_metric_map(base_input_dir: str, scenario: str, housing_type: str, cou
         name="County Info"
     ).add_to(m)
     
-    # Hide layer control
-    m.get_root().html.add_child(folium.Element(
-        '<style>.leaflet-control-layers{display:none !important;}</style>'
-    ))
+    return m
+
+
+def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: str, counties: list):
+    """
+    Create a combined HTML dashboard with all 4 diagnostic maps.
+    """
     
-    # Export map
-    output_dir = os.path.join("visualizations", "diagnostic_maps")
-    filename_prefix = f"{metric_name.lower().replace(' ', '_').replace('(', '').replace(')', '')}_{scenario}_{housing_type.replace(' ', '-').lower()}"
+    # Define metrics configuration
+    metrics_config = {
+        "Solar Size (kW)": {
+            "color_scheme": "YlOrBr",
+            "bins": [0, 2, 4, 6, 8, 10, 12, 15, 20],
+            "unit": "kW"
+        },
+        "Annual Electricity Bill ($)": {
+            "subfolder": "electricity",
+            "prefix": "RESULTS_electricity_annual_costs",
+            "column": "electricity.PG&E.E-TOU-D",
+            "scenario_row": 0,
+            "color_scheme": "Reds",
+            "bins": [0, 1000, 2000, 3000, 4000, 5000, 6000, 8000, 10000],
+            "unit": "$"
+        },
+        "Annual Gas Bill ($)": {
+            "subfolder": "gas",
+            "prefix": "RESULTS_gas_annual_costs",
+            "column": "gas.PG&E.G-1",
+            "scenario_row": 0,
+            "color_scheme": "Oranges",
+            "bins": [0, 500, 1000, 1500, 2000, 2500, 3000, 4000],
+            "unit": "$"
+        },
+        "Total Energy Consumption (kWh, therms)": {
+            "color_scheme": "Greens",
+            "bins": [0, 10000, 20000, 30000, 40000, 50000, 60000, 80000, 100000],
+            "unit": "kWh equiv."
+        }
+    }
     
-    return export_geojson_and_html(gdf, output_dir, filename_prefix, m, open_in_browser=True)
+    # Create individual maps
+    maps = {}
+    for metric_name, config in metrics_config.items():
+        print(f"Creating map for: {metric_name}")
+        try:
+            maps[metric_name] = create_single_map(
+                base_input_dir, scenario, housing_type, counties, metric_name, config
+            )
+        except Exception as e:
+            print(f"Error creating map for {metric_name}: {e}")
+    
+    # Create the combined HTML
+    scenario_title = scenario.replace('_', ' ').title()
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Diagnostic Maps - {scenario_title}</title>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style>
+            body {{
+                font-family: Arial, sans-serif;
+                margin: 0;
+                padding: 20px;
+                background-color: #f5f5f5;
+            }}
+            .header {{
+                text-align: center;
+                margin-bottom: 30px;
+                background-color: white;
+                padding: 20px;
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }}
+            .dashboard {{
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 20px;
+                max-width: 1200px;
+                margin: 0 auto;
+            }}
+            .map-container {{
+                background-color: white;
+                border-radius: 8px;
+                padding: 15px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }}
+            .map-title {{
+                font-size: 16px;
+                font-weight: bold;
+                margin-bottom: 10px;
+                text-align: center;
+                color: #333;
+            }}
+            .map-wrapper {{
+                display: flex;
+                justify-content: center;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <h1>Diagnostic Maps Dashboard</h1>
+            <h2>{scenario_title} - {housing_type.replace('-', ' ').title()}</h2>
+            <p>County-level analysis of key metrics for electrification scenario</p>
+        </div>
+        
+        <div class="dashboard">
+    """
+    
+    # Add each map to the HTML
+    for i, (metric_name, map_obj) in enumerate(maps.items()):
+        map_html = map_obj._repr_html_()
+        html_content += f"""
+            <div class="map-container">
+                <div class="map-title">{metric_name}</div>
+                <div class="map-wrapper">
+                    {map_html}
+                </div>
+            </div>
+        """
+    
+    html_content += """
+        </div>
+    </body>
+    </html>
+    """
+    
+    # Save the combined HTML file
+    output_dir = os.path.join("visualizations", "diagnostic_maps", "html")
+    os.makedirs(output_dir, exist_ok=True)
+    
+    filename = f"diagnostic_dashboard_{scenario}_{housing_type.replace(' ', '-').lower()}.html"
+    output_path = os.path.join(output_dir, filename)
+    
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(html_content)
+    
+    return output_path
 
 
 def process(base_input_dir: str, base_output_dir: str, scenario: str, 
            housing_type: str, counties: list, desired_rate_plans: dict):
     """
-    Display key metrics maps for the scenario.
-    
-    Args:
-        base_input_dir: Input directory path
-        base_output_dir: Output directory path
-        scenario: Scenario name
-        housing_type: Housing type
-        counties: List of counties to process
-        desired_rate_plans: Rate plans by utility
+    Display key metrics maps for the scenario in a combined dashboard.
     """
     
     log(
@@ -233,83 +325,37 @@ def process(base_input_dir: str, base_output_dir: str, scenario: str,
         counties_requested=len(counties)
     )
     
-    # Define metrics to display with their data loading configurations
-    metrics_config = {
-        "Solar Size (kW)": {
-            # Special case - loaded from annual analysis files
-            "color_scheme": "YlOrBr",
-            "bins": [0, 2, 4, 6, 8, 10, 12, 15, 20],
-            "unit": "kW"
-        },
-        "Annual Electricity Bill ($)": {
-            "subfolder": "electricity",
-            "prefix": "RESULTS_electricity_annual_costs",
-            "column": "electricity.PG&E.E-TOU-D",  # Use PG&E E-TOU-D rate as default
-            "scenario_row": 0,  # Baseline scenario
-            "color_scheme": "Reds",
-            "bins": [0, 1000, 2000, 3000, 4000, 5000, 6000, 8000, 10000],
-            "unit": "$"
-        },
-        "Annual Gas Bill ($)": {
-            "subfolder": "gas",
-            "prefix": "RESULTS_gas_annual_costs",
-            "column": "gas.PG&E.G-1",  # Use PG&E G-1 rate as default
-            "scenario_row": 0,  # Baseline scenario
-            "color_scheme": "Oranges",
-            "bins": [0, 500, 1000, 1500, 2000, 2500, 3000, 4000],
-            "unit": "$"
-        },
-        "Total Energy Consumption (kWh, thermes)": {
-            # Special case - loaded from hourly load profile files
-            "color_scheme": "Greens",
-            "bins": [0, 10000, 20000, 30000, 40000, 50000, 60000, 80000, 100000],
-            "unit": "kWh"
-        }
-    }
-    
-    # Create maps for each metric
-    created_maps = []
-    
-    for metric_name, config in metrics_config.items():
-        try:
-            print(f"Creating map for: {metric_name}")
-            
-            geojson_path, html_path = create_metric_map(
-                base_input_dir, scenario, housing_type, counties, metric_name, config
-            )
-            
-            created_maps.append({
-                "metric": metric_name,
-                "html_path": html_path,
-                "geojson_path": geojson_path
-            })
-            
-            print(f"  Map saved: {html_path}")
-            
-        except Exception as e:
-            print(f"  Error creating map for {metric_name}: {e}")
-            log(
-                at="step14_display_key_metrics_maps",
-                error=f"Failed to create {metric_name} map: {e}",
-                scenario=scenario,
-                metric=metric_name
-            )
-    
-    # Log completion
-    log(
-        at="step14_display_key_metrics_maps",
-        info="key_metrics_display_complete",
-        scenario=scenario,
-        housing_type=housing_type,
-        counties_processed=len(counties),
-        maps_created=len(created_maps)
-    )
-    
-    print(f"\nStep 14 complete! Created {len(created_maps)} diagnostic maps:")
-    for map_info in created_maps:
-        print(f"  - {map_info['metric']}: {map_info['html_path']}")
-    
-    return created_maps
+    # Create combined dashboard
+    try:
+        dashboard_path = create_combined_dashboard(base_input_dir, scenario, housing_type, counties)
+        
+        # Auto-open in browser
+        import webbrowser
+        webbrowser.open(f'file://{os.path.abspath(dashboard_path)}')
+        
+        print(f"\nStep 14 complete! Created diagnostic dashboard:")
+        print(f"  - File: {dashboard_path}")
+        print(f"  - Opened in browser automatically")
+        
+        log(
+            at="step14_display_key_metrics_maps",
+            info="key_metrics_display_complete",
+            scenario=scenario,
+            housing_type=housing_type,
+            counties_processed=len(counties),
+            dashboard_path=dashboard_path
+        )
+        
+        return [{"metric": "Combined Dashboard", "html_path": dashboard_path}]
+        
+    except Exception as e:
+        print(f"Error creating dashboard: {e}")
+        log(
+            at="step14_display_key_metrics_maps",
+            error=f"Failed to create dashboard: {e}",
+            scenario=scenario
+        )
+        return []
 
 
 if __name__ == "__main__":
