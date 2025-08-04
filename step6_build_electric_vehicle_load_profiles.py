@@ -229,7 +229,8 @@ def process(base_input_dir: str, base_output_dir: str, scenario: str, scenario_c
         log(
             at="step6_build_vehicle_load_profiles",
             info="no_vehicle_loads_needed",
-            scenario=scenario
+            scenario=scenario,
+
         )
         print("No vehicle loads needed for this scenario, skipping vehicle profile generation")
         return
@@ -272,7 +273,7 @@ if __name__ == "__main__":
     process(
         base_input_dir="data",
         base_output_dir="data/loadprofiles", 
-        scenario="baseline_ice_car", # baseline_ice_car, baseline_ev_car
+        scenario="baseline_ev_car", # baseline_ice_car, baseline_ev_car
         scenario_config=test_scenario_config,
         housing_types=["single-family-detached"],
         counties=["Alameda County"],

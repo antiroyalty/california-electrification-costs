@@ -275,17 +275,13 @@ def combine_profiles(input_dir, output_dir, scenario, housing_type, county, scen
     # Vehicle electricity profile (EV charging) - using SCENARIO_DATA_MAP
     vehicle_electricity_columns = scenario_data_map['default']['electricity_vehicle']['columns']
     vehicle_electricity = pd.Series(0, index=electricity_real.index)  # Default to zero
-    
     if vehicle_electricity_columns:
-        vehicle_electricity_file = os.path.join(input_dir, scenario, housing_type, county_slug, 
-                                              f"{scenario_data_map['default']['electricity_vehicle']['file_prefix']}{county_slug}_{housing_type.replace(' ', '-').lower()}.csv")
+        vehicle_electricity_file = os.path.join(input_dir, scenario, housing_type, county_slug, f"{scenario_data_map['default']['electricity_vehicle']['file_prefix']}{county_slug}_{housing_type}.csv")
         if os.path.exists(vehicle_electricity_file):
             try:
                 vehicle_df = pd.read_csv(vehicle_electricity_file, parse_dates=['datetime'])
                 vehicle_df = vehicle_df.set_index('datetime')
                 vehicle_electricity = aggregate_columns_from_dataframe(vehicle_df, vehicle_electricity_columns)
-                # Align with electricity index
-                vehicle_electricity = vehicle_electricity.reindex(electricity_real.index, fill_value=0)
             except Exception as e:
                 print(f"Warning: Could not load vehicle electricity profile for {county}: {e}")
 
@@ -314,7 +310,6 @@ def combine_profiles(input_dir, output_dir, scenario, housing_type, county, scen
     gas_combined = gas_real + gas_simulated_adjustment  # Natural gas only (appliances)
     electricity_combined = np.array(electricity_real) + np.array(electricity_simulated) + np.array(vehicle_electricity)  # Includes EV charging
     gasoline_combined = np.array(vehicle_gasoline)  # Gasoline separate from natural gas
-   
     # Compute total annual consumption for logs
     total_gas_real = gas_real.sum()
     total_gas_adjusted = gas_simulated_adjustment
@@ -343,6 +338,7 @@ def combine_profiles(input_dir, output_dir, scenario, housing_type, county, scen
         log(at="step6_combine_real_and_simulated_electricity_loads", 
             scenario=scenario, county=county, status="skipped_existing", output_file=output_file)
         return None
+    
     combined_df.to_csv(output_file, index=False)
 
     log(
@@ -388,7 +384,7 @@ if __name__ == '__main__':
     input_dir = 'data/loadprofiles'
     output_dir = 'data/loadprofiles'
     housing_types = ['single-family-detached']
-    counties = None  # Auto-detect all counties
+    counties = ['Alameda County']  # Auto-detect all counties
     scenario = args.scenario
     
     print(f"Processing step6 with:")

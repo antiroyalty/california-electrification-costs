@@ -87,7 +87,7 @@ def get_scenario_path(base_input_dir, scenario, housing_type):
 
     return scenario_path
 
-def log(**metrics):
+def log(*, log_level: str = "info", **metrics):
     """
     Logs a standardized message summarizing key outputs from a processing step.
     
@@ -109,6 +109,9 @@ def log(**metrics):
         description (str, optional): A brief description of what the step does.
         **metrics: Arbitrary key-value pairs for important numbers (e.g., counts, annual totals, costs).
     """
+    if log_level.lower() != "debug":
+        return
+
     if metrics:
         # Determine the longest key for nice alignment.
         key_length =[len(str(key)) for key in metrics.keys()]
