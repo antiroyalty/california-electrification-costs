@@ -21,6 +21,7 @@ This project requires Python 3 with the following external dependencies:
 - **botocore** - Low-level interface to AWS services
 - **geopy** - Geocoding library
 - **python-dotenv** - Environment variable management
+- **openpyxl** - Open Excel files
 
 #### Additional files and applications
 - Get the NREL metadata CSV from Ana (too big to include on Github)
