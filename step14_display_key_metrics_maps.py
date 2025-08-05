@@ -20,23 +20,20 @@ from helpers.maps_helpers import (
 from main_helpers import log, slugify_county_name, to_decimal_number
 
 
-def load_solar_data(base_input_dir: str, scenario: str, housing_type: str, county_name: str) -> float:
+def load_solar_data(base_input_dir: str, scenario: str, housing_type: str, county_slug: str) -> float:
     """
-    Load solar capacity data from annual analysis files.
+    Load solar capacity data from electrified assets CSV using capital_costs_helper.
     """
     try:
-        # Path to annual analysis directory
-        annual_analysis_path = os.path.join(base_input_dir, scenario, housing_type, "ANNUAL_ANALYSIS")
+        from helpers.capital_costs_helper import load_electrified_assets
+        from main_helpers import get_scenario_path, slugify_county_name
         
-        # Find the latest solar capacity file
-        solar_file = get_latest_csv_file(annual_analysis_path, "annual_solar_capacity_")
+        # Get the scenario path and load electrified assets
+        scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
+        assets_mapping = load_electrified_assets(scenario_path)
         
-        # Load and find the county data
-        df = pd.read_csv(solar_file)
-        county_row = df[df['county'] == county_name.lower()]
-        
-        if not county_row.empty:
-            return float(county_row['solar_capacity_kw'].iloc[0])
+        if county_slug in assets_mapping:
+            return float(assets_mapping[county_slug])
         else:
             return 0.0
             
@@ -99,7 +96,7 @@ def create_single_map(base_input_dir: str, scenario: str, housing_type: str, cou
         try:
             # Special handling for different metrics
             if metric_name == "Solar Size (kW)":
-                metric_value = load_solar_data(base_input_dir, scenario, housing_type, county_name)
+                metric_value = load_solar_data(base_input_dir, scenario, housing_type, county_slug)
                 
             elif metric_name == "Total Energy Consumption (kWh, therms)":
                 elec_kwh, gas_thm = load_energy_consumption_data(
