@@ -15,6 +15,7 @@ I want the ability to configure different Component "scenarios", like:
 
 import os
 from main_helpers import log
+from scenarios import SCENARIOS
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional
 from dataclasses import dataclass
@@ -87,19 +88,6 @@ def get_appliances_for_scenario(scenario: str) -> Dict[str, type]:
     Returns:
         Dictionary mapping appliance type to appliance class
     """
-    # Define scenario configurations based on CostService.SCENARIOS
-    SCENARIOS = {
-        "baseline": {"gas": {"heating", "hot_water", "cooking"}, "electric": {"appliances", "misc"}},
-        "heat_pump": {"gas": {"hot_water", "cooking"}, "electric": {"appliances", "misc", "heating"}},
-        "induction_stove": {"gas": {"hot_water", "heating"}, "electric": {"appliances", "misc", "cooking"}},
-        "heat_pump_and_induction_stove": {"gas": {"hot_water"}, "electric": {"appliances", "misc", "cooking", "heating"}},
-        "water_heating": {"gas": {"cooking", "heating"}, "electric": {"hot_water", "appliances", "misc"}},
-        "heat_pump_and_induction_stove_and_water_heating": {"gas": set(), "electric": {"hot_water", "cooking", "heating", "appliances", "misc"}},
-        # EV scenarios
-        "baseline_ice_car": {"gas": {"heating", "hot_water", "cooking", "vehicle_fuel"}, "electric": {"appliances", "misc"}},
-        "baseline_ev_car": {"gas": {"heating", "hot_water", "cooking"}, "electric": {"appliances", "misc", "vehicle_charging"}},
-        "full_electric_ev": {"gas": set(), "electric": {"hot_water", "cooking", "heating", "appliances", "misc", "vehicle_charging"}},
-    }
     
     if scenario not in SCENARIOS:
         raise ValueError(f"Unknown scenario: {scenario}. Available scenarios: {list(SCENARIOS.keys())}")
@@ -139,19 +127,6 @@ def get_gas_appliances_for_scenario(scenario: str) -> Dict[str, type]:
     Returns:
         Dictionary mapping appliance type to gas appliance class
     """
-    # Define scenario configurations based on CostService.SCENARIOS
-    SCENARIOS = {
-        "baseline": {"gas": {"heating", "hot_water", "cooking"}, "electric": {"appliances", "misc"}},
-        "heat_pump": {"gas": {"hot_water", "cooking"}, "electric": {"appliances", "misc", "heating"}},
-        "induction_stove": {"gas": {"hot_water", "heating"}, "electric": {"appliances", "misc", "cooking"}},
-        "heat_pump_and_induction_stove": {"gas": {"hot_water"}, "electric": {"appliances", "misc", "cooking", "heating"}},
-        "water_heating": {"gas": {"cooking", "heating"}, "electric": {"hot_water", "appliances", "misc"}},
-        "heat_pump_and_induction_stove_and_water_heating": {"gas": set(), "electric": {"hot_water", "cooking", "heating", "appliances", "misc"}},
-        # EV scenarios
-        "baseline_ice_car": {"gas": {"heating", "hot_water", "cooking", "vehicle_fuel"}, "electric": {"appliances", "misc"}},
-        "baseline_ev_car": {"gas": {"heating", "hot_water", "cooking"}, "electric": {"appliances", "misc", "vehicle_charging"}},
-        "full_electric_ev": {"gas": set(), "electric": {"hot_water", "cooking", "heating", "appliances", "misc", "vehicle_charging"}},
-    }
     
     if scenario not in SCENARIOS:
         raise ValueError(f"Unknown scenario: {scenario}. Available scenarios: {list(SCENARIOS.keys())}")
