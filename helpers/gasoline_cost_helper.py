@@ -1,4 +1,4 @@
-"""
+helpers/gasoline_cost_helper.py"""
 County-specific gasoline cost and vehicle miles traveled helper for ICE vehicle calculations.
 
 This module provides county-specific data for gasoline prices and vehicle miles traveled
@@ -145,7 +145,6 @@ COUNTY_ANNUAL_VMT = {
 # Default values for counties not in the database
 DEFAULT_GASOLINE_COST = 0.0  # dollars per gallon
 DEFAULT_ANNUAL_VMT = 0        # miles per year
-
 
 def get_gasoline_cost_for_county(county_name: str) -> float:
     county_slug = slugify_county_name(county_name)
