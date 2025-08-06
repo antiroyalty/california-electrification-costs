@@ -5,7 +5,9 @@ class ElectricVehicleAppliance(ElectricAppliance):
     def __init__(self, 
                  vehicle_type: str = "BEV",
                  base_cost: float = 42000.0,
-                 lifetime_years: int = 12):
+                 lifetime_years: int = 12,
+                 annual_maintenance_cost: float = 800.0,
+                 annual_insurance_cost: float = 1800.0):
         """
         Initialize electric vehicle appliance.
         
@@ -13,9 +15,13 @@ class ElectricVehicleAppliance(ElectricAppliance):
             vehicle_type: Type of electric vehicle (default: "BEV" - Battery Electric Vehicle)
             base_cost: Base vehicle purchase cost in dollars
             lifetime_years: Expected vehicle ownership period in years
+            annual_maintenance_cost: Annual maintenance cost in dollars
+            annual_insurance_cost: Annual insurance cost in dollars
         """
         super().__init__(f"electric_{vehicle_type.lower()}", base_cost, lifetime_years)
         self.vehicle_type = vehicle_type
+        self.annual_maintenance_cost = annual_maintenance_cost
+        self.annual_insurance_cost = annual_insurance_cost
         
         # Add default incentives based on current federal and California programs
         self._add_default_incentives()
@@ -67,6 +73,9 @@ class ElectricVehicleAppliance(ElectricAppliance):
                     "scenario_multiplier": multiplier
                 })
         
+        annual_operating_cost = self.annual_maintenance_cost + self.annual_insurance_cost
+        total_operating_cost = annual_operating_cost * self.lifetime_years
+        
         return {
             "appliance_type": self.name,
             "vehicle_type": self.vehicle_type,
@@ -76,5 +85,10 @@ class ElectricVehicleAppliance(ElectricAppliance):
             "total_incentives": total_incentives,
             "net_cost": self.get_net_cost(scenario),
             "incentives_detail": incentives_detail,
-            "cost_per_year": self.get_net_cost(scenario) / self.lifetime_years
+            "cost_per_year": self.get_net_cost(scenario) / self.lifetime_years,
+            "annual_maintenance_cost": self.annual_maintenance_cost,
+            "annual_insurance_cost": self.annual_insurance_cost,
+            "annual_operating_cost": annual_operating_cost,
+            "total_operating_cost_over_lifetime": total_operating_cost,
+            "total_cost_of_ownership": self.get_net_cost(scenario) + total_operating_cost
         }

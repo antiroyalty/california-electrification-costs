@@ -219,7 +219,9 @@ def process(base_input_dir: str, base_output_dir: str, scenario: str,
         ev = electric_appliance_classes["vehicle"](
             vehicle_type="Tesla_Model_3",
             base_cost=45000.0,
-            lifetime_years=12
+            lifetime_years=12,
+            annual_maintenance_cost=800.0,  # EVs typically have lower maintenance
+            annual_insurance_cost=1800.0    # Slightly lower than ICE due to safety features
         )
 
         # Add custom incentives in addition to what is defined in electric_vehicle.py
@@ -251,7 +253,9 @@ def process(base_input_dir: str, base_output_dir: str, scenario: str,
         gas_appliances["vehicle"] = gas_appliance_classes["vehicle"](
             vehicle_type="ICE",
             base_cost=35000.0,
-            lifetime_years=12
+            lifetime_years=12,
+            annual_maintenance_cost=1200.0,  # ICE vehicles have higher maintenance
+            annual_insurance_cost=2000.0     # Slightly higher than EV
         )
     
     if electric_appliances:
