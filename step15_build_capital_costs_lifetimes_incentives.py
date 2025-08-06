@@ -190,7 +190,6 @@ def process(base_input_dir: str, base_output_dir: str, scenario: str,
         )
         return {}
     
-    # Initialize appliance instances
     electric_appliances = {}
     gas_appliances = {}
     
@@ -217,11 +216,21 @@ def process(base_input_dir: str, base_output_dir: str, scenario: str,
         )
     
     if "vehicle" in electric_appliance_classes:
-        electric_appliances["vehicle"] = electric_appliance_classes["vehicle"](
-            vehicle_type="BEV",
-            base_cost=42000.0,
+        ev = electric_appliance_classes["vehicle"](
+            vehicle_type="Tesla_Model_3",
+            base_cost=45000.0,
             lifetime_years=12
         )
+
+        # Add custom incentives in addition to what is defined in electric_vehicle.py
+        # ev.add_incentive(Incentive(
+        #     name="Federal Clean Vehicle Credit - Model 3",
+        #     value=3750.0,  # Half credit for Tesla after phase-out
+        #     unit="$"
+        # ))
+
+        electric_appliances["vehicle"] = ev
+
     
     # Initialize gas appliances
     if "heating" in gas_appliance_classes:
@@ -244,11 +253,6 @@ def process(base_input_dir: str, base_output_dir: str, scenario: str,
             base_cost=35000.0,
             lifetime_years=12
         )
-    
-    # Print appliance summary
-    print(f"\n=== SCENARIO: {scenario.upper()} ===")
-    print(f"Electric Appliances: {len(electric_appliances)}")
-    print(f"Gas Appliances: {len(gas_appliances)}")
     
     if electric_appliances:
         print(f"Electric: {list(electric_appliances.keys())}")
