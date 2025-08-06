@@ -173,9 +173,9 @@ if __name__ == '__main__':
     scenario = args.scenario
     
     # Validate scenario
-    if scenario not in CostService.SCENARIOS:
+    if scenario not in SCENARIOS:
         print(f"Error: Unknown scenario '{scenario}'")
-        print(f"Available scenarios: {', '.join(CostService.SCENARIOS.keys())}")
+        print(f"Available scenarios: {', '.join(SCENARIOS.keys())}")
         sys.exit(1)
     
     housing_type = "single-family-detached"
