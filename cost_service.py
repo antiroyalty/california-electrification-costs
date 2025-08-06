@@ -1,5 +1,6 @@
 import sys
 import argparse
+from scenarios import SCENARIOS
 import step1_identify_suitable_buildings as IdentifySuitableBuildings
 import step2_pull_buildings as PullBuildings
 import step3_build_electricity_load_profiles as BuildElectricityLoadProfiles
@@ -25,18 +26,6 @@ import step21_build_payback_difference_maps as BuildPaybackDifferenceMaps
 import step22_calculate_npv as CalculateNPV
 
 class CostService:
-    SCENARIOS = {
-        "baseline": {"gas": {"heating", "hot_water", "cooking"}, "electric": {"appliances", "misc"}}, # Almost everything is gas, except normal electrical appliances
-        "heat_pump": {"gas": {"hot_water", "cooking"}, "electric": {"appliances", "misc", "heating"}},
-        "induction_stove": {"gas": {"hot_water", "heating"}, "electric": {"appliances", "misc", "cooking"}},
-        "heat_pump_and_induction_stove": {"gas": {"hot_water"}, "electric": {"appliances", "misc", "cooking", "heating"}},
-        "water_heating": {"gas": {"cooking", "heating"}, "electric": {"hot_water", "appliances", "misc"}},
-        "heat_pump_and_induction_stove_and_water_heating": {"gas": {}, "electric": {"hot_water", "cooking", "heating", "appliances", "misc"}},
-        # EV scenarios
-        "baseline_ice_car": {"gas": {"heating", "hot_water", "cooking", "vehicle_fuel"}, "electric": {"appliances", "misc"}},
-        "baseline_ev_car": {"gas": {"heating", "hot_water", "cooking"}, "electric": {"appliances", "misc", "vehicle_charging"}},
-        "full_electric_ev": {"gas": set(), "electric": {"hot_water", "cooking", "heating", "appliances", "misc", "vehicle_charging"}},
-    }
 
     def __init__(self, scenario, housing_type, counties, rate_plans, input_dir, output_dir):
         self.scenario = scenario
@@ -57,17 +46,17 @@ class CostService:
         PullBuildings.process(scenario, self.housing_type, self.counties, output_base_dir="data", download_new_files=False) # output directory should just be 'data', not 'loadprofiles'
     
         self.log_step(3)
-        BuildElectricityLoadProfiles.process(scenario, self.SCENARIOS[scenario], self.housing_type, self.counties, "data", "data/loadprofiles", force_recompute=False)
+        BuildElectricityLoadProfiles.process(scenario, SCENARIOS[scenario], self.housing_type, self.counties, "data", "data/loadprofiles", force_recompute=False)
 
         self.log_step(4)
-        BuildGasLoadProfiles.process("data", "data/loadprofiles", scenario, self.SCENARIOS, self.housing_type, self.counties, force_recompute=False)
+        BuildGasLoadProfiles.process("data", "data/loadprofiles", scenario, SCENARIOS, self.housing_type, self.counties, force_recompute=False)
 
         self.log_step(5)
         ConvertGasToElectric.process("data/loadprofiles", "data/loadprofiles", self.counties, scenario, [self.housing_type], force_recompute=False)
 
         self.log_step(6)
         # Build vehicle load profiles (EV charging and/or ICE fuel consumption) based on scenario
-        BuildElectricVehicleLoadProfiles.process("data", "data/loadprofiles", scenario, self.SCENARIOS[scenario], [self.housing_type], self.counties, force_recompute=True)
+        BuildElectricVehicleLoadProfiles.process("data", "data/loadprofiles", scenario, SCENARIOS[scenario], [self.housing_type], self.counties, force_recompute=True)
 
         self.log_step(7)
         # Add EVs here so they get used in SAM model deployment
