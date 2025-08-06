@@ -284,13 +284,6 @@ def process(base_input_dir: str, base_output_dir: str, scenario: str,
                 print(f"Net Cost: ${breakdown['net_cost']:,.2f}")
                 print(f"Cost per Year: ${breakdown['cost_per_year']:,.2f}")
                 print(f"Lifetime: {breakdown['lifetime_years']} years")
-                
-                # Show required annual savings for different payback periods
-                for payback_years in [5, 10, 15]:
-                    required_savings = appliance.get_annual_cost_savings_needed_for_payback(
-                        payback_years, incentive_scenario
-                    )
-                    print(f"  {payback_years}-year payback needs: ${required_savings:,.2f}/year")
     
     # Show cost breakdown for gas appliances (no incentives)
     if gas_appliances:
@@ -335,31 +328,30 @@ def process(base_input_dir: str, base_output_dir: str, scenario: str,
 if __name__ == "__main__":
     import argparse
     from scenarios import SCENARIOS
+    from main_helpers import norcal_counties, socal_counties, central_counties
     
     parser = argparse.ArgumentParser(description="Build capital costs, lifetimes, and incentives for electrification scenarios")
-    parser.add_argument("--scenario", 
+    parser.add_argument("scenario", 
                        choices=list(SCENARIOS.keys()),
-                       default="heat_pump_and_induction_stove_and_water_heating",
                        help="Electrification scenario to analyze")
-    parser.add_argument("--housing-type",
-                       default="single-family-detached",
-                       help="Housing type to analyze")
-    parser.add_argument("--county",
-                       default="Alameda County", 
-                       help="County to analyze")
     
     args = parser.parse_args()
     
+    housing_type = "single-family-detached"
+    all_counties = norcal_counties + socal_counties + central_counties
+    
     print("=" * 70)
     print(f"ANALYZING SCENARIO: {args.scenario.upper()}")
+    print(f"Housing Type: {housing_type}")
+    print(f"Counties: {len(all_counties)} total")
     print("=" * 70)
     
     result = process(
         base_input_dir="data/loadprofiles",
         base_output_dir="data/loadprofiles", 
         scenario=args.scenario,
-        housing_type=args.housing_type,
-        counties=[args.county]
+        housing_type=housing_type,
+        counties=all_counties
     )
     
     print(f"\nResult summary for {args.scenario}:")
