@@ -95,7 +95,7 @@ class CostService:
         # Ensure that EV electricity costs are passed through to here too, applied with the right scenario.
         CombineTotalAnnualCosts.process("data/loadprofiles", "data/loadprofiles", scenario, [self.housing_type], self.counties)
 
-        MapPaybackVisualization.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties, self.desired_rate_plans)
+        # MapPaybackVisualization.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties, self.desired_rate_plans)
         
         self.log_step(14)
         # Display Maps for key metrics: 
@@ -114,7 +114,7 @@ class CostService:
         
         self.log_step(16)
         # Build Capital Cost classes for Cris's numbers as well
-        BuildCrisCapitalCosts.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties)
+        # BuildCrisCapitalCosts.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties)
 
         self.log_step(17)
         # Build Capital Costs, Lifetimes, Incentives (? if they apply) for the gas counterparts of each of the components in question
