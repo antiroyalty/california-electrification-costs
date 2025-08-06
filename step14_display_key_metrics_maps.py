@@ -181,6 +181,11 @@ def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: 
             "bins": [0, 2, 4, 6, 8, 10, 12, 15, 20],
             "unit": "kW"
         },
+        "Total Energy Consumption (kWh, therms)": {
+            "color_scheme": "Greens",
+            "bins": [0, 10000, 20000, 30000, 40000, 50000, 60000, 80000, 100000],
+            "unit": "kWh equiv."
+        },
         "Annual Electricity Bill ($)": {
             "subfolder": "electricity",
             "prefix": "RESULTS_electricity_annual_costs",
@@ -199,11 +204,6 @@ def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: 
             "bins": [0, 500, 1000, 1500, 2000, 2500, 3000, 4000],
             "unit": "$"
         },
-        "Total Energy Consumption (kWh, therms)": {
-            "color_scheme": "Greens",
-            "bins": [0, 10000, 20000, 30000, 40000, 50000, 60000, 80000, 100000],
-            "unit": "kWh equiv."
-        }
     }
     
     # Create individual maps
