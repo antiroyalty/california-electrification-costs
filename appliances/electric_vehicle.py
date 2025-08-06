@@ -1,22 +1,7 @@
-"""
-Electric vehicle appliance class for residential electrification cost modeling.
-
-This module defines the ElectricVehicleAppliance class used to model the capital costs,
-lifetime, and incentives for electric vehicles that replace internal combustion engine
-vehicles in residential electrification scenarios.
-"""
-
 from typing import Dict
 from step15_build_capital_costs_lifetimes_incentives import ElectricAppliance, Incentive, IncentiveScenario
 
 class ElectricVehicleAppliance(ElectricAppliance):
-    """
-    Class representing electric vehicles for home electrification.
-    
-    This class models the capital costs, lifetime, and incentives for electric
-    vehicles that replace gasoline-powered vehicles in residential electrification scenarios.
-    """
-    
     def __init__(self, 
                  vehicle_type: str = "BEV",
                  base_cost: float = 42000.0,
@@ -92,52 +77,4 @@ class ElectricVehicleAppliance(ElectricAppliance):
             "net_cost": self.get_net_cost(scenario),
             "incentives_detail": incentives_detail,
             "cost_per_year": self.get_net_cost(scenario) / self.lifetime_years
-        }
-    
-    def get_annual_cost_savings_needed_for_payback(self, 
-                                                  target_payback_years: float,
-                                                  scenario: IncentiveScenario = IncentiveScenario.FULL_INCENTIVES) -> float:
-        """
-        Calculate annual cost savings needed to achieve target payback period.
-        
-        Args:
-            target_payback_years: Desired payback period in years
-            scenario: Incentive scenario to use
-            
-        Returns:
-            Required annual savings in dollars to achieve target payback
-        """
-        net_cost = self.get_net_cost(scenario)
-        return net_cost / target_payback_years
-    
-    def get_total_cost_of_ownership(self, 
-                                   annual_fuel_savings: float = 1500.0,
-                                   annual_maintenance_savings: float = 400.0,
-                                   scenario: IncentiveScenario = IncentiveScenario.FULL_INCENTIVES) -> Dict:
-        """
-        Calculate total cost of ownership including fuel and maintenance savings.
-        
-        Args:
-            annual_fuel_savings: Annual savings from not buying gasoline (default: $1500)
-            annual_maintenance_savings: Annual savings from reduced maintenance (default: $400)
-            scenario: Incentive scenario to use
-            
-        Returns:
-            Dictionary with total cost of ownership analysis
-        """
-        net_purchase_cost = self.get_net_cost(scenario)
-        total_annual_savings = annual_fuel_savings + annual_maintenance_savings
-        total_savings_over_lifetime = total_annual_savings * self.lifetime_years
-        
-        net_total_cost = net_purchase_cost - total_savings_over_lifetime
-        
-        return {
-            "net_purchase_cost": net_purchase_cost,
-            "annual_fuel_savings": annual_fuel_savings,
-            "annual_maintenance_savings": annual_maintenance_savings,
-            "total_annual_savings": total_annual_savings,
-            "total_savings_over_lifetime": total_savings_over_lifetime,
-            "net_total_cost_of_ownership": net_total_cost,
-            "payback_period_years": net_purchase_cost / total_annual_savings if total_annual_savings > 0 else float('inf'),
-            "lifetime_years": self.lifetime_years
         }
