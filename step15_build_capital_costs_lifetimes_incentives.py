@@ -329,35 +329,38 @@ def process(base_input_dir: str, base_output_dir: str, scenario: str,
 
 
 if __name__ == "__main__":
-    # Test multiple scenarios to demonstrate appliance initialization
-    test_scenarios = [
-        "baseline",
-        "heat_pump", 
-        "induction_stove",
-        "heat_pump_and_induction_stove_and_water_heating",
-        "baseline_ice_car",
-        "baseline_ev_car",
-        "full_electric_ev"
-    ]
+    import argparse
+    from scenarios import SCENARIOS
     
-    for scenario in test_scenarios:
-        print("=" * 70)
-        print(f"TESTING SCENARIO: {scenario.upper()}")
-        print("=" * 70)
-        
-        result = process(
-            base_input_dir="data/loadprofiles",
-            base_output_dir="data/loadprofiles", 
-            scenario=scenario,
-            housing_type="single-family-detached",
-            counties=["Alameda County"]
-        )
-        
-        print(f"\nResult summary for {scenario}:")
-        if isinstance(result, dict):
-            print(f"  Electric appliances: {len(result.get('electric', {}))}")
-            print(f"  Gas appliances: {len(result.get('gas', {}))}")
-        else:
-            print(f"  Legacy result type: {type(result)}")
-        
-        print("\n")
+    parser = argparse.ArgumentParser(description="Build capital costs, lifetimes, and incentives for electrification scenarios")
+    parser.add_argument("--scenario", 
+                       choices=list(SCENARIOS.keys()),
+                       default="heat_pump_and_induction_stove_and_water_heating",
+                       help="Electrification scenario to analyze")
+    parser.add_argument("--housing-type",
+                       default="single-family-detached",
+                       help="Housing type to analyze")
+    parser.add_argument("--county",
+                       default="Alameda County", 
+                       help="County to analyze")
+    
+    args = parser.parse_args()
+    
+    print("=" * 70)
+    print(f"ANALYZING SCENARIO: {args.scenario.upper()}")
+    print("=" * 70)
+    
+    result = process(
+        base_input_dir="data/loadprofiles",
+        base_output_dir="data/loadprofiles", 
+        scenario=args.scenario,
+        housing_type=args.housing_type,
+        counties=[args.county]
+    )
+    
+    print(f"\nResult summary for {args.scenario}:")
+    if isinstance(result, dict):
+        print(f"  Electric appliances: {len(result.get('electric', {}))}")
+        print(f"  Gas appliances: {len(result.get('gas', {}))}")
+    else:
+        print(f"  Legacy result type: {type(result)}")
