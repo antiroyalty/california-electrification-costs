@@ -219,7 +219,9 @@ def process(base_input_dir: str, base_output_dir: str, scenario: str,
         ev = electric_appliance_classes["vehicle"](
             vehicle_type="Tesla_Model_3",
             base_cost=45000.0,
-            lifetime_years=12
+            lifetime_years=12,
+            annual_maintenance_cost=800.0,  # EVs typically have lower maintenance
+            annual_insurance_cost=1800.0    # Slightly lower than ICE due to safety features
         )
 
         # Add custom incentives in addition to what is defined in electric_vehicle.py
@@ -251,7 +253,9 @@ def process(base_input_dir: str, base_output_dir: str, scenario: str,
         gas_appliances["vehicle"] = gas_appliance_classes["vehicle"](
             vehicle_type="ICE",
             base_cost=35000.0,
-            lifetime_years=12
+            lifetime_years=12,
+            annual_maintenance_cost=1200.0,  # ICE vehicles have higher maintenance
+            annual_insurance_cost=2000.0     # Slightly higher than EV
         )
     
     if electric_appliances:
@@ -280,13 +284,6 @@ def process(base_input_dir: str, base_output_dir: str, scenario: str,
                 print(f"Net Cost: ${breakdown['net_cost']:,.2f}")
                 print(f"Cost per Year: ${breakdown['cost_per_year']:,.2f}")
                 print(f"Lifetime: {breakdown['lifetime_years']} years")
-                
-                # Show required annual savings for different payback periods
-                for payback_years in [5, 10, 15]:
-                    required_savings = appliance.get_annual_cost_savings_needed_for_payback(
-                        payback_years, incentive_scenario
-                    )
-                    print(f"  {payback_years}-year payback needs: ${required_savings:,.2f}/year")
     
     # Show cost breakdown for gas appliances (no incentives)
     if gas_appliances:
@@ -329,35 +326,37 @@ def process(base_input_dir: str, base_output_dir: str, scenario: str,
 
 
 if __name__ == "__main__":
-    # Test multiple scenarios to demonstrate appliance initialization
-    test_scenarios = [
-        "baseline",
-        "heat_pump", 
-        "induction_stove",
-        "heat_pump_and_induction_stove_and_water_heating",
-        "baseline_ice_car",
-        "baseline_ev_car",
-        "full_electric_ev"
-    ]
+    import argparse
+    from scenarios import SCENARIOS
+    from main_helpers import norcal_counties, socal_counties, central_counties
     
-    for scenario in test_scenarios:
-        print("=" * 70)
-        print(f"TESTING SCENARIO: {scenario.upper()}")
-        print("=" * 70)
-        
-        result = process(
-            base_input_dir="data/loadprofiles",
-            base_output_dir="data/loadprofiles", 
-            scenario=scenario,
-            housing_type="single-family-detached",
-            counties=["Alameda County"]
-        )
-        
-        print(f"\nResult summary for {scenario}:")
-        if isinstance(result, dict):
-            print(f"  Electric appliances: {len(result.get('electric', {}))}")
-            print(f"  Gas appliances: {len(result.get('gas', {}))}")
-        else:
-            print(f"  Legacy result type: {type(result)}")
-        
-        print("\n")
+    parser = argparse.ArgumentParser(description="Build capital costs, lifetimes, and incentives for electrification scenarios")
+    parser.add_argument("scenario", 
+                       choices=list(SCENARIOS.keys()),
+                       help="Electrification scenario to analyze")
+    
+    args = parser.parse_args()
+    
+    housing_type = "single-family-detached"
+    all_counties = norcal_counties + socal_counties + central_counties
+    
+    print("=" * 70)
+    print(f"ANALYZING SCENARIO: {args.scenario.upper()}")
+    print(f"Housing Type: {housing_type}")
+    print(f"Counties: {len(all_counties)} total")
+    print("=" * 70)
+    
+    result = process(
+        base_input_dir="data/loadprofiles",
+        base_output_dir="data/loadprofiles", 
+        scenario=args.scenario,
+        housing_type=housing_type,
+        counties=all_counties
+    )
+    
+    print(f"\nResult summary for {args.scenario}:")
+    if isinstance(result, dict):
+        print(f"  Electric appliances: {len(result.get('electric', {}))}")
+        print(f"  Gas appliances: {len(result.get('gas', {}))}")
+    else:
+        print(f"  Legacy result type: {type(result)}")
