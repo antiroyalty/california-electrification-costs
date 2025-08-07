@@ -291,25 +291,46 @@ def process(base_input_dir: str, base_output_dir: str, scenario: str,
         print("GAS APPLIANCES COST ANALYSIS")
         print(f"{'='*60}")
         
-        for appliance_name, appliance in gas_appliances.items():
-            print(f"\n=== GAS {appliance_name.upper()} ===")
-            breakdown = appliance.get_cost_breakdown()
+        # Show analysis for each county
+        for county in counties:
+            print(f"\n{'='*40}")
+            print(f"COUNTY: {county}")
+            print(f"{'='*40}")
             
-            print(f"Appliance: {breakdown['appliance_type']}")
-            print(f"Base Cost: ${breakdown['base_cost']:,.2f}")
-            print(f"Net Cost: ${breakdown['net_cost']:,.2f}")
-            print(f"Annual Cost: ${breakdown['annual_cost']:,.2f}")
-            print(f"Lifetime: {breakdown['lifetime_years']} years")
-            print(f"Has Incentives: {breakdown['has_incentives']}")
-            
-            # Show total cost of ownership if available
-            if hasattr(appliance, 'get_total_cost_of_ownership'):
-                try:
-                    tco = appliance.get_total_cost_of_ownership()
-                    if 'total_cost_of_ownership' in tco:
-                        print(f"Total Cost of Ownership: ${tco['total_cost_of_ownership']:,.2f}")
-                except:
-                    pass  # Skip if TCO calculation fails
+            for appliance_name, appliance in gas_appliances.items():
+                print(f"\n=== GAS {appliance_name.upper()} ===")
+                
+                # For ICE vehicles, pass county name to get fuel costs
+                if appliance_name == "vehicle":
+                    breakdown = appliance.get_cost_breakdown(county)
+                    print(f"County: {breakdown.get('county_name', 'N/A')}")
+                    print(f"Annual Fuel Cost: ${breakdown.get('annual_fuel_cost', 0):,.2f}")
+                else:
+                    breakdown = appliance.get_cost_breakdown()
+                
+                print(f"Appliance: {breakdown['appliance_type']}")
+                print(f"Base Cost: ${breakdown['base_cost']:,.2f}")
+                print(f"Net Cost: ${breakdown['net_cost']:,.2f}")
+                print(f"Annual Cost: ${breakdown['annual_cost']:,.2f}")
+                print(f"Lifetime: {breakdown['lifetime_years']} years")
+                print(f"Has Incentives: {breakdown['has_incentives']}")
+                
+                if 'annual_operating_cost' in breakdown:
+                    print(f"Annual Operating Cost: ${breakdown['annual_operating_cost']:,.2f}")
+                if 'total_cost_of_ownership' in breakdown:
+                    print(f"Total Cost of Ownership: ${breakdown['total_cost_of_ownership']:,.2f}")
+                
+                # Show total cost of ownership if available (legacy method)
+                if hasattr(appliance, 'get_total_cost_of_ownership'):
+                    try:
+                        if appliance_name == "vehicle":
+                            tco = appliance.get_total_cost_of_ownership(county)
+                        else:
+                            tco = appliance.get_total_cost_of_ownership()
+                        if 'total_cost_of_ownership' in tco:
+                            print(f"Legacy TCO: ${tco['total_cost_of_ownership']:,.2f}")
+                    except:
+                        pass  # Skip if TCO calculation fails
     
     all_appliances = {**electric_appliances, **gas_appliances}
     
