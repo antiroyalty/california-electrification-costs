@@ -3,11 +3,17 @@ from step15_build_capital_costs_lifetimes_incentives import ElectricAppliance, I
 
 class ElectricVehicleAppliance(ElectricAppliance):
     def __init__(self, 
-                 vehicle_type: str = "BEV",
-                 base_cost: float = 42000.0,
-                 lifetime_years: int = 12,
-                 annual_maintenance_cost: float = 800.0,
-                 annual_insurance_cost: float = 1800.0):
+                 vehicle_type: str = "BEV", # assuming midsize SUV (tesla model Y) for now, other values may be found in the excel 
+                 base_cost: float = 47500.0 + 1400.0, 
+                    # https://www.energy.gov/sites/default/files/2022-12/2022.12.23%202022%20Incremental%20Purchase%20Cost%20Methodology%20and%20Results%20for%20Clean%20Vehicles.pdf
+                    # https://www.itskrs.its.dot.gov/2020-sc00472 - L2 charger cost
+                # charger_cost: float = 1400.0, # https://www.itskrs.its.dot.gov/2020-sc00472 - L2 charger cost
+                 lifetime_years: int = 12, #between 12 and 15 https://afdc.energy.gov/files/u/publication/electric-drive_vehicles.pdf?46ed6d7f2c=
+                 annual_maintenance_cost: float = 121.56, 
+                    # https://theicct.org/wp-content/uploads/2021/06/EV-equity-feb2021.pdf - $/mile
+                    # https://www.fhwa.dot.gov/policyinformation/statistics/2022/mv1.cfm - # of vehicles in CA
+                    # https://www.fhwa.dot.gov/policyinformation/statistics/2022/vm2.cfm - # of miles driven in CA for all cars
+                 annual_insurance_cost: float = 2040.0): # https://theicct.org/wp-content/uploads/2021/06/EV-equity-feb2021.pdf - monthly insurance cost for EVs in CA
         """
         Initialize electric vehicle appliance.
         
@@ -25,7 +31,7 @@ class ElectricVehicleAppliance(ElectricAppliance):
         
         # Add default incentives based on current federal and California programs
         self._add_default_incentives()
-    
+
     def _add_default_incentives(self) -> None:
         """Add default federal and state incentives for electric vehicles."""
         # Federal Clean Vehicle Credit (through September 2025)
@@ -37,6 +43,16 @@ class ElectricVehicleAppliance(ElectricAppliance):
             source_url="https://www.irs.gov/credits-deductions/clean-vehicle-credits"
         )
         self.add_incentive(federal_credit)
+        
+        # # Federal Alternative Fuel Infrastructure Tax Credit for charging equipment.
+        # alt_fuel_infra_credit = Incentive(
+        #     name="Alternative Fuel Infrastructure Tax Credit",
+        #     value=min(0.30 * charger_cost, 1000.0), # 30% of charger cost, max $1,000.
+        #     unit="$",
+        #     description="Federal tax credit for installing qualified EV charging equipment. Covers 30 percent of the cost, up to a maximum of $1,000.",
+        #     source_url="https://afdc.energy.gov/laws/10513"
+        # )
+        # self.add_incentive(alt_fuel_infra_credit)
         
         # California utility rebates (average across PG&E, SCE, SDG&E)
         ca_utility_rebate = Incentive(
