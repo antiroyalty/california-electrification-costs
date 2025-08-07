@@ -1,4 +1,5 @@
 from typing import Dict
+from helpers.gasoline_cost_helper import calculate_annual_fuel_cost
 
 class ICEVehicleAppliance:
     def __init__(self, 
@@ -49,15 +50,19 @@ class ICEVehicleAppliance:
         Returns:
             Estimated annual operating cost for ICE vehicle
         """
-        from helpers.gasoline_cost_helper import calculate_annual_fuel_cost
         fuel_data = calculate_annual_fuel_cost(county_name, self.fuel_efficiency_mpg)
         annual_fuel_cost = fuel_data['annual_fuel_cost']
         
         return annual_fuel_cost + annual_maintenance_cost
     
-    def get_cost_breakdown(self) -> Dict:
+    def get_cost_breakdown(self, county_name: str) -> Dict:
         """Return detailed cost breakdown for ICE vehicle."""
-        annual_operating_cost = self.annual_maintenance_cost + self.annual_insurance_cost
+        # Calculate fuel costs using county-specific data
+        fuel_data = calculate_annual_fuel_cost(county_name, self.fuel_efficiency_mpg)
+        annual_fuel_cost = fuel_data['annual_fuel_cost']
+        
+        # Total operating costs include maintenance, insurance, and fuel
+        annual_operating_cost = self.annual_maintenance_cost + self.annual_insurance_cost + annual_fuel_cost
         total_operating_cost = annual_operating_cost * self.lifetime_years
         
         return {
@@ -72,7 +77,9 @@ class ICEVehicleAppliance:
             "total_incentives": 0.0,
             "annual_maintenance_cost": self.annual_maintenance_cost,
             "annual_insurance_cost": self.annual_insurance_cost,
+            "annual_fuel_cost": annual_fuel_cost,
             "annual_operating_cost": annual_operating_cost,
             "total_operating_cost_over_lifetime": total_operating_cost,
-            "total_cost_of_ownership": self.base_cost + total_operating_cost
+            "total_cost_of_ownership": self.base_cost + total_operating_cost,
+            "county_name": county_name
         }
