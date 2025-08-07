@@ -3,12 +3,15 @@ from helpers.gasoline_cost_helper import calculate_annual_fuel_cost
 
 class ICEVehicleAppliance:
     def __init__(self, 
-                 vehicle_type: str = "ICE",
-                 base_cost: float = 35000.0,
+                 vehicle_type: str = "ICE", # Assuming midsize SUV 
+                 base_cost: float = 33500.0, # https://www.energy.gov/sites/default/files/2022-12/2022.12.23%202022%20Incremental%20Purchase%20Cost%20Methodology%20and%20Results%20for%20Clean%20Vehicles.pdf
                  lifetime_years: int = 12,
-                 fuel_efficiency_mpg: float = 28.0,
-                 annual_maintenance_cost: float = 1200.0,
-                 annual_insurance_cost: float = 2000.0):
+                 fuel_efficiency_mpg: float = 24.25,
+                    #  https://www.fhwa.dot.gov/policyinformation/statistics/2022/mv1.cfm - # vehicles in CA
+                    #  https://www.energy.ca.gov/data-reports/energy-almanac/transportation-energy/california-gasoline-data-facts-and-statistics - #gas of gas sold 2024 CA
+                    #  https://www.fhwa.dot.gov/policyinformation/statistics/2022/vm2.cfm - VMT per year in CA
+                 annual_maintenance_cost: float = 283.65, # https://theicct.org/wp-content/uploads/2021/06/EV-equity-feb2021.pdf - $/mile multiplied by VMT/vehicle/year
+                 annual_insurance_cost: float = 1836.0): # https://theicct.org/wp-content/uploads/2021/06/EV-equity-feb2021.pdf - $/month multiplied by 12
         """
         Initialize ICE vehicle appliance.
         
@@ -36,7 +39,6 @@ class ICEVehicleAppliance:
         """Return annualized cost over the vehicle lifetime."""
         return self.base_cost / self.lifetime_years
 
-    
     def get_annual_operating_cost_estimate(self, 
                                          county_name: str,
                                          annual_maintenance_cost: float = 1200.0) -> float:
