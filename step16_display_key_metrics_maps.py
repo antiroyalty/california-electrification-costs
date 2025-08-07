@@ -6,6 +6,7 @@ Display diagnostic maps for key metrics in a single HTML file:
 - Total annual electricity bill in county, in $
 - Total annual gas bill in county, in $
 - Total annual energy consumption (electricity kWh, gas therms)
+- Solar+storage annual savings vs non-solar deployment, in $
 """
 
 import os
@@ -46,13 +47,12 @@ def load_energy_consumption_data(
     base_input_dir: str,
     scenario: str,
     housing_type: str,
-    county_name: str
+    county_slug: str
 ) -> tuple[float, float]:
     """
     Load annual energy consumption data for county.
     Returns (electricity_kwh, gas_therms)
     """
-    county_slug = slugify_county_name(f"{county_name} County")
     county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
     file_name = f"loadprofiles_for_rates_{county_slug}.csv"
     file_path = os.path.join(county_dir, file_name)
@@ -69,6 +69,113 @@ def load_energy_consumption_data(
     except Exception as exc:
         print(f"Warning: could not parse {file_path}: {exc}")
         return 0.0, 0.0
+
+
+def load_solar_savings_data(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+    rate_plan: str = "PG&E.E-TOU-D+PG&E.G-1"
+) -> float:
+    """
+    Load annual cost difference between solar+storage and non-solar scenarios.
+    Returns savings (positive) or extra costs (negative) in dollars.
+    """
+    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+    
+    # Find the latest total annual costs file
+    results_dir = os.path.join(county_dir, "results", "totals")
+    if not os.path.exists(results_dir):
+        print(f"Warning: Results directory not found: {results_dir}")
+        return 0.0
+    
+    file_path = get_latest_csv_file(results_dir, f"RESULTS_total_annual_costs_{county_slug}")
+    if not file_path:
+        print(f"Warning: No total costs file found for {county_slug}")
+        return 0.0
+    
+    try:
+        df = pd.read_csv(file_path, low_memory=False)
+        
+        # Find baseline and solar+storage costs
+        baseline_cost = None
+        solar_cost = None
+        
+        column_name = f"total.{rate_plan}"
+        if column_name not in df.columns:
+            # Use first available column
+            column_name = [col for col in df.columns if col.startswith("total.")][0]
+        
+        for _, row in df.iterrows():
+            scenario_name = row['scenario']
+            if scenario_name == scenario:
+                baseline_cost = float(row[column_name])
+            elif scenario_name == f"{scenario}.solarstorage":
+                solar_cost = float(row[column_name])
+        
+        if baseline_cost is not None and solar_cost is not None:
+            # Return savings (positive = savings, negative = extra cost)
+            return baseline_cost - solar_cost
+        else:
+            print(f"Warning: Could not find both baseline and solar costs for {county_slug}")
+            return 0.0
+            
+    except Exception as exc:
+        print(f"Warning: could not parse {file_path}: {exc}")
+        return 0.0
+
+
+def load_capital_costs_data(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str
+) -> float:
+    """
+    Load capital costs for the scenario from step15 capital costs summary files.
+    Returns the net outlay with full incentives.
+    """
+    # Capital costs files are in base_input_dir/capital_costs/
+    capital_costs_dir = os.path.join(base_input_dir, "capital_costs")
+    if not os.path.exists(capital_costs_dir):
+        print(f"Warning: Capital costs directory not found: {capital_costs_dir}")
+        return 0.0
+    
+    # Look for the summary file: capital_costs_summary_{scenario}_{housing_type}.csv
+    base_name = f"{scenario}_{housing_type.replace('-', '_')}"
+    summary_file = f"capital_costs_summary_{base_name}.csv"
+    file_path = os.path.join(capital_costs_dir, summary_file)
+    
+    if not os.path.exists(file_path):
+        print(f"Warning: Capital costs summary file not found: {file_path}")
+        return 0.0
+    
+    try:
+        df = pd.read_csv(file_path, low_memory=False)
+        
+        # Convert county_slug back to county name for matching
+        county_name = county_slug.replace("-", " ").title()
+        if not county_name.endswith(" County"):
+            county_name += " County"
+        
+        # Find the row for this county
+        county_row = df[df['county'].str.contains(county_name.replace(" County", ""), case=False, na=False)]
+        
+        if county_row.empty:
+            print(f"Warning: No capital costs data found for {county_name}")
+            return 0.0
+        
+        # Get the net outlay with full incentives
+        if 'net_outlay_full' not in df.columns:
+            print(f"Warning: net_outlay_full column not found in {file_path}")
+            return 0.0
+        
+        return float(county_row['net_outlay_full'].iloc[0])
+        
+    except Exception as exc:
+        print(f"Warning: could not parse capital costs file {file_path}: {exc}")
+        return 0.0
 
 
 def create_single_map(base_input_dir: str, scenario: str, housing_type: str, counties: list, 
@@ -100,12 +207,25 @@ def create_single_map(base_input_dir: str, scenario: str, housing_type: str, cou
                 
             elif metric_name == "Total Energy Consumption (kWh, therms)":
                 elec_kwh, gas_thm = load_energy_consumption_data(
-                    base_input_dir, scenario, housing_type, county_name
+                    base_input_dir, scenario, housing_type, county_slug
                 )
                 # Use kWh equivalent for color mapping
                 metric_value = elec_kwh + gas_thm * 29.3
                 # Display both values in tooltip
                 pretty = f"{to_decimal_number(elec_kwh)} kWh, {to_decimal_number(gas_thm)} therms"
+                gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
+                
+            elif metric_name == "Solar+Storage Annual Savings ($)":
+                metric_value = load_solar_savings_data(
+                    base_input_dir, scenario, housing_type, county_slug
+                )
+                # Format with appropriate sign (+ for savings, - for extra costs)
+                if metric_value > 0:
+                    pretty = f"+${to_decimal_number(abs(metric_value))}"
+                elif metric_value < 0:
+                    pretty = f"-${to_decimal_number(abs(metric_value))}"
+                else:
+                    pretty = "$0"
                 gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
                 
             else:
@@ -127,7 +247,6 @@ def create_single_map(base_input_dir: str, scenario: str, housing_type: str, cou
         except Exception as e:
             print(f"Warning: Could not load {metric_name} data for {county_name}: {e}")
     
-    # Create map
     m = folium.Map(
         location=[37.8, -120], 
         zoom_start=6, 
@@ -171,7 +290,7 @@ def create_single_map(base_input_dir: str, scenario: str, housing_type: str, cou
 
 def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: str, counties: list):
     """
-    Create a combined HTML dashboard with all 4 diagnostic maps.
+    Create a combined HTML dashboard with all 5 diagnostic maps.
     """
     
     # Define metrics configuration
@@ -202,6 +321,11 @@ def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: 
             "scenario_row": 0,
             "color_scheme": "Oranges",
             "bins": [0, 500, 1000, 1500, 2000, 2500, 3000, 4000],
+            "unit": "$"
+        },
+        "Solar+Storage Annual Savings ($)": {
+            "color_scheme": "RdYlGn",
+            "bins": [-2000, -1000, -500, 0, 500, 1000, 1500, 2000, 3000],
             "unit": "$"
         },
     }
@@ -243,9 +367,9 @@ def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: 
             }}
             .dashboard {{
                 display: grid;
-                grid-template-columns: 1fr 1fr;
+                grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
                 gap: 20px;
-                max-width: 1200px;
+                max-width: 1400px;
                 margin: 0 auto;
             }}
             .map-container {{

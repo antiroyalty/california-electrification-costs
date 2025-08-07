@@ -35,21 +35,10 @@ import pandas as pd
 import numpy as np
 import geopandas as gpd
 import folium
-from main_helpers import log, slugify_county_name, norcal_counties, socal_counties, central_counties
+from main_helpers import log, slugify_county_name, get_scenario_path, norcal_counties, socal_counties, central_counties
 from helpers.maps_helpers import initialize_map, get_latest_csv_file, create_folium_map
 
 def load_capital_costs(base_output_dir: str, scenario: str, housing_type: str) -> pd.DataFrame:
-    """
-    Load capital costs data from step15 output.
-    
-    Args:
-        base_output_dir: Base output directory
-        scenario: Scenario name
-        housing_type: Housing type
-        
-    Returns:
-        DataFrame with capital costs by county and incentive scenario
-    """
     capital_costs_dir = os.path.join(base_output_dir, "capital_costs")
     csv_filename = f"capital_costs_{scenario}_{housing_type.replace('-', '_')}.csv"
     csv_path = os.path.join(capital_costs_dir, csv_filename)
@@ -59,22 +48,19 @@ def load_capital_costs(base_output_dir: str, scenario: str, housing_type: str) -
     
     return pd.read_csv(csv_path)
 
-
-def load_annual_costs(county_dir: str, service: str, scenario: str = "baseline") -> float:
-    """
-    Load annual costs for a specific service and scenario.
-    
-    Args:
-        county_dir: County directory path
-        service: Service type ("electricity", "gas", "totals")
-        scenario: Scenario name (default: "baseline")
-        
-    Returns:
-        Annual cost value for the scenario
-    """
+def load_annual_costs(county_dir: str, service: str, scenario: str) -> float:
     results_dir = os.path.join(county_dir, "results", service)
     county_name = os.path.basename(county_dir)
-    prefix = f"RESULTS_{service}_annual_costs_{county_name}_"
+    
+    # Use different prefixes based on service type
+    if service == "electricity":
+        prefix = f"RESULTS_electricity_annual_costs_{county_name}_"
+    elif service == "gas":
+        prefix = f"RESULTS_gas_annual_costs_{county_name}_"
+    elif service in ["totals", "solarstorage"]:
+        prefix = f"RESULTS_total_annual_costs_{county_name}_"
+    else:
+        raise ValueError(f"Unknown service type: {service}")
     
     try:
         latest_file = get_latest_csv_file(results_dir, prefix)
@@ -106,29 +92,26 @@ def load_annual_costs(county_dir: str, service: str, scenario: str = "baseline")
 
 def calculate_payback_periods(base_input_dir: str, base_output_dir: str, scenario: str, 
                             housing_type: str, counties: list) -> pd.DataFrame:
-    """
-    Calculate payback periods for all counties and incentive scenarios.
-    
-    Args:
-        base_input_dir: Input directory path
-        base_output_dir: Output directory path  
-        scenario: Electrification scenario
-        housing_type: Housing type
-        counties: List of county names
-        
-    Returns:
-        DataFrame with payback periods by county and incentive scenario
-    """
-    # Load capital costs
     try:
         capital_costs_df = load_capital_costs(base_output_dir, scenario, housing_type)
-    except FileNotFoundError:
+        print(f"DEBUG: Loaded capital costs DataFrame with {len(capital_costs_df)} rows")
+        print(f"DEBUG: Capital costs columns: {capital_costs_df.columns.tolist()}")
+        if not capital_costs_df.empty:
+            print(f"DEBUG: Unique counties in capital costs: {capital_costs_df['county'].unique()}")
+            print(f"DEBUG: Unique incentive scenarios: {capital_costs_df['incentive_scenario'].unique()}")
+    except FileNotFoundError as e:
+        print(f"DEBUG: Capital costs file not found: {e}")
         log(
             at="step15_maps_payback_period",
             info="no_capital_costs_found",
             scenario=scenario,
+            error=str(e),
             note="Run step15_build_capital_costs_lifetimes_incentives.py first"
         )
+        return pd.DataFrame()
+    
+    if capital_costs_df.empty:
+        print(f"DEBUG: Capital costs DataFrame is empty for scenario {scenario}")
         return pd.DataFrame()
     
     # Aggregate capital costs by county and incentive scenario
@@ -137,29 +120,46 @@ def calculate_payback_periods(base_input_dir: str, base_output_dir: str, scenari
         'total_cost_of_ownership': 'sum'
     }).reset_index()
     
+    print(f"DEBUG: Capital summary has {len(capital_summary)} rows")
+    if not capital_summary.empty:
+        print(f"DEBUG: Capital summary counties: {capital_summary['county'].unique()}")
+    
     payback_data = []
+    counties_processed = 0
+    counties_with_data = 0
     
     for county in counties:
         county_slug = slugify_county_name(county)
-        county_dir = os.path.join(base_input_dir, county_slug)
         
-        if not os.path.exists(county_dir):
-            log(
-                at="step15_maps_payback_period",
-                info="county_directory_not_found", 
-                county=county,
-                county_dir=county_dir
-            )
+        # Use get_scenario_path helper to get correct directory structure
+        baseline_scenario_dir = get_scenario_path(base_input_dir, "baseline", housing_type)
+        scenario_scenario_dir = get_scenario_path(base_input_dir, scenario, housing_type)
+        
+        # Add county to the path
+        baseline_county_dir = os.path.join(baseline_scenario_dir, county_slug)
+        scenario_county_dir = os.path.join(scenario_scenario_dir, county_slug)
+        
+        counties_processed += 1
+        
+        if not os.path.exists(baseline_county_dir):
+            print(f"DEBUG: Baseline county directory not found: {baseline_county_dir}")
+            continue
+            
+        if not os.path.exists(scenario_county_dir):
+            print(f"DEBUG: Scenario county directory not found: {scenario_county_dir}")
             continue
         
         # Load annual costs for baseline and scenario
-        baseline_total_cost = load_annual_costs(county_dir, "totals", "baseline")
-        scenario_total_cost = load_annual_costs(county_dir, "totals", scenario)
+        baseline_total_cost = load_annual_costs(baseline_county_dir, "totals", "baseline")
+        scenario_total_cost = load_annual_costs(scenario_county_dir, "totals", scenario)
+        
+        print(f"DEBUG: {county} - Baseline cost: {baseline_total_cost}, Scenario cost: {scenario_total_cost}")
         
         # Calculate annual savings (baseline - scenario)
         annual_savings = baseline_total_cost - scenario_total_cost
         
         if annual_savings <= 0:
+            print(f"DEBUG: {county} - No savings (baseline: {baseline_total_cost}, scenario: {scenario_total_cost})")
             log(
                 at="step15_maps_payback_period",
                 info="no_annual_savings",
@@ -174,12 +174,21 @@ def calculate_payback_periods(base_input_dir: str, base_output_dir: str, scenari
         # Get capital costs for this county
         county_capital = capital_summary[capital_summary['county'] == county]
         
+        if county_capital.empty:
+            print(f"DEBUG: No capital costs found for county: {county}")
+            continue
+        
+        print(f"DEBUG: {county} - Found {len(county_capital)} capital cost entries")
+        counties_with_data += 1
+        
         for _, row in county_capital.iterrows():
             incentive_scenario = row['incentive_scenario']
             net_capital_cost = row['net_cost']
             
             # Calculate payback period in years
             payback_years = net_capital_cost / annual_savings if annual_savings > 0 else float('inf')
+            
+            print(f"DEBUG: {county} {incentive_scenario} - Capital: {net_capital_cost}, Savings: {annual_savings}, Payback: {payback_years}")
             
             payback_data.append({
                 'county': county,
@@ -192,6 +201,9 @@ def calculate_payback_periods(base_input_dir: str, base_output_dir: str, scenari
                 'net_capital_cost': net_capital_cost,
                 'payback_period_years': payback_years
             })
+    
+    print(f"DEBUG: Processed {counties_processed} counties, {counties_with_data} had capital cost data")
+    print(f"DEBUG: Generated {len(payback_data)} payback data entries")
     
     return pd.DataFrame(payback_data)
 
@@ -323,7 +335,7 @@ def process(base_input_dir: str, base_output_dir: str, scenario: str, housing_ty
     
     # Calculate payback periods
     payback_df = calculate_payback_periods(base_input_dir, base_output_dir, scenario, housing_type, counties)
-    
+
     if payback_df.empty:
         log(
             at="step15_maps_payback_period",
@@ -332,11 +344,11 @@ def process(base_input_dir: str, base_output_dir: str, scenario: str, housing_ty
         )
         return
     
-    # Save payback data to CSV
-    payback_output_dir = os.path.join(base_output_dir, "payback_periods")
+    # Save payback data to CSV in data/results/single-family-detached/
+    payback_output_dir = os.path.join("data", "results", housing_type)
     os.makedirs(payback_output_dir, exist_ok=True)
     
-    payback_csv_path = os.path.join(payback_output_dir, f"payback_periods_{scenario}_{housing_type.replace('-', '_')}.csv")
+    payback_csv_path = os.path.join(payback_output_dir, f"payback_periods_{scenario}.csv")
     payback_df.to_csv(payback_csv_path, index=False)
     print(f"Payback period data saved: {payback_csv_path}")
     
@@ -353,6 +365,13 @@ def process(base_input_dir: str, base_output_dir: str, scenario: str, housing_ty
         
         create_payback_period_map(payback_df, incentive_scenario, map_path)
         print(f"Payback period map created: {map_path}")
+    
+    # Auto-open the first map in the browser
+    if len(incentive_scenarios) > 0:
+        import webbrowser
+        first_map_filename = f"payback_period_map_{scenario}_{incentive_scenarios[0]}_{housing_type.replace('-', '_')}.html"
+        first_map_path = os.path.join(maps_output_dir, first_map_filename)
+        webbrowser.open('file://' + os.path.abspath(first_map_path))
     
     log(
         at="step15_maps_payback_period",
@@ -374,7 +393,7 @@ if __name__ == "__main__":
                        help="Electrification scenario to analyze")
     
     args = parser.parse_args()
-    
+
     # Fixed parameters
     housing_type = "single-family-detached"
     all_counties = norcal_counties + socal_counties + central_counties
