@@ -1,7 +1,8 @@
 """
-Step 15 Maps: Build Payback Period Maps
+Step 15: Calculate Payback Period Data
 
-Build maps showing payback periods for electrification scenarios based on:
+Calculate payback periods for electrification scenarios and save to CSV files.
+Based on:
 - Annual savings from operational cost differences
 - Capital costs from appliances and equipment
 - County-specific data variations
@@ -23,20 +24,16 @@ Payback Period Calculation:
 - Annual Savings = Baseline Annual Costs - Scenario Annual Costs
 - Payback Period = Net Capital Costs / Annual Savings (in years)
 
-Maps Generated:
-- Payback period by county for full incentives
-- Payback period by county for half incentives  
-- Payback period by county for no incentives
-- Comparison maps between incentive scenarios
+Output:
+- CSV file: data/results/{housing_type}/payback_periods_{scenario}.csv
+  Contains payback period data by county and incentive scenario
 """
 
 import os
 import pandas as pd
 import numpy as np
-import geopandas as gpd
-import folium
 from main_helpers import log, slugify_county_name, get_scenario_path, norcal_counties, socal_counties, central_counties
-from helpers.maps_helpers import initialize_map, get_latest_csv_file, create_folium_map
+from helpers.maps_helpers import get_latest_csv_file
 
 def load_capital_costs(base_output_dir: str, scenario: str, housing_type: str) -> pd.DataFrame:
     capital_costs_dir = os.path.join(base_output_dir, "capital_costs")
@@ -70,7 +67,7 @@ def load_annual_costs(county_dir: str, service: str, scenario: str) -> float:
             return float(df.loc[scenario].iloc[0] if hasattr(df.loc[scenario], 'iloc') else df.loc[scenario])
         else:
             log(
-                at="step15_maps_payback_period",
+                at="step15_payback_period_calculations",
                 info="scenario_not_found",
                 county=county_name,
                 scenario=scenario,
@@ -80,7 +77,7 @@ def load_annual_costs(county_dir: str, service: str, scenario: str) -> float:
             
     except (FileNotFoundError, Exception) as e:
         log(
-            at="step15_maps_payback_period", 
+            at="step15_payback_period_calculations", 
             info="failed_to_load_annual_costs",
             county=county_name,
             service=service,
@@ -161,7 +158,7 @@ def calculate_payback_periods(base_input_dir: str, base_output_dir: str, scenari
         if annual_savings <= 0:
             print(f"DEBUG: {county} - No savings (baseline: {baseline_total_cost}, scenario: {scenario_total_cost})")
             log(
-                at="step15_maps_payback_period",
+                at="step15_payback_period_calculations",
                 info="no_annual_savings",
                 county=county,
                 baseline_cost=baseline_total_cost,
@@ -208,115 +205,11 @@ def calculate_payback_periods(base_input_dir: str, base_output_dir: str, scenari
     return pd.DataFrame(payback_data)
 
 
-def create_payback_period_map(payback_df: pd.DataFrame, incentive_scenario: str, 
-                             output_path: str) -> None:
-    """
-    Create a folium map showing payback periods by county.
-    
-    Args:
-        payback_df: DataFrame with payback period data
-        incentive_scenario: Incentive scenario to map
-        output_path: Output HTML file path
-    """
-    # Filter data for the specific incentive scenario
-    scenario_data = payback_df[payback_df['incentive_scenario'] == incentive_scenario].copy()
-    
-    if scenario_data.empty:
-        log(
-            at="step15_maps_payback_period",
-            info="no_data_for_incentive_scenario",
-            incentive_scenario=incentive_scenario
-        )
-        return
-    
-    # Load California counties geodata
-    gdf = initialize_map()
-    
-    # Merge payback data with geodata
-    gdf = gdf.merge(scenario_data, left_on='NAME', right_on='county_slug', how='left')
-    
-    # Create color mapping based on payback periods
-    # Cap payback periods at 30 years for color mapping
-    max_payback = min(scenario_data['payback_period_years'].max(), 30.0)
-    min_payback = scenario_data['payback_period_years'].min()
-    
-    def get_payback_color(payback_years):
-        if pd.isna(payback_years) or payback_years == float('inf'):
-            return "#cccccc"  # Gray for no data or infinite payback
-        
-        # Normalize payback period to 0-1 range
-        normalized = (payback_years - min_payback) / (max_payback - min_payback) if max_payback > min_payback else 0
-        normalized = max(0, min(1, normalized))  # Clamp to 0-1
-        
-        # Color scale: Green (short payback) to Red (long payback)
-        # Green: (0, 128, 0), Red: (255, 0, 0)
-        r = int(255 * normalized)
-        g = int(128 * (1 - normalized))
-        b = 0
-        
-        return f"#{r:02x}{g:02x}{b:02x}"
-    
-    # Create map
-    center_lat, center_lon = 36.7783, -119.4179  # California center
-    m = folium.Map(location=[center_lat, center_lon], zoom_start=6)
-    
-    # Add choropleth layer
-    for _, row in gdf.iterrows():
-        if pd.notna(row.get('payback_period_years')):
-            color = get_payback_color(row['payback_period_years'])
-            popup_text = f"""
-            <b>{row['NAME']} County</b><br>
-            Payback Period: {row['payback_period_years']:.1f} years<br>
-            Annual Savings: ${row['annual_savings']:,.0f}<br>
-            Capital Cost: ${row['net_capital_cost']:,.0f}<br>
-            Incentive Scenario: {incentive_scenario.replace('_', ' ').title()}
-            """
-        else:
-            color = "#cccccc"
-            popup_text = f"<b>{row['NAME']} County</b><br>No data available"
-        
-        folium.GeoJson(
-            row['geometry'],
-            style_function=lambda x, color=color: {
-                'fillColor': color,
-                'color': 'black',
-                'weight': 1,
-                'fillOpacity': 0.7
-            },
-            popup=folium.Popup(popup_text, max_width=300)
-        ).add_to(m)
-    
-    # Add legend
-    legend_html = f"""
-    <div style="position: fixed; 
-                bottom: 50px; left: 50px; width: 200px; height: 120px; 
-                background-color: white; border:2px solid grey; z-index:9999; 
-                font-size:14px; padding: 10px">
-    <b>Payback Period (Years)</b><br>
-    <i style="background: #00ff00; width: 20px; height: 20px; float: left; margin-right: 8px;"></i>
-    {min_payback:.1f} (Best)<br>
-    <i style="background: #ff0000; width: 20px; height: 20px; float: left; margin-right: 8px;"></i>
-    {max_payback:.1f}+ (Worst)<br>
-    <i style="background: #cccccc; width: 20px; height: 20px; float: left; margin-right: 8px;"></i>
-    No data
-    </div>
-    """
-    m.get_root().html.add_child(folium.Element(legend_html))
-    
-    # Save map
-    m.save(output_path)
-    log(
-        at="step15_maps_payback_period",
-        info="map_created",
-        incentive_scenario=incentive_scenario,
-        output_path=output_path,
-        counties_with_data=len(scenario_data)
-    )
 
 
 def process(base_input_dir: str, base_output_dir: str, scenario: str, housing_type: str, counties: list):
     """
-    Build payback period maps for the specified electrification scenario.
+    Calculate payback period data for the specified electrification scenario and save to CSV.
     
     Args:
         base_input_dir: Input directory path
@@ -326,8 +219,8 @@ def process(base_input_dir: str, base_output_dir: str, scenario: str, housing_ty
         counties: List of counties to process
     """
     log(
-        at="step15_maps_payback_period",
-        info="starting_payback_maps",
+        at="step15_payback_period_calculations",
+        info="starting_payback_calculations",
         scenario=scenario,
         housing_type=housing_type,
         counties_count=len(counties)
@@ -338,7 +231,7 @@ def process(base_input_dir: str, base_output_dir: str, scenario: str, housing_ty
 
     if payback_df.empty:
         log(
-            at="step15_maps_payback_period",
+            at="step15_payback_period_calculations",
             info="no_payback_data_calculated",
             scenario=scenario
         )
@@ -352,32 +245,11 @@ def process(base_input_dir: str, base_output_dir: str, scenario: str, housing_ty
     payback_df.to_csv(payback_csv_path, index=False)
     print(f"Payback period data saved: {payback_csv_path}")
     
-    # Create maps directory
-    maps_output_dir = os.path.join(base_output_dir, "maps", "payback_periods")
-    os.makedirs(maps_output_dir, exist_ok=True)
-    
-    # Create maps for each incentive scenario
-    incentive_scenarios = payback_df['incentive_scenario'].unique()
-    
-    for incentive_scenario in incentive_scenarios:
-        map_filename = f"payback_period_map_{scenario}_{incentive_scenario}_{housing_type.replace('-', '_')}.html"
-        map_path = os.path.join(maps_output_dir, map_filename)
-        
-        create_payback_period_map(payback_df, incentive_scenario, map_path)
-        print(f"Payback period map created: {map_path}")
-    
-    # Auto-open the first map in the browser
-    if len(incentive_scenarios) > 0:
-        import webbrowser
-        first_map_filename = f"payback_period_map_{scenario}_{incentive_scenarios[0]}_{housing_type.replace('-', '_')}.html"
-        first_map_path = os.path.join(maps_output_dir, first_map_filename)
-        webbrowser.open('file://' + os.path.abspath(first_map_path))
-    
     log(
-        at="step15_maps_payback_period",
-        info="payback_maps_completed",
+        at="step15_payback_period_calculations",
+        info="payback_data_completed",
         scenario=scenario,
-        maps_created=len(incentive_scenarios),
+        csv_path=payback_csv_path,
         average_payback=payback_df['payback_period_years'].mean()
     )
 
