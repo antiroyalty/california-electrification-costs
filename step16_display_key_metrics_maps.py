@@ -1,11 +1,13 @@
 """
-Step 14: Display Key Metrics Maps
+Step 16: Display Key Metrics Maps
 
 Display diagnostic maps for key metrics in a single HTML file:
 - Average solar panel size in county
 - Total annual electricity bill in county, in $
 - Total annual gas bill in county, in $
 - Total annual energy consumption (electricity kWh, gas therms)
+- Solar+storage annual savings vs non-solar deployment, in $
+- Capital costs (net outlay with full incentives) for scenario appliances, in $
 """
 
 import os
@@ -46,13 +48,12 @@ def load_energy_consumption_data(
     base_input_dir: str,
     scenario: str,
     housing_type: str,
-    county_name: str
+    county_slug: str
 ) -> tuple[float, float]:
     """
     Load annual energy consumption data for county.
     Returns (electricity_kwh, gas_therms)
     """
-    county_slug = slugify_county_name(f"{county_name} County")
     county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
     file_name = f"loadprofiles_for_rates_{county_slug}.csv"
     file_path = os.path.join(county_dir, file_name)
@@ -69,6 +70,118 @@ def load_energy_consumption_data(
     except Exception as exc:
         print(f"Warning: could not parse {file_path}: {exc}")
         return 0.0, 0.0
+
+
+def load_solar_savings_data(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+    rate_plan: str = "PG&E.E-TOU-D+PG&E.G-1"
+) -> float:
+    """
+    Load annual cost difference between solar+storage and non-solar scenarios.
+    Returns savings (positive) or extra costs (negative) in dollars.
+    """
+    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+    
+    # Find the latest total annual costs file
+    results_dir = os.path.join(county_dir, "results", "totals")
+    if not os.path.exists(results_dir):
+        print(f"Warning: Results directory not found: {results_dir}")
+        return 0.0
+    
+    file_path = get_latest_csv_file(results_dir, f"RESULTS_total_annual_costs_{county_slug}")
+    if not file_path:
+        print(f"Warning: No total costs file found for {county_slug}")
+        return 0.0
+    
+    try:
+        df = pd.read_csv(file_path, low_memory=False)
+        
+        # Find baseline and solar+storage costs
+        baseline_cost = None
+        solar_cost = None
+        
+        column_name = f"total.{rate_plan}"
+        if column_name not in df.columns:
+            # Use first available column
+            column_name = [col for col in df.columns if col.startswith("total.")][0]
+        
+        for _, row in df.iterrows():
+            scenario_name = row['scenario']
+            if scenario_name == scenario:
+                baseline_cost = float(row[column_name])
+            elif scenario_name == f"{scenario}.solarstorage":
+                solar_cost = float(row[column_name])
+        
+        if baseline_cost is not None and solar_cost is not None:
+            # Return savings (positive = savings, negative = extra cost)
+            return baseline_cost - solar_cost
+        else:
+            print(f"Warning: Could not find both baseline and solar costs for {county_slug}")
+            return 0.0
+            
+    except Exception as exc:
+        print(f"Warning: could not parse {file_path}: {exc}")
+        return 0.0
+
+
+def load_capital_costs_data(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str
+) -> float:
+    """
+    Load capital costs for the scenario from step15 capital costs files.
+    Returns the total net cost for all appliances with full incentives.
+    """
+    # Capital costs files are in base_input_dir/capital_costs/
+    capital_costs_dir = os.path.join(base_input_dir, "capital_costs")
+    if not os.path.exists(capital_costs_dir):
+        print(f"Warning: Capital costs directory not found: {capital_costs_dir}")
+        return 0.0
+    
+    # Look for the detailed file: capital_costs_{scenario}_{housing_type}.csv
+    base_name = f"{scenario}_{housing_type.replace('-', '_')}"
+    capital_costs_file = f"capital_costs_{base_name}.csv"
+    file_path = os.path.join(capital_costs_dir, capital_costs_file)
+    
+    if not os.path.exists(file_path):
+        print(f"Warning: Capital costs file not found: {file_path}")
+        return 0.0
+    
+    try:
+        df = pd.read_csv(file_path, low_memory=False)
+        
+        # Convert county_slug back to county name for matching
+        county_name = county_slug.replace("-", " ").title()
+        if not county_name.endswith(" County"):
+            county_name += " County"
+        
+        # Filter for this county and full incentives scenario
+        county_data = df[
+            (df['county'].str.contains(county_name.replace(" County", ""), case=False, na=False)) &
+            (df['incentive_scenario'] == 'full_incentives')
+        ]
+        
+        if county_data.empty:
+            print(f"Warning: No capital costs data found for {county_name} with full incentives")
+            return 0.0
+        
+        # Check if net_cost column exists
+        if 'net_cost' not in df.columns:
+            print(f"Warning: net_cost column not found in {file_path}")
+            return 0.0
+        
+        # Sum up all net costs for this county with full incentives
+        total_net_cost = county_data['net_cost'].sum()
+        return float(total_net_cost)
+        
+    except Exception as exc:
+        print(f"Warning: could not parse capital costs file {file_path}: {exc}")
+        return 0.0
 
 
 def create_single_map(base_input_dir: str, scenario: str, housing_type: str, counties: list, 
@@ -100,12 +213,33 @@ def create_single_map(base_input_dir: str, scenario: str, housing_type: str, cou
                 
             elif metric_name == "Total Energy Consumption (kWh, therms)":
                 elec_kwh, gas_thm = load_energy_consumption_data(
-                    base_input_dir, scenario, housing_type, county_name
+                    base_input_dir, scenario, housing_type, county_slug
                 )
                 # Use kWh equivalent for color mapping
                 metric_value = elec_kwh + gas_thm * 29.3
                 # Display both values in tooltip
                 pretty = f"{to_decimal_number(elec_kwh)} kWh, {to_decimal_number(gas_thm)} therms"
+                gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
+                
+            elif metric_name == "Solar+Storage Annual Savings ($)":
+                metric_value = load_solar_savings_data(
+                    base_input_dir, scenario, housing_type, county_slug
+                )
+                # Format with appropriate sign (+ for savings, - for extra costs)
+                if metric_value > 0:
+                    pretty = f"+${to_decimal_number(abs(metric_value))}"
+                elif metric_value < 0:
+                    pretty = f"-${to_decimal_number(abs(metric_value))}"
+                else:
+                    pretty = "$0"
+                gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
+                
+            elif metric_name == "Capital Costs ($)":
+                metric_value = load_capital_costs_data(
+                    base_input_dir, scenario, housing_type, county_slug
+                )
+                # Format as currency
+                pretty = f"${to_decimal_number(abs(metric_value))}"
                 gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
                 
             else:
@@ -127,7 +261,6 @@ def create_single_map(base_input_dir: str, scenario: str, housing_type: str, cou
         except Exception as e:
             print(f"Warning: Could not load {metric_name} data for {county_name}: {e}")
     
-    # Create map
     m = folium.Map(
         location=[37.8, -120], 
         zoom_start=6, 
@@ -171,7 +304,7 @@ def create_single_map(base_input_dir: str, scenario: str, housing_type: str, cou
 
 def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: str, counties: list):
     """
-    Create a combined HTML dashboard with all 4 diagnostic maps.
+    Create a combined HTML dashboard with all 6 diagnostic maps.
     """
     
     # Define metrics configuration
@@ -202,6 +335,16 @@ def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: 
             "scenario_row": 0,
             "color_scheme": "Oranges",
             "bins": [0, 500, 1000, 1500, 2000, 2500, 3000, 4000],
+            "unit": "$"
+        },
+        "Solar+Storage Annual Savings ($)": {
+            "color_scheme": "RdYlGn",
+            "bins": [-2000, -1000, -500, 0, 500, 1000, 1500, 2000, 3000],
+            "unit": "$"
+        },
+        "Capital Costs, Net After Incentives ($)": {
+            "color_scheme": "Blues",
+            "bins": [0, 5000, 10000, 15000, 20000, 25000, 30000, 40000, 50000],
             "unit": "$"
         },
     }
@@ -243,9 +386,9 @@ def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: 
             }}
             .dashboard {{
                 display: grid;
-                grid-template-columns: 1fr 1fr;
+                grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
                 gap: 20px;
-                max-width: 1200px;
+                max-width: 1400px;
                 margin: 0 auto;
             }}
             .map-container {{
@@ -356,6 +499,17 @@ def process(base_input_dir: str, base_output_dir: str, scenario: str,
 
 
 if __name__ == "__main__":
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Display key metrics maps for electrification scenario")
+    parser.add_argument("scenario", help="Electrification scenario to analyze (e.g., 'baseline', 'heat_pump', etc.)")
+    parser.add_argument("--housing-type", default="single-family-detached", 
+                       help="Housing type (default: single-family-detached)")
+    parser.add_argument("--counties", nargs="+", default=["Alameda County"],
+                       help="Counties to analyze (default: Alameda County)")
+    
+    args = parser.parse_args()
+    
     # Test configuration
     desired_rate_plans = {
         "PG&E": {"electricity": "E-TOU-D", "gas": "G-1"},
@@ -366,8 +520,8 @@ if __name__ == "__main__":
     process(
         base_input_dir="data/loadprofiles",
         base_output_dir="data/loadprofiles",
-        scenario="baseline",
-        housing_type="single-family-detached",
-        counties=["Alameda County"],
+        scenario=args.scenario,
+        housing_type=args.housing_type,
+        counties=args.counties,
         desired_rate_plans=desired_rate_plans
     )

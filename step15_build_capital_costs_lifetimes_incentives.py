@@ -14,10 +14,11 @@ I want the ability to configure different Component "scenarios", like:
 """
 
 import os
-from main_helpers import log
+import pandas as pd
+from main_helpers import log, slugify_county_name
 from scenarios import SCENARIOS
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
 
@@ -77,25 +78,89 @@ class ElectricAppliance(ABC):
         """Return detailed cost breakdown including incentives."""
         pass
 
+from typing import Dict, Set
+
+from typing import Dict, Set, Tuple
+
+def diff_scenarios(
+    scenario: str,
+    base: str = "baseline",
+)  -> dict[str, set[str]]:
+    """
+    Compare `scenario` with the `base` scenario (defaults to "baseline")
+    and return two dictionaries:
+
+        • electric_added  – end-uses that are electric in `scenario` but were
+                            *not* electric in `base`  (includes gas→electric moves
+                            *and* entirely new electric loads).
+
+        • gas_removed     – end-uses that were gas in `base` and are *no longer*
+                            gas in `scenario`  (i.e. converted to electric or
+                            removed altogether).
+
+    Example
+    -------
+    >>> e_added, g_removed = diff_scenarios("heat_pump")
+    >>> e_added    # {'heating'}
+    >>> g_removed  # {'heating'}
+    """
+    try:
+        base_cfg   = SCENARIOS[base]
+        target_cfg = SCENARIOS[scenario]
+    except KeyError as err:
+        raise ValueError(f"Unknown scenario '{err.args[0]}'") from None
+
+    # --- convenience shortcuts -----------------------------------------
+    base_elec   = base_cfg.get("electric", set())
+    base_gas    = base_cfg.get("gas", set())
+    target_elec = target_cfg.get("electric", set())
+    target_gas  = target_cfg.get("gas", set())
+
+    # --- what’s new on the electric side -------------------------------
+    electric_added = target_elec - base_elec        # new or moved-from-gas
+
+    # --- what’s vanished from the gas side -----------------------------
+    gas_removed = base_gas - target_gas             # moved to electric or dropped
+
+    return {"electric_added": electric_added, "gas_removed": gas_removed}
+
+def net_outlay_by_scenario(
+    electric: dict[str, "ElectricAppliance"],
+    gas: dict[str, "ElectricAppliance"],
+) -> dict[IncentiveScenario, float]:
+    """
+    Return a dict mapping each IncentiveScenario → summed net capital cost
+    (electric - incentives) minus gas‐appliance capital cost.
+
+    If the scenario does not replace a given gas appliance (e.g. induction stove
+    when there was no gas stove), the gas cost is treated as 0.
+    """
+    gas_baseline = {name: app.base_cost for name, app in gas.items()}
+
+    net_totals = defaultdict(float)         # {scenario: total $}
+
+    for name, e_app in electric.items():
+        gas_cost = gas_baseline.get(name, 0.0)
+
+        for sc in (
+            IncentiveScenario.FULL_INCENTIVES,
+            IncentiveScenario.HALF_INCENTIVES,
+            IncentiveScenario.NO_INCENTIVES,
+        ):
+            electric_net = e_app.get_net_cost(sc)
+            net_totals[sc] += electric_net - gas_cost      # add difference
+
+    return net_totals
 
 def get_appliances_for_scenario(scenario: str) -> Dict[str, type]:
-    """
-    Determine which electric appliances are needed based on the scenario.
-    
-    Args:
-        scenario: Scenario name from CostService.SCENARIOS
-        
-    Returns:
-        Dictionary mapping appliance type to appliance class
-    """
-    
     if scenario not in SCENARIOS:
         raise ValueError(f"Unknown scenario: {scenario}. Available scenarios: {list(SCENARIOS.keys())}")
     
-    scenario_config = SCENARIOS[scenario]
-    electric_appliances = scenario_config.get("electric", set())
+    diff = diff_scenarios(scenario)
+    electric_appliances = diff["electric_added"]
+
+    print(electric_appliances)
     
-    # Map electric appliances to their corresponding classes
     appliance_classes = {}
     
     if "heating" in electric_appliances:
@@ -113,7 +178,7 @@ def get_appliances_for_scenario(scenario: str) -> Dict[str, type]:
     if "vehicle_charging" in electric_appliances:
         from appliances.electric_vehicle import ElectricVehicleAppliance
         appliance_classes["vehicle"] = ElectricVehicleAppliance
-    
+
     return appliance_classes
 
 
@@ -131,10 +196,12 @@ def get_gas_appliances_for_scenario(scenario: str) -> Dict[str, type]:
     if scenario not in SCENARIOS:
         raise ValueError(f"Unknown scenario: {scenario}. Available scenarios: {list(SCENARIOS.keys())}")
     
-    scenario_config = SCENARIOS[scenario]
-    gas_appliances = scenario_config.get("gas", set())
+    diff = diff_scenarios(scenario)
+    breakpoint()
+    gas_appliances = diff["gas_removed"]
+
+    print(gas_appliances)
     
-    # Map gas appliances to their corresponding classes
     appliance_classes = {}
     
     if "heating" in gas_appliances:
@@ -148,203 +215,213 @@ def get_gas_appliances_for_scenario(scenario: str) -> Dict[str, type]:
     if "vehicle_fuel" in gas_appliances:
         from appliances.ice_vehicle import ICEVehicleAppliance
         appliance_classes["vehicle"] = ICEVehicleAppliance
-    
+
     return appliance_classes
 
+def _save_capital_costs_to_csv(
+    base_output_dir: str,
+    scenario: str,
+    housing_type: str,
+    counties: list[str],
+    electric_appliances: dict[str, "ElectricAppliance"],
+    gas_appliances: dict[str, "ElectricAppliance"],
+    incentive_scenarios: list[IncentiveScenario],
+) -> None:
+    """
+    Write a single CSV with one row per county and the eight columns:
 
-def process(base_input_dir: str, base_output_dir: str, scenario: str,
-           housing_type: str, counties: list):
+        county, capital_cost_full,
+        incentives_full, incentives_half, incentives_none,
+        net_outlay_full, net_outlay_half, net_outlay_none
     """
-    Build capital costs, lifetimes, and incentives definitions using scenario-based appliance selection.
-    
-    This function initializes the appropriate electric appliances based on the scenario
-    and demonstrates cost calculations for different incentive scenarios.
-    
-    Args:
-        base_input_dir: Input directory path
-        base_output_dir: Output directory path
-        scenario: Scenario name (from CostService.SCENARIOS)
-        housing_type: Housing type
-        counties: List of counties to process
+    rows: list[dict] = []
+
+    for county in counties:
+        # ----------------------------------------------------------
+        # 1.  capital-cost buckets (no incentives applied yet)
+        # ----------------------------------------------------------
+        capital_cost_electric = sum(app.base_cost for app in electric_appliances.values())
+        capital_cost_gas      = sum(app.base_cost for app in gas_appliances.values())
+
+        # ----------------------------------------------------------
+        # 2.  incentives on the electric side
+        # ----------------------------------------------------------
+        incentives_full = sum(
+            app.calculate_total_incentives(IncentiveScenario.FULL_INCENTIVES)
+            for app in electric_appliances.values()
+        )
+        incentives_half = incentives_full * 0.5
+        incentives_none = 0.0
+
+        # ----------------------------------------------------------
+        # 3.  incremental (“net”) outlay  = electric – gas – incentives
+        # ----------------------------------------------------------
+        net_outlay_full = (capital_cost_electric - capital_cost_gas) - incentives_full
+        net_outlay_half = (capital_cost_electric - capital_cost_gas) - incentives_half
+        net_outlay_none = (capital_cost_electric - capital_cost_gas)                # no incentives
+
+        rows.append(
+            {
+                "county": county,
+                "capital_cost_electric": capital_cost_electric,
+                "capital_cost_gas": capital_cost_gas,
+                "incentives_full": incentives_full,
+                "incentives_half": incentives_half,
+                "incentives_none": incentives_none,
+                "net_outlay_full": net_outlay_full,
+                "net_outlay_half": net_outlay_half,
+                "net_outlay_none": net_outlay_none,
+            }
+        )
+
+    df = pd.DataFrame(rows).sort_values("county")
+
+    out_dir = os.path.join(base_output_dir, "capital_costs")
+    os.makedirs(out_dir, exist_ok=True)
+
+    fname = f"capital_costs_summary_{scenario}_{housing_type.replace('-', '_')}.csv"
+    csv_path = os.path.join(out_dir, fname)
+    df.to_csv(csv_path, index=False)
+    print(f"Capital-cost summary saved to: {csv_path}")
+
+def initialize_capital_cost_appliances(
+    scenario: str,
+) -> Tuple[Dict[str, "ElectricAppliance"], Dict[str, "ElectricAppliance"]]:
     """
-    
+    Instantiate and return the electric_appliances and gas_appliances dicts
+    required by `process`.
+
+    Raises
+    ------
+    ValueError
+        If `scenario` is not defined in SCENARIOS.
+    """
+    # look up which appliance classes the scenario requires
+    electric_classes = get_appliances_for_scenario(scenario)
+    gas_classes      = get_gas_appliances_for_scenario(scenario)
+
+    electric: Dict[str, ElectricAppliance] = {}
+    gas: Dict[str, ElectricAppliance]      = {}
+
+    # ---------- electric ---------------------------------------------------
+    if "heating" in electric_classes:
+        electric["heating"] = electric_classes["heating"](
+            heating_type="heat_pump",
+            base_cost=19_000.0,
+            lifetime_years=15,
+        )
+
+    if "cooking" in electric_classes:
+        electric["cooking"] = electric_classes["cooking"](
+            cooking_type="induction",
+            base_cost=2_000.0,
+            lifetime_years=15,
+        )
+
+    if "hot_water" in electric_classes:
+        electric["hot_water"] = electric_classes["hot_water"](
+            heater_type="heat_pump",
+            base_cost=2_637.0,
+            lifetime_years=15,
+        )
+
+    if "vehicle" in electric_classes:
+        electric["vehicle"] = electric_classes["vehicle"](
+            vehicle_type="Tesla_Model_3",
+            base_cost=45_000.0,
+            lifetime_years=12,
+            annual_maintenance_cost=800.0,
+            annual_insurance_cost=1_800.0,
+        )
+
+    # ---------- gas --------------------------------------------------------
+    # TODO make sure the capital costs are net with gas, not absolute
+
+    if "heating" in gas_classes:
+        gas["heating"] = gas_classes["heating"](
+            heating_type="furnace",
+            base_cost=4_500.0,
+            lifetime_years=15,
+        )
+
+    if "cooking" in gas_classes:
+        gas["cooking"] = gas_classes["cooking"](
+            stove_type="gas",
+            base_cost=1_600.0,
+            lifetime_years=15,
+        )
+
+    # TODO: Add a gas water heater too
+
+    if "vehicle" in gas_classes:
+        gas["vehicle"] = gas_classes["vehicle"](
+            vehicle_type="ICE",
+            base_cost=35_000.0,
+            lifetime_years=12,
+            annual_maintenance_cost=1_200.0,
+            annual_insurance_cost=2_000.0,
+        )
+
+    return electric, gas
+
+def process(
+    base_input_dir: str,
+    base_output_dir: str,
+    scenario: str,
+    housing_type: str,
+    counties: list[str],
+):
+    """Build capital-cost, lifetime, and incentive tables for a scenario."""
     log(
         at="step15_build_capital_costs_lifetimes_incentives",
         info="starting_capital_costs_build",
         scenario=scenario,
-        housing_type=housing_type
+        housing_type=housing_type,
     )
-    
-    print(f"Initializing appliances for scenario: {scenario}")
-    
-    # Get the appropriate appliances for this scenario
+
     try:
-        electric_appliance_classes = get_appliances_for_scenario(scenario)
-        gas_appliance_classes = get_gas_appliances_for_scenario(scenario)
-    except ValueError as e:
-        print(f"Error: {e}")
+        electric_appliances, gas_appliances = initialize_capital_cost_appliances(
+            scenario
+        )
+    except ValueError as err:
         log(
             at="step15_build_capital_costs_lifetimes_incentives",
             info="capital_costs_build_failed",
-            error=str(e)
+            error=str(err),
         )
         return {}
-    
-    electric_appliances = {}
-    gas_appliances = {}
-    
-    # Initialize electric appliances
-    if "heating" in electric_appliance_classes:
-        electric_appliances["heating"] = electric_appliance_classes["heating"](
-            heating_type="heat_pump",
-            base_cost=19000.0,
-            lifetime_years=15
-        )
-    
-    if "cooking" in electric_appliance_classes:
-        electric_appliances["cooking"] = electric_appliance_classes["cooking"](
-            cooking_type="induction",
-            base_cost=2000.0,
-            lifetime_years=15
-        )
-    
-    if "hot_water" in electric_appliance_classes:
-        electric_appliances["hot_water"] = electric_appliance_classes["hot_water"](
-            heater_type="heat_pump",
-            base_cost=2637.0,
-            lifetime_years=15
-        )
-    
-    if "vehicle" in electric_appliance_classes:
-        ev = electric_appliance_classes["vehicle"](
-            vehicle_type="Tesla_Model_3",
-            base_cost=45000.0,
-            lifetime_years=12,
-            annual_maintenance_cost=800.0,  # EVs typically have lower maintenance
-            annual_insurance_cost=1800.0    # Slightly lower than ICE due to safety features
-        )
 
-        # Add custom incentives in addition to what is defined in electric_vehicle.py
-        # ev.add_incentive(Incentive(
-        #     name="Federal Clean Vehicle Credit - Model 3",
-        #     value=3750.0,  # Half credit for Tesla after phase-out
-        #     unit="$"
-        # ))
+    incentive_scenarios = [
+        IncentiveScenario.FULL_INCENTIVES,
+        IncentiveScenario.HALF_INCENTIVES,
+        IncentiveScenario.NO_INCENTIVES,
+    ]
 
-        electric_appliances["vehicle"] = ev
+    # (Optional) quick sanity-check / warm-up
+    for app in electric_appliances.values():
+        _ = [app.get_cost_breakdown(sc) for sc in incentive_scenarios]
 
-    
-    # Initialize gas appliances
-    if "heating" in gas_appliance_classes:
-        gas_appliances["heating"] = gas_appliance_classes["heating"](
-            heating_type="furnace",
-            base_cost=4500.0,
-            lifetime_years=15
-        )
-    
-    if "cooking" in gas_appliance_classes:
-        gas_appliances["cooking"] = gas_appliance_classes["cooking"](
-            stove_type="gas",
-            base_cost=1600.0,
-            lifetime_years=15
-        )
-    
-    if "vehicle" in gas_appliance_classes:
-        gas_appliances["vehicle"] = gas_appliance_classes["vehicle"](
-            vehicle_type="ICE",
-            base_cost=35000.0,
-            lifetime_years=12,
-            annual_maintenance_cost=1200.0,  # ICE vehicles have higher maintenance
-            annual_insurance_cost=2000.0     # Slightly higher than EV
-        )
-    
-    if electric_appliances:
-        print(f"Electric: {list(electric_appliances.keys())}")
-    if gas_appliances:
-        print(f"Gas: {list(gas_appliances.keys())}")
-    
-    # Show cost breakdown for electric appliances with different incentive scenarios
-    incentive_scenarios = [IncentiveScenario.FULL_INCENTIVES, IncentiveScenario.HALF_INCENTIVES, IncentiveScenario.NO_INCENTIVES]
-    
-    if electric_appliances:
-        print(f"\n{'='*60}")
-        print("ELECTRIC APPLIANCES COST ANALYSIS")
-        print(f"{'='*60}")
-        
-        for appliance_name, appliance in electric_appliances.items():
-            print(f"\n=== ELECTRIC {appliance_name.upper()} ===")
-            
-            for incentive_scenario in incentive_scenarios:
-                breakdown = appliance.get_cost_breakdown(incentive_scenario)
-                
-                print(f"\n--- {incentive_scenario.value.upper()} ---")
-                print(f"Appliance: {breakdown['appliance_type']}")
-                print(f"Base Cost: ${breakdown['base_cost']:,.2f}")
-                print(f"Total Incentives: ${breakdown['total_incentives']:,.2f}")
-                print(f"Net Cost: ${breakdown['net_cost']:,.2f}")
-                print(f"Cost per Year: ${breakdown['cost_per_year']:,.2f}")
-                print(f"Lifetime: {breakdown['lifetime_years']} years")
-    
-    # Show cost breakdown for gas appliances (no incentives)
-    if gas_appliances:
-        print(f"\n{'='*60}")
-        print("GAS APPLIANCES COST ANALYSIS")
-        print(f"{'='*60}")
-        
-        # Show analysis for each county
-        for county in counties:
-            print(f"\n{'='*40}")
-            print(f"COUNTY: {county}")
-            print(f"{'='*40}")
-            
-            for appliance_name, appliance in gas_appliances.items():
-                print(f"\n=== GAS {appliance_name.upper()} ===")
-                
-                # For ICE vehicles, pass county name to get fuel costs
-                if appliance_name == "vehicle":
-                    breakdown = appliance.get_cost_breakdown(county)
-                    print(f"County: {breakdown.get('county_name', 'N/A')}")
-                    print(f"Annual Fuel Cost: ${breakdown.get('annual_fuel_cost', 0):,.2f}")
-                else:
-                    breakdown = appliance.get_cost_breakdown()
-                
-                print(f"Appliance: {breakdown['appliance_type']}")
-                print(f"Base Cost: ${breakdown['base_cost']:,.2f}")
-                print(f"Net Cost: ${breakdown['net_cost']:,.2f}")
-                print(f"Annual Cost: ${breakdown['annual_cost']:,.2f}")
-                print(f"Lifetime: {breakdown['lifetime_years']} years")
-                print(f"Has Incentives: {breakdown['has_incentives']}")
-                
-                if 'annual_operating_cost' in breakdown:
-                    print(f"Annual Operating Cost: ${breakdown['annual_operating_cost']:,.2f}")
-                if 'total_cost_of_ownership' in breakdown:
-                    print(f"Total Cost of Ownership: ${breakdown['total_cost_of_ownership']:,.2f}")
-                
-                # Show total cost of ownership if available (legacy method)
-                if hasattr(appliance, 'get_total_cost_of_ownership'):
-                    try:
-                        if appliance_name == "vehicle":
-                            tco = appliance.get_total_cost_of_ownership(county)
-                        else:
-                            tco = appliance.get_total_cost_of_ownership()
-                        if 'total_cost_of_ownership' in tco:
-                            print(f"Legacy TCO: ${tco['total_cost_of_ownership']:,.2f}")
-                    except:
-                        pass  # Skip if TCO calculation fails
-    
+    _save_capital_costs_to_csv(
+        base_output_dir,
+        scenario,
+        housing_type,
+        counties,
+        electric_appliances,
+        gas_appliances,
+        incentive_scenarios,
+    )
+
     all_appliances = {**electric_appliances, **gas_appliances}
-    
     log(
         at="step15_build_capital_costs_lifetimes_incentives",
         info="capital_costs_build_completed",
         electric_appliances_initialized=len(electric_appliances),
         gas_appliances_initialized=len(gas_appliances),
         total_appliances_initialized=len(all_appliances),
-        scenarios_evaluated=len(incentive_scenarios) if electric_appliances else 0
+        scenarios_evaluated=len(incentive_scenarios),
     )
-    
-    return {"electric": electric_appliances, "gas": gas_appliances}
 
+    return {"electric": electric_appliances, "gas": gas_appliances}
 
 if __name__ == "__main__":
     import argparse
@@ -361,12 +438,6 @@ if __name__ == "__main__":
     housing_type = "single-family-detached"
     all_counties = norcal_counties + socal_counties + central_counties
     
-    print("=" * 70)
-    print(f"ANALYZING SCENARIO: {args.scenario.upper()}")
-    print(f"Housing Type: {housing_type}")
-    print(f"Counties: {len(all_counties)} total")
-    print("=" * 70)
-    
     result = process(
         base_input_dir="data/loadprofiles",
         base_output_dir="data/loadprofiles", 
@@ -375,9 +446,3 @@ if __name__ == "__main__":
         counties=all_counties
     )
     
-    print(f"\nResult summary for {args.scenario}:")
-    if isinstance(result, dict):
-        print(f"  Electric appliances: {len(result.get('electric', {}))}")
-        print(f"  Gas appliances: {len(result.get('gas', {}))}")
-    else:
-        print(f"  Legacy result type: {type(result)}")
