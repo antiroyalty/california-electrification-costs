@@ -134,8 +134,8 @@ def load_capital_costs_data(
     county_slug: str
 ) -> float:
     """
-    Load capital costs for the scenario from step15 capital costs summary files.
-    Returns the net outlay with full incentives.
+    Load capital costs for the scenario from step15 capital costs files.
+    Returns the total net cost for all appliances with full incentives.
     """
     # Capital costs files are in base_input_dir/capital_costs/
     capital_costs_dir = os.path.join(base_input_dir, "capital_costs")
@@ -143,13 +143,13 @@ def load_capital_costs_data(
         print(f"Warning: Capital costs directory not found: {capital_costs_dir}")
         return 0.0
     
-    # Look for the summary file: capital_costs_summary_{scenario}_{housing_type}.csv
+    # Look for the detailed file: capital_costs_{scenario}_{housing_type}.csv
     base_name = f"{scenario}_{housing_type.replace('-', '_')}"
-    summary_file = f"capital_costs_summary_{base_name}.csv"
-    file_path = os.path.join(capital_costs_dir, summary_file)
+    capital_costs_file = f"capital_costs_{base_name}.csv"
+    file_path = os.path.join(capital_costs_dir, capital_costs_file)
     
     if not os.path.exists(file_path):
-        print(f"Warning: Capital costs summary file not found: {file_path}")
+        print(f"Warning: Capital costs file not found: {file_path}")
         return 0.0
     
     try:
@@ -160,19 +160,24 @@ def load_capital_costs_data(
         if not county_name.endswith(" County"):
             county_name += " County"
         
-        # Find the row for this county
-        county_row = df[df['county'].str.contains(county_name.replace(" County", ""), case=False, na=False)]
+        # Filter for this county and full incentives scenario
+        county_data = df[
+            (df['county'].str.contains(county_name.replace(" County", ""), case=False, na=False)) &
+            (df['incentive_scenario'] == 'full_incentives')
+        ]
         
-        if county_row.empty:
-            print(f"Warning: No capital costs data found for {county_name}")
+        if county_data.empty:
+            print(f"Warning: No capital costs data found for {county_name} with full incentives")
             return 0.0
         
-        # Get the net outlay with full incentives
-        if 'net_outlay_full' not in df.columns:
-            print(f"Warning: net_outlay_full column not found in {file_path}")
+        # Check if net_cost column exists
+        if 'net_cost' not in df.columns:
+            print(f"Warning: net_cost column not found in {file_path}")
             return 0.0
         
-        return float(county_row['net_outlay_full'].iloc[0])
+        # Sum up all net costs for this county with full incentives
+        total_net_cost = county_data['net_cost'].sum()
+        return float(total_net_cost)
         
     except Exception as exc:
         print(f"Warning: could not parse capital costs file {file_path}: {exc}")
@@ -494,6 +499,17 @@ def process(base_input_dir: str, base_output_dir: str, scenario: str,
 
 
 if __name__ == "__main__":
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Display key metrics maps for electrification scenario")
+    parser.add_argument("scenario", help="Electrification scenario to analyze (e.g., 'baseline', 'heat_pump', etc.)")
+    parser.add_argument("--housing-type", default="single-family-detached", 
+                       help="Housing type (default: single-family-detached)")
+    parser.add_argument("--counties", nargs="+", default=["Alameda County"],
+                       help="Counties to analyze (default: Alameda County)")
+    
+    args = parser.parse_args()
+    
     # Test configuration
     desired_rate_plans = {
         "PG&E": {"electricity": "E-TOU-D", "gas": "G-1"},
@@ -504,8 +520,8 @@ if __name__ == "__main__":
     process(
         base_input_dir="data/loadprofiles",
         base_output_dir="data/loadprofiles",
-        scenario="baseline",
-        housing_type="single-family-detached",
-        counties=["Alameda County"],
+        scenario=args.scenario,
+        housing_type=args.housing_type,
+        counties=args.counties,
         desired_rate_plans=desired_rate_plans
     )
