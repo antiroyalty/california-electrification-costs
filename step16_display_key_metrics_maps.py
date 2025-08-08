@@ -342,7 +342,7 @@ def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: 
             "bins": [-2000, -1000, -500, 0, 500, 1000, 1500, 2000, 3000],
             "unit": "$"
         },
-        "Capital Costs ($)": {
+        "Capital Costs, Net After Incentives ($)": {
             "color_scheme": "Blues",
             "bins": [0, 5000, 10000, 15000, 20000, 25000, 30000, 40000, 50000],
             "unit": "$"
