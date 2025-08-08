@@ -1,5 +1,5 @@
 """
-Step 14: Display Key Metrics Maps
+Step 16: Display Key Metrics Maps
 
 Display diagnostic maps for key metrics in a single HTML file:
 - Average solar panel size in county
@@ -7,6 +7,7 @@ Display diagnostic maps for key metrics in a single HTML file:
 - Total annual gas bill in county, in $
 - Total annual energy consumption (electricity kWh, gas therms)
 - Solar+storage annual savings vs non-solar deployment, in $
+- Capital costs (net outlay with full incentives) for scenario appliances, in $
 """
 
 import os
@@ -228,6 +229,14 @@ def create_single_map(base_input_dir: str, scenario: str, housing_type: str, cou
                     pretty = "$0"
                 gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
                 
+            elif metric_name == "Capital Costs ($)":
+                metric_value = load_capital_costs_data(
+                    base_input_dir, scenario, housing_type, county_slug
+                )
+                # Format as currency
+                pretty = f"${to_decimal_number(abs(metric_value))}"
+                gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
+                
             else:
                 # Use load_cost_data to get metric data
                 data = load_cost_data(
@@ -290,7 +299,7 @@ def create_single_map(base_input_dir: str, scenario: str, housing_type: str, cou
 
 def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: str, counties: list):
     """
-    Create a combined HTML dashboard with all 5 diagnostic maps.
+    Create a combined HTML dashboard with all 6 diagnostic maps.
     """
     
     # Define metrics configuration
@@ -326,6 +335,11 @@ def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: 
         "Solar+Storage Annual Savings ($)": {
             "color_scheme": "RdYlGn",
             "bins": [-2000, -1000, -500, 0, 500, 1000, 1500, 2000, 3000],
+            "unit": "$"
+        },
+        "Capital Costs ($)": {
+            "color_scheme": "Blues",
+            "bins": [0, 5000, 10000, 15000, 20000, 25000, 30000, 40000, 50000],
             "unit": "$"
         },
     }
