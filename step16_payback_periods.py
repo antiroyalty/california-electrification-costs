@@ -73,11 +73,11 @@ def load_annual_costs(base_input_dir: str, county: str, scenario: str, housing_t
     
     if with_solar:
         # Load from solarstorage results directory
-        results_dir = os.path.join(base_input_dir, scenario, housing_type, county, "results", "solarstorage")
+        results_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug, "results", "solarstorage")
         expected_scenario = f"{scenario}.solarstorage"
     else:
         # Load from totals results directory  
-        results_dir = os.path.join(base_input_dir, scenario, housing_type, county, "results", "totals")
+        results_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug, "results", "totals")
         expected_scenario = scenario
     
     if not os.path.exists(results_dir):
