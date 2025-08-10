@@ -55,21 +55,30 @@ def load_capital_costs(base_input_dir: str, scenario: str, housing_type: str) ->
     print(f"Loaded capital costs: {len(df)} rows from {csv_path}")
     return df
 
-def load_annual_costs(base_input_dir: str, county_slug: str, scenario: str, housing_type: str) -> float:
+def load_annual_costs(base_input_dir: str, county: str, scenario: str, housing_type: str, with_solar: bool = False) -> float:
     """
-    Load annual total costs for a county and scenario.
+    Load annual total costs for a county and scenario, following the same pattern as capital_costs_helper.py.
     
     Args:
         base_input_dir: Base input directory
-        county_slug: County slug (e.g., 'alameda')  
-        scenario: Scenario name
+        county: Full county name (e.g., 'Alameda County')
+        scenario: Scenario name ('baseline' or electrification scenario)
         housing_type: Housing type
+        with_solar: Whether to load from solarstorage directory
         
     Returns:
         Annual total cost for the scenario
     """
-    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
-    results_dir = os.path.join(county_dir, "results", "totals")
+    county_slug = slugify_county_name(county)
+    
+    if with_solar:
+        # Load from solarstorage results directory
+        results_dir = os.path.join(base_input_dir, scenario, housing_type, county, "results", "solarstorage")
+        expected_scenario = f"{scenario}.solarstorage"
+    else:
+        # Load from totals results directory  
+        results_dir = os.path.join(base_input_dir, scenario, housing_type, county, "results", "totals")
+        expected_scenario = scenario
     
     if not os.path.exists(results_dir):
         print(f"Warning: Results directory not found: {results_dir}")
@@ -77,18 +86,23 @@ def load_annual_costs(base_input_dir: str, county_slug: str, scenario: str, hous
     
     try:
         # Get latest total annual costs file
-        file_path = get_latest_csv_file(results_dir, f"RESULTS_total_annual_costs_{county_slug}")
+        file_path = get_latest_csv_file(results_dir, f"RESULTS_total_annual_costs_{county_slug}_")
         df = pd.read_csv(file_path, index_col="scenario")
         
-        if scenario in df.index:
-            # Use first column (usually the primary rate plan)
-            return float(df.loc[scenario].iloc[0] if hasattr(df.loc[scenario], 'iloc') else df.loc[scenario])
+        if expected_scenario in df.index:
+            # Use first column (usually the primary rate plan like total.PG&E.E-TOU-D+PG&E.G-1)
+            cost_value = df.loc[expected_scenario]
+            if hasattr(cost_value, 'iloc'):
+                return float(cost_value.iloc[0])
+            else:
+                return float(cost_value)
         else:
-            print(f"Warning: Scenario {scenario} not found in {file_path}")
+            print(f"Warning: Scenario {expected_scenario} not found in {file_path}")
+            print(f"Available scenarios: {list(df.index)}")
             return 0.0
             
     except Exception as e:
-        print(f"Warning: Failed to load annual costs for {county_slug}/{scenario}: {e}")
+        print(f"Warning: Failed to load annual costs for {county}/{scenario} (solar={with_solar}): {e}")
         return 0.0
 
 def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: str, counties: list) -> pd.DataFrame:
@@ -120,58 +134,78 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
         payback_data = []
         
         for county in counties:
-            county_slug = slugify_county_name(county)
-            
-            # Load annual costs for baseline and scenario
-            baseline_annual_cost = load_annual_costs(base_input_dir, county_slug, "baseline", housing_type)
-            scenario_annual_cost = load_annual_costs(base_input_dir, county_slug, scenario, housing_type)
-            
-            if baseline_annual_cost == 0 or scenario_annual_cost == 0:
-                print(f"Warning: Missing annual cost data for {county}")
+            try:
+                # Load annual costs using the correct pattern
+                # 1. Baseline costs (no electrification)
+                baseline_annual_cost = load_annual_costs(base_input_dir, county, "baseline", housing_type, with_solar=False)
+                
+                # 2. Scenario costs (electrification only, no solar)
+                scenario_annual_cost = load_annual_costs(base_input_dir, county, scenario, housing_type, with_solar=False)
+                
+                # 3. Scenario + solar costs (electrification + solar+storage)
+                scenario_solar_annual_cost = load_annual_costs(base_input_dir, county, scenario, housing_type, with_solar=True)
+                
+                if baseline_annual_cost == 0:
+                    print(f"Warning: Missing baseline annual cost data for {county}")
+                    continue
+                    
+                if scenario_annual_cost == 0 or scenario_solar_annual_cost == 0:
+                    print(f"Warning: Missing scenario annual cost data for {county}")
+                    continue
+                
+                # Calculate annual savings (baseline - scenario)
+                savings_scenario_only = baseline_annual_cost - scenario_annual_cost
+                savings_with_solar = baseline_annual_cost - scenario_solar_annual_cost
+                
+                print(f"{county}:")
+                print(f"  Baseline: ${baseline_annual_cost:.0f}")
+                print(f"  {scenario} only: ${scenario_annual_cost:.0f} (savings: ${savings_scenario_only:.0f})")
+                print(f"  {scenario} + solar: ${scenario_solar_annual_cost:.0f} (savings: ${savings_with_solar:.0f})")
+                
+                # Get capital costs for this county
+                county_capital = capital_summary[capital_summary['county'].str.contains(county.replace(' County', ''), case=False, na=False)]
+                
+                if county_capital.empty:
+                    print(f"Warning: No capital costs found for {county}")
+                    continue
+                
+                # Calculate payback for each incentive scenario
+                for _, capital_row in county_capital.iterrows():
+                    incentive_scenario = capital_row['incentive_scenario']
+                    net_capital_cost = capital_row['net_cost']
+                    
+                    # For scenario-only, use scenario-only savings
+                    # For solar scenarios, we would need to add solar capital costs and use solar savings
+                    # For now, let's calculate payback for electrification only
+                    annual_savings = savings_scenario_only
+                    
+                    if annual_savings <= 0:
+                        print(f"  Warning: No savings for {county} {incentive_scenario}")
+                        annual_savings = 0.01  # Avoid division by zero
+                    
+                    # Calculate payback period in years
+                    payback_years = net_capital_cost / annual_savings if annual_savings > 0 else float('inf')
+                    
+                    print(f"    {incentive_scenario}: Capital ${net_capital_cost:.0f}, Payback {payback_years:.1f} years")
+                    
+                    payback_data.append({
+                        'county': county,
+                        'county_slug': slugify_county_name(county),
+                        'scenario': scenario,
+                        'housing_type': housing_type,
+                        'incentive_scenario': incentive_scenario,
+                        'baseline_annual_cost': baseline_annual_cost,
+                        'scenario_annual_cost': scenario_annual_cost,
+                        'scenario_solar_annual_cost': scenario_solar_annual_cost,
+                        'annual_savings_scenario_only': savings_scenario_only,
+                        'annual_savings_with_solar': savings_with_solar,
+                        'net_capital_cost': net_capital_cost,
+                        'payback_period_years': payback_years
+                    })
+                    
+            except Exception as e:
+                print(f"Error processing {county}: {e}")
                 continue
-            
-            # Calculate annual savings (baseline - scenario)
-            annual_savings = baseline_annual_cost - scenario_annual_cost
-            
-            if annual_savings <= 0:
-                print(f"Warning: No savings for {county} (baseline: ${baseline_annual_cost:.0f}, scenario: ${scenario_annual_cost:.0f})")
-                # Set a small positive value to avoid division by zero, resulting in very long payback
-                annual_savings = 0.01
-            
-            print(f"{county}: Baseline ${baseline_annual_cost:.0f}, Scenario ${scenario_annual_cost:.0f}, Savings ${annual_savings:.0f}")
-            
-            # Get capital costs for this county
-            county_capital = capital_summary[capital_summary['county'].str.contains(county.replace(' County', ''), case=False, na=False)]
-            
-            if county_capital.empty:
-                print(f"Warning: No capital costs found for {county}")
-                continue
-            
-            # Calculate payback for each incentive scenario
-            for _, capital_row in county_capital.iterrows():
-                incentive_scenario = capital_row['incentive_scenario']
-                net_capital_cost = capital_row['net_cost']
-                
-                # Calculate payback period in years
-                if annual_savings > 0:
-                    payback_years = net_capital_cost / annual_savings
-                else:
-                    payback_years = float('inf')
-                
-                print(f"  {incentive_scenario}: Capital ${net_capital_cost:.0f}, Payback {payback_years:.1f} years")
-                
-                payback_data.append({
-                    'county': county,
-                    'county_slug': county_slug,
-                    'scenario': scenario,
-                    'housing_type': housing_type,
-                    'incentive_scenario': incentive_scenario,
-                    'baseline_annual_cost': baseline_annual_cost,
-                    'scenario_annual_cost': scenario_annual_cost,
-                    'annual_savings': annual_savings,
-                    'net_capital_cost': net_capital_cost,
-                    'payback_period_years': payback_years
-                })
         
         return pd.DataFrame(payback_data)
         
