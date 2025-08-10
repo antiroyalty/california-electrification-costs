@@ -174,19 +174,24 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
                     incentive_scenario = capital_row['incentive_scenario']
                     net_capital_cost = capital_row['net_cost']
                     
-                    # For scenario-only, use scenario-only savings
-                    # For solar scenarios, we would need to add solar capital costs and use solar savings
-                    # For now, let's calculate payback for electrification only
-                    annual_savings = savings_scenario_only
-                    
-                    if annual_savings <= 0:
-                        print(f"  Warning: No savings for {county} {incentive_scenario}")
-                        annual_savings = 0.01  # Avoid division by zero
+                    # Determine which savings to use based on available data
+                    # If solar savings are positive, use those; otherwise use scenario-only if positive
+                    if savings_with_solar > 0:
+                        annual_savings = savings_with_solar
+                        savings_type = "with_solar"
+                    elif savings_scenario_only > 0:
+                        annual_savings = savings_scenario_only 
+                        savings_type = "scenario_only"
+                    else:
+                        # No positive savings available - set a very small value for very long payback
+                        annual_savings = 0.01
+                        savings_type = "no_savings"
+                        print(f"  Warning: No positive savings for {county} {incentive_scenario}")
                     
                     # Calculate payback period in years
                     payback_years = net_capital_cost / annual_savings if annual_savings > 0 else float('inf')
                     
-                    print(f"    {incentive_scenario}: Capital ${net_capital_cost:.0f}, Payback {payback_years:.1f} years")
+                    print(f"    {incentive_scenario}: Capital ${net_capital_cost:.0f}, Savings ${annual_savings:.0f} ({savings_type}), Payback {payback_years:.1f} years")
                     
                     payback_data.append({
                         'county': county,
@@ -199,6 +204,8 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
                         'scenario_solar_annual_cost': scenario_solar_annual_cost,
                         'annual_savings_scenario_only': savings_scenario_only,
                         'annual_savings_with_solar': savings_with_solar,
+                        'annual_savings_used': annual_savings,
+                        'savings_type': savings_type,
                         'net_capital_cost': net_capital_cost,
                         'payback_period_years': payback_years
                     })
