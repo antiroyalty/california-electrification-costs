@@ -184,6 +184,59 @@ def load_capital_costs_data(
         return 0.0
 
 
+def load_payback_period_data(
+    scenario: str,
+    housing_type: str,
+    county_slug: str
+) -> float:
+    """
+    Load payback period data from step16_payback_periods.py output.
+    Returns payback period in years with full incentives.
+    """
+    # Payback period files are in data/results/{housing_type}/
+    payback_file = os.path.join("data", "results", housing_type, f"payback_periods_{scenario}.csv")
+    
+    if not os.path.exists(payback_file):
+        print(f"Warning: Payback periods file not found: {payback_file}")
+        return 0.0
+    
+    try:
+        df = pd.read_csv(payback_file, low_memory=False)
+        
+        # Convert county_slug back to county name for matching
+        county_name = county_slug.replace("-", " ").title()
+        if not county_name.endswith(" County"):
+            county_name += " County"
+        
+        # Filter for this county and full incentives scenario
+        county_data = df[
+            (df['county'].str.contains(county_name.replace(" County", ""), case=False, na=False)) &
+            (df['incentive_scenario'] == 'full_incentives')
+        ]
+        
+        if county_data.empty:
+            print(f"Warning: No payback period data found for {county_name} with full incentives")
+            return 0.0
+        
+        # Check if payback_period_years column exists
+        if 'payback_period_years' not in df.columns:
+            print(f"Warning: payback_period_years column not found in {payback_file}")
+            return 0.0
+        
+        # Get payback period (should be only one row per county-incentive combination)
+        payback_years = county_data['payback_period_years'].iloc[0]
+        
+        # Handle infinite payback periods
+        if payback_years == float('inf') or payback_years > 100:
+            return 100.0  # Cap at 100 years for display purposes
+        
+        return float(payback_years)
+        
+    except Exception as exc:
+        print(f"Warning: could not parse payback periods file {payback_file}: {exc}")
+        return 0.0
+
+
 def create_single_map(base_input_dir: str, scenario: str, housing_type: str, counties: list, 
                      metric_name: str, data_loader_config: dict) -> folium.Map:
     """
@@ -234,7 +287,7 @@ def create_single_map(base_input_dir: str, scenario: str, housing_type: str, cou
                     pretty = "$0"
                 gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
                 
-            elif metric_name == "Capital Costs ($)":
+            elif metric_name == "Capital Costs, Net After Incentives ($)":
                 metric_value = load_capital_costs_data(
                     base_input_dir, scenario, housing_type, county_slug
                 )
