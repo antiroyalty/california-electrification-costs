@@ -8,6 +8,7 @@ Display diagnostic maps for key metrics in a single HTML file:
 - Total annual energy consumption (electricity kWh, gas therms)
 - Solar+storage annual savings vs non-solar deployment, in $
 - Capital costs (net outlay with full incentives) for scenario appliances, in $
+- Payback period (years) for electrification investments with full incentives
 """
 
 import os
@@ -295,6 +296,17 @@ def create_single_map(base_input_dir: str, scenario: str, housing_type: str, cou
                 pretty = f"${to_decimal_number(abs(metric_value))}"
                 gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
                 
+            elif metric_name == "Payback Period (years)":
+                metric_value = load_payback_period_data(
+                    scenario, housing_type, county_slug
+                )
+                # Format as years with 1 decimal place
+                if metric_value >= 100:
+                    pretty = ">100 years"
+                else:
+                    pretty = f"{metric_value:.1f} years"
+                gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
+                
             else:
                 # Use load_cost_data to get metric data
                 data = load_cost_data(
@@ -357,7 +369,7 @@ def create_single_map(base_input_dir: str, scenario: str, housing_type: str, cou
 
 def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: str, counties: list):
     """
-    Create a combined HTML dashboard with all 6 diagnostic maps.
+    Create a combined HTML dashboard with all 7 diagnostic maps.
     """
     
     # Define metrics configuration
@@ -399,6 +411,11 @@ def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: 
             "color_scheme": "Blues",
             "bins": [0, 5000, 10000, 15000, 20000, 25000, 30000, 40000, 50000],
             "unit": "$"
+        },
+        "Payback Period (years)": {
+            "color_scheme": "RdYlGn_r",
+            "bins": [0, 5, 10, 15, 20, 25, 30, 50, 100],
+            "unit": "years"
         },
     }
     
