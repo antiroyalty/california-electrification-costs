@@ -135,7 +135,6 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
         
         for county in counties:
             try:
-                # Load annual costs using the correct pattern
                 # 1. Baseline costs (no electrification)
                 baseline_annual_cost = load_annual_costs(base_input_dir, county, "baseline", housing_type, with_solar=False)
                 
