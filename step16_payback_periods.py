@@ -29,7 +29,8 @@ Output:
 import os
 import pandas as pd
 import numpy as np
-from main_helpers import log, slugify_county_name, norcal_counties, socal_counties, central_counties
+from collections import defaultdict
+from main_helpers import log, slugify_county_name, norcal_counties, socal_counties, central_counties, get_scenario_path
 from helpers.maps_helpers import get_latest_csv_file
 
 def load_capital_costs(base_input_dir: str, scenario: str, housing_type: str) -> pd.DataFrame:
@@ -105,6 +106,7 @@ def load_annual_costs(base_input_dir: str, county: str, scenario: str, housing_t
         print(f"Warning: Failed to load annual costs for {county}/{scenario} (solar={with_solar}): {e}")
         return 0.0
 
+
 def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: str, counties: list) -> pd.DataFrame:
     """
     Calculate payback periods for all counties and incentive scenarios.
@@ -119,9 +121,9 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
         DataFrame with payback period data
     """
     try:
-        # Load capital costs data from step15
+        # Load capital costs data from step15 (electrification appliances only)
         capital_costs_df = load_capital_costs(base_input_dir, scenario, housing_type)
-        print(f"Loaded capital costs: {len(capital_costs_df)} rows")
+        print(f"Loaded electrification capital costs: {len(capital_costs_df)} rows")
         
         if capital_costs_df.empty:
             print(f"No capital costs data found for scenario: {scenario}")
@@ -129,7 +131,8 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
         
         # Group capital costs by county and incentive scenario
         capital_summary = capital_costs_df.groupby(['county', 'incentive_scenario'])['net_cost'].sum().reset_index()
-        print(f"Capital costs summary: {len(capital_summary)} county-incentive combinations")
+        print(f"Electrification capital costs summary: {len(capital_summary)} county-incentive combinations")
+        
         
         payback_data = []
         
@@ -168,10 +171,12 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
                     print(f"Warning: No capital costs found for {county}")
                     continue
                 
+                county_slug = slugify_county_name(county)
+                
                 # Calculate payback for each incentive scenario
                 for _, capital_row in county_capital.iterrows():
                     incentive_scenario = capital_row['incentive_scenario']
-                    net_capital_cost = capital_row['net_cost']
+                    net_capital_cost = capital_row['net_cost']  # This now includes solar/storage if generated with --include-solar-storage
                     
                     # Determine which savings to use based on available data
                     # If solar savings are positive, use those; otherwise use scenario-only if positive
