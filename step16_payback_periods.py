@@ -32,8 +32,6 @@ import numpy as np
 from collections import defaultdict
 from main_helpers import log, slugify_county_name, norcal_counties, socal_counties, central_counties, get_scenario_path
 from helpers.maps_helpers import get_latest_csv_file
-from helpers.capital_costs_helper import load_electrified_assets
-from step17_cris_capital_costs import CAPITAL_COSTS_CRIS
 
 def load_capital_costs(base_input_dir: str, scenario: str, housing_type: str) -> pd.DataFrame:
     """
@@ -108,89 +106,6 @@ def load_annual_costs(base_input_dir: str, county: str, scenario: str, housing_t
         print(f"Warning: Failed to load annual costs for {county}/{scenario} (solar={with_solar}): {e}")
         return 0.0
 
-def load_solar_capacity_data(base_input_dir: str, scenario: str, housing_type: str) -> dict:
-    """
-    Load solar capacity data for counties from electrified assets CSV.
-    
-    Args:
-        base_input_dir: Base input directory
-        scenario: Electrification scenario name
-        housing_type: Housing type
-        
-    Returns:
-        Dictionary mapping county slug to solar capacity in kW
-    """
-    try:
-        scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
-        assets_mapping = load_electrified_assets(scenario_path)
-        
-        # Convert county names to slugs for consistency
-        slug_mapping = {}
-        for county_name, solar_kw in assets_mapping.items():
-            county_slug = slugify_county_name(county_name)
-            slug_mapping[county_slug] = solar_kw
-        
-        print(f"Loaded solar capacity data: {len(slug_mapping)} counties")
-        return slug_mapping
-        
-    except Exception as e:
-        print(f"Warning: Could not load solar capacity data: {e}")
-        return {}
-
-def calculate_solar_storage_capital_costs(solar_kw: float) -> dict:
-    """
-    Calculate solar and storage capital costs based on CAPITAL_COSTS_CRIS structure.
-    
-    Args:
-        solar_kw: Solar system capacity in kW
-        
-    Returns:
-        Dictionary with solar and storage cost breakdown
-    """
-    try:
-        # Extract solar cost parameters from CAPITAL_COSTS_CRIS
-        solar_config = CAPITAL_COSTS_CRIS["solar"]["panel"]
-        storage_config = CAPITAL_COSTS_CRIS["storage"]["tesla_powerwall_3"]
-        
-        # Solar costs
-        dollars_per_watt = solar_config["base"]["value"]  # $2.8/W
-        installation_markup = solar_config["markup"]["installation_labor"]["value"] / 100  # 0%
-        design_markup = solar_config["markup"]["design_engineering"]["value"] / 100  # 0%
-        
-        # Calculate solar costs
-        panel_cost = solar_kw * 1000 * dollars_per_watt  # Convert kW to W
-        total_solar_cost = panel_cost * (1 + installation_markup + design_markup)
-        
-        # Storage costs (Tesla Powerwall 3)
-        storage_cost = storage_config["base"]["value"]  # $16,853
-        storage_capacity = storage_config["capacity_kwh"]  # 13.5 kWh
-        
-        # Total system cost before incentives
-        total_system_cost = total_solar_cost + storage_cost
-        
-        # Apply federal tax credit (30% through 2032)
-        federal_tax_credit = total_system_cost * 0.30
-        
-        # Net cost after incentives
-        net_cost = total_system_cost - federal_tax_credit
-        
-        return {
-            "solar_kw": solar_kw,
-            "panel_cost": panel_cost,
-            "total_solar_cost": total_solar_cost,
-            "storage_cost": storage_cost,
-            "storage_capacity_kwh": storage_capacity,
-            "total_system_cost_before_incentives": total_system_cost,
-            "federal_tax_credit": federal_tax_credit,
-            "net_solar_storage_cost": net_cost
-        }
-        
-    except Exception as e:
-        print(f"Error calculating solar/storage costs: {e}")
-        return {
-            "solar_kw": solar_kw,
-            "net_solar_storage_cost": 0.0
-        }
 
 def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: str, counties: list) -> pd.DataFrame:
     """
@@ -218,9 +133,6 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
         capital_summary = capital_costs_df.groupby(['county', 'incentive_scenario'])['net_cost'].sum().reset_index()
         print(f"Electrification capital costs summary: {len(capital_summary)} county-incentive combinations")
         
-        # Load solar capacity data for solar/storage capital costs
-        solar_capacity_data = load_solar_capacity_data(base_input_dir, scenario, housing_type)
-        print(f"Loaded solar capacity data: {len(solar_capacity_data)} counties")
         
         payback_data = []
         
@@ -259,44 +171,31 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
                     print(f"Warning: No capital costs found for {county}")
                     continue
                 
-                # Get solar capacity for this county
                 county_slug = slugify_county_name(county)
-                solar_kw = solar_capacity_data.get(county_slug, 0.0)
-                
-                # Calculate solar/storage capital costs if solar capacity exists
-                solar_storage_costs = calculate_solar_storage_capital_costs(solar_kw) if solar_kw > 0 else None
-                
-                print(f"  Solar capacity: {solar_kw:.1f} kW")
-                if solar_storage_costs:
-                    print(f"  Solar/storage capital cost: ${solar_storage_costs['net_solar_storage_cost']:.0f}")
                 
                 # Calculate payback for each incentive scenario
                 for _, capital_row in county_capital.iterrows():
                     incentive_scenario = capital_row['incentive_scenario']
-                    electrification_capital_cost = capital_row['net_cost']
+                    net_capital_cost = capital_row['net_cost']  # This now includes solar/storage if generated with --include-solar-storage
                     
-                    # Total capital costs (electrification + solar/storage)
-                    if solar_storage_costs and savings_with_solar > savings_scenario_only:
-                        # Use solar+storage scenario
-                        total_capital_cost = electrification_capital_cost + solar_storage_costs['net_solar_storage_cost']
+                    # Determine which savings to use based on available data
+                    # If solar savings are positive, use those; otherwise use scenario-only if positive
+                    if savings_with_solar > 0:
                         annual_savings = savings_with_solar
                         savings_type = "with_solar"
                     elif savings_scenario_only > 0:
-                        # Use electrification-only scenario
-                        total_capital_cost = electrification_capital_cost
                         annual_savings = savings_scenario_only 
                         savings_type = "scenario_only"
                     else:
-                        # No positive savings available - use electrification costs with minimal savings
-                        total_capital_cost = electrification_capital_cost
+                        # No positive savings available - set a very small value for very long payback
                         annual_savings = 0.01
                         savings_type = "no_savings"
                         print(f"  Warning: No positive savings for {county} {incentive_scenario}")
                     
                     # Calculate payback period in years
-                    payback_years = total_capital_cost / annual_savings if annual_savings > 0 else float('inf')
+                    payback_years = net_capital_cost / annual_savings if annual_savings > 0 else float('inf')
                     
-                    print(f"    {incentive_scenario}: Electrification ${electrification_capital_cost:.0f}, Total Capital ${total_capital_cost:.0f}, Savings ${annual_savings:.0f} ({savings_type}), Payback {payback_years:.1f} years")
+                    print(f"    {incentive_scenario}: Capital ${net_capital_cost:.0f}, Savings ${annual_savings:.0f} ({savings_type}), Payback {payback_years:.1f} years")
                     
                     payback_data.append({
                         'county': county,
@@ -311,11 +210,7 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
                         'annual_savings_with_solar': savings_with_solar,
                         'annual_savings_used': annual_savings,
                         'savings_type': savings_type,
-                        'electrification_capital_cost': electrification_capital_cost,
-                        'solar_storage_capital_cost': solar_storage_costs['net_solar_storage_cost'] if solar_storage_costs else 0.0,
-                        'solar_capacity_kw': solar_kw,
-                        'total_capital_cost': total_capital_cost,
-                        'net_capital_cost': total_capital_cost,  # Keep for backward compatibility
+                        'net_capital_cost': net_capital_cost,
                         'payback_period_years': payback_years
                     })
                     
