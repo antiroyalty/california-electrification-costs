@@ -159,7 +159,11 @@ def get_appliances_for_scenario(scenario: str) -> Dict[str, type]:
     diff = diff_scenarios(scenario)
     electric_appliances = diff["electric_added"]
 
-    print(electric_appliances)
+    log(
+        at="get_appliances_for_scenario",
+        info="electric_appliances_identified",
+        appliances=list(electric_appliances)
+    )
     
     appliance_classes = {}
     
@@ -199,7 +203,11 @@ def get_gas_appliances_for_scenario(scenario: str) -> Dict[str, type]:
     diff = diff_scenarios(scenario)
     gas_appliances = diff["gas_removed"]
 
-    print(gas_appliances)
+    log(
+        at="get_gas_appliances_for_scenario",
+        info="gas_appliances_identified",
+        appliances=list(gas_appliances)
+    )
     
     appliance_classes = {}
     
@@ -242,11 +250,19 @@ def load_solar_capacity_data(base_input_dir: str, scenario: str, housing_type: s
             county_slug = slugify_county_name(county_name)
             slug_mapping[county_slug] = solar_kw
         
-        print(f"Loaded solar capacity data: {len(slug_mapping)} counties")
+        log(
+            at="load_solar_capacity_data",
+            info="solar_capacity_loaded",
+            counties_count=len(slug_mapping)
+        )
         return slug_mapping
         
     except Exception as e:
-        print(f"Warning: Could not load solar capacity data: {e}")
+        log(
+            at="load_solar_capacity_data",
+            info="solar_capacity_load_failed",
+            error=str(e)
+        )
         return {}
 
 def _save_capital_costs_to_csv(
@@ -340,7 +356,11 @@ def _save_capital_costs_to_csv(
     fname = f"capital_costs_summary_{scenario}_{housing_type.replace('-', '_')}.csv"
     csv_path = os.path.join(out_dir, fname)
     df.to_csv(csv_path, index=False)
-    print(f"Capital-cost summary saved to: {csv_path}")
+    log(
+        at="_save_capital_costs_to_csv",
+        info="capital_costs_summary_saved",
+        csv_path=csv_path
+    )
 
 def _save_detailed_capital_costs_to_csv(
     base_output_dir: str,
@@ -455,7 +475,11 @@ def _save_detailed_capital_costs_to_csv(
     fname = f"capital_costs_{scenario}_{housing_type.replace('-', '_')}.csv"
     detailed_csv_path = os.path.join(out_dir, fname)
     detailed_df.to_csv(detailed_csv_path, index=False)
-    print(f"Detailed capital costs saved to: {detailed_csv_path}")
+    log(
+        at="_save_detailed_capital_costs_to_csv",
+        info="detailed_capital_costs_saved",
+        csv_path=detailed_csv_path
+    )
 
 def initialize_capital_cost_appliances(
     scenario: str,
@@ -592,12 +616,24 @@ def process(
                             lifetime_years=15
                         )
                         
-                print(f"Created solar/storage appliances for {len(solar_appliances)} counties")
+                log(
+                    at="process",
+                    info="solar_storage_appliances_created",
+                    counties_count=len(solar_appliances)
+                )
             else:
-                print("No solar capacity data found, skipping solar/storage appliances")
+                log(
+                    at="process",
+                    info="no_solar_capacity_data_found",
+                    include_solar_storage=include_solar_storage
+                )
                 
         except Exception as e:
-            print(f"Warning: Could not initialize solar/storage appliances: {e}")
+            log(
+                at="process",
+                info="solar_storage_appliances_init_failed",
+                error=str(e)
+            )
             include_solar_storage = False
 
     incentive_scenarios = [
