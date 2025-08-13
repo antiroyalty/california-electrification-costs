@@ -200,16 +200,26 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
                 savings_scenario_only = baseline_annual_cost - scenario_annual_cost
                 savings_with_solar = baseline_annual_cost - scenario_solar_annual_cost
                 
-                print(f"{county}:")
-                print(f"  Baseline: ${baseline_annual_cost:.0f}")
-                print(f"  {scenario} only: ${scenario_annual_cost:.0f} (savings: ${savings_scenario_only:.0f})")
-                print(f"  {scenario} + solar: ${scenario_solar_annual_cost:.0f} (savings: ${savings_with_solar:.0f})")
+                log(
+                    at="calculate_payback_periods",
+                    info="county_cost_analysis",
+                    county=county,
+                    baseline_cost=baseline_annual_cost,
+                    scenario_cost=scenario_annual_cost,
+                    scenario_solar_cost=scenario_solar_annual_cost,
+                    savings_scenario_only=savings_scenario_only,
+                    savings_with_solar=savings_with_solar
+                )
                 
                 # Get capital costs for this county
                 county_capital = capital_summary[capital_summary['county'].str.contains(county.replace(' County', ''), case=False, na=False)]
                 
                 if county_capital.empty:
-                    print(f"Warning: No capital costs found for {county}")
+                    log(
+                        at="calculate_payback_periods",
+                        info="no_capital_costs_for_county",
+                        county=county
+                    )
                     continue
                 
                 county_slug = slugify_county_name(county)
@@ -231,12 +241,26 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
                         # No positive savings available - set a very small value for very long payback
                         annual_savings = 0.01
                         savings_type = "no_savings"
-                        print(f"  Warning: No positive savings for {county} {incentive_scenario}")
+                        log(
+                            at="calculate_payback_periods",
+                            info="no_positive_savings",
+                            county=county,
+                            incentive_scenario=incentive_scenario
+                        )
                     
                     # Calculate payback period in years
                     payback_years = net_capital_cost / annual_savings if annual_savings > 0 else float('inf')
                     
-                    print(f"    {incentive_scenario}: Capital ${net_capital_cost:.0f}, Savings ${annual_savings:.0f} ({savings_type}), Payback {payback_years:.1f} years")
+                    log(
+                        at="calculate_payback_periods",
+                        info="payback_calculation",
+                        county=county,
+                        incentive_scenario=incentive_scenario,
+                        capital_cost=net_capital_cost,
+                        annual_savings=annual_savings,
+                        savings_type=savings_type,
+                        payback_years=payback_years
+                    )
                     
                     payback_data.append({
                         'county': county,
@@ -256,13 +280,22 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
                     })
                     
             except Exception as e:
-                print(f"Error processing {county}: {e}")
+                log(
+                    at="calculate_payback_periods",
+                    info="county_processing_error",
+                    county=county,
+                    error=str(e)
+                )
                 continue
         
         return pd.DataFrame(payback_data)
         
     except Exception as e:
-        print(f"Error calculating payback periods: {e}")
+        log(
+            at="calculate_payback_periods",
+            info="payback_calculation_error",
+            error=str(e)
+        )
         log(
             at="step16_payback_periods",
             info="payback_calculation_failed",
@@ -299,7 +332,11 @@ def process(base_input_dir: str, scenario: str, housing_type: str, counties: lis
                 info="no_payback_data_calculated",
                 scenario=scenario
             )
-            print(f"No payback data calculated for scenario: {scenario}")
+            log(
+                at="process",
+                info="no_payback_data_calculated",
+                scenario=scenario
+            )
             return
         
         # Save payback data to CSV
@@ -324,11 +361,15 @@ def process(base_input_dir: str, scenario: str, housing_type: str, counties: lis
             average_payback_years=avg_payback
         )
         
-        print(f"Payback period calculations completed for {scenario}")
-        print(f"   CSV saved: {csv_path}")
-        print(f"   Counties processed: {len(payback_df['county'].unique())}")
-        print(f"   Incentive scenarios: {len(incentive_scenarios)}")
-        print(f"   Average payback: {avg_payback:.1f} years")
+        log(
+            at="process",
+            info="payback_calculations_summary",
+            scenario=scenario,
+            csv_path=csv_path,
+            counties_processed=len(payback_df['county'].unique()),
+            incentive_scenarios_count=len(incentive_scenarios),
+            average_payback_years=avg_payback
+        )
         
         return csv_path
         
@@ -339,7 +380,12 @@ def process(base_input_dir: str, scenario: str, housing_type: str, counties: lis
             scenario=scenario,
             error=str(e)
         )
-        print(f"Failed to calculate payback periods for {scenario}: {e}")
+        log(
+            at="process",
+            info="payback_calculations_failed",
+            scenario=scenario,
+            error=str(e)
+        )
         raise
 
 if __name__ == "__main__":

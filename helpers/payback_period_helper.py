@@ -90,7 +90,7 @@ CAPITAL_COSTS = {
     "storage": {
         # Other papers suggest: 1200–$1600 per kilowatt-hour which would = $16320 - $21600 https://www.mdpi.com/2071-1050/16/23/10320#:~:text=residential%20solar%20and%20BESS%2C%20the,6%2FWh%20in%20Texas%20%28Figure%203d
         # https://energylibrary.tesla.com/docs/Public/EnergyStorage/Powerwall/3/Datasheet/en-us/Powerwall-3-Datasheet.pdf
-        # https://www.solarreviews.com/blog/is-the-tesla-powerwall-the-best-solar-battery-available?utm_source=chatgpt.com
+        # https://www.solarreviews.com/blog/is-the-tesla-powerwall-the-best-solar-battery-available
         # https://www.selfgenca.com/home/program_metrics/
         "powerwall_13.5kwh": 16853          # $16853 Cost for one Tesla Powerwall 3 before incentives. https://www.tesla.com/powerwall/design/overview
     },

@@ -20,8 +20,10 @@ from helpers.maps_helpers import (
     add_centroid_labels, add_map_title, export_geojson_and_html,
     get_latest_csv_file
 )
-from main_helpers import log, slugify_county_name, to_decimal_number
+from main_helpers import log, slugify_county_name, to_decimal_number, norcal_counties, socal_counties, central_counties
 
+# Combine all California counties for default processing
+all_california_counties = norcal_counties + central_counties + socal_counties
 
 def load_solar_data(base_input_dir: str, scenario: str, housing_type: str, county_slug: str) -> float:
     """
@@ -41,7 +43,7 @@ def load_solar_data(base_input_dir: str, scenario: str, housing_type: str, count
             return 0.0
             
     except Exception as e:
-        print(f"Warning: Could not load solar data for {county_name}: {e}")
+        print(f"Warning: Could not load solar data for {county_slug}: {e}")
         return 0.0
 
 
@@ -575,8 +577,8 @@ if __name__ == "__main__":
     parser.add_argument("scenario", help="Electrification scenario to analyze (e.g., 'baseline', 'heat_pump', etc.)")
     parser.add_argument("--housing-type", default="single-family-detached", 
                        help="Housing type (default: single-family-detached)")
-    parser.add_argument("--counties", nargs="+", default=["Alameda County"],
-                       help="Counties to analyze (default: Alameda County)")
+    parser.add_argument("--counties", nargs="+", default=all_california_counties,
+                       help="Counties to analyze (default: all California counties)")
     
     args = parser.parse_args()
     

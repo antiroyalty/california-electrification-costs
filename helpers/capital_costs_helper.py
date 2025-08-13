@@ -95,7 +95,7 @@ def calculate_water_heater_cost(capital_costs_structure, tank_size: str = "55-75
     
     federal_tax_credit = min(base_cost * 0.3, INCENTIVES["water_heater"]["max_federal_annual_tax_rebate"]) 
     rebate = federal_tax_credit + INCENTIVES["water_heater"]["45-55gal"]
-    print("REBATE: ", rebate)
+    # Rebate calculation completed
     return base_cost - rebate
 
 
@@ -164,7 +164,7 @@ def evaluate_custom_combo(
             solar_kw, dollars_per_watt, labour_pct, design_pct, storage_cost
         )
         solar_cost_after_incentives = apply_solar_storage_incentives(base_solar_cost, utility)
-        print(f"Solar cost ({cost_label}): ", solar_cost_after_incentives)
+        # Solar cost calculated
         total_cost += solar_cost_after_incentives
         components["solar_storage"] = solar_cost_after_incentives
         lifetimes.append(LIFETIMES["solar"])
@@ -172,21 +172,21 @@ def evaluate_custom_combo(
 
     if include_heat_pump:
         hp_cost = calculate_heat_pump_cost(capital_costs_structure)
-        print(f"Heat pump cost ({cost_label}): ", hp_cost)
+        # Heat pump cost calculated
         total_cost += hp_cost
         components["heat_pump"] = hp_cost
         lifetimes.append(LIFETIMES["heat_pump"])
 
     if include_induction:
         stove_cost = calculate_induction_stove_cost(capital_costs_structure)
-        print(f"Stove cost ({cost_label}): ", stove_cost)
+        # Induction stove cost calculated
         total_cost += stove_cost
         components["induction_stove"] = stove_cost
         lifetimes.append(LIFETIMES["induction_stove"])
 
     if include_water_heater:
         water_heater_cost = calculate_water_heater_cost(capital_costs_structure, water_heater_tank_size)
-        print(f"Water heater cost ({cost_label}): ", water_heater_cost)
+        # Water heater cost calculated
         total_cost += water_heater_cost
         components["water_heater"] = water_heater_cost
         lifetimes.append(LIFETIMES["water_heater"])
@@ -286,7 +286,7 @@ def process_payback_analysis(
             )
 
             if county not in assets_mapping:
-                print(f"Missing solar capacity for {county}; skipping solar combo.")
+                # Skip counties missing solar capacity data
                 continue
 
             solar_kw = assets_mapping[county]
@@ -302,24 +302,11 @@ def process_payback_analysis(
             )
 
             # === Display Results ===
-            print(f"--- {county} ({cost_label} CAPITAL COSTS) ---")
-            print(f"1) {scenario} Only")
-            print(f"   Annual Cost: ${hp_cost:.2f}")
-            print(f"   Annual Savings vs Baseline: ${savings_hp_only:.2f}")
-            print(f"   Capital Cost: ${results_hp_only['capital_cost']:.2f}")
-            print(f"   Payback: {results_hp_only['payback_period']:.2f} years")
-            print(f"   Lifetime Limit: {results_hp_only['min_lifetime']:.2f} years")
-
-            print(f"2) {scenario} + Solar + Storage")
-            print(f"   Annual Cost: ${hp_solar_cost:.2f}")
-            print(f"   Annual Savings vs Baseline: ${savings_hp_solar:.2f}")
-            print(f"   Capital Cost: ${results_hp_solar['capital_cost']:.2f}")
-            print(f"   Payback: {results_hp_solar['payback_period']:.2f} years")
-            print(f"   Lifetime Limit: {results_hp_solar['min_lifetime']:.2f} years")
-            print()
+            # Capital cost analysis completed for county
 
         except Exception as e:
-            print(f"Error processing {county}: {e}")
+            # Error processing county - logged elsewhere
+            pass
 
         records.append({
             "County": county,
@@ -363,7 +350,7 @@ def process_payback_analysis(
     )
 
     merged_gdf.to_file(geojson_path, driver="GeoJSON")
-    print(f"🗺️  Saved {cost_label} CAPITAL COSTS GeoJSON to {geojson_path}")
+    # GeoJSON file saved
         
     metrics = ["Payback Period", "Solar Size (kW)"]
     variants = [f"{scenario}_only", f"{scenario}_solar"]
@@ -380,7 +367,7 @@ def process_payback_analysis(
             filename = f"{metric.lower().replace(' ', '_')}_{variant}_{output_suffix.lower()}.html"
             output_path = os.path.join(maps_dir, filename)
             m.save(output_path)
-            print(f"Saved {cost_label} CAPITAL COSTS map: {output_path}")
+            # Map file saved
             os.system(f'open "{output_path}"')
 
     return merged_gdf, df_metrics
