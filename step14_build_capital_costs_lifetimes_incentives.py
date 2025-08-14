@@ -159,7 +159,11 @@ def get_appliances_for_scenario(scenario: str) -> Dict[str, type]:
     diff = diff_scenarios(scenario)
     electric_appliances = diff["electric_added"]
 
-    print(electric_appliances)
+    log(
+        at="get_appliances_for_scenario",
+        info="electric_appliances_identified",
+        appliances=list(electric_appliances)
+    )
     
     appliance_classes = {}
     
@@ -197,10 +201,13 @@ def get_gas_appliances_for_scenario(scenario: str) -> Dict[str, type]:
         raise ValueError(f"Unknown scenario: {scenario}. Available scenarios: {list(SCENARIOS.keys())}")
     
     diff = diff_scenarios(scenario)
-    breakpoint()
     gas_appliances = diff["gas_removed"]
 
-    print(gas_appliances)
+    log(
+        at="get_gas_appliances_for_scenario",
+        info="gas_appliances_identified",
+        appliances=list(gas_appliances)
+    )
     
     appliance_classes = {}
     
@@ -218,6 +225,46 @@ def get_gas_appliances_for_scenario(scenario: str) -> Dict[str, type]:
 
     return appliance_classes
 
+def load_solar_capacity_data(base_input_dir: str, scenario: str, housing_type: str) -> dict:
+    """
+    Load solar capacity data for counties from electrified assets CSV.
+    
+    Args:
+        base_input_dir: Base input directory
+        scenario: Electrification scenario name
+        housing_type: Housing type
+        
+    Returns:
+        Dictionary mapping county slug to solar capacity in kW
+    """
+    try:
+        from main_helpers import get_scenario_path
+        from helpers.capital_costs_helper import load_electrified_assets
+        
+        scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
+        assets_mapping = load_electrified_assets(scenario_path)
+        
+        # Convert county names to slugs for consistency
+        slug_mapping = {}
+        for county_name, solar_kw in assets_mapping.items():
+            county_slug = slugify_county_name(county_name)
+            slug_mapping[county_slug] = solar_kw
+        
+        log(
+            at="load_solar_capacity_data",
+            info="solar_capacity_loaded",
+            counties_count=len(slug_mapping)
+        )
+        return slug_mapping
+        
+    except Exception as e:
+        log(
+            at="load_solar_capacity_data",
+            info="solar_capacity_load_failed",
+            error=str(e)
+        )
+        return {}
+
 def _save_capital_costs_to_csv(
     base_output_dir: str,
     scenario: str,
@@ -226,6 +273,8 @@ def _save_capital_costs_to_csv(
     electric_appliances: dict[str, "ElectricAppliance"],
     gas_appliances: dict[str, "ElectricAppliance"],
     incentive_scenarios: list[IncentiveScenario],
+    solar_appliances: dict[str, "ElectricAppliance"] = None,
+    storage_appliances: dict[str, "ElectricAppliance"] = None,
 ) -> None:
     """
     Write a single CSV with one row per county and the eight columns:
@@ -235,35 +284,60 @@ def _save_capital_costs_to_csv(
         net_outlay_full, net_outlay_half, net_outlay_none
     """
     rows: list[dict] = []
+    
+    # Default to empty dicts if solar/storage not provided
+    solar_appliances = solar_appliances or {}
+    storage_appliances = storage_appliances or {}
 
     for county in counties:
         # ----------------------------------------------------------
         # 1.  capital-cost buckets (no incentives applied yet)
         # ----------------------------------------------------------
+        county_slug = slugify_county_name(county)
+        
         capital_cost_electric = sum(app.base_cost for app in electric_appliances.values())
         capital_cost_gas      = sum(app.base_cost for app in gas_appliances.values())
+        
+        # Add solar/storage costs for this county if available
+        capital_cost_solar = 0.0
+        capital_cost_storage = 0.0
+        if county_slug in solar_appliances:
+            capital_cost_solar = solar_appliances[county_slug].base_cost
+        if county_slug in storage_appliances:
+            capital_cost_storage = storage_appliances[county_slug].base_cost
+            
+        total_capital_cost_electric = capital_cost_electric + capital_cost_solar + capital_cost_storage
 
         # ----------------------------------------------------------
-        # 2.  incentives on the electric side
+        # 2.  incentives on the electric side (including solar/storage)
         # ----------------------------------------------------------
         incentives_full = sum(
             app.calculate_total_incentives(IncentiveScenario.FULL_INCENTIVES)
             for app in electric_appliances.values()
         )
+        
+        # Add solar/storage incentives for this county
+        if county_slug in solar_appliances:
+            incentives_full += solar_appliances[county_slug].calculate_total_incentives(IncentiveScenario.FULL_INCENTIVES)
+        if county_slug in storage_appliances:
+            incentives_full += storage_appliances[county_slug].calculate_total_incentives(IncentiveScenario.FULL_INCENTIVES)
         incentives_half = incentives_full * 0.5
         incentives_none = 0.0
 
         # ----------------------------------------------------------
         # 3.  incremental (“net”) outlay  = electric – gas – incentives
         # ----------------------------------------------------------
-        net_outlay_full = (capital_cost_electric - capital_cost_gas) - incentives_full
-        net_outlay_half = (capital_cost_electric - capital_cost_gas) - incentives_half
-        net_outlay_none = (capital_cost_electric - capital_cost_gas)                # no incentives
+        net_outlay_full = (total_capital_cost_electric - capital_cost_gas) - incentives_full
+        net_outlay_half = (total_capital_cost_electric - capital_cost_gas) - incentives_half
+        net_outlay_none = (total_capital_cost_electric - capital_cost_gas)                # no incentives
 
         rows.append(
             {
                 "county": county,
                 "capital_cost_electric": capital_cost_electric,
+                "capital_cost_solar": capital_cost_solar,
+                "capital_cost_storage": capital_cost_storage,
+                "total_capital_cost_electric": total_capital_cost_electric,
                 "capital_cost_gas": capital_cost_gas,
                 "incentives_full": incentives_full,
                 "incentives_half": incentives_half,
@@ -282,7 +356,130 @@ def _save_capital_costs_to_csv(
     fname = f"capital_costs_summary_{scenario}_{housing_type.replace('-', '_')}.csv"
     csv_path = os.path.join(out_dir, fname)
     df.to_csv(csv_path, index=False)
-    print(f"Capital-cost summary saved to: {csv_path}")
+    log(
+        at="_save_capital_costs_to_csv",
+        info="capital_costs_summary_saved",
+        csv_path=csv_path
+    )
+
+def _save_detailed_capital_costs_to_csv(
+    base_output_dir: str,
+    scenario: str,
+    housing_type: str,
+    counties: list[str],
+    electric_appliances: dict[str, "ElectricAppliance"],
+    gas_appliances: dict[str, "ElectricAppliance"],
+    incentive_scenarios: list[IncentiveScenario],
+    solar_appliances: dict[str, "ElectricAppliance"] = None,
+    storage_appliances: dict[str, "ElectricAppliance"] = None,
+) -> None:
+    """
+    Write detailed capital costs CSV file with individual appliance records for each county.
+    This generates the format expected by step16_payback_periods.py.
+    """
+    rows = []
+    
+    # Default to empty dicts if solar/storage not provided
+    solar_appliances = solar_appliances or {}
+    storage_appliances = storage_appliances or {}
+    
+    for county in counties:
+        county_slug = slugify_county_name(county)
+        
+        # Add records for each electric appliance
+        for appliance_name, appliance in electric_appliances.items():
+            for incentive_scenario in incentive_scenarios:
+                breakdown = appliance.get_cost_breakdown(incentive_scenario)
+                rows.append({
+                    'county': county,
+                    'county_slug': county_slug,
+                    'scenario': scenario,
+                    'housing_type': housing_type,
+                    'appliance_category': 'electric',
+                    'appliance_type': appliance_name,
+                    'appliance_name': f"electric_{appliance_name}",
+                    'incentive_scenario': incentive_scenario.value,
+                    'base_cost': appliance.base_cost,
+                    'total_incentives': appliance.calculate_total_incentives(incentive_scenario),
+                    'net_cost': appliance.get_net_cost(incentive_scenario),
+                    'lifetime_years': appliance.lifetime_years,
+                    'cost_per_year': appliance.get_net_cost(incentive_scenario) / appliance.lifetime_years,
+                    'annual_maintenance_cost': 0,
+                    'annual_insurance_cost': 0,
+                    'annual_fuel_cost': 0,
+                    'annual_operating_cost': 0,
+                    'total_operating_cost_over_lifetime': 0,
+                    'total_cost_of_ownership': appliance.get_net_cost(incentive_scenario)
+                })
+        
+        # Add records for solar appliance if available for this county
+        if county_slug in solar_appliances:
+            solar_appliance = solar_appliances[county_slug]
+            for incentive_scenario in incentive_scenarios:
+                breakdown = solar_appliance.get_cost_breakdown(incentive_scenario)
+                rows.append({
+                    'county': county,
+                    'county_slug': county_slug,
+                    'scenario': scenario,
+                    'housing_type': housing_type,
+                    'appliance_category': 'solar',
+                    'appliance_type': 'solar_system',
+                    'appliance_name': solar_appliance.name,
+                    'incentive_scenario': incentive_scenario.value,
+                    'base_cost': solar_appliance.base_cost,
+                    'total_incentives': solar_appliance.calculate_total_incentives(incentive_scenario),
+                    'net_cost': solar_appliance.get_net_cost(incentive_scenario),
+                    'lifetime_years': solar_appliance.lifetime_years,
+                    'cost_per_year': solar_appliance.get_net_cost(incentive_scenario) / solar_appliance.lifetime_years,
+                    'annual_maintenance_cost': 0,
+                    'annual_insurance_cost': 0,
+                    'annual_fuel_cost': 0,
+                    'annual_operating_cost': 0,
+                    'total_operating_cost_over_lifetime': 0,
+                    'total_cost_of_ownership': solar_appliance.get_net_cost(incentive_scenario)
+                })
+        
+        # Add records for storage appliance if available for this county
+        if county_slug in storage_appliances:
+            storage_appliance = storage_appliances[county_slug]
+            for incentive_scenario in incentive_scenarios:
+                breakdown = storage_appliance.get_cost_breakdown(incentive_scenario)
+                rows.append({
+                    'county': county,
+                    'county_slug': county_slug,
+                    'scenario': scenario,
+                    'housing_type': housing_type,
+                    'appliance_category': 'storage',
+                    'appliance_type': 'battery_storage',
+                    'appliance_name': storage_appliance.name,
+                    'incentive_scenario': incentive_scenario.value,
+                    'base_cost': storage_appliance.base_cost,
+                    'total_incentives': storage_appliance.calculate_total_incentives(incentive_scenario),
+                    'net_cost': storage_appliance.get_net_cost(incentive_scenario),
+                    'lifetime_years': storage_appliance.lifetime_years,
+                    'cost_per_year': storage_appliance.get_net_cost(incentive_scenario) / storage_appliance.lifetime_years,
+                    'annual_maintenance_cost': 0,
+                    'annual_insurance_cost': 0,
+                    'annual_fuel_cost': 0,
+                    'annual_operating_cost': 0,
+                    'total_operating_cost_over_lifetime': 0,
+                    'total_cost_of_ownership': storage_appliance.get_net_cost(incentive_scenario)
+                })
+    
+    # Save detailed CSV
+    detailed_df = pd.DataFrame(rows).sort_values(['county', 'appliance_type', 'incentive_scenario'])
+    
+    out_dir = os.path.join(base_output_dir, "capital_costs")
+    os.makedirs(out_dir, exist_ok=True)
+    
+    fname = f"capital_costs_{scenario}_{housing_type.replace('-', '_')}.csv"
+    detailed_csv_path = os.path.join(out_dir, fname)
+    detailed_df.to_csv(detailed_csv_path, index=False)
+    log(
+        at="_save_detailed_capital_costs_to_csv",
+        info="detailed_capital_costs_saved",
+        csv_path=detailed_csv_path
+    )
 
 def initialize_capital_cost_appliances(
     scenario: str,
@@ -370,6 +567,7 @@ def process(
     scenario: str,
     housing_type: str,
     counties: list[str],
+    include_solar_storage: bool = False,
 ):
     """Build capital-cost, lifetime, and incentive tables for a scenario."""
     log(
@@ -377,6 +575,7 @@ def process(
         info="starting_capital_costs_build",
         scenario=scenario,
         housing_type=housing_type,
+        include_solar_storage=include_solar_storage,
     )
 
     try:
@@ -390,6 +589,52 @@ def process(
             error=str(err),
         )
         return {}
+        
+    # Initialize solar and storage appliances if requested
+    solar_appliances = {}
+    storage_appliances = {}
+    
+    if include_solar_storage:
+        try:
+            # Load solar capacity data
+            solar_capacity_data = load_solar_capacity_data(base_input_dir, scenario, housing_type)
+            
+            if solar_capacity_data:
+                from appliances.solar_system import SolarSystemAppliance
+                from appliances.battery_storage import BatteryStorageAppliance
+                
+                # Create solar and storage appliances for each county
+                for county_slug, solar_kw in solar_capacity_data.items():
+                    if solar_kw > 0:
+                        solar_appliances[county_slug] = SolarSystemAppliance(
+                            capacity_kw=solar_kw,
+                            lifetime_years=25
+                        )
+                        # Add one Tesla Powerwall 3 per installation
+                        storage_appliances[county_slug] = BatteryStorageAppliance(
+                            num_units=1,
+                            lifetime_years=15
+                        )
+                        
+                log(
+                    at="process",
+                    info="solar_storage_appliances_created",
+                    counties_count=len(solar_appliances)
+                )
+            else:
+                log(
+                    at="process",
+                    info="no_solar_capacity_data_found",
+                    include_solar_storage=include_solar_storage
+                )
+                
+        except Exception as e:
+            log(
+                at="process",
+                info="solar_storage_appliances_init_failed",
+                error=str(e)
+            )
+            include_solar_storage = False
 
     incentive_scenarios = [
         IncentiveScenario.FULL_INCENTIVES,
@@ -409,19 +654,46 @@ def process(
         electric_appliances,
         gas_appliances,
         incentive_scenarios,
+        solar_appliances if include_solar_storage else None,
+        storage_appliances if include_solar_storage else None,
+    )
+    
+    # Also save detailed CSV format expected by step16_payback_periods.py
+    _save_detailed_capital_costs_to_csv(
+        base_output_dir,
+        scenario,
+        housing_type,
+        counties,
+        electric_appliances,
+        gas_appliances,
+        incentive_scenarios,
+        solar_appliances if include_solar_storage else None,
+        storage_appliances if include_solar_storage else None,
     )
 
     all_appliances = {**electric_appliances, **gas_appliances}
+    if include_solar_storage:
+        all_appliances.update({f"solar_{k}": v for k, v in solar_appliances.items()})
+        all_appliances.update({f"storage_{k}": v for k, v in storage_appliances.items()})
+        
     log(
         at="step15_build_capital_costs_lifetimes_incentives",
         info="capital_costs_build_completed",
         electric_appliances_initialized=len(electric_appliances),
         gas_appliances_initialized=len(gas_appliances),
+        solar_appliances_initialized=len(solar_appliances) if include_solar_storage else 0,
+        storage_appliances_initialized=len(storage_appliances) if include_solar_storage else 0,
         total_appliances_initialized=len(all_appliances),
         scenarios_evaluated=len(incentive_scenarios),
     )
 
-    return {"electric": electric_appliances, "gas": gas_appliances}
+    result = {"electric": electric_appliances, "gas": gas_appliances}
+    if include_solar_storage:
+        result.update({
+            "solar": solar_appliances,
+            "storage": storage_appliances
+        })
+    return result
 
 if __name__ == "__main__":
     import argparse
@@ -432,6 +704,8 @@ if __name__ == "__main__":
     parser.add_argument("scenario", 
                        choices=list(SCENARIOS.keys()),
                        help="Electrification scenario to analyze")
+    parser.add_argument("--include-solar-storage", action="store_true",
+                       help="Include solar and storage capital costs based on electrified_assets.csv")
     
     args = parser.parse_args()
     
@@ -443,6 +717,7 @@ if __name__ == "__main__":
         base_output_dir="data/loadprofiles", 
         scenario=args.scenario,
         housing_type=housing_type,
-        counties=all_counties
+        counties=all_counties,
+        include_solar_storage=args.include_solar_storage
     )
     

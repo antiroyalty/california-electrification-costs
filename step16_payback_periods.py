@@ -29,7 +29,8 @@ Output:
 import os
 import pandas as pd
 import numpy as np
-from main_helpers import log, slugify_county_name, norcal_counties, socal_counties, central_counties
+from collections import defaultdict
+from main_helpers import log, slugify_county_name, norcal_counties, socal_counties, central_counties, get_scenario_path
 from helpers.maps_helpers import get_latest_csv_file
 
 def load_capital_costs(base_input_dir: str, scenario: str, housing_type: str) -> pd.DataFrame:
@@ -52,7 +53,12 @@ def load_capital_costs(base_input_dir: str, scenario: str, housing_type: str) ->
         raise FileNotFoundError(f"Capital costs file not found: {csv_path}")
     
     df = pd.read_csv(csv_path)
-    print(f"Loaded capital costs: {len(df)} rows from {csv_path}")
+    log(
+        at="load_capital_costs",
+        info="capital_costs_loaded",
+        rows_count=len(df),
+        csv_path=csv_path
+    )
     return df
 
 def load_annual_costs(base_input_dir: str, county: str, scenario: str, housing_type: str, with_solar: bool = False) -> float:
@@ -81,7 +87,11 @@ def load_annual_costs(base_input_dir: str, county: str, scenario: str, housing_t
         expected_scenario = scenario
     
     if not os.path.exists(results_dir):
-        print(f"Warning: Results directory not found: {results_dir}")
+        log(
+            at="load_annual_costs",
+            info="results_directory_not_found",
+            directory=results_dir
+        )
         return 0.0
     
     try:
@@ -97,13 +107,26 @@ def load_annual_costs(base_input_dir: str, county: str, scenario: str, housing_t
             else:
                 return float(cost_value)
         else:
-            print(f"Warning: Scenario {expected_scenario} not found in {file_path}")
-            print(f"Available scenarios: {list(df.index)}")
+            log(
+                at="load_annual_costs",
+                info="scenario_not_found",
+                expected_scenario=expected_scenario,
+                file_path=file_path,
+                available_scenarios=list(df.index)
+            )
             return 0.0
             
     except Exception as e:
-        print(f"Warning: Failed to load annual costs for {county}/{scenario} (solar={with_solar}): {e}")
+        log(
+            at="load_annual_costs",
+            info="annual_costs_load_failed",
+            county=county,
+            scenario=scenario,
+            with_solar=with_solar,
+            error=str(e)
+        )
         return 0.0
+
 
 def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: str, counties: list) -> pd.DataFrame:
     """
@@ -119,17 +142,30 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
         DataFrame with payback period data
     """
     try:
-        # Load capital costs data from step15
+        # Load capital costs data from step15 (electrification appliances only)
         capital_costs_df = load_capital_costs(base_input_dir, scenario, housing_type)
-        print(f"Loaded capital costs: {len(capital_costs_df)} rows")
+        log(
+            at="calculate_payback_periods",
+            info="electrification_capital_costs_loaded",
+            rows_count=len(capital_costs_df)
+        )
         
         if capital_costs_df.empty:
-            print(f"No capital costs data found for scenario: {scenario}")
+            log(
+                at="calculate_payback_periods",
+                info="no_capital_costs_found",
+                scenario=scenario
+            )
             return pd.DataFrame()
         
         # Group capital costs by county and incentive scenario
         capital_summary = capital_costs_df.groupby(['county', 'incentive_scenario'])['net_cost'].sum().reset_index()
-        print(f"Capital costs summary: {len(capital_summary)} county-incentive combinations")
+        log(
+            at="calculate_payback_periods",
+            info="capital_costs_summary_created",
+            combinations_count=len(capital_summary)
+        )
+        
         
         payback_data = []
         
@@ -145,11 +181,19 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
                 scenario_solar_annual_cost = load_annual_costs(base_input_dir, county, scenario, housing_type, with_solar=True)
                 
                 if baseline_annual_cost == 0:
-                    print(f"Warning: Missing baseline annual cost data for {county}")
+                    log(
+                        at="calculate_payback_periods",
+                        info="missing_baseline_cost_data",
+                        county=county
+                    )
                     continue
                     
                 if scenario_annual_cost == 0 or scenario_solar_annual_cost == 0:
-                    print(f"Warning: Missing scenario annual cost data for {county}")
+                    log(
+                        at="calculate_payback_periods",
+                        info="missing_scenario_cost_data",
+                        county=county
+                    )
                     continue
                 
                 # Calculate annual savings (baseline - scenario)
@@ -168,10 +212,12 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
                     print(f"Warning: No capital costs found for {county}")
                     continue
                 
+                county_slug = slugify_county_name(county)
+                
                 # Calculate payback for each incentive scenario
                 for _, capital_row in county_capital.iterrows():
                     incentive_scenario = capital_row['incentive_scenario']
-                    net_capital_cost = capital_row['net_cost']
+                    net_capital_cost = capital_row['net_cost']  # This now includes solar/storage if generated with --include-solar-storage
                     
                     # Determine which savings to use based on available data
                     # If solar savings are positive, use those; otherwise use scenario-only if positive

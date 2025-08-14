@@ -20,7 +20,7 @@ from helpers.maps_helpers import (
     add_centroid_labels, add_map_title, export_geojson_and_html,
     get_latest_csv_file
 )
-from main_helpers import log, slugify_county_name, to_decimal_number
+from main_helpers import log, slugify_county_name, to_decimal_number, norcal_counties
 
 
 def load_solar_data(base_input_dir: str, scenario: str, housing_type: str, county_slug: str) -> float:
@@ -575,7 +575,7 @@ if __name__ == "__main__":
     parser.add_argument("scenario", help="Electrification scenario to analyze (e.g., 'baseline', 'heat_pump', etc.)")
     parser.add_argument("--housing-type", default="single-family-detached", 
                        help="Housing type (default: single-family-detached)")
-    parser.add_argument("--counties", nargs="+", default=["Alameda County"],
+    parser.add_argument("--counties", nargs="+", default=norcal_counties,
                        help="Counties to analyze (default: Alameda County)")
     
     args = parser.parse_args()
