@@ -1,5 +1,5 @@
 from typing import Dict
-from step15_build_capital_costs_lifetimes_incentives import ElectricAppliance, Incentive, IncentiveScenario
+from appliances.electric_base import ElectricAppliance, Incentive, IncentiveScenario
 
 class ElectricVehicleAppliance(ElectricAppliance):
     def __init__(self, 

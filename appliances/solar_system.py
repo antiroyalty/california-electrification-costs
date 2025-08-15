@@ -3,7 +3,7 @@ Solar System Appliance Class for Capital Cost Analysis
 """
 
 from typing import Dict, Optional
-from step15_build_capital_costs_lifetimes_incentives import ElectricAppliance, Incentive, IncentiveScenario
+from appliances.electric_base import ElectricAppliance, Incentive, IncentiveScenario
 from step17_cris_capital_costs import CAPITAL_COSTS_CRIS
 
 class SolarSystemAppliance(ElectricAppliance):
