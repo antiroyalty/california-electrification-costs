@@ -86,7 +86,6 @@ def load_annual_costs(county_dir: str, service: str, scenario: str) -> float:
         )
         return 0.0
 
-
 def calculate_payback_periods(base_input_dir: str, base_output_dir: str, scenario: str, 
                             housing_type: str, counties: list) -> pd.DataFrame:
     try:
@@ -204,9 +203,6 @@ def calculate_payback_periods(base_input_dir: str, base_output_dir: str, scenari
     
     return pd.DataFrame(payback_data)
 
-
-
-
 def process(base_input_dir: str, base_output_dir: str, scenario: str, housing_type: str, counties: list):
     """
     Calculate payback period data for the specified electrification scenario and save to CSV.
@@ -252,7 +248,6 @@ def process(base_input_dir: str, base_output_dir: str, scenario: str, housing_ty
         csv_path=payback_csv_path,
         average_payback=payback_df['payback_period_years'].mean()
     )
-
 
 if __name__ == "__main__":
     import argparse
