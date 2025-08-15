@@ -4,13 +4,6 @@ Step 15: Build Capital Costs, Lifetimes, Incentives
 Build Capital Costs, Lifetimes, Incentives for my numbers.
 Define each technology as a class that can be configured. It has a capital cost, 
 a lifetime, and associated incentives at the state, federal, and utility level.
-
-I want the ability to configure different Component "scenarios", like:
-- No Incentives
-- Half Incentives  
-- My Capital Costs
-- Cris's Capital Costs
-- EMP Capital Costs
 """
 
 import os
@@ -18,69 +11,13 @@ import pandas as pd
 from main_helpers import log, slugify_county_name
 from scenarios import SCENARIOS
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Set
 from dataclasses import dataclass
 from enum import Enum
+from appliances.solar_system import SolarSystemAppliance
+from appliances.battery_storage import BatteryStorageAppliance
+from appliances.electric_base import ElectricAppliance, Incentive, IncentiveScenario
 
-class IncentiveScenario(Enum):
-    """Defines different incentive scenarios for capital cost analysis."""
-    FULL_INCENTIVES = "full_incentives"
-    HALF_INCENTIVES = "half_incentives"
-    NO_INCENTIVES = "no_incentives"
-
-@dataclass
-class Incentive:
-    """Represents a single incentive (federal, state, or utility level)."""
-    name: str
-    value: float
-    unit: str  # "$" for fixed amount, "%" for percentage
-    max_value: Optional[float] = None
-    description: str = ""
-    source_url: str = ""
-
-
-class ElectricAppliance(ABC):
-    """Abstract base class for electric appliances used in home electrification."""
-    
-    def __init__(self, name: str, base_cost: float, lifetime_years: int):
-        self.name = name
-        self.base_cost = base_cost
-        self.lifetime_years = lifetime_years
-        self.incentives: List[Incentive] = []
-    
-    def add_incentive(self, incentive: Incentive) -> None:
-        self.incentives.append(incentive)
-    
-    def calculate_total_incentives(self, scenario: IncentiveScenario = IncentiveScenario.FULL_INCENTIVES) -> float:
-        if scenario == IncentiveScenario.NO_INCENTIVES:
-            return 0.0
-        
-        total_incentives = 0.0
-        multiplier = 1.0 if scenario == IncentiveScenario.FULL_INCENTIVES else 0.5
-        
-        for incentive in self.incentives:
-            if incentive.unit == "%":
-                incentive_value = self.base_cost * (incentive.value / 100)
-                if incentive.max_value:
-                    incentive_value = min(incentive_value, incentive.max_value)
-            else:  # Fixed dollar amount
-                incentive_value = incentive.value
-            
-            total_incentives += incentive_value * multiplier
-        
-        return total_incentives
-    
-    def get_net_cost(self, scenario: IncentiveScenario = IncentiveScenario.FULL_INCENTIVES) -> float:
-        return max(0, self.base_cost - self.calculate_total_incentives(scenario))
-    
-    @abstractmethod
-    def get_cost_breakdown(self, scenario: IncentiveScenario = IncentiveScenario.FULL_INCENTIVES) -> Dict:
-        """Return detailed cost breakdown including incentives."""
-        pass
-
-from typing import Dict, Set
-
-from typing import Dict, Set, Tuple
 
 def diff_scenarios(
     scenario: str,
@@ -481,19 +418,85 @@ def _save_detailed_capital_costs_to_csv(
         csv_path=detailed_csv_path
     )
 
+def make_heating_appliance(gas: bool, electric_classes=None, gas_classes=None):
+    if gas:
+        return gas_classes["heating"](
+            heating_type="furnace",
+            base_cost=4_500.0,
+            lifetime_years=15,
+        )
+    else:
+        return electric_classes["heating"](
+            heating_type="heat_pump",
+            base_cost=19_000.0,
+            lifetime_years=15,
+        )
+
+def make_cooking_appliance(gas: bool, electric_classes=None, gas_classes=None):
+    if gas:
+       return gas_classes["cooking"](
+            stove_type="gas",
+            base_cost=1_600.0,
+            lifetime_years=15,
+        )
+    else:
+        return electric_classes["cooking"](
+            cooking_type="induction",
+            base_cost=2_000.0,
+            lifetime_years=15,
+        )
+    
+def make_hot_water_appliance(gas: bool, electric_classes=None, gas_classes=None):
+    if gas:
+        return gas_classes["hot_water"](
+            heater_type="",
+            base_cost=0, # TODO:Simon, update this to be the latest base cost
+            lifetime_years=10,
+        )
+    else:
+        return electric_classes["hot_water"](
+            heater_type="heat_pump",
+            base_cost=2_637.0,
+            lifetime_years=15,
+        )
+
+def make_vehicle(gas: bool, electric_classes=None, gas_classes=None):
+    if gas:
+        return gas_classes["vehicle"](
+            vehicle_type="ICE",
+            base_cost=35_000.0,
+            lifetime_years=12,
+            annual_maintenance_cost=1_200.0,
+            annual_insurance_cost=2_000.0,
+        )
+    else: 
+        return electric_classes["vehicle"](
+            vehicle_type="Tesla_Model_3",
+            base_cost=45_000.0,
+            lifetime_years=12,
+            annual_maintenance_cost=800.0,
+            annual_insurance_cost=1_800.0,
+        )
+    
+def make_solar(solar_kw: int):
+    return SolarSystemAppliance(
+                capacity_kw=solar_kw,
+                lifetime_years=25
+            )
+
+def make_storage():
+    return BatteryStorageAppliance(
+                num_units=1,
+                lifetime_years=15
+            )
+
 def initialize_capital_cost_appliances(
     scenario: str,
 ) -> Tuple[Dict[str, "ElectricAppliance"], Dict[str, "ElectricAppliance"]]:
     """
     Instantiate and return the electric_appliances and gas_appliances dicts
     required by `process`.
-
-    Raises
-    ------
-    ValueError
-        If `scenario` is not defined in SCENARIOS.
     """
-    # look up which appliance classes the scenario requires
     electric_classes = get_appliances_for_scenario(scenario)
     gas_classes      = get_gas_appliances_for_scenario(scenario)
 
@@ -502,62 +505,30 @@ def initialize_capital_cost_appliances(
 
     # ---------- electric ---------------------------------------------------
     if "heating" in electric_classes:
-        electric["heating"] = electric_classes["heating"](
-            heating_type="heat_pump",
-            base_cost=19_000.0,
-            lifetime_years=15,
-        )
+        electric["heating"] = make_heating_appliance(gas=False, electric_classes=electric_classes, gas_classes=gas_classes)
 
     if "cooking" in electric_classes:
-        electric["cooking"] = electric_classes["cooking"](
-            cooking_type="induction",
-            base_cost=2_000.0,
-            lifetime_years=15,
-        )
+        electric["cooking"] = make_cooking_appliance(gas=False, electric_classes=electric_classes, gas_classes=gas_classes)
 
     if "hot_water" in electric_classes:
-        electric["hot_water"] = electric_classes["hot_water"](
-            heater_type="heat_pump",
-            base_cost=2_637.0,
-            lifetime_years=15,
-        )
+        electric["hot_water"] = make_hot_water_appliance(gas=False, electric_classes=electric_classes, gas_classes=gas_classes)
 
     if "vehicle" in electric_classes:
-        electric["vehicle"] = electric_classes["vehicle"](
-            vehicle_type="Tesla_Model_3",
-            base_cost=45_000.0,
-            lifetime_years=12,
-            annual_maintenance_cost=800.0,
-            annual_insurance_cost=1_800.0,
-        )
+        electric["vehicle"] = make_vehicle(gas=False, electric_classes=electric_classes, gas_classes=gas_classes)
 
     # ---------- gas --------------------------------------------------------
-    # TODO make sure the capital costs are net with gas, not absolute
 
     if "heating" in gas_classes:
-        gas["heating"] = gas_classes["heating"](
-            heating_type="furnace",
-            base_cost=4_500.0,
-            lifetime_years=15,
-        )
+        gas["heating"] = make_heating_appliance(gas=True, electric_classes=electric_classes, gas_classes=gas_classes)
 
     if "cooking" in gas_classes:
-        gas["cooking"] = gas_classes["cooking"](
-            stove_type="gas",
-            base_cost=1_600.0,
-            lifetime_years=15,
-        )
+        gas["cooking"] = make_cooking_appliance(gas=True, electric_classes=electric_classes, gas_classes=gas_classes)
 
-    # TODO: Add a gas water heater too
+    if "hot_water" in gas_classes:
+       gas["hot_water"] = make_hot_water_appliance(gas=True, electric_classes=electric_classes, gas_classes=gas_classes)
 
     if "vehicle" in gas_classes:
-        gas["vehicle"] = gas_classes["vehicle"](
-            vehicle_type="ICE",
-            base_cost=35_000.0,
-            lifetime_years=12,
-            annual_maintenance_cost=1_200.0,
-            annual_insurance_cost=2_000.0,
-        )
+        gas["vehicle"] = make_vehicle(gas=True, electric_classes=electric_classes, gas_classes=gas_classes)
 
     return electric, gas
 
@@ -567,84 +538,38 @@ def process(
     scenario: str,
     housing_type: str,
     counties: list[str],
-    include_solar_storage: bool = False,
 ):
-    """Build capital-cost, lifetime, and incentive tables for a scenario."""
     log(
         at="step15_build_capital_costs_lifetimes_incentives",
         info="starting_capital_costs_build",
         scenario=scenario,
         housing_type=housing_type,
-        include_solar_storage=include_solar_storage,
     )
 
-    try:
-        electric_appliances, gas_appliances = initialize_capital_cost_appliances(
-            scenario
-        )
-    except ValueError as err:
-        log(
-            at="step15_build_capital_costs_lifetimes_incentives",
-            info="capital_costs_build_failed",
-            error=str(err),
-        )
-        return {}
-        
-    # Initialize solar and storage appliances if requested
+    electric_appliances, gas_appliances = initialize_capital_cost_appliances(scenario)
+
     solar_appliances = {}
     storage_appliances = {}
     
-    if include_solar_storage:
-        try:
-            # Load solar capacity data
-            solar_capacity_data = load_solar_capacity_data(base_input_dir, scenario, housing_type)
+    solar_capacity_data = load_solar_capacity_data(base_input_dir, scenario, housing_type)
+
+    # Create solar and storage appliances for each county
+    for county_slug, solar_kw in solar_capacity_data.items():
+        if solar_kw > 0:
+            solar_appliances[county_slug] = make_solar(solar_kw=solar_kw)
+            storage_appliances[county_slug] = make_storage()
             
-            if solar_capacity_data:
-                from appliances.solar_system import SolarSystemAppliance
-                from appliances.battery_storage import BatteryStorageAppliance
-                
-                # Create solar and storage appliances for each county
-                for county_slug, solar_kw in solar_capacity_data.items():
-                    if solar_kw > 0:
-                        solar_appliances[county_slug] = SolarSystemAppliance(
-                            capacity_kw=solar_kw,
-                            lifetime_years=25
-                        )
-                        # Add one Tesla Powerwall 3 per installation
-                        storage_appliances[county_slug] = BatteryStorageAppliance(
-                            num_units=1,
-                            lifetime_years=15
-                        )
-                        
-                log(
-                    at="process",
-                    info="solar_storage_appliances_created",
-                    counties_count=len(solar_appliances)
-                )
-            else:
-                log(
-                    at="process",
-                    info="no_solar_capacity_data_found",
-                    include_solar_storage=include_solar_storage
-                )
-                
-        except Exception as e:
-            log(
-                at="process",
-                info="solar_storage_appliances_init_failed",
-                error=str(e)
-            )
-            include_solar_storage = False
+    log(
+        at="process",
+        info="solar_storage_appliances_created",
+        counties_count=len(solar_appliances)
+    )
 
     incentive_scenarios = [
         IncentiveScenario.FULL_INCENTIVES,
         IncentiveScenario.HALF_INCENTIVES,
         IncentiveScenario.NO_INCENTIVES,
     ]
-
-    # (Optional) quick sanity-check / warm-up
-    for app in electric_appliances.values():
-        _ = [app.get_cost_breakdown(sc) for sc in incentive_scenarios]
 
     _save_capital_costs_to_csv(
         base_output_dir,
@@ -654,8 +579,8 @@ def process(
         electric_appliances,
         gas_appliances,
         incentive_scenarios,
-        solar_appliances if include_solar_storage else None,
-        storage_appliances if include_solar_storage else None,
+        solar_appliances,
+        storage_appliances,
     )
     
     # Also save detailed CSV format expected by step16_payback_periods.py
@@ -667,22 +592,21 @@ def process(
         electric_appliances,
         gas_appliances,
         incentive_scenarios,
-        solar_appliances if include_solar_storage else None,
-        storage_appliances if include_solar_storage else None,
+        solar_appliances,
+        storage_appliances,
     )
 
     all_appliances = {**electric_appliances, **gas_appliances}
-    if include_solar_storage:
-        all_appliances.update({f"solar_{k}": v for k, v in solar_appliances.items()})
-        all_appliances.update({f"storage_{k}": v for k, v in storage_appliances.items()})
+    all_appliances.update({f"solar_{k}": v for k, v in solar_appliances.items()})
+    all_appliances.update({f"storage_{k}": v for k, v in storage_appliances.items()})
         
     log(
         at="step15_build_capital_costs_lifetimes_incentives",
         info="capital_costs_build_completed",
         electric_appliances_initialized=len(electric_appliances),
         gas_appliances_initialized=len(gas_appliances),
-        solar_appliances_initialized=len(solar_appliances) if include_solar_storage else 0,
-        storage_appliances_initialized=len(storage_appliances) if include_solar_storage else 0,
+        solar_appliances_initialized=len(solar_appliances),
+        storage_appliances_initialized=len(storage_appliances),
         total_appliances_initialized=len(all_appliances),
         scenarios_evaluated=len(incentive_scenarios),
     )

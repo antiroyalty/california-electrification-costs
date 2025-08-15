@@ -36,7 +36,6 @@ class ElectricCookingAppliance(ElectricAppliance):
         self._add_default_incentives()
     
     def _add_default_incentives(self) -> None:
-        """Add default federal incentives for electric cooking appliances."""
         # Federal tax credit for electric cooking appliances (Inflation Reduction Act)
         federal_credit = Incentive(
             name="Federal Residential Electrification Rebate",
