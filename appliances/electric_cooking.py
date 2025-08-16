@@ -7,7 +7,7 @@ in residential electrification scenarios.
 """
 
 from typing import Dict
-from step15_build_capital_costs_lifetimes_incentives import ElectricAppliance, Incentive, IncentiveScenario
+from appliances.electric_base import ElectricAppliance, Incentive, IncentiveScenario
 
 class ElectricCookingAppliance(ElectricAppliance):
     """
@@ -36,7 +36,6 @@ class ElectricCookingAppliance(ElectricAppliance):
         self._add_default_incentives()
     
     def _add_default_incentives(self) -> None:
-        """Add default federal incentives for electric cooking appliances."""
         # Federal tax credit for electric cooking appliances (Inflation Reduction Act)
         federal_credit = Incentive(
             name="Federal Residential Electrification Rebate",

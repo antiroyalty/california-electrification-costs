@@ -3,18 +3,16 @@ Solar System Appliance Class for Capital Cost Analysis
 """
 
 from typing import Dict, Optional
-from step15_build_capital_costs_lifetimes_incentives import ElectricAppliance, Incentive, IncentiveScenario
-from step17_cris_capital_costs import CAPITAL_COSTS_CRIS
+from appliances.electric_base import ElectricAppliance, Incentive, IncentiveScenario
 
 class SolarSystemAppliance(ElectricAppliance):
     """Solar panel system with sizing based on capacity in kW."""
     
     def __init__(self, capacity_kw: float, lifetime_years: int = 25):
-        # Calculate base cost from CAPITAL_COSTS_CRIS structure
-        solar_config = CAPITAL_COSTS_CRIS["solar"]["panel"]
-        dollars_per_watt = solar_config["base"]["value"]  # $2.8/W
-        installation_markup = solar_config["markup"]["installation_labor"]["value"] / 100  # 0%
-        design_markup = solar_config["markup"]["design_engineering"]["value"] / 100  # 0%
+        # Solar panel specifications (2025 pricing)
+        dollars_per_watt = 2.8  # $2.8/W
+        installation_markup = 0.0  # 0% installation markup
+        design_markup = 0.0  # 0% design/engineering markup
         
         # Calculate total solar cost
         panel_cost = capacity_kw * 1000 * dollars_per_watt  # Convert kW to W

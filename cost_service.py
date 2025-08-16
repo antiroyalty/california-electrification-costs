@@ -14,16 +14,9 @@ import step10_get_loads_for_rates as GetLoadsForRates
 import step11_evaluate_gas_rates as EvaluateGasRates
 import step12_evaluate_electricity_rates as EvaluateElectricityRates
 import step13_combine_total_annual_costs as CombineTotalAnnualCosts
-import step14_display_key_metrics_maps as DisplayKeyMetricsMaps
-import step15_build_capital_costs_lifetimes_incentives as BuildCapitalCostsLifetimesIncentives
-import step16_build_cris_capital_costs as BuildCrisCapitalCosts
-import step17_old_build_payback_period_capital_costs as MapPaybackVisualization
-import step17_build_gas_capital_costs as BuildGasCapitalCosts
-import step18_compare_capital_costs as CompareCapitalCosts
-import step19_calculate_payback_periods as CalculatePaybackPeriods
-import step20_calculate_end_of_life_payback as CalculateEndOfLifePayback
-import step21_build_payback_difference_maps as BuildPaybackDifferenceMaps
-import step22_calculate_npv as CalculateNPV
+import step14_build_capital_costs_lifetimes_incentives as BuildCapitalCostsLifetimesIncentives
+import step15_payback_periods as PaybackPeriods
+import step16_display_key_metrics_maps as DisplayKeyMetricsMaps
 
 class CostService:
 
@@ -69,7 +62,6 @@ class CostService:
         RunSamModelForSolarStorage.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties, force_recompute=True)
 
         self.log_step(10)
-        # Ensure that EV loads are captured here too
         GetLoadsForRates.process("data/loadprofiles", "data/loadprofiles", scenario, [self.housing_type], self.counties)
 
         self.log_step(11)
@@ -79,64 +71,16 @@ class CostService:
         EvaluateElectricityRates.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties)
 
         self.log_step(13)
-        # Combine total annual costs, without capital costs
-        # Rename this to GetAnnualGasAndElectricCosts
-        # Ensure that EV electricity costs are passed through to here too, applied with the right scenario.
         CombineTotalAnnualCosts.process("data/loadprofiles", "data/loadprofiles", scenario, [self.housing_type], self.counties)
 
-        # MapPaybackVisualization.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties, self.desired_rate_plans)
-        
         self.log_step(14)
-        # Display Maps for key metrics: 
-        # - Average solar panel size in county
-        # - Total annual load in county, in kwh
-        # - Total electricity bill annually, in $
-        # - Total gas bill annually, in $
-        # Display this as 4 maps all on one tab, if I can.
-        DisplayKeyMetricsMaps.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties, self.desired_rate_plans)
-
-        self.log_step(15)
-        # Build Capital Costs, Lifetimes, Incentives for my numbers
-        # Define each technology as a class that can be configured. It has a capital cost, a lifetime, and associated incentives at the state, federal, and utility level
-        # I want the ability to configure different Component "scenarios", like No Incentives, Half Incentives, My Capital Costs, Cris's Capital Costs, EMP Capital Costs
         BuildCapitalCostsLifetimesIncentives.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties)
         
-        self.log_step(16)
-        # Build Capital Cost classes for Cris's numbers as well
-        # BuildCrisCapitalCosts.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties)
-
-        self.log_step(17)
-        # Build Capital Costs, Lifetimes, Incentives (? if they apply) for the gas counterparts of each of the components in question
-        BuildGasCapitalCosts.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties)
+        self.log_step(15)
+        PaybackPeriods.process("data/loadprofiles", scenario, self.housing_type, self.counties)
         
-        self.log_step(18)
-        # Show the differences between Mine and Cris's capital costs
-        # Just component by component, create bar graphs or something
-        CompareCapitalCosts.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties)
-
-        # Create a Payback Period helper
-        self.log_step(19)
-        # Calculate the Payback Period for the scenario, given the component parameters defined in the DefineElectrifiedComponents step
-        # First, do an "out of the blue", electrification 
-        CalculatePaybackPeriods.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties, self.desired_rate_plans)
-
-        self.log_step(20)
-        # Then, do an "end-of-device life" electrification, when the component is being swapped when the previous gas component has reached its end of life
-        # Mostly, this affects the capital costs of electrification. Now, the "capital costs" get considered as electrified_capital_costs - gas_capital_costs, so incremental increase or decrease relative to the gas counterpart
-        CalculateEndOfLifePayback.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties, self.desired_rate_plans)
-
-        # Map how the payback periods differ across California. But before I decide which scenario to use, I will have to look at the difference maps
-
-        # Create a DifferenceMaps helper
-        self.log_step(21)
-        # Show the differences in Payback Periods between Out of the Blue electrification, and End of Life electrification.
-        # Do the same for my capital costs vs. Cris's capital costs
-        BuildPaybackDifferenceMaps.process("data/loadprofiles", "data/loadprofiles", self.housing_type, self.counties, "baseline", "baseline", "baseline", "baseline.solarstorage")
-
-        self.log_step(22)
-        # Calculate the NPV for each scenario, in addition to the payback period
-        # Define the NPV parameters here
-        CalculateNPV.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties, self.desired_rate_plans)
+        self.log_step(16)
+        DisplayKeyMetricsMaps.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties, self.desired_rate_plans)
 
 def parse_arguments():
     """
