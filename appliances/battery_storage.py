@@ -4,16 +4,14 @@ Battery Storage Appliance Class for Capital Cost Analysis
 
 from typing import Dict, Optional
 from appliances.electric_base import ElectricAppliance, Incentive, IncentiveScenario
-from step17_cris_capital_costs import CAPITAL_COSTS_CRIS
 
 class BatteryStorageAppliance(ElectricAppliance):
     """Battery storage system (Tesla Powerwall 3)."""
     
     def __init__(self, num_units: int = 1, lifetime_years: int = 15):
-        # Get battery cost from CAPITAL_COSTS_CRIS structure
-        storage_config = CAPITAL_COSTS_CRIS["storage"]["tesla_powerwall_3"]
-        base_unit_cost = storage_config["base"]["value"]  # $16,853 per unit
-        capacity_per_unit = storage_config["capacity_kwh"]  # 13.5 kWh per unit
+        # Tesla Powerwall 3 specifications (2025 pricing)
+        base_unit_cost = 16853  # $16,853 per unit
+        capacity_per_unit = 13.5  # 13.5 kWh per unit
         
         total_cost = base_unit_cost * num_units
         total_capacity = capacity_per_unit * num_units
