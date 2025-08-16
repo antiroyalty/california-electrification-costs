@@ -509,9 +509,13 @@ def process(
     housing_type: str,
     counties: list[str],
 ):
-    log(at="step15_build_capital_costs_lifetimes_incentives",
+    log(
+        at="step15_build_capital_costs_lifetimes_incentives",
         info="starting_capital_costs_build",
-        scenario=scenario, housing_type=housing_type)
+        scenario=scenario, 
+        housing_type=housing_type,
+        log_level="debug"
+        )
 
     # 1) instantiate
     electric_appliances, gas_appliances = build_appliances_from_config(scenario)
@@ -558,15 +562,19 @@ def process(
     summary_pv_name = f"capital_costs_summary_with_pv_{scenario}_{housing_type.replace('-', '_')}.csv"
     summary_with_pv.to_csv(os.path.join(out_dir, summary_pv_name), index=False)
 
-    log(at="process", info="capital_costs_build_completed",
+    log(
+        at="process", 
+        info="capital_costs_build_completed",
         electric_appliances_initialized=len(electric_appliances),
         gas_appliances_initialized=len(gas_appliances),
         counties=len(counties),
         rows_ledger=len(ledger_df),
         rows_summary=len(summary),
-        rows_summary_with_pv=len(summary_with_pv))
+        rows_summary_with_pv=len(summary_with_pv),
+        log_level="debug"
+    )
 
-    return {
+    result = {
         "electric": electric_appliances,
         "gas": gas_appliances,
         "ledger_df": ledger_df,
@@ -574,8 +582,12 @@ def process(
         "summary_with_pv_df": summary_with_pv,
         "pv_adjustments_df": pv_adj_df,
     }
+    print(result)
+
+    return result
 
 if __name__ == "__main__":
+    print("Running main")
     import argparse
     
     parser = argparse.ArgumentParser(description="Build capital costs, lifetimes, and incentives for electrification scenarios")
@@ -589,7 +601,7 @@ if __name__ == "__main__":
     
     housing_type = "single-family-detached"
     all_counties = norcal_counties + socal_counties + central_counties
-    
+
     result = process(
         base_input_dir="data/loadprofiles",
         base_output_dir="data/loadprofiles", 
