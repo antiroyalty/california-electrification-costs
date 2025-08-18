@@ -392,8 +392,11 @@ def apply_pv_storage_to_summary(
            .fillna(0.0)
     )
 
-    # Keep electric-side capex unchanged; adjust net outlays by PV+storage net
-    out["total_capital_cost_electric_with_pv"] = out["total_capital_cost_electric"]
+    # Total capital cost of electrification and solar and storage
+    out["total_capital_cost_electric_with_pv_st"] = (
+        out["total_capital_cost_electric"] + out["pv_capex"] + out["storage_capex"]
+    )
+    # Net outlays with PV/Storage (add the PV+Storage net to base net)
     out["net_outlay_full_with_pv"] = out["net_outlay_full"] + out["pv_storage_net_full"]
     out["net_outlay_half_with_pv"] = out["net_outlay_half"] + out["pv_storage_net_half"]
     out["net_outlay_none_with_pv"] = out["net_outlay_none"] + out["pv_storage_net_none"]
