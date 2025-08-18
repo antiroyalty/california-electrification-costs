@@ -263,32 +263,48 @@ def build_pv_storage_adjustments_df(
 
     rows = []
     # Pre-create one battery per site, and a PV system per kW
-    # If you prefer to avoid classes here, compute numbers directly.
     for county_slug, solar_kw in cap.items():
-        # Build “measure objects” only to fetch cost/incentives with your existing API
-        pv = SolarSystemAppliance(capacity_kw=solar_kw, lifetime_years=25) if solar_kw > 0 else None
-        bat = BatteryStorageAppliance(num_units=1, lifetime_years=15) if solar_kw > 0 else None
+        if solar_kw and solar_kw > 0:
+            pv  = SolarSystemAppliance(capacity_kw=solar_kw, lifetime_years=25)
+            bat = BatteryStorageAppliance(num_units=1, lifetime_years=15)
 
-        for sc in incentive_scenarios:
-            pv_capex = pv.base_cost if pv else 0.0
-            st_capex = bat.base_cost if bat else 0.0
-            pv_inc   = pv.calculate_total_incentives(sc) if pv else 0.0
-            st_inc   = bat.calculate_total_incentives(sc) if bat else 0.0
-            pv_net   = pv.get_net_cost(sc) if pv else 0.0
-            st_net   = bat.get_net_cost(sc) if bat else 0.0
+            # capex (constant across incentives)
+            pv_capex = pv.base_cost
+            st_capex = bat.base_cost
+
+            # only FULL incentives (sanity check)
+            pv_inc_full = pv.calculate_total_incentives(IncentiveScenario.FULL_INCENTIVES)
+            st_inc_full = bat.calculate_total_incentives(IncentiveScenario.FULL_INCENTIVES)
+
+            # nets for all three incentive scenarios
+            net_full = pv.get_net_cost(IncentiveScenario.FULL_INCENTIVES) + bat.get_net_cost(IncentiveScenario.FULL_INCENTIVES)
+            net_half = pv.get_net_cost(IncentiveScenario.HALF_INCENTIVES) + bat.get_net_cost(IncentiveScenario.HALF_INCENTIVES)
+            net_none = pv.get_net_cost(IncentiveScenario.NO_INCENTIVES)   + bat.get_net_cost(IncentiveScenario.NO_INCENTIVES)
 
             rows.append({
-                'county_slug': county_slug,
-                'incentive_scenario': sc.value,
-                'pv_capex': pv_capex,
-                'storage_capex': st_capex,
-                'pv_incentives': pv_inc,
-                'storage_incentives': st_inc,
-                'pv_storage_net': pv_net + st_net,
+                "county_slug": county_slug,
+                "solar_kw": solar_kw,
+                "pv_capex": pv_capex,
+                "storage_capex": st_capex,
+                "pv_incentives_full": pv_inc_full,
+                "storage_incentives_full": st_inc_full,
+                "pv_storage_net_full": net_full,
+                "pv_storage_net_half": net_half,
+                "pv_storage_net_none": net_none,
+            })
+        else:
+            rows.append({
+                "county_slug": county_slug,
+                "solar_kw": 0.0,
+                "pv_capex": 0.0,
+                "storage_capex": 0.0,
+                "pv_incentives_full": 0.0,
+                "storage_incentives_full": 0.0,
+                "pv_storage_net_full": 0.0,
+                "pv_storage_net_half": 0.0,
+                "pv_storage_net_none": 0.0,
             })
 
-    # Ensure every county shows up even if absent in cap dict (zeros)
-    # (Optional) If you want a complete grid, you can generate rows for all counties.
     return pd.DataFrame(rows)
 
 def summary_from_ledger(df: pd.DataFrame) -> pd.DataFrame:
@@ -350,45 +366,39 @@ def apply_pv_storage_to_summary(
     """
     Returns a copy of summary_df with *_with_pv columns added.
     """
+    out = summary_df.copy()
+
+    base_cols = [
+        "solar_kw", "pv_capex", "storage_capex",
+        "pv_incentives_full", "storage_incentives_full",
+        "pv_storage_net_full", 'pv_storage_net_half', 'pv_storage_net_none',
+    ]
+
+    # Ensure columns exist even if pv_df is empty
     if pv_df.empty:
-        # No changes; create *_with_pv identical to base
-        out = summary_df.copy()
-        out['total_capital_cost_electric_with_pv'] = out['total_capital_cost_electric']
-        out['incentives_full_with_pv'] = out['incentives_full']
-        out['incentives_half_with_pv'] = out['incentives_half']
-        out['net_outlay_full_with_pv'] = out['net_outlay_full']
-        out['net_outlay_half_with_pv'] = out['net_outlay_half']
-        out['net_outlay_none_with_pv'] = out['net_outlay_none']
+        for c in base_cols:
+            out[c] = 0.0
+        out["total_capital_cost_electric_with_pv"] = out["total_capital_cost_electric"]
+        out["net_outlay_full_with_pv"] = out["net_outlay_full"]
+        out["net_outlay_half_with_pv"] = out["net_outlay_half"]
+        out["net_outlay_none_with_pv"] = out["net_outlay_none"]
         return out
 
-    # Collapse PV adjustments to county level per incentive_scenario (we only need FULL here, but keep general)
-    pv_wide = (
-        pv_df.groupby(['county_slug','incentive_scenario'], as_index=False)[
-            ['pv_capex','storage_capex','pv_incentives','storage_incentives','pv_storage_net']
-        ].sum()
-        .pivot(index='county_slug', columns='incentive_scenario', values='pv_storage_net')
-        .fillna(0.0)
-        .rename(columns={
-            IncentiveScenario.FULL_INCENTIVES.value: 'pv_storage_net_full',
-            IncentiveScenario.HALF_INCENTIVES.value: 'pv_storage_net_half',
-            IncentiveScenario.NO_INCENTIVES.value:   'pv_storage_net_none',
-        })
+    # Join FULL-only PV/Storage info (one row per county)
+    pv_base = pv_df.set_index("county_slug")[base_cols]
+    out = (
+        out.set_index("county_slug")
+           .join(pv_base, how="left")
+           .fillna(0.0)
     )
 
-    out = summary_df.set_index('county_slug').join(pv_wide, how='left').fillna(0.0)
+    # Keep electric-side capex unchanged; adjust net outlays by PV+storage net
+    out["total_capital_cost_electric_with_pv"] = out["total_capital_cost_electric"]
+    out["net_outlay_full_with_pv"] = out["net_outlay_full"] + out["pv_storage_net_full"]
+    out["net_outlay_half_with_pv"] = out["net_outlay_half"] + out["pv_storage_net_half"]
+    out["net_outlay_none_with_pv"] = out["net_outlay_none"] + out["pv_storage_net_none"]
 
-    # Add PV/storage net to electric-side totals & recompute net outlays
-    out['total_capital_cost_electric_with_pv'] = out['total_capital_cost_electric'] + (
-        # If you prefer to split PV capex vs incentives explicitly, carry both in pv_df and add them here.
-        0.0  # keep base capex unchanged; net effect is applied in net_outlay via pv_storage_net_*
-    )
-
-    out['net_outlay_full_with_pv'] = out['net_outlay_full'] + out['pv_storage_net_full']
-    out['net_outlay_half_with_pv'] = out['net_outlay_half'] + out['pv_storage_net_half']
-    out['net_outlay_none_with_pv'] = out['net_outlay_none'] + out['pv_storage_net_none']
-
-    # If you also want separate columns for PV/storage capex and incentives in the summary, add/join them similarly.
-    return out.reset_index().sort_values('county_slug')
+    return out.reset_index().sort_values("county_slug")
 
 def write_capex_outputs(
     *,
@@ -555,12 +565,15 @@ def process(
 
     detailed_name = f"capital_costs_{scenario}_{housing_type.replace('-', '_')}.csv"
     ledger_df.to_csv(os.path.join(out_dir, detailed_name), index=False)
+    print(os.path.join(out_dir, detailed_name))
 
     summary_name = f"capital_costs_summary_{scenario}_{housing_type.replace('-', '_')}.csv"
     summary.to_csv(os.path.join(out_dir, summary_name), index=False)
+    print(os.path.join(out_dir, summary_name))
 
     summary_pv_name = f"capital_costs_summary_with_pv_{scenario}_{housing_type.replace('-', '_')}.csv"
     summary_with_pv.to_csv(os.path.join(out_dir, summary_pv_name), index=False)
+    print(os.path.join(out_dir, summary_pv_name))
 
     log(
         at="process", 
@@ -582,6 +595,7 @@ def process(
         "summary_with_pv_df": summary_with_pv,
         "pv_adjustments_df": pv_adj_df,
     }
+
     print(result)
 
     return result
@@ -607,6 +621,6 @@ if __name__ == "__main__":
         base_output_dir="data/loadprofiles", 
         scenario=args.scenario,
         housing_type=housing_type,
-        counties=["Alameda County"], #all_counties,
+        counties=["Alameda County"] # ["Alameda County"], #all_counties,
     )
     
