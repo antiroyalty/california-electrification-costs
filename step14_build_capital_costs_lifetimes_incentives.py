@@ -624,6 +624,6 @@ if __name__ == "__main__":
         base_output_dir="data/loadprofiles", 
         scenario=args.scenario,
         housing_type=housing_type,
-        counties=["Alameda County"] # ["Alameda County"], #all_counties,
+        counties=norcal_counties + socal_counties + central_counties # ["Alameda County"] # ["Alameda County"], #all_counties,
     )
     
