@@ -28,8 +28,6 @@ Output:
 
 import os
 import pandas as pd
-import numpy as np
-from collections import defaultdict
 from main_helpers import log, slugify_county_name, norcal_counties, socal_counties, central_counties, get_scenario_path
 from helpers.maps_helpers import get_latest_csv_file
 
@@ -126,7 +124,50 @@ def load_annual_costs(base_input_dir: str, county: str, scenario: str, housing_t
             error=str(e)
         )
         return 0.0
+
+def load_pv_net_adders(base_input_dir: str, scenario: str, housing_type: str) -> pd.DataFrame:
+    """
+    Reads capital_costs_summary_with_pv_{scenario}_{housing_type}.csv
+    and returns (county_slug, pv_storage_net_full/half/none).
+    If file missing, returns empty df (treated as zeros downstream).
+    """
+    capital_costs_dir = os.path.join(base_input_dir, "capital_costs")
+    fname = f"capital_costs_summary_with_pv_{scenario}_{housing_type.replace('-', '_')}.csv"
+    path = os.path.join(capital_costs_dir, fname)
+
+    if not os.path.exists(path):
+        log(at="load_pv_net_adders", info="pv_summary_not_found", csv_path=path)
+        return pd.DataFrame(columns=[
+            'county_slug',
+            'pv_storage_net_full', 'pv_storage_net_half', 'pv_storage_net_none'
+        ])
+
+    df = pd.read_csv(path)
+    # Keep only what we need; if columns are missing, fill zeros
+    needed = ['county_slug',
+              'pv_storage_net_full', 'pv_storage_net_half', 'pv_storage_net_none']
+    for col in needed:
+        if col not in df.columns:
+            df[col] = 0.0
+    log(at="load_pv_net_adders", info="pv_summary_loaded", rows_count=len(df), csv_path=path)
     
+    return df[needed]
+
+def pv_adder_for(county_slug: str, incentive_scenario: str, pv_net_df: pd.DataFrame) -> float:
+    if pv_net_df.empty:
+        return 0.0
+    row = pv_net_df[pv_net_df['county_slug'] == county_slug]
+    if row.empty:
+        return 0.0
+    key = str(incentive_scenario).lower()
+    col_map = {
+        'full_incentives': 'pv_storage_net_full',
+        'half_incentives': 'pv_storage_net_half',
+        'none_incentives': 'pv_storage_net_none',
+    }
+    col = col_map.get(key)
+    return float(row.iloc[0][col]) if col in row.columns else 0.0
+
 def calculate_annual_savings(base_input_dir: str, county: str, scenario: str, housing_type: str):
     """
     Calculate annual savings for a county and scenario.
@@ -176,28 +217,8 @@ def calculate_annual_savings(base_input_dir: str, county: str, scenario: str, ho
 
     return baseline_annual_cost, scenario_annual_cost, scenario_solar_annual_cost, savings_scenario_only, savings_with_solar
     
-
 def calculate_net_capital_cost(capital_summary: pd.DataFrame, county: str) -> pd.DataFrame:
-    """
-    Calculate net capital costs for a county.
-    
-    Args:
-        capital_summary: DataFrame with capital costs by county and incentive scenario
-        county: County name
-        
-    Returns:
-        DataFrame with capital costs for the county
-    """
-    # Get capital costs for this county
-    county_capital = capital_summary[capital_summary['county'].str.contains(county.replace(' County', ''), case=False, na=False)]
-    
-    if county_capital.empty:
-        print(f"Warning: No capital costs found for {county}")
-        return pd.DataFrame()
-
-    county_slug = slugify_county_name(county)
-    return county_capital
-
+    return capital_summary[capital_summary['county'] == county]
 
 def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: str, counties: list) -> pd.DataFrame:
     """
@@ -213,7 +234,6 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
         DataFrame with payback period data
     """
     try:
-        # Load capital costs data from step15 (electrification appliances only)
         capital_costs_df = load_capital_costs(base_input_dir, scenario, housing_type)
         log(
             at="calculate_payback_periods",
@@ -230,7 +250,8 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
             return pd.DataFrame()
         
         # Group capital costs by county and incentive scenario
-        capital_summary = capital_costs_df.groupby(['county', 'incentive_scenario'])['net_cost'].sum().reset_index()
+        capital_summary  = summarize_incremental_capex(capital_costs_df)
+        pv_net_df = load_pv_net_adders(base_input_dir, scenario, housing_type)
         log(
             at="calculate_payback_periods",
             info="capital_costs_summary_created",
@@ -256,33 +277,48 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
                 if county_capital.empty:
                     continue
                 
-                # Calculate payback for each incentive scenario
                 for _, capital_row in county_capital.iterrows():
-                    incentive_scenario = capital_row['incentive_scenario']
-                    net_capital_cost = capital_row['net_cost']  # This now includes solar/storage if generated with --include-solar-storage
-                    
-                    # Determine which savings to use based on available data
-                    # If solar savings are positive, use those; otherwise use scenario-only if positive
+                    incentive_scenario = str(capital_row['incentive_scenario']).lower()
+                    county_slug = slugify_county_name(county)
+
+                    inc_row = capital_summary[
+                        (capital_summary['county'] == county) &
+                        (capital_summary['incentive_scenario'].str.lower() == incentive_scenario)
+                    ]
+                    if inc_row.empty:
+                        continue
+
+                    net_cap_no_pv = float(inc_row.iloc[0]['net_capital_cost_no_pv'])
+
+                    # 1) Choose which annual savings to use
                     if savings_with_solar > 0:
                         annual_savings = savings_with_solar
                         savings_type = "with_solar"
                     elif savings_scenario_only > 0:
-                        annual_savings = savings_scenario_only 
+                        annual_savings = savings_scenario_only
                         savings_type = "scenario_only"
                     else:
-                        # No positive savings available - set a very small value for very long payback
-                        annual_savings = 0.01
+                        annual_savings = 0.01  # avoid div-by-zero, suggests “very long payback”
                         savings_type = "no_savings"
                         print(f"  Warning: No positive savings for {county} {incentive_scenario}")
-                    
-                    # Calculate payback period in years
+
+                    # 2) Adjust capex if we’re using with-solar savings
+                    if savings_type == "with_solar":
+                        pv_add = pv_adder_for(county_slug, incentive_scenario, pv_net_df)
+                        net_capital_cost = net_cap_no_pv + pv_add
+                    else:
+                        net_capital_cost = net_cap_no_pv
+
+                    # 3) Payback
                     payback_years = net_capital_cost / annual_savings if annual_savings > 0 else float('inf')
-                    
-                    print(f"    {incentive_scenario}: Capital ${net_capital_cost:.0f}, Savings ${annual_savings:.0f} ({savings_type}), Payback {payback_years:.1f} years")
-                    
+
+                    print(f"    {incentive_scenario}: Capital ${net_capital_cost:.0f}, "
+                        f"Savings ${annual_savings:.0f} ({savings_type}), "
+                        f"Payback {payback_years:.1f} years")
+
                     payback_data.append({
                         'county': county,
-                        'county_slug': slugify_county_name(county),
+                        'county_slug': county_slug,
                         'scenario': scenario,
                         'housing_type': housing_type,
                         'incentive_scenario': incentive_scenario,
@@ -312,6 +348,25 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
             error=str(e)
         )
         return pd.DataFrame()
+
+def summarize_incremental_capex(capital_costs_df: pd.DataFrame) -> pd.DataFrame:
+    df = capital_costs_df.copy()
+    df['incentive_scenario'] = df['incentive_scenario'].str.lower()
+
+    elec = (df[df['appliance_category'] == 'electric']
+            .groupby(['county', 'incentive_scenario'], as_index=False)['net_cost']
+            .sum()
+            .rename(columns={'net_cost': 'electric_net'}))
+
+    gas = (df[df['appliance_category'] == 'gas']
+           .groupby(['county', 'incentive_scenario'], as_index=False)['base_cost']
+           .sum()
+           .rename(columns={'base_cost': 'gas_base'}))
+
+    out = (elec.merge(gas, on=['county', 'incentive_scenario'], how='left')
+               .fillna({'gas_base': 0.0}))
+    out['net_capital_cost_no_pv'] = out['electric_net'] - out['gas_base']
+    return out[['county', 'incentive_scenario', 'net_capital_cost_no_pv']]
 
 def process(base_input_dir: str, scenario: str, housing_type: str, counties: list):
     """
