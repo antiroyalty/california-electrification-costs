@@ -20,7 +20,7 @@ from helpers.maps_helpers import (
     add_centroid_labels, add_map_title, export_geojson_and_html,
     get_latest_csv_file
 )
-from main_helpers import log, slugify_county_name, to_decimal_number, norcal_counties
+from main_helpers import log, slugify_county_name, to_decimal_number, norcal_counties, central_counties, socal_counties
 
 
 def load_solar_data(base_input_dir: str, scenario: str, housing_type: str, county_slug: str) -> float:
@@ -271,8 +271,10 @@ def create_single_map(base_input_dir: str, scenario: str, housing_type: str, cou
                 )
                 # Use kWh equivalent for color mapping
                 metric_value = elec_kwh + gas_thm * 29.3
-                # Display both values in tooltip
-                pretty = f"{to_decimal_number(elec_kwh)} kWh, {to_decimal_number(gas_thm)} therms"
+                # Display both values in tooltip with better formatting
+                elec_fmt = f"{elec_kwh:,.0f}" if elec_kwh >= 1000 else f"{elec_kwh:.0f}"
+                gas_fmt = f"{gas_thm:,.0f}" if gas_thm >= 1000 else f"{gas_thm:.0f}"
+                pretty = f"{elec_fmt} kWh<br>{gas_fmt} therms"
                 gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
                 
             elif metric_name == "Solar+Storage Annual Savings ($)":
@@ -292,6 +294,7 @@ def create_single_map(base_input_dir: str, scenario: str, housing_type: str, cou
                 metric_value = load_capital_costs_data(
                     base_input_dir, scenario, housing_type, county_slug
                 )
+
                 # Format as currency
                 pretty = f"${to_decimal_number(abs(metric_value))}"
                 gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
@@ -409,7 +412,7 @@ def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: 
         },
         "Capital Costs, Net After Incentives ($)": {
             "color_scheme": "Blues",
-            "bins": [0, 5000, 10000, 15000, 20000, 25000, 30000, 40000, 50000],
+            "bins": [-1000, 0, 5000, 10000, 15000, 20000, 25000, 30000, 40000, 50000, 60000],
             "unit": "$"
         },
         "Payback Period (years)": {
@@ -575,7 +578,7 @@ if __name__ == "__main__":
     parser.add_argument("scenario", help="Electrification scenario to analyze (e.g., 'baseline', 'heat_pump', etc.)")
     parser.add_argument("--housing-type", default="single-family-detached", 
                        help="Housing type (default: single-family-detached)")
-    parser.add_argument("--counties", nargs="+", default=norcal_counties,
+    parser.add_argument("--counties", nargs="+", default=norcal_counties + central_counties + socal_counties,
                        help="Counties to analyze (default: Alameda County)")
     
     args = parser.parse_args()
