@@ -1,5 +1,5 @@
 """
-Step 15: Build Capital Costs, Lifetimes, Incentives
+Step 14: Build Capital Costs, Lifetimes, Incentives
 
 Build Capital Costs, Lifetimes, Incentives for my numbers.
 Define each technology as a class that can be configured. It has a capital cost, 
