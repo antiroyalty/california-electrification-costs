@@ -568,15 +568,12 @@ def process(
 
     detailed_name = f"capital_costs_{scenario}_{housing_type.replace('-', '_')}.csv"
     ledger_df.to_csv(os.path.join(out_dir, detailed_name), index=False)
-    print(os.path.join(out_dir, detailed_name))
 
     summary_name = f"capital_costs_summary_{scenario}_{housing_type.replace('-', '_')}.csv"
     summary.to_csv(os.path.join(out_dir, summary_name), index=False)
-    print(os.path.join(out_dir, summary_name))
 
     summary_pv_name = f"capital_costs_summary_with_pv_{scenario}_{housing_type.replace('-', '_')}.csv"
     summary_with_pv.to_csv(os.path.join(out_dir, summary_pv_name), index=False)
-    print(os.path.join(out_dir, summary_pv_name))
 
     log(
         at="process", 
@@ -599,12 +596,9 @@ def process(
         "pv_adjustments_df": pv_adj_df,
     }
 
-    print(result)
-
     return result
 
 if __name__ == "__main__":
-    print("Running main")
     import argparse
     
     parser = argparse.ArgumentParser(description="Build capital costs, lifetimes, and incentives for electrification scenarios")

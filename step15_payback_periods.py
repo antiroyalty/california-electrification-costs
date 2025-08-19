@@ -421,11 +421,11 @@ def process(base_input_dir: str, scenario: str, housing_type: str, counties: lis
             average_payback_years=avg_payback
         )
         
-        print(f"Payback period calculations completed for {scenario}")
-        print(f"   CSV saved: {csv_path}")
-        print(f"   Counties processed: {len(payback_df['county'].unique())}")
-        print(f"   Incentive scenarios: {len(incentive_scenarios)}")
-        print(f"   Average payback: {avg_payback:.1f} years")
+        # print(f"Payback period calculations completed for {scenario}")
+        # print(f"   CSV saved: {csv_path}")
+        # print(f"   Counties processed: {len(payback_df['county'].unique())}")
+        # print(f"   Incentive scenarios: {len(incentive_scenarios)}")
+        # print(f"   Average payback: {avg_payback:.1f} years")
         
         return csv_path
         
