@@ -46,30 +46,3 @@ class ZeroCostAppliance(ElectricAppliance):
             "incentives_detail": [],
             "cost_per_year": 0.0
         }
-    
-    def get_annual_cost_savings_needed_for_payback(self, 
-                                                  target_payback_years: float,
-                                                  scenario: IncentiveScenario = IncentiveScenario.FULL_INCENTIVES) -> float:
-        """
-        Calculate annual cost savings needed to achieve target payback period.
-        
-        For zero cost appliances, no savings are needed for payback since
-        the initial investment is zero.
-        
-        Args:
-            target_payback_years: Desired payback period in years (ignored)
-            scenario: Incentive scenario to use (ignored)
-            
-        Returns:
-            Always returns 0.0 since no savings are needed for zero cost appliances
-        """
-        return 0.0
-    
-    def is_cost_effective(self) -> bool:
-        """
-        Check if the appliance is cost effective.
-        
-        Returns:
-            Always returns True since zero cost appliances are always cost effective
-        """
-        return True

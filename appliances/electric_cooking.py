@@ -82,19 +82,3 @@ class ElectricCookingAppliance(ElectricAppliance):
             "incentives_detail": incentives_detail,
             "cost_per_year": self.get_net_cost(scenario) / self.lifetime_years
         }
-    
-    def get_annual_cost_savings_needed_for_payback(self, 
-                                                  target_payback_years: float,
-                                                  scenario: IncentiveScenario = IncentiveScenario.FULL_INCENTIVES) -> float:
-        """
-        Calculate annual cost savings needed to achieve target payback period.
-        
-        Args:
-            target_payback_years: Desired payback period in years
-            scenario: Incentive scenario to use
-            
-        Returns:
-            Required annual savings in dollars to achieve target payback
-        """
-        net_cost = self.get_net_cost(scenario)
-        return net_cost / target_payback_years
