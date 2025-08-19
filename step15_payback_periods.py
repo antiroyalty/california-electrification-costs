@@ -161,9 +161,9 @@ def pv_adder_for(county_slug: str, incentive_scenario: str, pv_net_df: pd.DataFr
         return 0.0
     key = str(incentive_scenario).lower()
     col_map = {
-        'full': 'pv_storage_net_full',
-        'half': 'pv_storage_net_half',
-        'none': 'pv_storage_net_none',
+        'full_incentives': 'pv_storage_net_full',
+        'half_incentives': 'pv_storage_net_half',
+        'none_incentives': 'pv_storage_net_none',
     }
     col = col_map.get(key)
     return float(row.iloc[0][col]) if col in row.columns else 0.0
