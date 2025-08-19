@@ -25,6 +25,8 @@ class ElectricWaterHeatingAppliance(ElectricAppliance):
 
     # Class-level cache of the DataFrame
     _CONFIG_DF: Optional[pd.DataFrame] = None
+
+    CAPITAL_COST_COLUMN_NAME = ""
     
     def __init__(self, 
                  heater_type: str = "heat_pump",
@@ -44,8 +46,6 @@ class ElectricWaterHeatingAppliance(ElectricAppliance):
         self.heater_type = heater_type
         self.capacity_gallons = capacity_gallons
         self.county_slug: Optional[str] = None
-        
-        self._add_default_incentives()
 
     @classmethod
     def for_county(cls, county_slug: str, heater_type: str = "heat_pump") -> "ElectricWaterHeatingAppliance":
@@ -70,53 +70,25 @@ class ElectricWaterHeatingAppliance(ElectricAppliance):
             cls._CONFIG_DF = df
         return cls._CONFIG_DF
     
-    def _add_default_incentives(self) -> None:
-        """Add default federal and state incentives for electric water heaters."""
-        # Federal tax credit for heat pump water heaters (30% through 2032)
-        federal_credit = Incentive(
-            name="Federal Residential Clean Energy Credit",
-            value=30.0,
-            unit="%",
-            max_value=2000.0,
-            description="Federal tax credit for residential heat pump water heaters (2023-2032)",
-            source_url="https://www.irs.gov/credits-deductions/residential-clean-energy-credit"
-        )
-        self.add_incentive(federal_credit)
-        
-        # California rebate for heat pump water heaters
-        ca_rebate = Incentive(
-            name="California Heat Pump Water Heater Rebate",
-            value=700.0,
-            unit="$",
-            description="California rebate for heat pump water heaters (45-55 gallon capacity)",
-            source_url="https://incentives.switchison.org/residents/incentives"
-        )
-        self.add_incentive(ca_rebate)
+    
+    def calculate_total_incentives(
+        self,
+        scenario: IncentiveScenario = IncentiveScenario.FULL_INCENTIVES,
+    ) -> float:
+        # Read the column from your cached CSV (e.g., incentive_full/half/none)
+        scen_col = {
+            IncentiveScenario.FULL_INCENTIVES: "incentive_full",
+            IncentiveScenario.HALF_INCENTIVES: "incentive_half",
+            IncentiveScenario.NO_INCENTIVES:   "incentive_none",
+        }[scenario]
+
+        df = self._load_config()
+        key = self.county_slug if (self.county_slug in df.index) else "statewide"
+        return float(df.loc[key, scen_col])
     
     def get_cost_breakdown(self, scenario: IncentiveScenario = IncentiveScenario.FULL_INCENTIVES) -> Dict:
         """Return detailed cost breakdown for electric water heating appliance."""
-        incentives_detail = []
         total_incentives = self.calculate_total_incentives(scenario)
-        
-        if scenario != IncentiveScenario.NO_INCENTIVES:
-            multiplier = 1.0 if scenario == IncentiveScenario.FULL_INCENTIVES else 0.5
-            
-            for incentive in self.incentives:
-                if incentive.unit == "%":
-                    incentive_value = self.base_cost * (incentive.value / 100)
-                    if incentive.max_value:
-                        incentive_value = min(incentive_value, incentive.max_value)
-                else:
-                    incentive_value = incentive.value
-                
-                applied_value = incentive_value * multiplier
-                
-                incentives_detail.append({
-                    "name": incentive.name,
-                    "base_value": incentive_value,
-                    "applied_value": applied_value,
-                    "scenario_multiplier": multiplier
-                })
         
         return {
             "appliance_type": self.name,

@@ -62,18 +62,20 @@ class ElectricHeatingAppliance(ElectricAppliance):
     def _county_key(self) -> str:
         return self.county_slug if (self.county_slug in self.INCENTIVES) else "statewide"
     
-    def _csv_total_incentive(self, scenario: IncentiveScenario) -> float:
+    def calculate_total_incentives(
+        self,
+        scenario: IncentiveScenario = IncentiveScenario.FULL_INCENTIVES,
+    ) -> float:
+        # Read the column from your cached CSV (e.g., incentive_full/half/none)
         scen_col = {
             IncentiveScenario.FULL_INCENTIVES: "incentive_full",
             IncentiveScenario.HALF_INCENTIVES: "incentive_half",
             IncentiveScenario.NO_INCENTIVES:   "incentive_none",
         }[scenario]
+
         df = self._load_config()
         key = self.county_slug if (self.county_slug in df.index) else "statewide"
         return float(df.loc[key, scen_col])
-
-    def calculate_total_incentives(self, scenario: IncentiveScenario) -> float:
-        return self._csv_total_incentive(scenario)
 
     def _add_default_incentives(self) -> None:
         """Add default federal and state incentives for heat pumps."""
@@ -98,7 +100,6 @@ class ElectricHeatingAppliance(ElectricAppliance):
 
     def get_cost_breakdown(self, scenario: IncentiveScenario = IncentiveScenario.FULL_INCENTIVES) -> Dict:
         """Return detailed cost breakdown for electric heating appliance."""
-        # Use the unified total that includes county bonus
         total_incentives = self.calculate_total_incentives(scenario)
 
         return {
