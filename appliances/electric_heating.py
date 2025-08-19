@@ -1,4 +1,6 @@
-git from typing import Dict, Optional
+import os
+import pandas as pd
+from typing import Dict, Optional
 from appliances.electric_base import ElectricAppliance, Incentive, IncentiveScenario
 
 class ElectricHeatingAppliance(ElectricAppliance):
@@ -13,6 +15,15 @@ class ElectricHeatingAppliance(ElectricAppliance):
         "statewide": {"full": 0.0, "half": 0.0, "none": 0.0},  # fallback
     }
 
+    # Load settings from CSV file
+    CONFIG_PATH = os.path.join(
+        os.path.dirname(__file__), "..", "data", "electric_heating_costs.csv"
+    )
+
+    CAPITAL_COST_COLUMN_NAME = ""
+
+    _CONFIG_DF: Optional[pd.DataFrame] = None
+
     def __init__(self, 
                  heating_type: str = "heat_pump",
                  base_cost: float = 19000.0,
@@ -26,15 +37,25 @@ class ElectricHeatingAppliance(ElectricAppliance):
         self._add_default_incentives()
 
     @classmethod
-    def for_county(cls, county_slug: str, heating_type: str = "heat_pump") -> "ElectricHeatingAppliance":
-        """
-        County-aware factory. Uses county-specific base_cost and tags the instance
-        with the county so later calls (e.g., incentives) can use it.
-        """
-        key = county_slug if county_slug in cls.CAPITAL_COSTS else "statewide"
-        base_cost = cls.CAPITAL_COSTS[key]
+    def _load_config(cls) -> pd.DataFrame:
+        """Load CSV once and cache as DataFrame indexed by county_slug."""
+        if cls._CONFIG_DF is None:
+            df = pd.read_csv(cls.CONFIG_PATH)
+            df = df.set_index("county_slug")
+            cls._CONFIG_DF = df
+        return cls._CONFIG_DF
 
-        # Use existing __init__ (no signature change)
+    @classmethod
+    def for_county(cls, county_slug: str, heating_type: str = "heat_pump") -> "ElectricHeatingAppliance":
+        """Factory: create a county-specific appliance instance using CSV config."""
+        df = cls._load_config()
+        if county_slug in df.index:
+            row = df.loc[county_slug]
+        else:
+            row = df.loc["statewide"]  # fallback
+
+        base_cost = float(row[CAPITAL_COST_COLUMN_NAME]) 
+
         inst = cls(heating_type=heating_type, base_cost=base_cost, lifetime_years=15)
         inst.county_slug = county_slug
         return inst

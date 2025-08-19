@@ -37,7 +37,7 @@ BUILDERS = {
     ("hot_water", "electric"): ElectricWaterHeatingAppliance.for_county,
     ("hot_water", "gas"):      GasWaterHeatingAppliance,
 
-    ("cooking", "electric"): ElectricCookingAppliance.for_county,
+    ("cooking", "electric"): ElectricCookingAppliance,
     ("cooking", "gas"):      GasStoveAppliance,
 
     ("vehicle_charging", "electric"): ElectricVehicleAppliance,

@@ -6,7 +6,9 @@ lifetime, and incentives for electric water heating systems that replace gas wat
 in residential electrification scenarios.
 """
 
-from typing import Dict
+from typing import Dict, Optional
+import os
+import pandas as pd
 from appliances.electric_base import ElectricAppliance, Incentive, IncentiveScenario
 
 class ElectricWaterHeatingAppliance(ElectricAppliance):
@@ -16,6 +18,13 @@ class ElectricWaterHeatingAppliance(ElectricAppliance):
     This class models the capital costs, lifetime, and incentives for electric
     water heating systems that replace gas water heaters in residential electrification scenarios.
     """
+
+    CONFIG_PATH = os.path.join(
+        os.path.dirname(__file__), "..", "data", "electric_water_heating_costs.csv"
+    )
+
+    # Class-level cache of the DataFrame
+    _CONFIG_DF: Optional[pd.DataFrame] = None
     
     def __init__(self, 
                  heater_type: str = "heat_pump",
@@ -34,9 +43,32 @@ class ElectricWaterHeatingAppliance(ElectricAppliance):
         super().__init__(f"electric_{heater_type}_water_heater", base_cost, lifetime_years)
         self.heater_type = heater_type
         self.capacity_gallons = capacity_gallons
+        self.county_slug: Optional[str] = None
         
-        # Add default incentives based on current California programs
         self._add_default_incentives()
+
+    @classmethod
+    def for_county(cls, county_slug: str, heater_type: str = "heat_pump") -> "ElectricWaterHeatingAppliance":
+        """Factory: create a county-specific appliance instance using CSV config."""
+        df = cls._load_config()
+        if county_slug in df.index:
+            row = df.loc[county_slug]
+        else:
+            row = df.loc["statewide"]  # fallback
+
+        base_cost = float(row[CAPITAL_COST_COLUMN_NAME])
+
+        inst = cls(heating_type=heating_type, base_cost=base_cost, lifetime_years=15)
+        inst.county_slug = county_slug
+        return inst
+
+    def _load_config(cls) -> pd.DataFrame:
+        """Load CSV once and cache as DataFrame indexed by county_slug."""
+        if cls._CONFIG_DF is None:
+            df = pd.read_csv(cls.CONFIG_PATH)
+            df = df.set_index("county_slug")
+            cls._CONFIG_DF = df
+        return cls._CONFIG_DF
     
     def _add_default_incentives(self) -> None:
         """Add default federal and state incentives for electric water heaters."""
