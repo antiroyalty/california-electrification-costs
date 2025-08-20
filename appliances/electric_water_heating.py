@@ -68,16 +68,24 @@ class ElectricWaterHeatingAppliance(ElectricAppliance):
         self,
         scenario: IncentiveScenario = IncentiveScenario.FULL_INCENTIVES,
     ) -> float:
+        # Start with base class incentives (includes federal 15% ITC)
+        base_incentives = super().calculate_total_incentives(scenario)
+        
+        # Add county-specific incentives from CSV data
         df = self._load_config()
         key = self.county_slug if (self.county_slug in df.index) else ("statewide" if "statewide" in df.index else df.index[0])
-        inc_full = float(df.loc[key, self.INCENTIVE_COLUMN_NAME])
+        csv_inc_full = float(df.loc[key, self.INCENTIVE_COLUMN_NAME])
 
+        # Apply scenario multiplier to CSV incentives
         if scenario == IncentiveScenario.FULL_INCENTIVES:
-            return inc_full
+            csv_incentives = csv_inc_full
         elif scenario == IncentiveScenario.HALF_INCENTIVES:
-            return inc_full * 0.5
+            csv_incentives = csv_inc_full * 0.5
         else:
-            return 0.0
+            csv_incentives = 0.0
+        
+        # Return combined incentives
+        return base_incentives + csv_incentives
 
     def get_cost_breakdown(
         self,

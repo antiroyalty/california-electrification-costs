@@ -37,6 +37,20 @@ class ElectricAppliance(ABC):
         self.base_cost = base_cost
         self.lifetime_years = lifetime_years
         self.incentives: List[Incentive] = []
+        
+        # Add default federal 15% investment tax credit for all electric appliances
+        self._add_default_federal_incentive()
+    
+    def _add_default_federal_incentive(self) -> None:
+        """Add default federal 15% investment tax credit for electric appliances."""
+        federal_itc = Incentive(
+            name="Federal Electric Appliance Investment Tax Credit",
+            value=15.0,
+            unit="%",
+            description="Federal 15% investment tax credit for residential electric appliances",
+            source_url="https://www.irs.gov/credits-deductions/residential-clean-energy-credit"
+        )
+        self.incentives.append(federal_itc)
     
     def add_incentive(self, incentive: Incentive) -> None:
         self.incentives.append(incentive)
@@ -48,6 +62,7 @@ class ElectricAppliance(ABC):
         total_incentives = 0.0
         multiplier = 1.0 if scenario == IncentiveScenario.FULL_INCENTIVES else 0.5
         
+        # Calculate incentives from all sources including default federal ITC
         for incentive in self.incentives:
             if incentive.unit == "%":
                 incentive_value = self.base_cost * (incentive.value / 100)
