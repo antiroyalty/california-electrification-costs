@@ -31,10 +31,10 @@ from appliances.solar_system import SolarSystemAppliance
 from appliances.battery_storage import BatteryStorageAppliance
 
 BUILDERS = {
-    ("heating", "electric"): ElectricHeatingAppliance,
+    ("heating", "electric"): ElectricHeatingAppliance.for_county,
     ("heating", "gas"):      GasHeatingAppliance,
 
-    ("hot_water", "electric"): ElectricWaterHeatingAppliance,
+    ("hot_water", "electric"): ElectricWaterHeatingAppliance.for_county,
     ("hot_water", "gas"):      GasWaterHeatingAppliance,
 
     ("cooking", "electric"): ElectricCookingAppliance,
@@ -47,16 +47,22 @@ BUILDERS = {
     ("misc", "electric"):       lambda: ZeroCostAppliance(name="misc"),
 }
 
+def build_for_county(builder, county_slug: str):
+    # Try county-aware builder first; fall back to zero-arg
+    try:
+        return builder(county_slug)
+    except TypeError:
+        return builder()
+
 def build_appliances_from_config(scenario: str):
     fuels = resolve_fuels_for_scenario(scenario)
-    electric, gas = {}, {}
+    electric_builders, gas_builders = {}, {}
     for end_use, fuel in fuels.items():
         builder = BUILDERS.get((end_use, fuel))
         if not builder:
-            continue  # end-use not supported for that fuel
-        app = builder()
-        (electric if fuel == "electric" else gas)[end_use] = app
-    return electric, gas
+            continue
+        (electric_builders if fuel == "electric" else gas_builders)[end_use] = builder
+    return electric_builders, gas_builders
 
 def resolve_fuels_for_scenario(scenario: str) -> dict[str, str]:
     cfg = SCENARIOS[scenario]  # e.g. {"gas": {...}, "electric": {...}}
@@ -210,9 +216,13 @@ def build_capex_ledger_df(
     rows = []
     for county in counties:
         county_slug = slugify_county_name(county)
+
+        elec_instances = {name: build_for_county(b, county_slug) for name, b in electric_appliances.items()}
+        gas_instances = {name: build_for_county(b, county_slug) for name, b in gas_appliances.items()}
+
         for incentive_scenario in incentive_scenarios:
             # electric rows
-            for appliance_name, appliance in electric_appliances.items():
+            for appliance_name, appliance in elec_instances.items():
                 rows.append({
                     'county': county,
                     'county_slug': county_slug,
@@ -228,7 +238,7 @@ def build_capex_ledger_df(
                     'lifetime_years': appliance.lifetime_years,
                 })
             # gas rows (no incentives)
-            for appliance_name, appliance in gas_appliances.items():
+            for appliance_name, appliance in gas_instances.items():
                 rows.append({
                     'county': county,
                     'county_slug': county_slug,

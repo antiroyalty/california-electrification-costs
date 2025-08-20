@@ -198,7 +198,6 @@ def create_battery_model(solar, load_profile, years_of_analysis):
     for f, m in zip(file_names, [battery]):
         with open(dir + f + ".json", 'r') as file:
             data = json.load(file)
-            print(file)
             for k, v in data.items():
                 if k not in ["number_inputs", "batt_adjust_constant", "batt_adjust_en_timeindex", "batt_adjust_en_periods", "batt_adjust_timeindex", "batt_adjust_periods"]:
                     m.value(k, v)

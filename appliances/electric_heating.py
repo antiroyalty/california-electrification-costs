@@ -1,88 +1,95 @@
-"""
-Electric heating appliance class for residential electrification cost modeling.
-
-This module defines the ElectricHeatingAppliance class used to model the capital costs,
-lifetime, and incentives for electric heating systems (heat pumps) that replace gas
-heating in residential electrification scenarios.
-"""
-
-from typing import Dict
-from appliances.electric_base import ElectricAppliance, Incentive, IncentiveScenario
+import os
+import pandas as pd
+from typing import Dict, Optional
+from appliances.electric_base import ElectricAppliance, IncentiveScenario
+from main_helpers import slugify_county_name
 
 class ElectricHeatingAppliance(ElectricAppliance):
-    """
-    Class representing electric heating appliances (heat pumps) for home electrification.
-    
-    This class models the capital costs, lifetime, and incentives for electric heating
-    systems that replace gas heating in residential electrification scenarios.
-    """
-    
-    def __init__(self, 
-                 heating_type: str = "heat_pump",
-                 base_cost: float = 19000.0,
-                 lifetime_years: int = 15):
-        """
-        Initialize electric heating appliance.
-        
-        Args:
-            heating_type: Type of electric heating system (default: "heat_pump")
-            base_cost: Base equipment and installation cost in dollars
-            lifetime_years: Expected equipment lifetime in years
-        """
+    # CSV file with county-specific costs and incentives
+    CONFIG_PATH = os.path.join(
+        os.path.dirname(__file__), "..", "data", "County_Median_HPSH_Stats.csv"
+    )
+    _CONFIG_DF: Optional[pd.DataFrame] = None
+
+    # Column names we care about
+    CAPITAL_COST_COLUMN_NAME = "Total Project Cost per Unit ($)"
+    INCENTIVE_COLUMN_NAME    = "Total Incentive Received by Contractor ($)"
+
+    def __init__(
+        self,
+        heating_type: str = "heat_pump",
+        base_cost: float = 19000.0,
+        lifetime_years: int = 15,
+    ):
         super().__init__(f"electric_{heating_type}", base_cost, lifetime_years)
         self.heating_type = heating_type
-        
-        # Add default incentives based on current California programs
-        self._add_default_incentives()
-    
-    def _add_default_incentives(self) -> None:
-        """Add default federal and state incentives for heat pumps."""
-        # Federal tax credit (30% through 2032, then declining)
-        federal_credit = Incentive(
-            name="Federal Residential Clean Energy Credit",
-            value=30.0,
-            unit="%",
-            max_value=2000.0,
-            description="Federal tax credit for residential heat pumps (2023-2032)",
-            source_url="https://www.irs.gov/credits-deductions/residential-clean-energy-credit"
-        )
-        self.add_incentive(federal_credit)
-        
-        # California TECH Clean California incentive
-        ca_tech_incentive = Incentive(
-            name="TECH Clean California HVAC Incentive",
-            value=1500.0,
-            unit="$",
-            description="California incentive for single-family HVAC heat pump installation",
-            source_url="https://incentives.switchison.org/rebate-profile/tech-clean-california-single-family-hvac"
-        )
-        self.add_incentive(ca_tech_incentive)
-    
-    def get_cost_breakdown(self, scenario: IncentiveScenario = IncentiveScenario.FULL_INCENTIVES) -> Dict:
-        """Return detailed cost breakdown for electric heating appliance."""
-        incentives_detail = []
+        self.county_slug: Optional[str] = None  # set by for_county()
+
+    @classmethod
+    def _load_config(cls) -> pd.DataFrame:
+        """Load CSV once and cache as DataFrame indexed by county_slug."""
+        if cls._CONFIG_DF is None:
+            df = pd.read_csv(cls.CONFIG_PATH)
+
+            if "County" not in df.columns:
+                raise ValueError(f"{cls.CONFIG_PATH} missing required 'County' column")
+
+            # Slugify the County column and set as index
+            df["county_slug"] = df["County"].apply(slugify_county_name)
+            df = df.set_index("county_slug")
+
+            cls._CONFIG_DF = df
+        return cls._CONFIG_DF
+
+    @classmethod
+    def for_county(cls, county_slug: str, heating_type: str = "heat_pump") -> "ElectricHeatingAppliance":
+        """
+        Factory that reads county-specific base_cost from CSV.
+        Expects county_slug to match the CSV index.
+        """
+        df = cls._load_config()
+
+        if county_slug in df.index:
+            row = df.loc[county_slug]
+        elif "statewide" in df.index:
+            row = df.loc["statewide"]
+        else:
+            # final fallback
+            row = pd.Series({
+                cls.CAPITAL_COST_COLUMN_NAME: 19000.0,
+                cls.INCENTIVE_COLUMN_NAME: 0.0,
+            })
+
+        base_cost = float(row[cls.CAPITAL_COST_COLUMN_NAME])
+        inst = cls(heating_type=heating_type, base_cost=base_cost, lifetime_years=15)
+        inst.county_slug = county_slug
+        return inst
+
+    def calculate_total_incentives(
+        self,
+        scenario: IncentiveScenario = IncentiveScenario.FULL_INCENTIVES,
+    ) -> float:
+        """
+        Interpret CSV incentive as the 'FULL' amount; HALF is 50%, NONE is 0%.
+        """
+        df = self._load_config()
+        key = self.county_slug if (self.county_slug in df.index) else ("statewide" if "statewide" in df.index else df.index[0])
+        inc_full = float(df.loc[key, self.INCENTIVE_COLUMN_NAME])
+
+        if scenario == IncentiveScenario.FULL_INCENTIVES:
+            return inc_full
+        elif scenario == IncentiveScenario.HALF_INCENTIVES:
+            return inc_full * 0.5
+        else:
+            return 0.0
+
+    def get_cost_breakdown(
+        self,
+        scenario: IncentiveScenario = IncentiveScenario.FULL_INCENTIVES
+    ) -> Dict:
         total_incentives = self.calculate_total_incentives(scenario)
-        
-        if scenario != IncentiveScenario.NO_INCENTIVES:
-            multiplier = 1.0 if scenario == IncentiveScenario.FULL_INCENTIVES else 0.5
-            
-            for incentive in self.incentives:
-                if incentive.unit == "%":
-                    incentive_value = self.base_cost * (incentive.value / 100)
-                    if incentive.max_value:
-                        incentive_value = min(incentive_value, incentive.max_value)
-                else:
-                    incentive_value = incentive.value
-                
-                applied_value = incentive_value * multiplier
-                
-                incentives_detail.append({
-                    "name": incentive.name,
-                    "base_value": incentive_value,
-                    "applied_value": applied_value,
-                    "scenario_multiplier": multiplier
-                })
-        
+        incentives_detail: list = []  # totals come from CSV; no per-program breakdown here
+
         return {
             "appliance_type": self.name,
             "heating_type": self.heating_type,
@@ -92,21 +99,5 @@ class ElectricHeatingAppliance(ElectricAppliance):
             "total_incentives": total_incentives,
             "net_cost": self.get_net_cost(scenario),
             "incentives_detail": incentives_detail,
-            "cost_per_year": self.get_net_cost(scenario) / self.lifetime_years
+            "cost_per_year": self.get_net_cost(scenario) / self.lifetime_years,
         }
-    
-    def get_annual_cost_savings_needed_for_payback(self, 
-                                                  target_payback_years: float,
-                                                  scenario: IncentiveScenario = IncentiveScenario.FULL_INCENTIVES) -> float:
-        """
-        Calculate annual cost savings needed to achieve target payback period.
-        
-        Args:
-            target_payback_years: Desired payback period in years
-            scenario: Incentive scenario to use
-            
-        Returns:
-            Required annual savings in dollars to achieve target payback
-        """
-        net_cost = self.get_net_cost(scenario)
-        return net_cost / target_payback_years
