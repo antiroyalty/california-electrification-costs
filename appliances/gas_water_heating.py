@@ -18,7 +18,7 @@ class GasWaterHeatingAppliance(GasAppliance):
     
     def __init__(self, 
                  heater_type: str = "tank",
-                 base_cost: float = 1500.0,
+                 base_cost: float = 2264.46,
                  lifetime_years: int = 12,
                  efficiency: float = 0.83,
                  capacity_gallons: int = 55):
