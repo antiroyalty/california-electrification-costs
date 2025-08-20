@@ -16,7 +16,7 @@ norcal_counties = [
 # Counties with no buildings: Glenn, Modoc, Siskiyou
 
 central_counties = [
-    "Fresno County", "Kern County", "Kings County", "Madera County", "Merced County", 
+    "Fresno County", "Kings County", "Madera County", "Merced County", 
     "San Joaquin County", "Stanislaus County", "Sutter County", 
     "Tulare County", "Yolo County",  # Central Valley
     "Monterey County", "San Benito County", "San Luis Obispo County", 
