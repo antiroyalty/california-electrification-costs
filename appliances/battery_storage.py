@@ -2,7 +2,7 @@
 Battery Storage Appliance Class for Capital Cost Analysis
 """
 
-from typing import Dict, Optional
+from typing import Dict
 from appliances.electric_base import ElectricAppliance, Incentive, IncentiveScenario
 
 class BatteryStorageAppliance(ElectricAppliance):

@@ -166,4 +166,4 @@ def process(scenario, housing_type, output_base_dir="data", target_counties=None
     return output_csv_paths
 
 if __name__ == '__main__':
-    process("baseline", "single-family-detached", output_base_dir="data", target_counties=["Inyo County"], force_recompute=True)
+    process("baseline", "single-family-detached", output_base_dir="data", target_counties=norcal_counties + central_counties + socal_counties, force_recompute=True)

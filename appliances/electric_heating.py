@@ -5,7 +5,6 @@ from appliances.electric_base import ElectricAppliance, IncentiveScenario
 from main_helpers import slugify_county_name
 
 class ElectricHeatingAppliance(ElectricAppliance):
-    # CSV file with county-specific costs and incentives
     CONFIG_PATH = os.path.join(
         os.path.dirname(__file__), "..", "data", "County_Median_HPSH_Stats.csv"
     )
