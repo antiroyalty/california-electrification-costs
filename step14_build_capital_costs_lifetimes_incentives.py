@@ -222,7 +222,7 @@ def build_capex_ledger_df(
 
         for incentive_scenario in incentive_scenarios:
             # electric rows
-            for appliance_name, appliance in electric_appliances.items():
+            for appliance_name, appliance in elec_instances.items():
                 rows.append({
                     'county': county,
                     'county_slug': county_slug,
@@ -238,7 +238,7 @@ def build_capex_ledger_df(
                     'lifetime_years': appliance.lifetime_years,
                 })
             # gas rows (no incentives)
-            for appliance_name, appliance in gas_appliances.items():
+            for appliance_name, appliance in gas_instances.items():
                 rows.append({
                     'county': county,
                     'county_slug': county_slug,
