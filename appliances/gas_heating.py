@@ -18,7 +18,7 @@ class GasHeatingAppliance(GasAppliance):
     
     def __init__(self, 
                  heating_type: str = "furnace",
-                 base_cost: float = 4500.0,
+                 base_cost: float = 9771.3,
                  lifetime_years: int = 15,
                  efficiency: float = 0.83):
         """
