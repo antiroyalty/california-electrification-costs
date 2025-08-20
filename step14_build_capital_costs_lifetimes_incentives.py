@@ -533,7 +533,7 @@ def process(
     counties: list[str],
 ):
     log(
-        at="step15_build_capital_costs_lifetimes_incentives",
+        at="step14_build_capital_costs_lifetimes_incentives",
         info="starting_capital_costs_build",
         scenario=scenario, 
         housing_type=housing_type,

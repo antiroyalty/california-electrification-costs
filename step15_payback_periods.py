@@ -210,10 +210,10 @@ def calculate_annual_savings(base_input_dir: str, county: str, scenario: str, ho
     savings_scenario_only = baseline_annual_cost - scenario_annual_cost
     savings_with_solar = baseline_annual_cost - scenario_solar_annual_cost
     
-    print(f"{county}:")
-    print(f"  Baseline: ${baseline_annual_cost:.0f}")
-    print(f"  {scenario} only: ${scenario_annual_cost:.0f} (savings: ${savings_scenario_only:.0f})")
-    print(f"  {scenario} + solar: ${scenario_solar_annual_cost:.0f} (savings: ${savings_with_solar:.0f})")
+    # print(f"{county}:")
+    # print(f"  Baseline Annual: ${baseline_annual_cost:.0f}")
+    # print(f"  {scenario} only Annual: ${scenario_annual_cost:.0f} (savings: ${savings_scenario_only:.0f})")
+    # print(f"  {scenario} + solar Annual: ${scenario_solar_annual_cost:.0f} (savings: ${savings_with_solar:.0f})")
 
     return baseline_annual_cost, scenario_annual_cost, scenario_solar_annual_cost, savings_scenario_only, savings_with_solar
     
@@ -312,9 +312,9 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
                     # 3) Payback
                     payback_years = net_capital_cost / annual_savings if annual_savings > 0 else float('inf')
 
-                    print(f"    {incentive_scenario}: Capital ${net_capital_cost:.0f}, "
-                        f"Savings ${annual_savings:.0f} ({savings_type}), "
-                        f"Payback {payback_years:.1f} years")
+                    # print(f"    {incentive_scenario}: Capital ${net_capital_cost:.0f}, "
+                    #     f"Savings ${annual_savings:.0f} ({savings_type}), "
+                    #     f"Payback {payback_years:.1f} years")
 
                     payback_data.append({
                         'county': county,
@@ -421,8 +421,8 @@ def process(base_input_dir: str, scenario: str, housing_type: str, counties: lis
             average_payback_years=avg_payback
         )
         
-        # print(f"Payback period calculations completed for {scenario}")
-        # print(f"   CSV saved: {csv_path}")
+        print(f"Payback period calculations completed for {scenario}")
+        print(f"   CSV saved: {csv_path}")
         # print(f"   Counties processed: {len(payback_df['county'].unique())}")
         # print(f"   Incentive scenarios: {len(incentive_scenarios)}")
         # print(f"   Average payback: {avg_payback:.1f} years")
