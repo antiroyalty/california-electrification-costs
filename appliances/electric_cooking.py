@@ -10,25 +10,10 @@ from typing import Dict
 from appliances.electric_base import ElectricAppliance, Incentive, IncentiveScenario
 
 class ElectricCookingAppliance(ElectricAppliance):
-    """
-    Class representing electric cooking appliances for home electrification.
-    
-    This class models the capital costs, lifetime, and incentives for electric
-    cooking systems that replace gas stoves in residential electrification scenarios.
-    """
-    
     def __init__(self, 
                  cooking_type: str = "induction",
-                 base_cost: float = 2000.0,
+                 base_cost: float = 4260.08,
                  lifetime_years: int = 15):
-        """
-        Initialize electric cooking appliance.
-        
-        Args:
-            cooking_type: Type of electric cooking system (default: "induction")
-            base_cost: Base equipment and installation cost in dollars
-            lifetime_years: Expected equipment lifetime in years
-        """
         super().__init__(f"electric_{cooking_type}_cooking", base_cost, lifetime_years)
         self.cooking_type = cooking_type
         
