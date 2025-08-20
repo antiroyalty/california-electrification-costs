@@ -4,7 +4,7 @@ from appliances.gas_base import GasAppliance
 class GasStoveAppliance(GasAppliance):
     def __init__(self, 
                  stove_type: str = "gas",
-                 base_cost: float = 1600.0,
+                 base_cost: float = 2802.14,
                  lifetime_years: int = 15,
                  efficiency: float = 0.45):
         """
