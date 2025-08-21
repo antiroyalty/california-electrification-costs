@@ -4,7 +4,7 @@ from appliances.electric_base import ElectricAppliance, Incentive, IncentiveScen
 class ElectricVehicleAppliance(ElectricAppliance):
     def __init__(self, 
                  vehicle_type: str = "BEV", # assuming midsize SUV (tesla model Y) for now, other values may be found in the excel 
-                 base_cost: float = 47500.0 + 1400.0, 
+                 base_cost: float = 49115.0 + 1400.0, 
                     # https://www.energy.gov/sites/default/files/2022-12/2022.12.23%202022%20Incremental%20Purchase%20Cost%20Methodology%20and%20Results%20for%20Clean%20Vehicles.pdf
                     # https://www.itskrs.its.dot.gov/2020-sc00472 - L2 charger cost
                 # charger_cost: float = 1400.0, # https://www.itskrs.its.dot.gov/2020-sc00472 - L2 charger cost
@@ -29,20 +29,18 @@ class ElectricVehicleAppliance(ElectricAppliance):
         self.annual_maintenance_cost = annual_maintenance_cost
         self.annual_insurance_cost = annual_insurance_cost
         
-        # Add default incentives based on current federal and California programs
-        self._add_default_incentives()
+        # Add federal EV tax credit
+        self._add_federal_ev_credit()
 
-    def _add_default_incentives(self) -> None:
-        """Add default federal and state incentives for electric vehicles."""
-        # Federal Clean Vehicle Credit (through September 2025)
-        federal_credit = Incentive(
+    def _add_federal_ev_credit(self) -> None:
+        """Add federal Clean Vehicle Credit for electric vehicles."""
+        self._add_federal_incentive(
             name="Federal Clean Vehicle Credit",
             value=7500.0,
             unit="$",
-            description="Federal tax credit for new electric vehicles (through Sept 2025)",
+            description="Federal tax credit for new electric vehicles",
             source_url="https://www.irs.gov/credits-deductions/clean-vehicle-credits"
         )
-        self.add_incentive(federal_credit)
         
         # # Federal Alternative Fuel Infrastructure Tax Credit for charging equipment.
         # alt_fuel_infra_credit = Incentive(

@@ -10,7 +10,7 @@ class SolarSystemAppliance(ElectricAppliance):
     
     def __init__(self, capacity_kw: float, lifetime_years: int = 25):
         # Solar panel specifications (2025 pricing)
-        dollars_per_watt = 2.8  # $2.8/W
+        dollars_per_watt = 3.3  # $3.3/W https://docs.cpuc.ca.gov/PublishedDocs/Published/G000/M499/K921/499921246.PDF 2023
         installation_markup = 0.0  # 0% installation markup
         design_markup = 0.0  # 0% design/engineering markup
         

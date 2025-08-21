@@ -181,9 +181,18 @@ def save_vehicle_profiles_by_county(base_output_dir: str, scenario: str, scenari
             if generate_ice_profile:
                 ice_output_path = os.path.join(county_dir, f"vehicle_fuel_profile_{county_slug}_{housing_slug}.csv")
                 
+                # Create datetime index for ICE profile if not available from EV data
+                if hourly_df_8760 is not None and 'datetime' in hourly_df_8760.columns:
+                    datetime_values = hourly_df_8760['datetime']
+                else:
+                    # Generate datetime index for full year (8760 hours)
+                    import datetime as dt
+                    start_date = dt.datetime(2024, 1, 1)
+                    datetime_values = pd.date_range(start=start_date, periods=8760, freq='h')
+                
                 # Create ICE fuel DataFrame
                 ice_df = pd.DataFrame({
-                    'datetime': hourly_df_8760['datetime'],
+                    'datetime': datetime_values,
                     'vehicle_fuel': ice_fuel_data
                 })
                 

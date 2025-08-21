@@ -10,41 +10,25 @@ from typing import Dict
 from appliances.electric_base import ElectricAppliance, Incentive, IncentiveScenario
 
 class ElectricCookingAppliance(ElectricAppliance):
-    """
-    Class representing electric cooking appliances for home electrification.
-    
-    This class models the capital costs, lifetime, and incentives for electric
-    cooking systems that replace gas stoves in residential electrification scenarios.
-    """
-    
     def __init__(self, 
                  cooking_type: str = "induction",
-                 base_cost: float = 2000.0,
+                 base_cost: float = 4260.08,
                  lifetime_years: int = 15):
-        """
-        Initialize electric cooking appliance.
-        
-        Args:
-            cooking_type: Type of electric cooking system (default: "induction")
-            base_cost: Base equipment and installation cost in dollars
-            lifetime_years: Expected equipment lifetime in years
-        """
         super().__init__(f"electric_{cooking_type}_cooking", base_cost, lifetime_years)
         self.cooking_type = cooking_type
         
-        # Add default incentives based on current California programs
-        self._add_default_incentives()
+        # Add federal electrification rebate
+        self._add_federal_electrification_rebate()
     
-    def _add_default_incentives(self) -> None:
-        # Federal tax credit for electric cooking appliances (Inflation Reduction Act)
-        federal_credit = Incentive(
+    def _add_federal_electrification_rebate(self) -> None:
+        """Add federal electrification rebate for electric cooking appliances."""
+        self._add_federal_incentive(
             name="Federal Residential Electrification Rebate",
-            value=420.0,
+            value=840.0,
             unit="$",
             description="Federal rebate for residential electric cooking appliances under Inflation Reduction Act",
-            source_url="https://www.geappliances.com/inflation-reduction-act"
+            source_url="https://www.energy.gov/scep/slsc/high-efficiency-electric-home-rebate-program"
         )
-        self.add_incentive(federal_credit)
     
     def get_cost_breakdown(self, scenario: IncentiveScenario = IncentiveScenario.FULL_INCENTIVES) -> Dict:
         """Return detailed cost breakdown for electric cooking appliance."""

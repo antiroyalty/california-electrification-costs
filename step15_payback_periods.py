@@ -169,7 +169,7 @@ def pv_adder_for(county_slug: str, incentive_scenario: str, pv_net_df: pd.DataFr
     col_map = {
         'full_incentives': 'pv_storage_net_full',
         'half_incentives': 'pv_storage_net_half',
-        'none_incentives': 'pv_storage_net_none',
+        'no_incentives': 'pv_storage_net_none',
     }
     col = col_map.get(key)
     return float(row.iloc[0][col]) if col in row.columns else 0.0
@@ -300,6 +300,8 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
         capital_summary  = summarize_incremental_capex_against_baseline(scenario_df, baseline_df)
         
         pv_net_df = load_pv_net_adders(base_input_dir, scenario, housing_type)
+        print("pv_net_df", pv_net_df)
+
         log(
             at="calculate_payback_periods",
             info="capital_costs_summary_created",
@@ -323,13 +325,13 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
                 # Skip if no cost data available
                 if baseline_annual_cost == 0 or (scenario_annual_cost == 0 and scenario_solar_annual_cost == 0):
                     continue
-                
+
                 # Get capital costs for this county
                 county_capital = calculate_net_capital_cost(capital_summary, county)
-                
+
                 if county_capital.empty:
                     continue
-                
+
                 for _, capital_row in county_capital.iterrows():
                     incentive_scenario = str(capital_row['incentive_scenario']).lower()
                     county_slug = slugify_county_name(county)
@@ -398,7 +400,8 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
             at="step16_payback_periods",
             info="payback_calculation_failed",
             scenario=scenario,
-            error=str(e)
+            error=str(e),
+            log_level="debug"
         )
         return pd.DataFrame()
 
@@ -511,7 +514,7 @@ if __name__ == "__main__":
     if args.counties:
         counties = args.counties
     else:
-        counties = norcal_counties + socal_counties + central_counties
+        counties = ["Alameda County"] # norcal_counties + socal_counties + central_counties
     
     process(
         base_input_dir="data/loadprofiles",
