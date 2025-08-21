@@ -23,6 +23,20 @@ class ElectricHeatingAppliance(ElectricAppliance):
         super().__init__(f"electric_{heating_type}", base_cost, lifetime_years)
         self.heating_type = heating_type
         self.county_slug: Optional[str] = None  # set by for_county()
+        
+        # Add federal heat pump tax credit
+        self._add_federal_heat_pump_incentive()
+
+    def _add_federal_heat_pump_incentive(self) -> None:
+        """Add federal 30% tax credit for heat pumps."""
+        self._add_federal_incentive(
+            name="Federal Heat Pump Tax Credit",
+            value=30.0,
+            unit="%",
+            max_value=2000.0,
+            description="Federal 30% tax credit for residential heat pumps (through 2032)",
+            source_url="https://www.irs.gov/credits-deductions/residential-clean-energy-credit"
+        )
 
     @classmethod
     def _load_config(cls) -> pd.DataFrame:
@@ -69,18 +83,27 @@ class ElectricHeatingAppliance(ElectricAppliance):
         scenario: IncentiveScenario = IncentiveScenario.FULL_INCENTIVES,
     ) -> float:
         """
-        Interpret CSV incentive as the 'FULL' amount; HALF is 50%, NONE is 0%.
+        Combines federal incentives with CSV county-specific incentives.
+        CSV incentive is interpreted as the 'FULL' amount; HALF is 50%, NONE is 0%.
         """
+        # Start with base class incentives (includes federal heat pump tax credit)
+        base_incentives = super().calculate_total_incentives(scenario)
+        
+        # Add county-specific incentives from CSV data
         df = self._load_config()
         key = self.county_slug if (self.county_slug in df.index) else ("statewide" if "statewide" in df.index else df.index[0])
-        inc_full = float(df.loc[key, self.INCENTIVE_COLUMN_NAME])
+        csv_inc_full = float(df.loc[key, self.INCENTIVE_COLUMN_NAME])
 
+        # Apply scenario multiplier to CSV incentives
         if scenario == IncentiveScenario.FULL_INCENTIVES:
-            return inc_full
+            csv_incentives = csv_inc_full
         elif scenario == IncentiveScenario.HALF_INCENTIVES:
-            return inc_full * 0.5
+            csv_incentives = csv_inc_full * 0.5
         else:
-            return 0.0
+            csv_incentives = 0.0
+        
+        # Return combined incentives
+        return base_incentives + csv_incentives
 
     def get_cost_breakdown(
         self,

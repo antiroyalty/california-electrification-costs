@@ -17,19 +17,18 @@ class ElectricCookingAppliance(ElectricAppliance):
         super().__init__(f"electric_{cooking_type}_cooking", base_cost, lifetime_years)
         self.cooking_type = cooking_type
         
-        # Add default incentives based on current California programs
-        self._add_default_incentives()
+        # Add federal electrification rebate
+        self._add_federal_electrification_rebate()
     
-    def _add_default_incentives(self) -> None:
-        # Federal tax credit for electric cooking appliances (Inflation Reduction Act)
-        federal_credit = Incentive(
+    def _add_federal_electrification_rebate(self) -> None:
+        """Add federal electrification rebate for electric cooking appliances."""
+        self._add_federal_incentive(
             name="Federal Residential Electrification Rebate",
-            value=420.0,
+            value=840.0,
             unit="$",
             description="Federal rebate for residential electric cooking appliances under Inflation Reduction Act",
-            source_url="https://www.geappliances.com/inflation-reduction-act"
+            source_url="https://www.energy.gov/scep/slsc/high-efficiency-electric-home-rebate-program"
         )
-        self.add_incentive(federal_credit)
     
     def get_cost_breakdown(self, scenario: IncentiveScenario = IncentiveScenario.FULL_INCENTIVES) -> Dict:
         """Return detailed cost breakdown for electric cooking appliance."""

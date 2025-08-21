@@ -29,20 +29,18 @@ class ElectricVehicleAppliance(ElectricAppliance):
         self.annual_maintenance_cost = annual_maintenance_cost
         self.annual_insurance_cost = annual_insurance_cost
         
-        # Add default incentives based on current federal and California programs
-        self._add_default_incentives()
+        # Add federal EV tax credit
+        self._add_federal_ev_credit()
 
-    def _add_default_incentives(self) -> None:
-        """Add default federal and state incentives for electric vehicles."""
-        # Federal Clean Vehicle Credit (through September 2025)
-        federal_credit = Incentive(
+    def _add_federal_ev_credit(self) -> None:
+        """Add federal Clean Vehicle Credit for electric vehicles."""
+        self._add_federal_incentive(
             name="Federal Clean Vehicle Credit",
             value=7500.0,
             unit="$",
-            description="Federal tax credit for new electric vehicles (through Sept 2025)",
+            description="Federal tax credit for new electric vehicles",
             source_url="https://www.irs.gov/credits-deductions/clean-vehicle-credits"
         )
-        self.add_incentive(federal_credit)
         
         # # Federal Alternative Fuel Infrastructure Tax Credit for charging equipment.
         # alt_fuel_infra_credit = Incentive(
