@@ -9,9 +9,9 @@ class BatteryStorageAppliance(ElectricAppliance):
     """Battery storage system (Tesla Powerwall 3)."""
     
     def __init__(self, num_units: int = 1, lifetime_years: int = 15):
-        # Tesla Powerwall 3 specifications (2025 pricing)
-        base_unit_cost = 16853  # $16,853 per unit
-        capacity_per_unit = 13.5  # 13.5 kWh per unit
+        # https://atb.nrel.gov/electricity/2024/data ATB data used by CEC report https://www.energy.ca.gov/sites/default/files/2024-07/CEC-200-2024-011.pdf
+        base_unit_cost = 18258  # $18,258 per unit (2023 value)
+        capacity_per_unit = 12.5  # 12.5 kWh per unit
         
         total_cost = base_unit_cost * num_units
         total_capacity = capacity_per_unit * num_units
