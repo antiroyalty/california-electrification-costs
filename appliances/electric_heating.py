@@ -23,6 +23,20 @@ class ElectricHeatingAppliance(ElectricAppliance):
         super().__init__(f"electric_{heating_type}", base_cost, lifetime_years)
         self.heating_type = heating_type
         self.county_slug: Optional[str] = None  # set by for_county()
+        
+        # Add federal heat pump tax credit
+        self._add_federal_heat_pump_incentive()
+
+    def _add_federal_heat_pump_incentive(self) -> None:
+        """Add federal 30% tax credit for heat pumps."""
+        self._add_federal_incentive(
+            name="Federal Heat Pump Tax Credit",
+            value=30.0,
+            unit="%",
+            max_value=2000.0,
+            description="Federal 30% tax credit for residential heat pumps (through 2032)",
+            source_url="https://www.irs.gov/credits-deductions/residential-clean-energy-credit"
+        )
 
     @classmethod
     def _load_config(cls) -> pd.DataFrame:
@@ -69,10 +83,10 @@ class ElectricHeatingAppliance(ElectricAppliance):
         scenario: IncentiveScenario = IncentiveScenario.FULL_INCENTIVES,
     ) -> float:
         """
-        Combines base class incentives (including federal 15% ITC) with CSV county-specific incentives.
+        Combines federal incentives with CSV county-specific incentives.
         CSV incentive is interpreted as the 'FULL' amount; HALF is 50%, NONE is 0%.
         """
-        # Start with base class incentives (includes federal 15% ITC)
+        # Start with base class incentives (includes federal heat pump tax credit)
         base_incentives = super().calculate_total_incentives(scenario)
         
         # Add county-specific incentives from CSV data

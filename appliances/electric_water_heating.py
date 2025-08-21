@@ -28,6 +28,20 @@ class ElectricWaterHeatingAppliance(ElectricAppliance):
         self.heater_type = heater_type
         self.capacity_gallons = capacity_gallons
         self.county_slug: Optional[str] = None
+        
+        # Add federal heat pump water heater tax credit
+        self._add_federal_heat_pump_water_heater_incentive()
+
+    def _add_federal_heat_pump_water_heater_incentive(self) -> None:
+        """Add federal 30% tax credit for heat pump water heaters."""
+        self._add_federal_incentive(
+            name="Federal Heat Pump Water Heater Tax Credit",
+            value=30.0,
+            unit="%",
+            max_value=2000.0,
+            description="Federal 30% tax credit for residential heat pump water heaters (through 2032)",
+            source_url="https://www.irs.gov/credits-deductions/residential-clean-energy-credit"
+        )
 
     @classmethod
     def _load_config(cls) -> pd.DataFrame:
@@ -68,7 +82,7 @@ class ElectricWaterHeatingAppliance(ElectricAppliance):
         self,
         scenario: IncentiveScenario = IncentiveScenario.FULL_INCENTIVES,
     ) -> float:
-        # Start with base class incentives (includes federal 15% ITC)
+        # Start with base class incentives (includes federal heat pump water heater tax credit)
         base_incentives = super().calculate_total_incentives(scenario)
         
         # Add county-specific incentives from CSV data
