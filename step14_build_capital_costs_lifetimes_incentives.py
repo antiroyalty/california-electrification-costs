@@ -223,6 +223,11 @@ def build_capex_ledger_df(
         for incentive_scenario in incentive_scenarios:
             # electric rows
             for appliance_name, appliance in elec_instances.items():
+                # Calculate annual operating costs for electric vehicles
+                annual_maintenance_cost = getattr(appliance, 'annual_maintenance_cost', 0.0)
+                annual_insurance_cost = getattr(appliance, 'annual_insurance_cost', 0.0)
+                annual_operating_cost = annual_maintenance_cost + annual_insurance_cost
+                
                 rows.append({
                     'county': county,
                     'county_slug': county_slug,
@@ -236,9 +241,31 @@ def build_capex_ledger_df(
                     'total_incentives': appliance.calculate_total_incentives(incentive_scenario),
                     'net_cost': appliance.get_net_cost(incentive_scenario),
                     'lifetime_years': appliance.lifetime_years,
+                    'annual_maintenance_cost': annual_maintenance_cost,
+                    'annual_insurance_cost': annual_insurance_cost,
+                    'annual_operating_cost': annual_operating_cost,
+                    'total_operating_cost_over_lifetime': annual_operating_cost * appliance.lifetime_years,
+                    'total_cost_of_ownership': appliance.get_net_cost(incentive_scenario) + (annual_operating_cost * appliance.lifetime_years),
                 })
             # gas rows (no incentives)
             for appliance_name, appliance in gas_instances.items():
+                # Calculate annual operating costs, especially for ICE vehicles
+                annual_maintenance_cost = getattr(appliance, 'annual_maintenance_cost', 0.0)
+                annual_insurance_cost = getattr(appliance, 'annual_insurance_cost', 0.0)
+                
+                # For ICE vehicles, also include fuel costs
+                annual_fuel_cost = 0.0
+                if appliance_name == "vehicle_fuel" and hasattr(appliance, 'get_annual_operating_cost_estimate'):
+                    try:
+                        # Use county name for fuel cost calculation
+                        annual_fuel_cost = appliance.get_annual_operating_cost_estimate(county) - annual_maintenance_cost
+                        # get_annual_operating_cost_estimate includes maintenance, so subtract it to get just fuel
+                    except:
+                        # Fallback if county-specific calculation fails
+                        annual_fuel_cost = 0.0
+                
+                annual_operating_cost = annual_maintenance_cost + annual_insurance_cost + annual_fuel_cost
+                
                 rows.append({
                     'county': county,
                     'county_slug': county_slug,
@@ -252,6 +279,12 @@ def build_capex_ledger_df(
                     'total_incentives': 0.0,
                     'net_cost': appliance.base_cost,
                     'lifetime_years': appliance.lifetime_years,
+                    'annual_maintenance_cost': annual_maintenance_cost,
+                    'annual_insurance_cost': annual_insurance_cost,
+                    'annual_fuel_cost': annual_fuel_cost,
+                    'annual_operating_cost': annual_operating_cost,
+                    'total_operating_cost_over_lifetime': annual_operating_cost * appliance.lifetime_years,
+                    'total_cost_of_ownership': appliance.base_cost + (annual_operating_cost * appliance.lifetime_years),
                 })
     return pd.DataFrame(rows).sort_values(
         ['county', 'appliance_category', 'appliance_type', 'incentive_scenario']
@@ -578,12 +611,15 @@ def process(
 
     detailed_name = f"capital_costs_{scenario}_{housing_type.replace('-', '_')}.csv"
     ledger_df.to_csv(os.path.join(out_dir, detailed_name), index=False)
+    print(os.path.join(out_dir, detailed_name))
 
     summary_name = f"capital_costs_summary_{scenario}_{housing_type.replace('-', '_')}.csv"
     summary.to_csv(os.path.join(out_dir, summary_name), index=False)
+    print(os.path.join(out_dir, summary_name))
 
     summary_pv_name = f"capital_costs_summary_with_pv_{scenario}_{housing_type.replace('-', '_')}.csv"
     summary_with_pv.to_csv(os.path.join(out_dir, summary_pv_name), index=False)
+    print(os.path.join(out_dir, summary_pv_name))
 
     log(
         at="process", 
