@@ -1,5 +1,5 @@
 """
-Step 16: Calculate Payback Periods
+Step 15: Calculate Payback Periods
 
 Calculate payback periods for electrification scenarios based on:
 - Capital costs from step15_build_capital_costs_lifetimes_incentives.py
@@ -30,6 +30,12 @@ import os
 import pandas as pd
 from main_helpers import log, slugify_county_name, norcal_counties, socal_counties, central_counties, get_scenario_path
 from helpers.maps_helpers import get_latest_csv_file
+
+# Define which baseline to use for comparison for each scenario
+COMPARISON_BASELINE = {
+    "baseline_ev_car": "baseline_ice_car",
+    "full_electric_ev": "baseline_ice_car",
+}
 
 def load_capital_costs(base_input_dir: str, scenario: str, housing_type: str) -> pd.DataFrame:
     """
@@ -168,19 +174,9 @@ def pv_adder_for(county_slug: str, incentive_scenario: str, pv_net_df: pd.DataFr
     col = col_map.get(key)
     return float(row.iloc[0][col]) if col in row.columns else 0.0
 
-def calculate_annual_savings(base_input_dir: str, county: str, scenario: str, housing_type: str):
-    """
-    Calculate annual savings for a county and scenario.
-    
-    Args:
-        base_input_dir: Base input directory
-        county: County name
-        scenario: Scenario name
-        housing_type: Housing type
-        
-    Returns:
-        Tuple of (baseline_cost, scenario_cost, solar_cost, savings_scenario_only, savings_with_solar)
-    """
+def load_annual_costs_for_county(base_input_dir: str, county: str, scenario: str, housing_type: str):
+    # TODO, ANA: Not including vehicle O&M yet.
+
     # 1. Baseline costs (no electrification)
     baseline_annual_cost = load_annual_costs(base_input_dir, county, "baseline", housing_type, with_solar=False)
     
@@ -192,7 +188,7 @@ def calculate_annual_savings(base_input_dir: str, county: str, scenario: str, ho
     
     if baseline_annual_cost == 0:
         log(
-            at="calculate_annual_savings",
+            at="load_annual_costs_for_county",
             info="missing_baseline_cost_data",
             county=county
         )
@@ -200,7 +196,7 @@ def calculate_annual_savings(base_input_dir: str, county: str, scenario: str, ho
         
     if scenario_annual_cost == 0 or scenario_solar_annual_cost == 0:
         log(
-            at="calculate_annual_savings",
+            at="load_annual_costs_for_county",
             info="missing_scenario_cost_data",
             county=county
         )
@@ -210,15 +206,50 @@ def calculate_annual_savings(base_input_dir: str, county: str, scenario: str, ho
     savings_scenario_only = baseline_annual_cost - scenario_annual_cost
     savings_with_solar = baseline_annual_cost - scenario_solar_annual_cost
     
-    # print(f"{county}:")
-    # print(f"  Baseline Annual: ${baseline_annual_cost:.0f}")
-    # print(f"  {scenario} only Annual: ${scenario_annual_cost:.0f} (savings: ${savings_scenario_only:.0f})")
-    # print(f"  {scenario} + solar Annual: ${scenario_solar_annual_cost:.0f} (savings: ${savings_with_solar:.0f})")
-
     return baseline_annual_cost, scenario_annual_cost, scenario_solar_annual_cost, savings_scenario_only, savings_with_solar
     
 def calculate_net_capital_cost(capital_summary: pd.DataFrame, county: str) -> pd.DataFrame:
     return capital_summary[capital_summary['county'] == county]
+
+def summarize_incremental_capex_against_baseline(
+    scen_df: pd.DataFrame, base_df: pd.DataFrame
+) -> pd.DataFrame:
+    """
+    Compare electric net costs from the scenario against gas base costs
+    from the chosen baseline (e.g., baseline_ice_car for EV scenarios).
+    """
+    s = scen_df.copy()
+    b = base_df.copy()
+    s['incentive_scenario'] = s['incentive_scenario'].str.lower()
+    b['incentive_scenario'] = b['incentive_scenario'].str.lower()
+
+    # scenario electrics
+    elec = (
+        s[s['appliance_category'] == 'electric']
+        .groupby(['county', 'county_slug', 'incentive_scenario'], as_index=False)['net_cost']
+        .sum()
+        .rename(columns={'net_cost':'electric_net'})
+    )
+
+    # baseline gas
+    gas = (
+        b[b['appliance_category'] == 'gas']
+        .groupby(['county', 'county_slug', 'incentive_scenario'], as_index=False)['base_cost']
+        .sum()
+        .rename(columns={'base_cost':'gas_base'})
+    )
+
+    out = elec.merge(gas, on=['county','county_slug', 'incentive_scenario'], how='left').fillna({'gas_base':0.0})
+    out['net_capital_cost_no_pv'] = out['electric_net'] - out['gas_base']
+    return out[['county', 'county_slug', 'incentive_scenario','net_capital_cost_no_pv']]
+
+def detect_vehicle_kind(ledger_df: pd.DataFrame) -> str:
+    """Return 'ev' if scenario has vehicle_charging, 'ice' if vehicle_fuel, else 'none'."""
+    has_ev  = ((ledger_df['appliance_category'] == 'electric') & (ledger_df['appliance_type'] == 'vehicle_charging')).any()
+    has_ice = ((ledger_df['appliance_category'] == 'gas')     & (ledger_df['appliance_type'] == 'vehicle_fuel')).any()
+    if has_ev:  return 'ev'
+    if has_ice: return 'ice'
+    return 'none'
 
 def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: str, counties: list) -> pd.DataFrame:
     """
@@ -234,23 +265,13 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
         DataFrame with payback period data
     """
     try:
-        capital_costs_df = load_capital_costs(base_input_dir, scenario, housing_type)
-        log(
-            at="calculate_payback_periods",
-            info="electrification_capital_costs_loaded",
-            rows_count=len(capital_costs_df)
-        )
+        scenario_df = load_capital_costs(base_input_dir, scenario, housing_type)
+        baseline_name = COMPARISON_BASELINE.get(scenario, "baseline")
+        baseline_df  = load_capital_costs(base_input_dir, baseline_name, housing_type)
+
+        # Calculate capital cost difference between scenarios
+        capital_summary  = summarize_incremental_capex_against_baseline(scenario_df, baseline_df)
         
-        if capital_costs_df.empty:
-            log(
-                at="calculate_payback_periods",
-                info="no_capital_costs_found",
-                scenario=scenario
-            )
-            return pd.DataFrame()
-        
-        # Group capital costs by county and incentive scenario
-        capital_summary  = summarize_incremental_capex(capital_costs_df)
         pv_net_df = load_pv_net_adders(base_input_dir, scenario, housing_type)
         log(
             at="calculate_payback_periods",
@@ -263,10 +284,15 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
         for county in counties:
             try:
                 # Calculate annual costs and savings
-                baseline_annual_cost, scenario_annual_cost, scenario_solar_annual_cost, savings_scenario_only, savings_with_solar = calculate_annual_savings(
+                baseline_annual_cost, scenario_annual_cost, scenario_solar_annual_cost, savings_scenario_only, savings_with_solar = load_annual_costs_for_county(
                     base_input_dir, county, scenario, housing_type
                 )
-                
+
+                county_slug = slugify_county_name(county)
+
+                savings_scenario_only = baseline_annual_cost - scenario_annual_cost
+                savings_with_solar    = baseline_annual_cost - scenario_solar_annual_cost
+
                 # Skip if no cost data available
                 if baseline_annual_cost == 0 or (scenario_annual_cost == 0 and scenario_solar_annual_cost == 0):
                     continue
@@ -311,10 +337,6 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
 
                     # 3) Payback
                     payback_years = net_capital_cost / annual_savings if annual_savings > 0 else float('inf')
-
-                    # print(f"    {incentive_scenario}: Capital ${net_capital_cost:.0f}, "
-                    #     f"Savings ${annual_savings:.0f} ({savings_type}), "
-                    #     f"Payback {payback_years:.1f} years")
 
                     payback_data.append({
                         'county': county,
