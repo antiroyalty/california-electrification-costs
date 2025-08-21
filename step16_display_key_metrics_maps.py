@@ -273,8 +273,8 @@ def load_net_capital_cost_difference_data(
             return 0.0
         
         # Check if net_capital_cost_diff_scenario_vs_baseline column exists
-        if 'net_capital_cost_diff_scenario_vs_baseline' in df.columns:
-            column_name = 'net_capital_cost_diff_scenario_vs_baseline'
+        if 'net_cap_cost_difference_no_pv' in df.columns:
+            column_name = 'net_cap_cost_difference_no_pv'
         elif 'net_capital_cost' in df.columns:
             # Fallback to old column name for compatibility
             column_name = 'net_capital_cost'

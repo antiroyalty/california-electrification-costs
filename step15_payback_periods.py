@@ -223,24 +223,25 @@ def summarize_incremental_capex_against_baseline(
     s['incentive_scenario'] = s['incentive_scenario'].str.lower()
     b['incentive_scenario'] = b['incentive_scenario'].str.lower()
 
-    # scenario electrics
-    elec = (
-        s[s['appliance_category'] == 'electric']
-        .groupby(['county', 'county_slug', 'incentive_scenario'], as_index=False)['net_cost']
+    # scenario net
+    scenario_net = (
+        s.groupby(['county', 'county_slug', 'incentive_scenario'], as_index=False)['net_cost']
         .sum()
-        .rename(columns={'net_cost':'electric_net'})
     )
 
-    # baseline gas
-    gas = (
-        b[b['appliance_category'] == 'gas']
-        .groupby(['county', 'county_slug', 'incentive_scenario'], as_index=False)['base_cost']
+    # baseline net
+    baseline_net = (
+        b.groupby(['county', 'county_slug', 'incentive_scenario'], as_index=False)['net_cost']
         .sum()
-        .rename(columns={'base_cost':'gas_base'})
     )
 
-    out = elec.merge(gas, on=['county','county_slug', 'incentive_scenario'], how='left').fillna({'gas_base':0.0})
-    out['net_capital_cost_no_pv'] = out['electric_net'] - out['gas_base']
+    out = scenario_net.merge(
+        baseline_net,
+        on=['county', 'county_slug', 'incentive_scenario'],
+        how='outer'  # keep all combos, even if missing in one side
+    ).fillna(0.0)
+    out['net_capital_cost_no_pv'] = scenario_net['net_cost'] - baseline_net['net_cost']
+    breakpoint()
     return out[['county', 'county_slug', 'incentive_scenario','net_capital_cost_no_pv']]
 
 def detect_vehicle_kind(ledger_df: pd.DataFrame) -> str:
@@ -283,12 +284,12 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
         
         for county in counties:
             try:
+                county_slug = slugify_county_name(county)
+                
                 # Calculate annual costs and savings
                 baseline_annual_cost, scenario_annual_cost, scenario_solar_annual_cost, savings_scenario_only, savings_with_solar = load_annual_costs_for_county(
                     base_input_dir, county, scenario, housing_type
                 )
-
-                county_slug = slugify_county_name(county)
 
                 savings_scenario_only = baseline_annual_cost - scenario_annual_cost
                 savings_with_solar    = baseline_annual_cost - scenario_solar_annual_cost
@@ -337,7 +338,7 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
 
                     # 3) Payback
                     payback_years = net_capital_cost / annual_savings if annual_savings > 0 else float('inf')
-
+                    
                     payback_data.append({
                         'county': county,
                         'county_slug': county_slug,
@@ -351,6 +352,7 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
                         'annual_savings_with_solar': savings_with_solar,
                         'annual_savings_used': annual_savings,
                         'savings_type': savings_type,
+                        'net_cap_cost_difference_no_pv': net_cap_no_pv,
                         'net_capital_cost_diff_scenario_vs_baseline': net_capital_cost,
                         'payback_period_years': payback_years
                     })
