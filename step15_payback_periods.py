@@ -351,7 +351,7 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
                         'annual_savings_with_solar': savings_with_solar,
                         'annual_savings_used': annual_savings,
                         'savings_type': savings_type,
-                        'net_capital_cost': net_capital_cost,
+                        'net_capital_cost_diff_scenario_vs_baseline': net_capital_cost,
                         'payback_period_years': payback_years
                     })
                     

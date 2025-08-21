@@ -238,6 +238,60 @@ def load_payback_period_data(
         return 0.0
 
 
+def load_net_capital_cost_difference_data(
+    scenario: str,
+    housing_type: str,
+    county_slug: str
+) -> float:
+    """
+    Load net capital cost difference between scenario and baseline from payback periods file.
+    Returns the net capital cost difference in dollars with full incentives.
+    """
+    # Payback period files are in data/results/{housing_type}/
+    payback_file = os.path.join("data", "results", housing_type, f"payback_periods_{scenario}.csv")
+    
+    if not os.path.exists(payback_file):
+        print(f"Warning: Payback periods file not found: {payback_file}")
+        return 0.0
+    
+    try:
+        df = pd.read_csv(payback_file, low_memory=False)
+        
+        # Convert county_slug back to county name for matching
+        county_name = county_slug.replace("-", " ").title()
+        if not county_name.endswith(" County"):
+            county_name += " County"
+        
+        # Filter for this county and full incentives scenario
+        county_data = df[
+            (df['county'].str.contains(county_name.replace(" County", ""), case=False, na=False)) &
+            (df['incentive_scenario'] == 'full_incentives')
+        ]
+        
+        if county_data.empty:
+            print(f"Warning: No net capital cost difference data found for {county_name} with full incentives")
+            return 0.0
+        
+        # Check if net_capital_cost_diff_scenario_vs_baseline column exists
+        if 'net_capital_cost_diff_scenario_vs_baseline' in df.columns:
+            column_name = 'net_capital_cost_diff_scenario_vs_baseline'
+        elif 'net_capital_cost' in df.columns:
+            # Fallback to old column name for compatibility
+            column_name = 'net_capital_cost'
+        else:
+            print(f"Warning: Neither net_capital_cost_diff_scenario_vs_baseline nor net_capital_cost column found in {payback_file}")
+            return 0.0
+        
+        # Get the net capital cost difference (should be only one row per county-incentive combination)
+        net_cost_diff = county_data[column_name].iloc[0]
+        
+        return float(net_cost_diff)
+        
+    except Exception as exc:
+        print(f"Warning: could not parse payback periods file {payback_file}: {exc}")
+        return 0.0
+
+
 def create_single_map(base_input_dir: str, scenario: str, housing_type: str, counties: list, 
                      metric_name: str, data_loader_config: dict) -> folium.Map:
     """
@@ -290,7 +344,7 @@ def create_single_map(base_input_dir: str, scenario: str, housing_type: str, cou
                     pretty = "$0"
                 gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
                 
-            elif metric_name == "Capital Costs, Net After Incentives ($)":
+            elif metric_name == "Scenario Capital Costs, Net After Incentives ($)":
                 metric_value = load_capital_costs_data(
                     base_input_dir, scenario, housing_type, county_slug
                 )
@@ -308,6 +362,19 @@ def create_single_map(base_input_dir: str, scenario: str, housing_type: str, cou
                     pretty = ">100 years"
                 else:
                     pretty = f"{metric_value:.1f} years"
+                gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
+                
+            elif metric_name == "Net Capital Cost Difference Between Scenario and Baseline Including Incentives ($)":
+                metric_value = load_net_capital_cost_difference_data(
+                    scenario, housing_type, county_slug
+                )
+                # Format as currency with appropriate sign
+                if metric_value > 0:
+                    pretty = f"+${to_decimal_number(abs(metric_value))}"
+                elif metric_value < 0:
+                    pretty = f"-${to_decimal_number(abs(metric_value))}"
+                else:
+                    pretty = "$0"
                 gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
                 
             else:
@@ -437,9 +504,14 @@ def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: 
             "bins": [-2000, -1000, -500, 0, 500, 1000, 1500, 2000, 3000],
             "unit": "$"
         },
-        "Capital Costs, Net After Incentives ($)": {
+        "Scenario Capital Costs, Net After Incentives ($)": {
             "color_scheme": "Blues",
             "bins": [-1000, 0, 5000, 10000, 15000, 20000, 25000, 30000, 40000, 50000, 100000],
+            "unit": "$"
+        },
+        "Net Capital Cost Difference Between Scenario and Baseline Including Incentives ($)": {
+            "color_scheme": "RdYlBu_r",
+            "bins": [-5000, 0, 5000, 10000, 15000, 20000, 25000, 30000, 40000, 50000],
             "unit": "$"
         },
         "Payback Period (years)": {
@@ -447,6 +519,7 @@ def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: 
             "bins": [0, 5, 10, 15, 20, 25, 30, 50, 100],
             "unit": "years"
         },
+
     }
     
     # Create individual maps
