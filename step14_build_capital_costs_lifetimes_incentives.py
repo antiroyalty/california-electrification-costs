@@ -320,18 +320,19 @@ def build_pv_storage_adjustments_df(
 def summary_from_ledger(df: pd.DataFrame) -> pd.DataFrame:
     """
     Produces per-county summary with:
-      capital_cost_electric / solar / storage / gas,
+      capital_cost_electric, capital_cost_gas,
       incentives_full / half / none,
       net_outlay_full / half / none.
+
+    Simplified: only sums net_cost per county instead of splitting by category/scenario.
     """
-    # For convenience, split by category and scenario level
-    # Base costs by category (pick 'full' to avoid triple-counting; base_cost is invariant)
+    # Capital costs: just sum electric vs gas base_cost (use 'full' to avoid duplication)
     full_key = IncentiveScenario.FULL_INCENTIVES.value
     df_full = df[df['incentive_scenario'] == full_key]
 
-    # Base costs by category
     by_cat = (
-        df_full.groupby(['county_slug', 'appliance_category'], as_index=False)['base_cost'].sum()
+        df_full.groupby(['county_slug', 'appliance_category'], as_index=False)['base_cost']
+        .sum()
         .pivot(index='county_slug', columns='appliance_category', values='base_cost')
         .fillna(0.0)
     )
@@ -341,10 +342,10 @@ def summary_from_ledger(df: pd.DataFrame) -> pd.DataFrame:
         'gas': 'capital_cost_gas'
     })
 
-    # Incentives (electric side only)
+    # Incentives: just sum per county per incentive scenario
     inc = (
-        df[df['appliance_category'].isin(['electric'])]
-          .groupby(['county_slug','incentive_scenario'], as_index=False)['total_incentives'].sum()
+        df.groupby(['county_slug','incentive_scenario'], as_index=False)['total_incentives']
+          .sum()
           .pivot(index='county_slug', columns='incentive_scenario', values='total_incentives')
           .fillna(0.0)
           .rename(columns={
@@ -354,20 +355,76 @@ def summary_from_ledger(df: pd.DataFrame) -> pd.DataFrame:
           })
     )
 
-    # Total “electric-side capex” (no PV/storage yet)
+    # Total "electric-side capex": just sum net_cost for electric appliances
     elec_total = (
-        df_full[df_full['appliance_category'].isin(['electric'])]
-        .groupby('county_slug', as_index=False)['base_cost'].sum()
-        .rename(columns={'base_cost': 'total_capital_cost_electric'})
+        df_full[df_full['appliance_category'] == 'electric']
+        .groupby('county_slug', as_index=False)['net_cost']
+        .sum()
+        .rename(columns={'net_cost': 'total_capital_cost_electric'})
         .set_index('county_slug')
     )
 
     out = by_cat.join(elec_total, how='left').fillna(0.0).join(inc, how='left').fillna(0.0)
-    # Net outlay columns (no PV/storage)
+    # Net outlay = electric cost - gas cost - incentives
     out['net_outlay_full'] = out['total_capital_cost_electric'] - out['capital_cost_gas'] - out['incentives_full']
     out['net_outlay_half'] = out['total_capital_cost_electric'] - out['capital_cost_gas'] - out['incentives_half']
     out['net_outlay_none'] = out['total_capital_cost_electric'] - out['capital_cost_gas']
+
     return out.reset_index().sort_values('county_slug')
+
+# def summary_from_ledger(df: pd.DataFrame) -> pd.DataFrame:
+#     """
+#     Produces per-county summary with:
+#       capital_cost_electric / solar / storage / gas,
+#       incentives_full / half / none,
+#       net_outlay_full / half / none.
+#     """
+#     # For convenience, split by category and scenario level
+#     # Base costs by category (pick 'full' to avoid triple-counting; base_cost is invariant)
+#     full_key = IncentiveScenario.FULL_INCENTIVES.value
+#     df_full = df[df['incentive_scenario'] == full_key]
+
+#     # Base costs by category
+#     by_cat = (
+#         df_full.groupby(['county_slug', 'appliance_category'], as_index=False)['base_cost'].sum()
+#         .pivot(index='county_slug', columns='appliance_category', values='base_cost')
+#         .fillna(0.0)
+#     )
+#     by_cat = by_cat.reindex(columns=['electric','gas'], fill_value=0.0)
+#     by_cat = by_cat.rename(columns={
+#         'electric': 'capital_cost_electric',
+#         'gas': 'capital_cost_gas'
+#     })
+
+#     # Incentives (electric side only)
+#     inc = (
+#         df[df['appliance_category'].isin(['electric'])]
+#           .groupby(['county_slug','incentive_scenario'], as_index=False)['total_incentives'].sum()
+#           .pivot(index='county_slug', columns='incentive_scenario', values='total_incentives')
+#           .fillna(0.0)
+#           .rename(columns={
+#               IncentiveScenario.FULL_INCENTIVES.value: 'incentives_full',
+#               IncentiveScenario.HALF_INCENTIVES.value: 'incentives_half',
+#               IncentiveScenario.NO_INCENTIVES.value:   'incentives_none',
+#           })
+#     )
+
+#     # Total “electric-side capex” (no PV/storage yet)
+#     elec_total = (
+#         df_full[df_full['appliance_category'].isin(['electric'])]
+#         .groupby('county_slug', as_index=False)['base_cost'].sum()
+#         .rename(columns={'base_cost': 'total_capital_cost_electric'})
+#         .set_index('county_slug')
+#     )
+
+#     breakpoint()
+
+#     out = by_cat.join(elec_total, how='left').fillna(0.0).join(inc, how='left').fillna(0.0)
+#     # Net outlay columns (no PV/storage)
+#     out['net_outlay_full'] = out['total_capital_cost_electric'] - out['capital_cost_gas'] - out['incentives_full']
+#     out['net_outlay_half'] = out['total_capital_cost_electric'] - out['capital_cost_gas'] - out['incentives_half']
+#     out['net_outlay_none'] = out['total_capital_cost_electric'] - out['capital_cost_gas']
+#     return out.reset_index().sort_values('county_slug')
 
 def apply_pv_storage_to_summary(
     summary_df: pd.DataFrame,
@@ -453,78 +510,6 @@ def load_solar_capacity_data(base_input_dir: str, scenario: str, housing_type: s
     )
     return slug_mapping
 
-# def make_heating_appliance(gas: bool, electric_classes=None, gas_classes=None):
-#     if gas:
-#         return gas_classes["heating"](
-#             heating_type="furnace",
-#             base_cost=4_500.0,
-#             lifetime_years=15,
-#         )
-#     else:
-#         return electric_classes["heating"](
-#             heating_type="heat_pump",
-#             base_cost=19_000.0,
-#             lifetime_years=15,
-#         )
-
-# def make_cooking_appliance(gas: bool, electric_classes=None, gas_classes=None):
-#     if gas:
-#        return gas_classes["cooking"](
-#             stove_type="gas",
-#             base_cost=1_600.0,
-#             lifetime_years=15,
-#         )
-#     else:
-#         return electric_classes["cooking"](
-#             cooking_type="induction",
-#             base_cost=2_000.0,
-#             lifetime_years=15,
-#         )
-    
-# def make_hot_water_appliance(gas: bool, electric_classes=None, gas_classes=None):
-#     if gas:
-#         return gas_classes["hot_water"](
-#             heater_type="",
-#             base_cost=0, # TODO:Simon, update this to be the latest base cost
-#             lifetime_years=10,
-#         )
-#     else:
-#         return electric_classes["hot_water"](
-#             heater_type="heat_pump",
-#             base_cost=2_637.0,
-#             lifetime_years=15,
-#         )
-
-# def make_vehicle(gas: bool, electric_classes=None, gas_classes=None):
-#     if gas:
-#         return gas_classes["vehicle"](
-#             vehicle_type="ICE",
-#             base_cost=35_000.0,
-#             lifetime_years=12,
-#             annual_maintenance_cost=1_200.0,
-#             annual_insurance_cost=2_000.0,
-#         )
-#     else: 
-#         return electric_classes["vehicle"](
-#             vehicle_type="Tesla_Model_3",
-#             base_cost=45_000.0,
-#             lifetime_years=12,
-#             annual_maintenance_cost=800.0,
-#             annual_insurance_cost=1_800.0,
-#         )
-    
-# def make_solar(solar_kw: int):
-#     return SolarSystemAppliance(
-#                 capacity_kw=solar_kw,
-#                 lifetime_years=25
-#             )
-
-# def make_storage():
-#     return BatteryStorageAppliance(
-#                 num_units=1,
-#                 lifetime_years=15
-#             )
-
 def process(
     base_input_dir: str,
     base_output_dir: str,
@@ -578,12 +563,15 @@ def process(
 
     detailed_name = f"capital_costs_{scenario}_{housing_type.replace('-', '_')}.csv"
     ledger_df.to_csv(os.path.join(out_dir, detailed_name), index=False)
+    print(os.path.join(out_dir, detailed_name))
 
     summary_name = f"capital_costs_summary_{scenario}_{housing_type.replace('-', '_')}.csv"
     summary.to_csv(os.path.join(out_dir, summary_name), index=False)
+    print(os.path.join(out_dir, summary_name))
 
     summary_pv_name = f"capital_costs_summary_with_pv_{scenario}_{housing_type.replace('-', '_')}.csv"
     summary_with_pv.to_csv(os.path.join(out_dir, summary_pv_name), index=False)
+    print(os.path.join(out_dir, summary_pv_name))
 
     log(
         at="process", 
