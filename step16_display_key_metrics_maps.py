@@ -11,6 +11,7 @@ Display diagnostic maps for key metrics in a single HTML file:
 - PV capital costs where applicable, in $
 - Payback period (years) for electrification investments with full incentives
 - Payback period without PV costs (years) for electrification investments with full incentives
+- Vehicle operating costs (maintenance, insurance, fuel) per year, in $
 """
 
 import os
@@ -400,6 +401,62 @@ def load_payback_period_no_pv_data(
         return 0.0
 
 
+def load_vehicle_operating_costs_data(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str
+) -> float:
+    """
+    Load vehicle operating costs from vehicle annual costs file.
+    Returns annual vehicle operating costs in dollars.
+    """
+    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+    vehicle_dir = os.path.join(county_dir, "results", "vehicle")
+    
+    if not os.path.exists(vehicle_dir):
+        print(f"Warning: Vehicle directory not found: {vehicle_dir}")
+        return 0.0
+    
+    # Look for vehicle costs file
+    vehicle_prefix = f"RESULTS_vehicle_annual_costs_{county_slug}_"
+    
+    try:
+        # Find the latest vehicle costs file
+        file_path = get_latest_csv_file(vehicle_dir, vehicle_prefix)
+        if not file_path:
+            print(f"Warning: No vehicle costs file found for {county_slug}")
+            return 0.0
+        
+        df = pd.read_csv(file_path, low_memory=False)
+        
+        # Check if the scenario exists in the data
+        if scenario not in df['scenario'].values:
+            print(f"Warning: Scenario {scenario} not found in vehicle costs for {county_slug}")
+            return 0.0
+        
+        scenario_data = df[df['scenario'] == scenario]
+        if scenario_data.empty:
+            return 0.0
+        
+        # Determine vehicle type and get appropriate costs
+        if 'vehicle.operating.ev_maintenance_insurance' in df.columns:
+            # EV scenario
+            vehicle_cost = scenario_data['vehicle.operating.ev_maintenance_insurance'].iloc[0]
+        elif 'vehicle.operating.ice_maintenance_insurance_fuel' in df.columns:
+            # ICE scenario  
+            vehicle_cost = scenario_data['vehicle.operating.ice_maintenance_insurance_fuel'].iloc[0]
+        else:
+            print(f"Warning: No recognized vehicle cost columns in {file_path}")
+            return 0.0
+        
+        return float(vehicle_cost)
+        
+    except Exception as exc:
+        print(f"Warning: could not parse vehicle costs file: {exc}")
+        return 0.0
+
+
 def create_single_map(base_input_dir: str, scenario: str, housing_type: str, counties: list, 
                      metric_name: str, data_loader_config: dict) -> folium.Map:
     """
@@ -510,6 +567,14 @@ def create_single_map(base_input_dir: str, scenario: str, housing_type: str, cou
                     pretty = "No payback (costs more)"
                 else:
                     pretty = f"{metric_value:.1f} years"
+                gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
+                
+            elif metric_name == "Vehicle Operating Costs ($)":
+                metric_value = load_vehicle_operating_costs_data(
+                    base_input_dir, scenario, housing_type, county_slug
+                )
+                # Format as currency
+                pretty = f"${to_decimal_number(abs(metric_value))}"
                 gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
                 
             else:
@@ -663,6 +728,11 @@ def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: 
             "color_scheme": "RdYlGn_r",
             "bins": [-100, -10, 0, 5, 10, 15, 20, 25, 30, 50, 100],
             "unit": "years"
+        },
+        "Vehicle Operating Costs ($)": {
+            "color_scheme": "YlOrRd",
+            "bins": [0, 1000, 2000, 3000, 4000, 5000, 6000, 8000, 10000],
+            "unit": "$"
         },
 
     }
