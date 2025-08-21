@@ -4,7 +4,7 @@ from appliances.electric_base import ElectricAppliance, Incentive, IncentiveScen
 class ElectricVehicleAppliance(ElectricAppliance):
     def __init__(self, 
                  vehicle_type: str = "BEV", # assuming midsize SUV (tesla model Y) for now, other values may be found in the excel 
-                 base_cost: float = 47500.0 + 1400.0, 
+                 base_cost: float = 49115.0 + 1400.0, 
                     # https://www.energy.gov/sites/default/files/2022-12/2022.12.23%202022%20Incremental%20Purchase%20Cost%20Methodology%20and%20Results%20for%20Clean%20Vehicles.pdf
                     # https://www.itskrs.its.dot.gov/2020-sc00472 - L2 charger cost
                 # charger_cost: float = 1400.0, # https://www.itskrs.its.dot.gov/2020-sc00472 - L2 charger cost

@@ -4,7 +4,7 @@ from helpers.gasoline_cost_helper import calculate_annual_fuel_cost
 class ICEVehicleAppliance:
     def __init__(self, 
                  vehicle_type: str = "ICE", # Assuming midsize SUV 
-                 base_cost: float = 33500.0, # https://www.energy.gov/sites/default/files/2022-12/2022.12.23%202022%20Incremental%20Purchase%20Cost%20Methodology%20and%20Results%20for%20Clean%20Vehicles.pdf
+                 base_cost: float = 34639.0, # https://www.energy.gov/sites/default/files/2022-12/2022.12.23%202022%20Incremental%20Purchase%20Cost%20Methodology%20and%20Results%20for%20Clean%20Vehicles.pdf
                  lifetime_years: int = 12,
                  fuel_efficiency_mpg: float = 24.25,
                     #  https://www.fhwa.dot.gov/policyinformation/statistics/2022/mv1.cfm - # vehicles in CA
