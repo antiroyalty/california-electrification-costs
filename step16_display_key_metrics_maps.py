@@ -8,7 +8,9 @@ Display diagnostic maps for key metrics in a single HTML file:
 - Total annual energy consumption (electricity kWh, gas therms)
 - Solar+storage annual savings vs non-solar deployment, in $
 - Capital costs (net outlay with full incentives) for scenario appliances, in $
+- PV capital costs where applicable, in $
 - Payback period (years) for electrification investments with full incentives
+- Payback period without PV costs (years) for electrification investments with full incentives
 """
 
 import os
@@ -227,9 +229,11 @@ def load_payback_period_data(
         # Get payback period (should be only one row per county-incentive combination)
         payback_years = county_data['payback_period_years'].iloc[0]
         
-        # Handle infinite payback periods
+        # Handle infinite and very large/negative payback periods
         if payback_years == float('inf') or payback_years > 100:
             return 100.0  # Cap at 100 years for display purposes
+        elif payback_years == float('-inf') or payback_years < -100:
+            return -100.0  # Cap at -100 years for display purposes
         
         return float(payback_years)
         
@@ -286,6 +290,110 @@ def load_net_capital_cost_difference_data(
         net_cost_diff = county_data[column_name].iloc[0]
         
         return float(net_cost_diff)
+        
+    except Exception as exc:
+        print(f"Warning: could not parse payback periods file {payback_file}: {exc}")
+        return 0.0
+
+
+def load_pv_capital_costs_data(
+    scenario: str,
+    housing_type: str,
+    county_slug: str
+) -> float:
+    """
+    Load PV capital costs from payback periods file.
+    Returns the PV capital costs in dollars with full incentives.
+    """
+    # Payback period files are in data/results/{housing_type}/
+    payback_file = os.path.join("data", "results", housing_type, f"payback_periods_{scenario}.csv")
+    
+    if not os.path.exists(payback_file):
+        print(f"Warning: Payback periods file not found: {payback_file}")
+        return 0.0
+    
+    try:
+        df = pd.read_csv(payback_file, low_memory=False)
+        
+        # Convert county_slug back to county name for matching
+        county_name = county_slug.replace("-", " ").title()
+        if not county_name.endswith(" County"):
+            county_name += " County"
+        
+        # Filter for this county and full incentives scenario
+        county_data = df[
+            (df['county'].str.contains(county_name.replace(" County", ""), case=False, na=False)) &
+            (df['incentive_scenario'] == 'full_incentives')
+        ]
+        
+        if county_data.empty:
+            print(f"Warning: No PV capital costs data found for {county_name} with full incentives")
+            return 0.0
+        
+        # Check if pv_cap_costs column exists
+        if 'pv_cap_costs' not in df.columns:
+            print(f"Warning: pv_cap_costs column not found in {payback_file}")
+            return 0.0
+        
+        # Get the PV capital costs (should be only one row per county-incentive combination)
+        pv_costs = county_data['pv_cap_costs'].iloc[0]
+        
+        return float(pv_costs)
+        
+    except Exception as exc:
+        print(f"Warning: could not parse payback periods file {payback_file}: {exc}")
+        return 0.0
+
+
+def load_payback_period_no_pv_data(
+    scenario: str,
+    housing_type: str,
+    county_slug: str
+) -> float:
+    """
+    Load payback period data (without PV) from step15 payback periods output.
+    Returns payback period in years with full incentives, excluding PV costs.
+    """
+    # Payback period files are in data/results/{housing_type}/
+    payback_file = os.path.join("data", "results", housing_type, f"payback_periods_{scenario}.csv")
+    
+    if not os.path.exists(payback_file):
+        print(f"Warning: Payback periods file not found: {payback_file}")
+        return 0.0
+    
+    try:
+        df = pd.read_csv(payback_file, low_memory=False)
+        
+        # Convert county_slug back to county name for matching
+        county_name = county_slug.replace("-", " ").title()
+        if not county_name.endswith(" County"):
+            county_name += " County"
+        
+        # Filter for this county and full incentives scenario
+        county_data = df[
+            (df['county'].str.contains(county_name.replace(" County", ""), case=False, na=False)) &
+            (df['incentive_scenario'] == 'full_incentives')
+        ]
+        
+        if county_data.empty:
+            print(f"Warning: No payback period (no PV) data found for {county_name} with full incentives")
+            return 0.0
+        
+        # Check if payback_years_no_pv column exists
+        if 'payback_years_no_pv' not in df.columns:
+            print(f"Warning: payback_years_no_pv column not found in {payback_file}")
+            return 0.0
+        
+        # Get payback period (should be only one row per county-incentive combination)
+        payback_years = county_data['payback_years_no_pv'].iloc[0]
+        
+        # Handle infinite and very large/negative payback periods
+        if payback_years == float('inf') or payback_years > 100:
+            return 100.0  # Cap at 100 years for display purposes
+        elif payback_years == float('-inf') or payback_years < -100:
+            return -100.0  # Cap at -100 years for display purposes
+        
+        return float(payback_years)
         
     except Exception as exc:
         print(f"Warning: could not parse payback periods file {payback_file}: {exc}")
@@ -360,6 +468,10 @@ def create_single_map(base_input_dir: str, scenario: str, housing_type: str, cou
                 # Format as years with 1 decimal place
                 if metric_value >= 100:
                     pretty = ">100 years"
+                elif metric_value <= -100:
+                    pretty = "No payback (costs more)"
+                elif metric_value < 0:
+                    pretty = "No payback (costs more)"
                 else:
                     pretty = f"{metric_value:.1f} years"
                 gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
@@ -375,6 +487,29 @@ def create_single_map(base_input_dir: str, scenario: str, housing_type: str, cou
                     pretty = f"-${to_decimal_number(abs(metric_value))}"
                 else:
                     pretty = "$0"
+                gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
+                
+            elif metric_name == "PV Capital Costs ($)":
+                metric_value = load_pv_capital_costs_data(
+                    scenario, housing_type, county_slug
+                )
+                # Format as currency
+                pretty = f"${to_decimal_number(abs(metric_value))}"
+                gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
+                
+            elif metric_name == "Payback Period Without PV (years)":
+                metric_value = load_payback_period_no_pv_data(
+                    scenario, housing_type, county_slug
+                )
+                # Format as years with 1 decimal place
+                if metric_value >= 100:
+                    pretty = ">100 years"
+                elif metric_value <= -100:
+                    pretty = "No payback (costs more)"
+                elif metric_value < 0:
+                    pretty = "No payback (costs more)"
+                else:
+                    pretty = f"{metric_value:.1f} years"
                 gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
                 
             else:
@@ -514,9 +649,19 @@ def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: 
             "bins": [-5000, 0, 5000, 10000, 15000, 20000, 25000, 30000, 40000, 50000],
             "unit": "$"
         },
+        "PV Capital Costs ($)": {
+            "color_scheme": "Purples",
+            "bins": [0, 5000, 10000, 15000, 20000, 25000, 30000, 40000, 50000],
+            "unit": "$"
+        },
         "Payback Period (years)": {
             "color_scheme": "RdYlGn_r",
-            "bins": [0, 5, 10, 15, 20, 25, 30, 50, 100],
+            "bins": [-100, -10, 0, 5, 10, 15, 20, 25, 30, 50, 100],
+            "unit": "years"
+        },
+        "Payback Period Without PV (years)": {
+            "color_scheme": "RdYlGn_r",
+            "bins": [-100, -10, 0, 5, 10, 15, 20, 25, 30, 50, 100],
             "unit": "years"
         },
 

@@ -241,7 +241,7 @@ def summarize_incremental_capex_against_baseline(
         how='outer'  # keep all combos, even if missing in one side
     ).fillna(0.0)
     out['net_capital_cost_no_pv'] = scenario_net['net_cost'] - baseline_net['net_cost']
-    breakpoint()
+
     return out[['county', 'county_slug', 'incentive_scenario','net_capital_cost_no_pv']]
 
 def detect_vehicle_kind(ledger_df: pd.DataFrame) -> str:
@@ -330,15 +330,17 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
                         print(f"  Warning: No positive savings for {county} {incentive_scenario}")
 
                     # 2) Adjust capex if we’re using with-solar savings
+                    pv_add = pv_adder_for(county_slug, incentive_scenario, pv_net_df)
                     if savings_type == "with_solar":
-                        pv_add = pv_adder_for(county_slug, incentive_scenario, pv_net_df)
                         net_capital_cost = net_cap_no_pv + pv_add
                     else:
                         net_capital_cost = net_cap_no_pv
 
                     # 3) Payback
                     payback_years = net_capital_cost / annual_savings if annual_savings > 0 else float('inf')
-                    
+                    payback_years_no_pv = net_cap_no_pv / annual_savings
+
+
                     payback_data.append({
                         'county': county,
                         'county_slug': county_slug,
@@ -353,8 +355,10 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
                         'annual_savings_used': annual_savings,
                         'savings_type': savings_type,
                         'net_cap_cost_difference_no_pv': net_cap_no_pv,
-                        'net_capital_cost_diff_scenario_vs_baseline': net_capital_cost,
-                        'payback_period_years': payback_years
+                        'pv_cap_costs': pv_add,
+                        'net_cap_cost_difference_with_pv': net_capital_cost,
+                        'payback_period_years': payback_years,
+                        'payback_years_no_pv': payback_years_no_pv,
                     })
                     
             except Exception as e:
