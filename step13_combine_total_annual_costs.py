@@ -2,11 +2,77 @@ import os
 import pandas as pd
 from datetime import datetime
 
-from main_helpers import get_counties, get_scenario_path, log, norcal_counties, socal_counties, central_counties
+from main_helpers import get_counties, get_scenario_path, log, norcal_counties, socal_counties, central_counties, slugify_county_name
+from scenarios import SCENARIOS
+from appliances.electric_vehicle import ElectricVehicleAppliance
+from appliances.ice_vehicle import ICEVehicleAppliance
 
 ELECTRICITY_PREFIX = "RESULTS_electricity_annual_costs"
 GAS_PREFIX = "RESULTS_gas_annual_costs"
+VEHICLE_PREFIX = "RESULTS_vehicle_annual_costs"
 TOTALS_PREFIX = "RESULTS_total_annual_costs"
+
+def calculate_vehicle_annual_costs(scenario: str, county: str) -> pd.DataFrame:
+    """
+    Calculate annual vehicle operating costs based on scenario configuration.
+    Returns DataFrame with structure similar to gas/electricity cost files.
+    """
+    if scenario not in SCENARIOS:
+        # Return empty DataFrame with single row of zeros
+        return pd.DataFrame({
+            'vehicle.operating.ev_maintenance_insurance': [0.0],
+            'vehicle.operating.ice_maintenance_insurance_fuel': [0.0]
+        }, index=[scenario])
+    
+    scenario_config = SCENARIOS[scenario]
+    costs = {}
+    
+    # Check for electric vehicle (vehicle_charging)
+    if 'vehicle_charging' in scenario_config.get('electric', set()):
+        ev = ElectricVehicleAppliance()
+        costs['vehicle.operating.ev_maintenance_insurance'] = ev.annual_maintenance_cost + ev.annual_insurance_cost
+    else:
+        costs['vehicle.operating.ev_maintenance_insurance'] = 0.0
+    
+    # Check for ICE vehicle (vehicle_fuel) 
+    if 'vehicle_fuel' in scenario_config.get('gas', set()):
+        ice = ICEVehicleAppliance()
+        # Get county-specific fuel costs
+        breakdown = ice.get_cost_breakdown(county)
+        costs['vehicle.operating.ice_maintenance_insurance_fuel'] = breakdown['annual_operating_cost']
+    else:
+        costs['vehicle.operating.ice_maintenance_insurance_fuel'] = 0.0
+    
+    return pd.DataFrame([costs], index=[scenario])
+
+def save_vehicle_costs(vehicle_df, output_county_dir):
+    """Save vehicle costs DataFrame to CSV file."""
+    vehicle_dir = os.path.join(output_county_dir, "results", "vehicle")
+    os.makedirs(vehicle_dir, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H")
+    county = os.path.basename(output_county_dir)
+    file_name = f"{VEHICLE_PREFIX}_{county}_{timestamp}.csv"
+    output_file = os.path.join(vehicle_dir, file_name)
+
+    vehicle_df.to_csv(output_file, index_label="scenario")
+
+def get_costs_from_vehicle(county_dir):
+    """Load vehicle costs from CSV file."""
+    vehicle_dir = os.path.join(county_dir, "results", "vehicle")
+    if not os.path.exists(vehicle_dir):
+        # Return empty DataFrame if no vehicle costs exist
+        return pd.DataFrame()
+    
+    county = os.path.basename(county_dir)
+    prefix = f"{VEHICLE_PREFIX}_{county}_"
+    
+    try:
+        latest_file = get_latest_csv_file(vehicle_dir, prefix)
+        return pd.read_csv(latest_file, index_col="scenario")
+    except FileNotFoundError:
+        # Return empty DataFrame if no vehicle costs file found
+        return pd.DataFrame()
 
 def get_latest_csv_file(directory, prefix):
     files = [f for f in os.listdir(directory) if f.startswith(prefix) and f.endswith(".csv")]
