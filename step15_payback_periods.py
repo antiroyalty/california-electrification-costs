@@ -174,9 +174,26 @@ def pv_adder_for(county_slug: str, incentive_scenario: str, pv_net_df: pd.DataFr
     col = col_map.get(key)
     return float(row.iloc[0][col]) if col in row.columns else 0.0
 
-def load_annual_costs_for_county(base_input_dir: str, county: str, scenario: str, housing_type: str):
-    # TODO, ANA: Not including vehicle O&M yet.
+VEHICLE_PREFIX = "RESULTS_vehicle_annual_costs"
 
+def get_costs_from_vehicle(county_dir):
+    """Load vehicle costs from CSV file."""
+    vehicle_dir = os.path.join(county_dir, "results", "vehicle")
+    if not os.path.exists(vehicle_dir):
+        # Return empty DataFrame if no vehicle costs exist
+        return pd.DataFrame()
+    
+    county = os.path.basename(county_dir)
+    prefix = f"{VEHICLE_PREFIX}_{county}_"
+    
+    try:
+        latest_file = get_latest_csv_file(vehicle_dir, prefix)
+        return pd.read_csv(latest_file, index_col="scenario")
+    except FileNotFoundError:
+        # Return empty DataFrame if no vehicle costs file found
+        return pd.DataFrame()
+
+def load_annual_costs_for_county(base_input_dir: str, county: str, scenario: str, housing_type: str):
     # 1. Baseline costs (no electrification)
     baseline_annual_cost = load_annual_costs(base_input_dir, county, "baseline", housing_type, with_solar=False)
     
@@ -187,21 +204,30 @@ def load_annual_costs_for_county(base_input_dir: str, county: str, scenario: str
     scenario_solar_annual_cost = load_annual_costs(base_input_dir, county, scenario, housing_type, with_solar=True)
     
     if baseline_annual_cost == 0:
-        log(
-            at="load_annual_costs_for_county",
-            info="missing_baseline_cost_data",
-            county=county
-        )
+        log(at="load_annual_costs_for_county", info="missing_baseline_cost_data", county=county)
         return baseline_annual_cost, scenario_annual_cost, scenario_solar_annual_cost, 0.0, 0.0
         
     if scenario_annual_cost == 0 or scenario_solar_annual_cost == 0:
-        log(
-            at="load_annual_costs_for_county",
-            info="missing_scenario_cost_data",
-            county=county
-        )
+        log(at="load_annual_costs_for_county", info="missing_scenario_cost_data", county=county)
         return baseline_annual_cost, scenario_annual_cost, scenario_solar_annual_cost, 0.0, 0.0
     
+    # --- Vehicle O&M costs ---
+    county_dir = os.path.join(base_input_dir, scenario, housing_type, county)
+    vehicle_df = get_costs_from_vehicle(county_dir)
+
+    if not vehicle_df.empty:
+        if scenario == "baseline_ev_car":
+            # Add EV costs to baseline and scenario costs
+            ev_cost = vehicle_df.loc[scenario, "vehicle.operating.ev_maintenance_insurance"]
+            baseline_annual_cost += ev_cost
+            scenario_annual_cost += ev_cost
+            scenario_solar_annual_cost += ev_cost
+        elif scenario == "baseline_ice_car":
+            ice_cost = vehicle_df.loc[scenario, "vehicle.operating.ice_maintenance_insurance_fuel"]
+            baseline_annual_cost += ice_cost
+            scenario_annual_cost += ice_cost
+            scenario_solar_annual_cost += ice_cost
+
     # Calculate annual savings (baseline - scenario)
     savings_scenario_only = baseline_annual_cost - scenario_annual_cost
     savings_with_solar = baseline_annual_cost - scenario_solar_annual_cost
@@ -339,7 +365,6 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
                     # 3) Payback
                     payback_years = net_capital_cost / annual_savings if annual_savings > 0 else float('inf')
                     payback_years_no_pv = net_cap_no_pv / annual_savings
-
 
                     payback_data.append({
                         'county': county,
