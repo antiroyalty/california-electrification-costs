@@ -399,7 +399,7 @@ def create_single_map(base_input_dir: str, scenario: str, housing_type: str, cou
 
 def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: str, counties: list):
     """
-    Create a combined HTML dashboard with all 7 diagnostic maps.
+    Create a combined HTML dashboard with diagnostic maps for key electrification metrics.
     """
     
     # Define metrics configuration
