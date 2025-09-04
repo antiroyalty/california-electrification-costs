@@ -23,6 +23,16 @@ from helpers.maps_helpers import (
 from main_helpers import log, slugify_county_name, to_decimal_number, norcal_counties, central_counties, socal_counties
 
 
+def format_currency_with_sign(value: float) -> str:
+    """Format currency values with appropriate sign for savings/costs."""
+    if value > 0:
+        return f"+${to_decimal_number(abs(value))}"
+    elif value < 0:
+        return f"-${to_decimal_number(abs(value))}"
+    else:
+        return "$0"
+
+
 def load_solar_data(base_input_dir: str, scenario: str, housing_type: str, county_slug: str) -> float:
     """
     Load solar capacity data from electrified assets CSV using capital_costs_helper.
@@ -282,12 +292,7 @@ def create_single_map(base_input_dir: str, scenario: str, housing_type: str, cou
                     base_input_dir, scenario, housing_type, county_slug
                 )
                 # Format with appropriate sign (+ for savings, - for extra costs)
-                if metric_value > 0:
-                    pretty = f"+${to_decimal_number(abs(metric_value))}"
-                elif metric_value < 0:
-                    pretty = f"-${to_decimal_number(abs(metric_value))}"
-                else:
-                    pretty = "$0"
+                pretty = format_currency_with_sign(metric_value)
                 gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
                 
             elif metric_name == "Capital Costs, Net After Incentives ($)":
