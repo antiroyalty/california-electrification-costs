@@ -33,6 +33,16 @@ def format_currency_with_sign(value: float) -> str:
         return "$0"
 
 
+def format_payback_period(years: float) -> str:
+    """Format payback period with appropriate handling for edge cases."""
+    if years >= 100:
+        return ">100 years"
+    elif years <= -100 or years < 0:
+        return "No payback (costs more)"
+    else:
+        return f"{years:.1f} years"
+
+
 def load_solar_data(base_input_dir: str, scenario: str, housing_type: str, county_slug: str) -> float:
     """
     Load solar capacity data from electrified assets CSV using capital_costs_helper.
