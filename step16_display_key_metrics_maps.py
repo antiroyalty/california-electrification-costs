@@ -23,6 +23,36 @@ from helpers.maps_helpers import (
 from main_helpers import log, slugify_county_name, to_decimal_number, norcal_counties, central_counties, socal_counties
 
 
+def format_currency_with_sign(value: float) -> str:
+    """Format currency values with appropriate sign for savings/costs."""
+    if value > 0:
+        return f"+${to_decimal_number(abs(value))}"
+    elif value < 0:
+        return f"-${to_decimal_number(abs(value))}"
+    else:
+        return "$0"
+
+
+def format_payback_period(years: float) -> str:
+    """Format payback period with appropriate handling for edge cases."""
+    if years >= 100:
+        return ">100 years"
+    elif years <= -100 or years < 0:
+        return "No payback (costs more)"
+    else:
+        return f"{years:.1f} years"
+
+
+# Bin ranges for map visualizations
+SOLAR_SIZE_BINS = [0, 2, 4, 6, 8, 10, 12, 15, 20]
+ENERGY_CONSUMPTION_BINS = [0, 10000, 20000, 30000, 40000, 50000, 60000, 80000, 100000]
+ELECTRICITY_BILL_BINS = [0, 1000, 2000, 3000, 4000, 5000, 6000, 8000, 10000]
+GAS_BILL_BINS = [0, 500, 1000, 1500, 2000, 2500, 3000, 4000]
+SAVINGS_BINS = [-2000, -1000, -500, 0, 500, 1000, 1500, 2000, 3000]
+CAPITAL_COSTS_BINS = [-1000, 0, 5000, 10000, 15000, 20000, 25000, 30000, 40000, 50000, 100000]
+PAYBACK_PERIOD_BINS = [0, 5, 10, 15, 20, 25, 30, 50, 100]
+
+
 def load_solar_data(base_input_dir: str, scenario: str, housing_type: str, county_slug: str) -> float:
     """
     Load solar capacity data from electrified assets CSV using capital_costs_helper.
@@ -282,12 +312,7 @@ def create_single_map(base_input_dir: str, scenario: str, housing_type: str, cou
                     base_input_dir, scenario, housing_type, county_slug
                 )
                 # Format with appropriate sign (+ for savings, - for extra costs)
-                if metric_value > 0:
-                    pretty = f"+${to_decimal_number(abs(metric_value))}"
-                elif metric_value < 0:
-                    pretty = f"-${to_decimal_number(abs(metric_value))}"
-                else:
-                    pretty = "$0"
+                pretty = format_currency_with_sign(metric_value)
                 gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
                 
             elif metric_name == "Capital Costs, Net After Incentives ($)":
@@ -399,19 +424,19 @@ def create_single_map(base_input_dir: str, scenario: str, housing_type: str, cou
 
 def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: str, counties: list):
     """
-    Create a combined HTML dashboard with all 7 diagnostic maps.
+    Create a combined HTML dashboard with diagnostic maps for key electrification metrics.
     """
     
     # Define metrics configuration
     metrics_config = {
         "Solar Size (kW)": {
             "color_scheme": "YlOrBr",
-            "bins": [0, 2, 4, 6, 8, 10, 12, 15, 20],
+            "bins": SOLAR_SIZE_BINS,
             "unit": "kW"
         },
         "Total Energy Consumption (kWh, therms)": {
             "color_scheme": "Greens",
-            "bins": [0, 10000, 20000, 30000, 40000, 50000, 60000, 80000, 100000],
+            "bins": ENERGY_CONSUMPTION_BINS,
             "unit": "kWh equiv."
         },
         "Annual Electricity Bill ($)": {
