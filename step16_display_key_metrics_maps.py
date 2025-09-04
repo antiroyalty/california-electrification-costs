@@ -43,6 +43,16 @@ def format_payback_period(years: float) -> str:
         return f"{years:.1f} years"
 
 
+# Bin ranges for map visualizations
+SOLAR_SIZE_BINS = [0, 2, 4, 6, 8, 10, 12, 15, 20]
+ENERGY_CONSUMPTION_BINS = [0, 10000, 20000, 30000, 40000, 50000, 60000, 80000, 100000]
+ELECTRICITY_BILL_BINS = [0, 1000, 2000, 3000, 4000, 5000, 6000, 8000, 10000]
+GAS_BILL_BINS = [0, 500, 1000, 1500, 2000, 2500, 3000, 4000]
+SAVINGS_BINS = [-2000, -1000, -500, 0, 500, 1000, 1500, 2000, 3000]
+CAPITAL_COSTS_BINS = [-1000, 0, 5000, 10000, 15000, 20000, 25000, 30000, 40000, 50000, 100000]
+PAYBACK_PERIOD_BINS = [0, 5, 10, 15, 20, 25, 30, 50, 100]
+
+
 def load_solar_data(base_input_dir: str, scenario: str, housing_type: str, county_slug: str) -> float:
     """
     Load solar capacity data from electrified assets CSV using capital_costs_helper.
@@ -421,12 +431,12 @@ def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: 
     metrics_config = {
         "Solar Size (kW)": {
             "color_scheme": "YlOrBr",
-            "bins": [0, 2, 4, 6, 8, 10, 12, 15, 20],
+            "bins": SOLAR_SIZE_BINS,
             "unit": "kW"
         },
         "Total Energy Consumption (kWh, therms)": {
             "color_scheme": "Greens",
-            "bins": [0, 10000, 20000, 30000, 40000, 50000, 60000, 80000, 100000],
+            "bins": ENERGY_CONSUMPTION_BINS,
             "unit": "kWh equiv."
         },
         "Annual Electricity Bill ($)": {
