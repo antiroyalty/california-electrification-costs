@@ -270,6 +270,109 @@ def load_payback_period_data(
         return 0.0
 
 
+def load_net_grid_consumption_data(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str
+) -> float:
+    """
+    Load net grid consumption (what the meter sees after solar+storage).
+    Returns annual kWh consumed from the grid.
+    """
+    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+    
+    # Try to find SAM optimized load profiles file
+    sam_file_patterns = [
+        f"sam_optimized_load_profiles_{county_slug}.csv",
+        f"sam_optimized_load_profiles_{scenario}_{county_slug}.csv"
+    ]
+    
+    for pattern in sam_file_patterns:
+        sam_file_path = os.path.join(county_dir, pattern)
+        if os.path.exists(sam_file_path):
+            try:
+                df = pd.read_csv(sam_file_path)
+                if 'Grid to Load' in df.columns:
+                    # Sum hourly values to get annual kWh
+                    annual_net_grid = df['Grid to Load'].sum()
+                    return float(annual_net_grid)
+            except Exception as e:
+                print(f"Warning: Error reading {sam_file_path}: {e}")
+                continue
+    
+    # Fallback: try loadprofiles_for_rates file
+    rates_file = os.path.join(county_dir, f"loadprofiles_for_rates_{county_slug}.csv")
+    if os.path.exists(rates_file):
+        try:
+            df = pd.read_csv(rates_file)
+            if 'solarstorage.electricity.kwh' in df.columns:
+                annual_net_grid = df['solarstorage.electricity.kwh'].sum()
+                return float(annual_net_grid)
+        except Exception as e:
+            print(f"Warning: Error reading {rates_file}: {e}")
+    
+    print(f"Warning: Could not find net grid consumption data for {county_slug} in scenario {scenario}")
+    return 0.0
+
+
+def load_total_consumption_data(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str
+) -> float:
+    """
+    Load total energy consumption (gross load before solar offset).
+    Returns annual kWh of total consumption.
+    """
+    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+    
+    # Try to find SAM optimized load profiles file
+    sam_file_patterns = [
+        f"sam_optimized_load_profiles_{county_slug}.csv",
+        f"sam_optimized_load_profiles_{scenario}_{county_slug}.csv"
+    ]
+    
+    for pattern in sam_file_patterns:
+        sam_file_path = os.path.join(county_dir, pattern)
+        if os.path.exists(sam_file_path):
+            try:
+                df = pd.read_csv(sam_file_path)
+                if 'Load Profile' in df.columns:
+                    # Sum hourly values to get annual kWh
+                    annual_total = df['Load Profile'].sum()
+                    return float(annual_total)
+            except Exception as e:
+                print(f"Warning: Error reading {sam_file_path}: {e}")
+                continue
+    
+    # Fallback: try loadprofiles_for_rates file (baseline consumption)
+    rates_file = os.path.join(county_dir, f"loadprofiles_for_rates_{county_slug}.csv")
+    if os.path.exists(rates_file):
+        try:
+            df = pd.read_csv(rates_file)
+            if 'default.electricity.kwh' in df.columns:
+                annual_total = df['default.electricity.kwh'].sum()
+                return float(annual_total)
+        except Exception as e:
+            print(f"Warning: Error reading {rates_file}: {e}")
+    
+    # Last fallback: combined profiles file
+    combined_file = os.path.join(county_dir, f"combined_profiles_{scenario}_{county_slug}.csv")
+    if os.path.exists(combined_file):
+        try:
+            df = pd.read_csv(combined_file)
+            if 'electricity.real_and_simulated.for_typical_county_home.kwh' in df.columns:
+                annual_total = df['electricity.real_and_simulated.for_typical_county_home.kwh'].sum()
+                return float(annual_total)
+        except Exception as e:
+            print(f"Warning: Error reading {combined_file}: {e}")
+    
+    print(f"Warning: Could not find total consumption data for {county_slug} in scenario {scenario}")
+    return 0.0
+
+
 def create_single_map(base_input_dir: str, scenario: str, housing_type: str, counties: list, 
                      metric_name: str, data_loader_config: dict) -> folium.Map:
     """
