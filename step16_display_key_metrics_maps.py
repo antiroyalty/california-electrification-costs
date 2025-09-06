@@ -711,6 +711,16 @@ def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: 
             "bins": TOTAL_CONSUMPTION_BINS,
             "unit": "kWh"
         },
+        "Battery Energy (kWh)": {
+            "color_scheme": "Purples",
+            "bins": BATTERY_ENERGY_BINS,
+            "unit": "kWh"
+        },
+        "Solar Energy (kWh)": {
+            "color_scheme": "Oranges",
+            "bins": SOLAR_ENERGY_BINS,
+            "unit": "kWh"
+        },
     }
     
     # Create individual maps
