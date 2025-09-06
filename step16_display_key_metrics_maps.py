@@ -440,6 +440,22 @@ def create_single_map(base_input_dir: str, scenario: str, housing_type: str, cou
                     pretty = f"{metric_value:.1f} years"
                 gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
                 
+            elif metric_name == "Net Grid Consumption (kWh)":
+                metric_value = load_net_grid_consumption_data(
+                    base_input_dir, scenario, housing_type, county_slug
+                )
+                # Format as kWh with comma separators
+                pretty = f"{to_decimal_number(metric_value)} kWh"
+                gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
+                
+            elif metric_name == "Total Energy Consumption (kWh)":
+                metric_value = load_total_consumption_data(
+                    base_input_dir, scenario, housing_type, county_slug
+                )
+                # Format as kWh with comma separators
+                pretty = f"{to_decimal_number(metric_value)} kWh"
+                gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
+                
             else:
                 # Use load_cost_data to get metric data
                 data = load_cost_data(
