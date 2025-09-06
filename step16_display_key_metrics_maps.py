@@ -377,6 +377,94 @@ def load_total_consumption_data(
     return 0.0
 
 
+def load_battery_energy_data(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str
+) -> float:
+    """
+    Load annual energy supported by battery (discharged to load).
+    Returns annual kWh discharged from battery to load.
+    """
+    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+    
+    # Try to find SAM optimized load profiles file
+    sam_file_patterns = [
+        f"sam_optimized_load_profiles_{county_slug}.csv",
+        f"sam_optimized_load_profiles_{scenario}_{county_slug}.csv"
+    ]
+    
+    for pattern in sam_file_patterns:
+        sam_file_path = os.path.join(county_dir, pattern)
+        if os.path.exists(sam_file_path):
+            try:
+                df = pd.read_csv(sam_file_path)
+                if 'Battery to Load' in df.columns:
+                    # Sum hourly values to get annual kWh
+                    annual_battery_energy = df['Battery to Load'].sum()
+                    return float(annual_battery_energy)
+            except Exception as e:
+                print(f"Warning: Error reading {sam_file_path}: {e}")
+                continue
+    
+    print(f"Warning: Could not find battery energy data for {county_slug} in scenario {scenario}")
+    return 0.0
+
+
+def load_solar_energy_data(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str
+) -> float:
+    """
+    Load annual energy supported by solar (directly to load, not including battery charging).
+    Returns annual kWh from solar directly to load.
+    """
+    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+    
+    # Try to find SAM optimized load profiles file
+    sam_file_patterns = [
+        f"sam_optimized_load_profiles_{county_slug}.csv",
+        f"sam_optimized_load_profiles_{scenario}_{county_slug}.csv"
+    ]
+    
+    for pattern in sam_file_patterns:
+        sam_file_path = os.path.join(county_dir, pattern)
+        if os.path.exists(sam_file_path):
+            try:
+                df = pd.read_csv(sam_file_path)
+                if 'System to Load' in df.columns:
+                    # Sum hourly values to get annual kWh
+                    annual_solar_energy = df['System to Load'].sum()
+                    return float(annual_solar_energy)
+            except Exception as e:
+                print(f"Warning: Error reading {sam_file_path}: {e}")
+                continue
+    
+    # Fallback: try to get total solar generation from PV system if available
+    # This would be total solar generation, not just direct to load
+    try:
+        # Look for solar generation files
+        sam_results_dir = os.path.join(county_dir, "results", "solarstorage")
+        if os.path.exists(sam_results_dir):
+            # Try to find latest solar generation file
+            for file in os.listdir(sam_results_dir):
+                if file.startswith("RESULTS_solar_generation_") and file.endswith(".csv"):
+                    solar_file_path = os.path.join(sam_results_dir, file)
+                    df = pd.read_csv(solar_file_path)
+                    # Look for solar generation column
+                    for col in df.columns:
+                        if 'solar' in col.lower() and 'generation' in col.lower():
+                            return float(df[col].iloc[0]) if len(df) > 0 else 0.0
+    except Exception as e:
+        pass
+    
+    print(f"Warning: Could not find solar energy data for {county_slug} in scenario {scenario}")
+    return 0.0
+
+
 def create_single_map(base_input_dir: str, scenario: str, housing_type: str, counties: list, 
                      metric_name: str, data_loader_config: dict) -> folium.Map:
     """
