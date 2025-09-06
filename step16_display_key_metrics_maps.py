@@ -9,6 +9,8 @@ Display diagnostic maps for key metrics in a single HTML file:
 - Solar+storage annual savings vs non-solar deployment, in $
 - Capital costs (net outlay with full incentives) for scenario appliances, in $
 - Payback period (years) for electrification investments with full incentives
+- Net grid consumption (kWh) - what the meter sees after solar+storage
+- Total energy consumption (kWh) - gross load before solar offset
 """
 
 import os
@@ -592,6 +594,16 @@ def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: 
             "color_scheme": "RdYlGn_r",
             "bins": [0, 5, 10, 15, 20, 25, 30, 50, 100],
             "unit": "years"
+        },
+        "Net Grid Consumption (kWh)": {
+            "color_scheme": "Reds",
+            "bins": NET_GRID_CONSUMPTION_BINS,
+            "unit": "kWh"
+        },
+        "Total Energy Consumption (kWh)": {
+            "color_scheme": "Blues",
+            "bins": TOTAL_CONSUMPTION_BINS,
+            "unit": "kWh"
         },
     }
     
