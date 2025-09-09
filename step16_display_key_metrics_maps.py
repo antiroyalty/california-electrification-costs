@@ -482,6 +482,9 @@ def load_appliance_breakdown_data(
     county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
     appliance_data = {}
     
+    print(f"DEBUG: Loading appliance data for {county_slug}, scenario: {scenario}")
+    print(f"DEBUG: County directory: {county_dir}")
+    
     # Define appliance categories based on step3 and step4 definitions
     electricity_categories = {
         "Cooling": ["ceiling_fan"],
@@ -501,28 +504,39 @@ def load_appliance_breakdown_data(
     
     # Load electricity loads
     electricity_file = os.path.join(county_dir, f"electricity_loads_{county_slug}.csv")
+    print(f"DEBUG: Looking for electricity file: {electricity_file}")
+    print(f"DEBUG: Electricity file exists: {os.path.exists(electricity_file)}")
+    
     if os.path.exists(electricity_file):
         try:
             df = pd.read_csv(electricity_file)
+            print(f"DEBUG: Electricity file loaded. Columns: {list(df.columns[:10])}")  # Show first 10 columns
             
             for category, appliances in electricity_categories.items():
                 category_total = 0.0
                 for appliance in appliances:
                     col_name = f"out.electricity.{appliance}.energy_consumption"
                     if col_name in df.columns:
-                        category_total += df[col_name].sum()
+                        appliance_sum = df[col_name].sum()
+                        category_total += appliance_sum
+                        print(f"DEBUG: {appliance}: {appliance_sum:.2f} kWh")
                 
                 if category_total > 0:
                     appliance_data[category] = category_total
+                    print(f"DEBUG: {category}: {category_total:.2f} kWh")
                     
         except Exception as e:
             print(f"Warning: Error reading electricity loads for {county_slug}: {e}")
     
     # Load gas loads
     gas_file = os.path.join(county_dir, f"gas_loads_{county_slug}.csv")
+    print(f"DEBUG: Looking for gas file: {gas_file}")
+    print(f"DEBUG: Gas file exists: {os.path.exists(gas_file)}")
+    
     if os.path.exists(gas_file):
         try:
             df = pd.read_csv(gas_file)
+            print(f"DEBUG: Gas file loaded. Columns: {list(df.columns[:10])}")  # Show first 10 columns
             
             for category, appliances in gas_categories.items():
                 category_total = 0.0
@@ -530,10 +544,13 @@ def load_appliance_breakdown_data(
                     col_name = f"out.natural_gas.{appliance}.energy_consumption.gas.building_avg.kwh"
                     if col_name in df.columns:
                         # Sum hourly values and convert to annual kWh
-                        category_total += df[col_name].sum()
+                        appliance_sum = df[col_name].sum()
+                        category_total += appliance_sum
+                        print(f"DEBUG: {appliance}: {appliance_sum:.2f} kWh")
                 
                 if category_total > 0:
                     appliance_data[category] = category_total
+                    print(f"DEBUG: {category}: {category_total:.2f} kWh")
                     
         except Exception as e:
             print(f"Warning: Error reading gas loads for {county_slug}: {e}")
@@ -541,9 +558,13 @@ def load_appliance_breakdown_data(
     # For electrified scenarios, load simulated electric appliances
     if scenario != "baseline":
         simulated_file = os.path.join(county_dir, f"electricity_loads_simulated_{county_slug}.csv")
+        print(f"DEBUG: Looking for simulated file: {simulated_file}")
+        print(f"DEBUG: Simulated file exists: {os.path.exists(simulated_file)}")
+        
         if os.path.exists(simulated_file):
             try:
                 df = pd.read_csv(simulated_file)
+                print(f"DEBUG: Simulated file loaded. Columns: {list(df.columns)}")
                 
                 # Check for simulated appliances based on scenario
                 appliance_mapping = {
@@ -557,10 +578,12 @@ def load_appliance_breakdown_data(
                         annual_kwh = df[col_name].sum()
                         if annual_kwh > 0:
                             appliance_data[category] = annual_kwh
+                            print(f"DEBUG: {category}: {annual_kwh:.2f} kWh")
                             
             except Exception as e:
                 print(f"Warning: Error reading simulated loads for {county_slug}: {e}")
     
+    print(f"DEBUG: Final appliance data: {appliance_data}")
     return appliance_data
 
 
