@@ -9,12 +9,18 @@ Display diagnostic maps for key metrics in a single HTML file:
 - Solar+storage annual savings vs non-solar deployment, in $
 - Capital costs (net outlay with full incentives) for scenario appliances, in $
 - Payback period (years) for electrification investments with full incentives
+- Net grid consumption (kWh) - what the meter sees after solar+storage
+- Total energy consumption (kWh) - gross load before solar offset
 """
 
 import os
 import pandas as pd
 import folium
 from folium import plugins
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+import io
+import base64
 from helpers.maps_helpers import (
     initialize_map, load_cost_data, add_choropleth_layer, 
     add_centroid_labels, add_map_title, export_geojson_and_html,
@@ -51,6 +57,10 @@ GAS_BILL_BINS = [0, 500, 1000, 1500, 2000, 2500, 3000, 4000]
 SAVINGS_BINS = [-2000, -1000, -500, 0, 500, 1000, 1500, 2000, 3000]
 CAPITAL_COSTS_BINS = [-1000, 0, 5000, 10000, 15000, 20000, 25000, 30000, 40000, 50000, 100000]
 PAYBACK_PERIOD_BINS = [0, 5, 10, 15, 20, 25, 30, 50, 100]
+NET_GRID_CONSUMPTION_BINS = [0, 5000, 10000, 15000, 20000, 25000, 30000, 40000, 50000]
+TOTAL_ELECTRICITY_CONSUMPTION_BINS = [0, 2000, 4000, 6000, 8000, 10000, 12000, 14000, 16000],
+BATTERY_ENERGY_BINS = [0, 1000, 2000, 3000, 4000, 5000, 6000, 8000, 10000]
+SOLAR_ENERGY_BINS = [0, 5000, 10000, 15000, 20000, 25000, 30000, 40000, 50000]
 
 
 def load_solar_data(base_input_dir: str, scenario: str, housing_type: str, county_slug: str) -> float:
@@ -268,6 +278,391 @@ def load_payback_period_data(
         return 0.0
 
 
+def load_net_grid_consumption_data(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str
+) -> float:
+    """
+    Load net grid consumption (what the meter sees after solar+storage).
+    Returns annual kWh consumed from the grid.
+    """
+    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+    
+    # Try to find SAM optimized load profiles file
+    sam_file_patterns = [
+        f"sam_optimized_load_profiles_{county_slug}.csv",
+        f"sam_optimized_load_profiles_{scenario}_{county_slug}.csv"
+    ]
+    
+    for pattern in sam_file_patterns:
+        sam_file_path = os.path.join(county_dir, pattern)
+        if os.path.exists(sam_file_path):
+            try:
+                df = pd.read_csv(sam_file_path)
+                if 'Grid to Load' in df.columns:
+                    # Sum hourly values to get annual kWh
+                    annual_net_grid = df['Grid to Load'].sum()
+                    return float(annual_net_grid)
+            except Exception as e:
+                print(f"Warning: Error reading {sam_file_path}: {e}")
+                continue
+    
+    # Fallback: try loadprofiles_for_rates file
+    rates_file = os.path.join(county_dir, f"loadprofiles_for_rates_{county_slug}.csv")
+    if os.path.exists(rates_file):
+        try:
+            df = pd.read_csv(rates_file)
+            if 'solarstorage.electricity.kwh' in df.columns:
+                annual_net_grid = df['solarstorage.electricity.kwh'].sum()
+                return float(annual_net_grid)
+        except Exception as e:
+            print(f"Warning: Error reading {rates_file}: {e}")
+    
+    print(f"Warning: Could not find net grid consumption data for {county_slug} in scenario {scenario}")
+    return 0.0
+
+
+def load_total_consumption_data(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str
+) -> float:
+    """
+    Load total energy consumption (gross load before solar offset).
+    Returns annual kWh of total consumption.
+    """
+    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+    
+    # Try to find SAM optimized load profiles file
+    sam_file_patterns = [
+        f"sam_optimized_load_profiles_{county_slug}.csv",
+        f"sam_optimized_load_profiles_{scenario}_{county_slug}.csv"
+    ]
+    
+    for pattern in sam_file_patterns:
+        sam_file_path = os.path.join(county_dir, pattern)
+        if os.path.exists(sam_file_path):
+            try:
+                df = pd.read_csv(sam_file_path)
+                if 'Load Profile' in df.columns:
+                    # Sum hourly values to get annual kWh
+                    annual_total = df['Load Profile'].sum()
+                    return float(annual_total)
+            except Exception as e:
+                print(f"Warning: Error reading {sam_file_path}: {e}")
+                continue
+    
+    # Fallback: try loadprofiles_for_rates file (baseline consumption)
+    rates_file = os.path.join(county_dir, f"loadprofiles_for_rates_{county_slug}.csv")
+    if os.path.exists(rates_file):
+        try:
+            df = pd.read_csv(rates_file)
+            if 'default.electricity.kwh' in df.columns:
+                annual_total = df['default.electricity.kwh'].sum()
+                return float(annual_total)
+        except Exception as e:
+            print(f"Warning: Error reading {rates_file}: {e}")
+    
+    # Last fallback: combined profiles file
+    combined_file = os.path.join(county_dir, f"combined_profiles_{scenario}_{county_slug}.csv")
+    if os.path.exists(combined_file):
+        try:
+            df = pd.read_csv(combined_file)
+            if 'electricity.real_and_simulated.for_typical_county_home.kwh' in df.columns:
+                annual_total = df['electricity.real_and_simulated.for_typical_county_home.kwh'].sum()
+                return float(annual_total)
+        except Exception as e:
+            print(f"Warning: Error reading {combined_file}: {e}")
+    
+    print(f"Warning: Could not find total consumption data for {county_slug} in scenario {scenario}")
+    return 0.0
+
+
+def load_battery_energy_data(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str
+) -> float:
+    """
+    Load annual energy supported by battery (discharged to load).
+    Returns annual kWh discharged from battery to load.
+    """
+    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+    
+    # Try to find SAM optimized load profiles file
+    sam_file_patterns = [
+        f"sam_optimized_load_profiles_{county_slug}.csv",
+        f"sam_optimized_load_profiles_{scenario}_{county_slug}.csv"
+    ]
+    
+    for pattern in sam_file_patterns:
+        sam_file_path = os.path.join(county_dir, pattern)
+        if os.path.exists(sam_file_path):
+            try:
+                df = pd.read_csv(sam_file_path)
+                if 'Battery to Load' in df.columns:
+                    # Sum hourly values to get annual kWh
+                    annual_battery_energy = df['Battery to Load'].sum()
+                    return float(annual_battery_energy)
+            except Exception as e:
+                print(f"Warning: Error reading {sam_file_path}: {e}")
+                continue
+    
+    print(f"Warning: Could not find battery energy data for {county_slug} in scenario {scenario}")
+    return 0.0
+
+
+def load_solar_energy_data(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str
+) -> float:
+    """
+    Load annual energy supported by solar (directly to load, not including battery charging).
+    Returns annual kWh from solar directly to load.
+    """
+    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+    
+    # Try to find SAM optimized load profiles file
+    sam_file_patterns = [
+        f"sam_optimized_load_profiles_{county_slug}.csv",
+        f"sam_optimized_load_profiles_{scenario}_{county_slug}.csv"
+    ]
+    
+    for pattern in sam_file_patterns:
+        sam_file_path = os.path.join(county_dir, pattern)
+        if os.path.exists(sam_file_path):
+            try:
+                df = pd.read_csv(sam_file_path)
+                if 'System to Load' in df.columns:
+                    # Sum hourly values to get annual kWh
+                    annual_solar_energy = df['System to Load'].sum()
+                    return float(annual_solar_energy)
+            except Exception as e:
+                print(f"Warning: Error reading {sam_file_path}: {e}")
+                continue
+    
+    # Fallback: try to get total solar generation from PV system if available
+    # This would be total solar generation, not just direct to load
+    try:
+        # Look for solar generation files
+        sam_results_dir = os.path.join(county_dir, "results", "solarstorage")
+        if os.path.exists(sam_results_dir):
+            # Try to find latest solar generation file
+            for file in os.listdir(sam_results_dir):
+                if file.startswith("RESULTS_solar_generation_") and file.endswith(".csv"):
+                    solar_file_path = os.path.join(sam_results_dir, file)
+                    df = pd.read_csv(solar_file_path)
+                    # Look for solar generation column
+                    for col in df.columns:
+                        if 'solar' in col.lower() and 'generation' in col.lower():
+                            return float(df[col].iloc[0]) if len(df) > 0 else 0.0
+    except Exception as e:
+        pass
+    
+    print(f"Warning: Could not find solar energy data for {county_slug} in scenario {scenario}")
+    return 0.0
+
+
+def load_appliance_breakdown_data(
+    base_input_dir: str,
+    scenario: str, 
+    housing_type: str,
+    county_slug: str
+) -> dict:
+    """
+    Load appliance breakdown data by end-use category.
+    Returns dictionary with appliance categories and their annual kWh consumption.
+    """
+    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+    appliance_data = {}
+    
+    print(f"DEBUG: Loading appliance data for {county_slug}, scenario: {scenario}")
+    print(f"DEBUG: County directory: {county_dir}")
+    
+    # Define appliance categories based on step3 and step4 definitions
+    electricity_categories = {
+        "Cooling": ["ceiling_fan"],
+        "Appliances": ["clothes_dryer", "dishwasher", "freezer", "refrigerator"],
+        "Lighting": ["lighting_garage", "lighting_interior"],
+        "Plug Loads": ["plug_loads"],
+        "Pool/Spa": ["permanent_spa_heat", "permanent_spa_pump", "pool_heater", "pool_pump"],
+        "Other Electric": ["mech_vent"]
+    }
+    
+    gas_categories = {
+        "Heating": ["heating"],
+        "Hot Water": ["hot_water"], 
+        "Cooking": ["range_oven"],
+        "Other Gas": ["clothes_dryer", "fireplace"]
+    }
+    
+    # Load electricity loads
+    electricity_file = os.path.join(county_dir, f"electricity_loads_{county_slug}.csv")
+    print(f"DEBUG: Looking for electricity file: {electricity_file}")
+    print(f"DEBUG: Electricity file exists: {os.path.exists(electricity_file)}")
+    
+    if os.path.exists(electricity_file):
+        try:
+            df = pd.read_csv(electricity_file)
+            print(f"DEBUG: Electricity file loaded. Columns: {list(df.columns[:10])}")  # Show first 10 columns
+            
+            for category, appliances in electricity_categories.items():
+                category_total = 0.0
+                for appliance in appliances:
+                    col_name = f"out.electricity.{appliance}.energy_consumption"
+                    if col_name in df.columns:
+                        appliance_sum = df[col_name].sum()
+                        category_total += appliance_sum
+                        print(f"DEBUG: {appliance}: {appliance_sum:.2f} kWh")
+                
+                if category_total > 0:
+                    appliance_data[category] = category_total
+                    print(f"DEBUG: {category}: {category_total:.2f} kWh")
+                    
+        except Exception as e:
+            print(f"Warning: Error reading electricity loads for {county_slug}: {e}")
+    
+    # Load gas loads
+    gas_file = os.path.join(county_dir, f"gas_loads_{county_slug}.csv")
+    print(f"DEBUG: Looking for gas file: {gas_file}")
+    print(f"DEBUG: Gas file exists: {os.path.exists(gas_file)}")
+    
+    if os.path.exists(gas_file):
+        try:
+            df = pd.read_csv(gas_file)
+            print(f"DEBUG: Gas file loaded. Columns: {list(df.columns[:10])}")  # Show first 10 columns
+            
+            for category, appliances in gas_categories.items():
+                category_total = 0.0
+                for appliance in appliances:
+                    col_name = f"out.natural_gas.{appliance}.energy_consumption.gas.building_avg.kwh"
+                    if col_name in df.columns:
+                        # Sum hourly values and convert to annual kWh
+                        appliance_sum = df[col_name].sum()
+                        category_total += appliance_sum
+                        print(f"DEBUG: {appliance}: {appliance_sum:.2f} kWh")
+                
+                if category_total > 0:
+                    appliance_data[category] = category_total
+                    print(f"DEBUG: {category}: {category_total:.2f} kWh")
+                    
+        except Exception as e:
+            print(f"Warning: Error reading gas loads for {county_slug}: {e}")
+    
+    # For electrified scenarios, load simulated electric appliances
+    if scenario != "baseline":
+        simulated_file = os.path.join(county_dir, f"electricity_loads_simulated_{county_slug}.csv")
+        print(f"DEBUG: Looking for simulated file: {simulated_file}")
+        print(f"DEBUG: Simulated file exists: {os.path.exists(simulated_file)}")
+        
+        if os.path.exists(simulated_file):
+            try:
+                df = pd.read_csv(simulated_file)
+                print(f"DEBUG: Simulated file loaded. Columns: {list(df.columns)}")
+                
+                # Check for simulated appliances based on scenario
+                appliance_mapping = {
+                    "simulated.electricity.heat_pump.energy_consumption.electricity.kwh": "Heat Pump",
+                    "simulated.electricity.induction_stove.energy_consumption.electricity.kwh": "Induction Cooking",
+                    "simulated.electricity.hot_water.energy_consumption.electricity.kwh": "Electric Hot Water"
+                }
+                
+                for col_name, category in appliance_mapping.items():
+                    if col_name in df.columns:
+                        annual_kwh = df[col_name].sum()
+                        if annual_kwh > 0:
+                            appliance_data[category] = annual_kwh
+                            print(f"DEBUG: {category}: {annual_kwh:.2f} kWh")
+                            
+            except Exception as e:
+                print(f"Warning: Error reading simulated loads for {county_slug}: {e}")
+    
+    print(f"DEBUG: Final appliance data: {appliance_data}")
+    return appliance_data
+
+
+def create_appliance_breakdown_chart(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str
+) -> str:
+    """
+    Create a pie chart showing appliance breakdown by end-use category.
+    Returns base64 encoded PNG image string.
+    """
+    appliance_data = load_appliance_breakdown_data(base_input_dir, scenario, housing_type, county_slug)
+    
+    if not appliance_data:
+        # Create empty chart
+        fig, ax = plt.subplots(figsize=(8, 6))
+        ax.text(0.5, 0.5, 'No appliance data available', 
+                ha='center', va='center', fontsize=14)
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+        ax.axis('off')
+    else:
+        # Create pie chart
+        fig, ax = plt.subplots(figsize=(10, 8))
+        
+        categories = list(appliance_data.keys())
+        values = list(appliance_data.values())
+        
+        # Define colors for different categories
+        color_map = {
+            "Heating": "#FF6B6B",
+            "Heat Pump": "#FF8E53", 
+            "Cooling": "#4ECDC4",
+            "Hot Water": "#45B7D1",
+            "Electric Hot Water": "#96CEB4",
+            "Cooking": "#FFEAA7",
+            "Induction Cooking": "#DDA0DD",
+            "Appliances": "#FD79A8",
+            "Lighting": "#FDCB6E",
+            "Plug Loads": "#6C5CE7",
+            "Pool/Spa": "#00B894",
+            "Other Electric": "#A29BFE",
+            "Other Gas": "#E17055"
+        }
+        
+        colors = [color_map.get(cat, "#BDC3C7") for cat in categories]
+        
+        # Create pie chart
+        wedges, texts, autotexts = ax.pie(values, labels=categories, colors=colors, autopct='%1.1f%%',
+                                        startangle=90, textprops={'fontsize': 10})
+        
+        # Improve readability
+        for autotext in autotexts:
+            autotext.set_color('white')
+            autotext.set_fontweight('bold')
+        
+        county_name = county_slug.replace('-', ' ').title()
+        scenario_name = scenario.replace('_', ' ').title()
+        ax.set_title(f'Annual Energy Consumption by End-Use\n{county_name} County - {scenario_name} Scenario', 
+                    fontsize=14, fontweight='bold', pad=20)
+        
+        # Add total consumption
+        total_kwh = sum(values)
+        ax.text(0, -1.3, f'Total: {total_kwh:,.0f} kWh/year', 
+               ha='center', fontsize=12, fontweight='bold')
+    
+    # Convert to base64
+    buffer = io.BytesIO()
+    plt.tight_layout()
+    plt.savefig(buffer, format='png', dpi=150, bbox_inches='tight')
+    buffer.seek(0)
+    image_base64 = base64.b64encode(buffer.getvalue()).decode()
+    plt.close()
+    
+    return image_base64
+
+
 def create_single_map(base_input_dir: str, scenario: str, housing_type: str, counties: list, 
                      metric_name: str, data_loader_config: dict) -> folium.Map:
     """
@@ -333,6 +728,38 @@ def create_single_map(base_input_dir: str, scenario: str, housing_type: str, cou
                     pretty = ">100 years"
                 else:
                     pretty = f"{metric_value:.1f} years"
+                gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
+                
+            elif metric_name == "Net Grid Consumption (kWh)":
+                metric_value = load_net_grid_consumption_data(
+                    base_input_dir, scenario, housing_type, county_slug
+                )
+                # Format as kWh with comma separators
+                pretty = f"{to_decimal_number(metric_value)} kWh"
+                gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
+                
+            elif metric_name == "Total Energy Consumption (kWh)":
+                metric_value = load_total_consumption_data(
+                    base_input_dir, scenario, housing_type, county_slug
+                )
+                # Format as kWh with comma separators
+                pretty = f"{to_decimal_number(metric_value)} kWh"
+                gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
+                
+            elif metric_name == "Battery Energy (kWh)":
+                metric_value = load_battery_energy_data(
+                    base_input_dir, scenario, housing_type, county_slug
+                )
+                # Format as kWh with comma separators
+                pretty = f"{to_decimal_number(metric_value)} kWh"
+                gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
+                
+            elif metric_name == "Solar Energy (kWh)":
+                metric_value = load_solar_energy_data(
+                    base_input_dir, scenario, housing_type, county_slug
+                )
+                # Format as kWh with comma separators
+                pretty = f"{to_decimal_number(metric_value)} kWh"
                 gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
                 
             else:
@@ -422,6 +849,100 @@ def create_single_map(base_input_dir: str, scenario: str, housing_type: str, cou
     return m
 
 
+def create_appliance_breakdown_report(base_input_dir: str, scenario: str, housing_type: str, counties: list):
+    """
+    Create a standalone HTML report with appliance breakdown charts for all counties.
+    """
+    scenario_title = scenario.replace('_', ' ').title()
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Appliance Breakdown Report - {scenario_title}</title>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style>
+            body {{
+                font-family: Arial, sans-serif;
+                margin: 0;
+                padding: 20px;
+                background-color: #f5f5f5;
+            }}
+            .header {{
+                text-align: center;
+                margin-bottom: 30px;
+                background-color: white;
+                padding: 20px;
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }}
+            .charts-grid {{
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+                gap: 20px;
+                max-width: 1400px;
+                margin: 0 auto;
+            }}
+            .chart-container {{
+                background-color: white;
+                border-radius: 8px;
+                padding: 15px;
+                text-align: center;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }}
+            .chart-title {{
+                font-size: 16px;
+                font-weight: bold;
+                margin-bottom: 10px;
+                color: #333;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <h1>Appliance Energy Consumption Breakdown</h1>
+            <h2>{scenario_title} - {housing_type.replace('-', ' ').title()}</h2>
+            <p>Annual energy consumption by end-use category for California counties</p>
+        </div>
+        
+        <div class="charts-grid">
+    """
+    
+    # Generate charts for all counties
+    county_names = [county.replace(" County", "") for county in counties]
+    for county_name in county_names:
+        county_slug = slugify_county_name(f"{county_name} County")
+        
+        try:
+            chart_b64 = create_appliance_breakdown_chart(base_input_dir, scenario, housing_type, county_slug)
+            html_content += f"""
+                <div class="chart-container">
+                    <div class="chart-title">{county_name} County</div>
+                    <img src="data:image/png;base64,{chart_b64}" alt="Appliance breakdown for {county_name}" style="max-width: 100%; height: auto;">
+                </div>
+            """
+        except Exception as e:
+            print(f"Error creating appliance chart for {county_name}: {e}")
+    
+    html_content += """
+        </div>
+    </body>
+    </html>
+    """
+    
+    # Save the report
+    output_dir = os.path.join("visualizations", "appliance_breakdown", "html")
+    os.makedirs(output_dir, exist_ok=True)
+    
+    filename = f"appliance_breakdown_{scenario}_{housing_type.replace(' ', '-').lower()}.html"
+    output_path = os.path.join(output_dir, filename)
+    
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(html_content)
+    
+    print(f"Appliance breakdown report saved to: {output_path}")
+
+
 def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: str, counties: list):
     """
     Create a combined HTML dashboard with diagnostic maps for key electrification metrics.
@@ -471,6 +992,26 @@ def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: 
             "color_scheme": "RdYlGn_r",
             "bins": [0, 5, 10, 15, 20, 25, 30, 50, 100],
             "unit": "years"
+        },
+        "Net Grid Consumption (kWh)": {
+            "color_scheme": "Reds",
+            "bins": NET_GRID_CONSUMPTION_BINS,
+            "unit": "kWh"
+        },
+        "Total Energy Consumption (kWh)": {
+            "color_scheme": "Blues",
+            "bins": TOTAL_ELECTRICITY_CONSUMPTION_BINS,
+            "unit": "kWh"
+        },
+        "Battery Energy (kWh)": {
+            "color_scheme": "Purples",
+            "bins": BATTERY_ENERGY_BINS,
+            "unit": "kWh"
+        },
+        "Solar Energy (kWh)": {
+            "color_scheme": "Oranges",
+            "bins": SOLAR_ENERGY_BINS,
+            "unit": "kWh"
         },
     }
     
@@ -533,6 +1074,31 @@ def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: 
                 display: flex;
                 justify-content: center;
             }}
+            .charts-section {{
+                margin-top: 40px;
+                background-color: white;
+                border-radius: 8px;
+                padding: 20px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }}
+            .charts-grid {{
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+                gap: 20px;
+                margin-top: 20px;
+            }}
+            .chart-container {{
+                background-color: #f8f9fa;
+                border-radius: 8px;
+                padding: 15px;
+                text-align: center;
+            }}
+            .chart-title {{
+                font-size: 14px;
+                font-weight: bold;
+                margin-bottom: 10px;
+                color: #333;
+            }}
         </style>
     </head>
     <body>
@@ -558,6 +1124,38 @@ def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: 
         """
     
     html_content += """
+        </div>
+        
+        <div class="charts-section">
+            <h2>Appliance Energy Consumption Breakdown</h2>
+            <p>Annual energy consumption by end-use category for selected counties</p>
+            <div class="charts-grid">
+    """
+    
+    # Generate appliance breakdown charts for a few representative counties
+    sample_counties = ["Alameda", "Los Angeles", "San Diego", "Fresno"]
+    for county_name in sample_counties:
+        county_slug = slugify_county_name(f"{county_name} County")
+        
+        try:
+            chart_b64 = create_appliance_breakdown_chart(base_input_dir, scenario, housing_type, county_slug)
+            html_content += f"""
+                <div class="chart-container">
+                    <div class="chart-title">{county_name} County</div>
+                    <img src="data:image/png;base64,{chart_b64}" alt="Appliance breakdown for {county_name}" style="max-width: 100%; height: auto;">
+                </div>
+            """
+        except Exception as e:
+            print(f"Error creating appliance chart for {county_name}: {e}")
+            html_content += f"""
+                <div class="chart-container">
+                    <div class="chart-title">{county_name} County</div>
+                    <p>Chart unavailable for this county</p>
+                </div>
+            """
+    
+    html_content += """
+            </div>
         </div>
     </body>
     </html>
@@ -594,11 +1192,18 @@ def process(base_input_dir: str, base_output_dir: str, scenario: str,
     try:
         dashboard_path = create_combined_dashboard(base_input_dir, scenario, housing_type, counties)
         
+        # Also create standalone appliance breakdown report
+        try:
+            create_appliance_breakdown_report(base_input_dir, scenario, housing_type, counties)
+            print(f"  - Created appliance breakdown report")
+        except Exception as e:
+            print(f"Warning: Could not create appliance breakdown report: {e}")
+        
         # Auto-open in browser
         import webbrowser
         webbrowser.open(f'file://{os.path.abspath(dashboard_path)}')
         
-        print(f"\nStep 14 complete! Created diagnostic dashboard:")
+        print(f"\nStep 16 complete! Created diagnostic dashboard:")
         print(f"  - File: {dashboard_path}")
         print(f"  - Opened in browser automatically")
         
