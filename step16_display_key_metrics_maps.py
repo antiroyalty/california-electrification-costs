@@ -476,10 +476,10 @@ def load_appliance_breakdown_data(
     county_slug: str
 ) -> dict:
     """
-    Load appliance breakdown data by end-use category.
+    Load appliance breakdown data by end-use category with proper time series handling.
+    For non-baseline scenarios, uses baseline electricity data + scenario-specific gas and simulated data.
     Returns dictionary with appliance categories and their annual kWh consumption.
     """
-    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
     appliance_data = {}
     
     # Define appliance categories based on the actual data structure
@@ -499,87 +499,128 @@ def load_appliance_breakdown_data(
         "Other Gas": ["clothes_dryer", "fireplace"]
     }
     
-    # Load electricity loads
-    electricity_file = os.path.join(county_dir, f"electricity_loads_{county_slug}.csv")
+    # Define which gas appliances remain in each scenario (based on step7 SCENARIO_DATA_MAP)
+    scenario_gas_appliances = {
+        "baseline": ["heating", "hot_water", "range_oven"],
+        "baseline_ev_car": ["heating", "hot_water", "range_oven"], 
+        "baseline_ice_car": ["heating", "hot_water", "range_oven"],
+        "heat_pump": ["hot_water", "range_oven"],  # heating becomes electric
+        "induction_stove": ["heating", "hot_water"],  # cooking becomes electric
+        "heat_pump_and_induction_stove": ["hot_water"],  # heating and cooking become electric
+        "water_heating": ["heating", "range_oven"],  # hot water becomes electric
+        "heat_pump_and_induction_stove_and_water_heating": [],  # all become electric
+        "full_electric_ev": [],  # all electric
+    }
+    
+    # For electricity loads, ALWAYS use baseline data (individual appliance breakdown only exists in baseline)
+    baseline_electricity_dir = os.path.join(base_input_dir, "baseline", housing_type, county_slug)
+    electricity_file = os.path.join(baseline_electricity_dir, f"electricity_loads_{county_slug}.csv")
+    
     if os.path.exists(electricity_file):
         try:
-            df = pd.read_csv(electricity_file)
+            # Load with timestamp parsing and indexing
+            df = pd.read_csv(electricity_file, parse_dates=['timestamp'])
+            df.set_index('timestamp', inplace=True)
             
             for category, appliances in electricity_categories.items():
-                category_total = 0.0
+                category_consumption = pd.Series(0.0, index=df.index)
                 for appliance in appliances:
                     col_name = f"out.electricity.{appliance}.energy_consumption"
                     if col_name in df.columns:
-                        appliance_sum = df[col_name].sum()
-                        category_total += appliance_sum
+                        category_consumption += df[col_name]
                 
-                if category_total > 0:
-                    appliance_data[category] = category_total
+                if category_consumption.sum() > 0:
+                    appliance_data[category] = float(category_consumption.sum())
                     
         except Exception as e:
-            print(f"Warning: Error reading electricity loads for {county_slug}: {e}")
+            print(f"Warning: Error reading baseline electricity loads for {county_slug}: {e}")
     else:
-        print(f"Warning: Electricity loads file not found: {electricity_file}")
+        print(f"Warning: Baseline electricity loads file not found: {electricity_file}")
     
-    # Load gas loads - convert to kWh for consistency
-    gas_file = os.path.join(county_dir, f"gas_loads_{county_slug}.csv")
-    if os.path.exists(gas_file):
-        try:
-            df = pd.read_csv(gas_file)
+    # For gas loads, use scenario-specific gas data (what remains after electrification)
+    remaining_gas_appliances = scenario_gas_appliances.get(scenario, ["heating", "hot_water", "range_oven"])
+    
+    if remaining_gas_appliances:
+        # For baseline scenarios, gas data is in baseline directory
+        if scenario.startswith("baseline"):
+            gas_dir = os.path.join(base_input_dir, "baseline", housing_type, county_slug)
+        else:
+            # For electrified scenarios, check if gas data exists in scenario directory, otherwise fallback to baseline
+            scenario_gas_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+            gas_file_scenario = os.path.join(scenario_gas_dir, f"gas_loads_{county_slug}.csv")
             
-            for category, appliances in gas_categories.items():
-                category_total = 0.0
-                for appliance in appliances:
-                    col_name = f"out.natural_gas.{appliance}.energy_consumption.gas.building_avg.kwh"
+            if os.path.exists(gas_file_scenario):
+                gas_dir = scenario_gas_dir
+            else:
+                # Fallback to baseline gas data
+                gas_dir = os.path.join(base_input_dir, "baseline", housing_type, county_slug)
+        
+        gas_file = os.path.join(gas_dir, f"gas_loads_{county_slug}.csv")
+        
+        if os.path.exists(gas_file):
+            try:
+                # Load with timestamp parsing and resample 15-min to hourly
+                df = pd.read_csv(gas_file, parse_dates=['timestamp'])
+                df.set_index('timestamp', inplace=True)
+                df = df.resample('H').sum()  # Critical: resample 15-min intervals to hourly
+                
+                for category, appliances in gas_categories.items():
+                    # Only include appliances that remain in this scenario
+                    remaining_appliances = [app for app in appliances if app in remaining_gas_appliances]
+                    if remaining_appliances:
+                        category_consumption = pd.Series(0.0, index=df.index)
+                        for appliance in remaining_appliances:
+                            col_name = f"out.natural_gas.{appliance}.energy_consumption.gas.building_avg.kwh"
+                            if col_name in df.columns:
+                                category_consumption += df[col_name]
+                        
+                        if category_consumption.sum() > 0:
+                            appliance_data[category] = float(category_consumption.sum())
+                        
+            except Exception as e:
+                print(f"Warning: Error reading gas loads for {county_slug}: {e}")
+        else:
+            print(f"Warning: Gas loads file not found: {gas_file}")
+    
+    # Load simulated electric appliances for electrified scenarios
+    if not scenario.startswith("baseline"):
+        # For electrified scenarios, check scenario directory first, then fallback to baseline
+        scenario_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+        simulated_file = os.path.join(scenario_dir, f"electricity_loads_simulated_{county_slug}.csv")
+        
+        if not os.path.exists(simulated_file):
+            # Fallback to baseline simulated data
+            baseline_dir = os.path.join(base_input_dir, "baseline", housing_type, county_slug)
+            simulated_file = os.path.join(baseline_dir, f"electricity_loads_simulated_{county_slug}.csv")
+        
+        if os.path.exists(simulated_file):
+            try:
+                # Load with timestamp parsing and resample 15-min to hourly
+                df = pd.read_csv(simulated_file, parse_dates=['timestamp'])
+                df.set_index('timestamp', inplace=True)
+                df = df.resample('H').sum()  # Critical: resample 15-min intervals to hourly
+                
+                # Map simulated appliances to categories based on scenario
+                simulated_categories = {
+                    "Heat Pump": "simulated.electricity.heat_pump.energy_consumption.electricity.kwh",
+                    "Induction Cooking": "simulated.electricity.induction_stove.energy_consumption.electricity.kwh",
+                    "Electric Hot Water": "simulated.electricity.hot_water.energy_consumption.electricity.kwh"
+                }
+                
+                for category, col_name in simulated_categories.items():
                     if col_name in df.columns:
-                        appliance_sum = df[col_name].sum()
-                        category_total += appliance_sum
-                
-                if category_total > 0:
-                    appliance_data[category] = category_total
-                    
-        except Exception as e:
-            print(f"Warning: Error reading gas loads for {county_slug}: {e}")
-    else:
-        print(f"Warning: Gas loads file not found: {gas_file}")
-    
-    # For electrified scenarios, load simulated electric appliances 
-    # But also load them for baseline to show potential conversion
-    simulated_file = os.path.join(county_dir, f"electricity_loads_simulated_{county_slug}.csv")
-    if os.path.exists(simulated_file):
-        try:
-            df = pd.read_csv(simulated_file)
-            
-            # Map simulated appliances to categories based on scenario
-            if scenario == "heat_pump" or scenario == "heat_pump_and_induction_stove" or scenario == "heat_pump_and_induction_stove_and_water_heating":
-                if "simulated.electricity.heat_pump.energy_consumption.electricity.kwh" in df.columns:
-                    heat_pump_kwh = df["simulated.electricity.heat_pump.energy_consumption.electricity.kwh"].sum()
-                    if heat_pump_kwh > 0:
-                        # Replace gas heating with electric heating
-                        if "Heating" in appliance_data:
-                            del appliance_data["Heating"]
-                        appliance_data["Heat Pump"] = heat_pump_kwh
-            
-            if scenario == "induction_stove" or scenario == "heat_pump_and_induction_stove" or scenario == "heat_pump_and_induction_stove_and_water_heating":
-                if "simulated.electricity.induction_stove.energy_consumption.electricity.kwh" in df.columns:
-                    induction_kwh = df["simulated.electricity.induction_stove.energy_consumption.electricity.kwh"].sum()
-                    if induction_kwh > 0:
-                        # Replace gas cooking with electric cooking
-                        if "Cooking" in appliance_data:
-                            del appliance_data["Cooking"]
-                        appliance_data["Induction Cooking"] = induction_kwh
-            
-            if scenario == "water_heating" or scenario == "heat_pump_and_induction_stove_and_water_heating":
-                if "simulated.electricity.hot_water.energy_consumption.electricity.kwh" in df.columns:
-                    water_heater_kwh = df["simulated.electricity.hot_water.energy_consumption.electricity.kwh"].sum()
-                    if water_heater_kwh > 0:
-                        # Replace gas hot water with electric hot water
-                        if "Hot Water" in appliance_data:
-                            del appliance_data["Hot Water"]
-                        appliance_data["Electric Hot Water"] = water_heater_kwh
-                            
-        except Exception as e:
-            print(f"Warning: Error reading simulated loads for {county_slug}: {e}")
+                        consumption = df[col_name].sum()
+                        if consumption > 0:
+                            # Add electrified appliances based on scenario
+                            if category == "Heat Pump" and scenario in ["heat_pump", "heat_pump_and_induction_stove", "heat_pump_and_induction_stove_and_water_heating", "full_electric_ev"]:
+                                appliance_data["Heat Pump"] = float(consumption)
+                            elif category == "Induction Cooking" and scenario in ["induction_stove", "heat_pump_and_induction_stove", "heat_pump_and_induction_stove_and_water_heating", "full_electric_ev"]:
+                                appliance_data["Induction Cooking"] = float(consumption)
+                            elif category == "Electric Hot Water" and scenario in ["water_heating", "heat_pump_and_induction_stove_and_water_heating", "full_electric_ev"]:
+                                appliance_data["Electric Hot Water"] = float(consumption)
+                                
+            except Exception as e:
+                print(f"Warning: Error reading simulated loads for {county_slug}: {e}")
     
     # Fallback: if no data found, return placeholder data for testing
     if not appliance_data:
