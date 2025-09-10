@@ -482,10 +482,7 @@ def load_appliance_breakdown_data(
     county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
     appliance_data = {}
     
-    print(f"DEBUG: Loading appliance data for {county_slug}, scenario: {scenario}")
-    print(f"DEBUG: County directory: {county_dir}")
-    
-    # Define appliance categories based on step3 and step4 definitions
+    # Define appliance categories based on the actual data structure
     electricity_categories = {
         "Cooling": ["ceiling_fan"],
         "Appliances": ["clothes_dryer", "dishwasher", "freezer", "refrigerator"],
@@ -504,13 +501,9 @@ def load_appliance_breakdown_data(
     
     # Load electricity loads
     electricity_file = os.path.join(county_dir, f"electricity_loads_{county_slug}.csv")
-    print(f"DEBUG: Looking for electricity file: {electricity_file}")
-    print(f"DEBUG: Electricity file exists: {os.path.exists(electricity_file)}")
-    
     if os.path.exists(electricity_file):
         try:
             df = pd.read_csv(electricity_file)
-            print(f"DEBUG: Electricity file loaded. Columns: {list(df.columns[:10])}")  # Show first 10 columns
             
             for category, appliances in electricity_categories.items():
                 category_total = 0.0
@@ -519,71 +512,82 @@ def load_appliance_breakdown_data(
                     if col_name in df.columns:
                         appliance_sum = df[col_name].sum()
                         category_total += appliance_sum
-                        print(f"DEBUG: {appliance}: {appliance_sum:.2f} kWh")
                 
                 if category_total > 0:
                     appliance_data[category] = category_total
-                    print(f"DEBUG: {category}: {category_total:.2f} kWh")
                     
         except Exception as e:
             print(f"Warning: Error reading electricity loads for {county_slug}: {e}")
+    else:
+        print(f"Warning: Electricity loads file not found: {electricity_file}")
     
-    # Load gas loads
+    # Load gas loads - convert to kWh for consistency
     gas_file = os.path.join(county_dir, f"gas_loads_{county_slug}.csv")
-    print(f"DEBUG: Looking for gas file: {gas_file}")
-    print(f"DEBUG: Gas file exists: {os.path.exists(gas_file)}")
-    
     if os.path.exists(gas_file):
         try:
             df = pd.read_csv(gas_file)
-            print(f"DEBUG: Gas file loaded. Columns: {list(df.columns[:10])}")  # Show first 10 columns
             
             for category, appliances in gas_categories.items():
                 category_total = 0.0
                 for appliance in appliances:
                     col_name = f"out.natural_gas.{appliance}.energy_consumption.gas.building_avg.kwh"
                     if col_name in df.columns:
-                        # Sum hourly values and convert to annual kWh
                         appliance_sum = df[col_name].sum()
                         category_total += appliance_sum
-                        print(f"DEBUG: {appliance}: {appliance_sum:.2f} kWh")
                 
                 if category_total > 0:
                     appliance_data[category] = category_total
-                    print(f"DEBUG: {category}: {category_total:.2f} kWh")
                     
         except Exception as e:
             print(f"Warning: Error reading gas loads for {county_slug}: {e}")
+    else:
+        print(f"Warning: Gas loads file not found: {gas_file}")
     
-    # For electrified scenarios, load simulated electric appliances
-    if scenario != "baseline":
-        simulated_file = os.path.join(county_dir, f"electricity_loads_simulated_{county_slug}.csv")
-        print(f"DEBUG: Looking for simulated file: {simulated_file}")
-        print(f"DEBUG: Simulated file exists: {os.path.exists(simulated_file)}")
-        
-        if os.path.exists(simulated_file):
-            try:
-                df = pd.read_csv(simulated_file)
-                print(f"DEBUG: Simulated file loaded. Columns: {list(df.columns)}")
-                
-                # Check for simulated appliances based on scenario
-                appliance_mapping = {
-                    "simulated.electricity.heat_pump.energy_consumption.electricity.kwh": "Heat Pump",
-                    "simulated.electricity.induction_stove.energy_consumption.electricity.kwh": "Induction Cooking",
-                    "simulated.electricity.hot_water.energy_consumption.electricity.kwh": "Electric Hot Water"
-                }
-                
-                for col_name, category in appliance_mapping.items():
-                    if col_name in df.columns:
-                        annual_kwh = df[col_name].sum()
-                        if annual_kwh > 0:
-                            appliance_data[category] = annual_kwh
-                            print(f"DEBUG: {category}: {annual_kwh:.2f} kWh")
+    # For electrified scenarios, load simulated electric appliances 
+    # But also load them for baseline to show potential conversion
+    simulated_file = os.path.join(county_dir, f"electricity_loads_simulated_{county_slug}.csv")
+    if os.path.exists(simulated_file):
+        try:
+            df = pd.read_csv(simulated_file)
+            
+            # Map simulated appliances to categories based on scenario
+            if scenario == "heat_pump" or scenario == "heat_pump_and_induction_stove" or scenario == "heat_pump_and_induction_stove_and_water_heating":
+                if "simulated.electricity.heat_pump.energy_consumption.electricity.kwh" in df.columns:
+                    heat_pump_kwh = df["simulated.electricity.heat_pump.energy_consumption.electricity.kwh"].sum()
+                    if heat_pump_kwh > 0:
+                        # Replace gas heating with electric heating
+                        if "Heating" in appliance_data:
+                            del appliance_data["Heating"]
+                        appliance_data["Heat Pump"] = heat_pump_kwh
+            
+            if scenario == "induction_stove" or scenario == "heat_pump_and_induction_stove" or scenario == "heat_pump_and_induction_stove_and_water_heating":
+                if "simulated.electricity.induction_stove.energy_consumption.electricity.kwh" in df.columns:
+                    induction_kwh = df["simulated.electricity.induction_stove.energy_consumption.electricity.kwh"].sum()
+                    if induction_kwh > 0:
+                        # Replace gas cooking with electric cooking
+                        if "Cooking" in appliance_data:
+                            del appliance_data["Cooking"]
+                        appliance_data["Induction Cooking"] = induction_kwh
+            
+            if scenario == "water_heating" or scenario == "heat_pump_and_induction_stove_and_water_heating":
+                if "simulated.electricity.hot_water.energy_consumption.electricity.kwh" in df.columns:
+                    water_heater_kwh = df["simulated.electricity.hot_water.energy_consumption.electricity.kwh"].sum()
+                    if water_heater_kwh > 0:
+                        # Replace gas hot water with electric hot water
+                        if "Hot Water" in appliance_data:
+                            del appliance_data["Hot Water"]
+                        appliance_data["Electric Hot Water"] = water_heater_kwh
                             
-            except Exception as e:
-                print(f"Warning: Error reading simulated loads for {county_slug}: {e}")
+        except Exception as e:
+            print(f"Warning: Error reading simulated loads for {county_slug}: {e}")
     
-    print(f"DEBUG: Final appliance data: {appliance_data}")
+    # Fallback: if no data found, return placeholder data for testing
+    if not appliance_data:
+        print(f"Warning: No appliance data found for {county_slug}. Using placeholder data.")
+        appliance_data = {
+            "Data Not Available": 1.0
+        }
+    
     return appliance_data
 
 
@@ -595,72 +599,136 @@ def create_appliance_breakdown_chart(
 ) -> str:
     """
     Create a pie chart showing appliance breakdown by end-use category.
-    Returns base64 encoded PNG image string.
+    Returns base64 encoded PNG image string or HTML table if matplotlib not available.
     """
     appliance_data = load_appliance_breakdown_data(base_input_dir, scenario, housing_type, county_slug)
     
-    if not appliance_data:
-        # Create empty chart
-        fig, ax = plt.subplots(figsize=(8, 6))
-        ax.text(0.5, 0.5, 'No appliance data available', 
-                ha='center', va='center', fontsize=14)
-        ax.set_xlim(0, 1)
-        ax.set_ylim(0, 1)
-        ax.axis('off')
-    else:
-        # Create pie chart
-        fig, ax = plt.subplots(figsize=(10, 8))
+    try:
+        if not appliance_data or "Data Not Available" in appliance_data:
+            # Create empty chart
+            fig, ax = plt.subplots(figsize=(8, 6))
+            ax.text(0.5, 0.5, 'No appliance data available', 
+                    ha='center', va='center', fontsize=14)
+            ax.set_xlim(0, 1)
+            ax.set_ylim(0, 1)
+            ax.axis('off')
+        else:
+            # Create pie chart
+            fig, ax = plt.subplots(figsize=(10, 8))
+            
+            categories = list(appliance_data.keys())
+            values = list(appliance_data.values())
+            
+            # Define colors for different categories
+            color_map = {
+                "Heating": "#FF6B6B",
+                "Heat Pump": "#FF8E53", 
+                "Cooling": "#4ECDC4",
+                "Hot Water": "#45B7D1",
+                "Electric Hot Water": "#96CEB4",
+                "Cooking": "#FFEAA7",
+                "Induction Cooking": "#DDA0DD",
+                "Appliances": "#FD79A8",
+                "Lighting": "#FDCB6E",
+                "Plug Loads": "#6C5CE7",
+                "Pool/Spa": "#00B894",
+                "Other Electric": "#A29BFE",
+                "Other Gas": "#E17055"
+            }
+            
+            colors = [color_map.get(cat, "#BDC3C7") for cat in categories]
+            
+            # Create pie chart
+            wedges, texts, autotexts = ax.pie(values, labels=categories, colors=colors, autopct='%1.1f%%',
+                                            startangle=90, textprops={'fontsize': 10})
+            
+            # Improve readability
+            for autotext in autotexts:
+                autotext.set_color('white')
+                autotext.set_fontweight('bold')
+            
+            county_name = county_slug.replace('-', ' ').title()
+            scenario_name = scenario.replace('_', ' ').title()
+            ax.set_title(f'Annual Energy Consumption by End-Use\n{county_name} County - {scenario_name} Scenario', 
+                        fontsize=14, fontweight='bold', pad=20)
+            
+            # Add total consumption
+            total_kwh = sum(values)
+            ax.text(0, -1.3, f'Total: {total_kwh:,.0f} kWh/year', 
+                   ha='center', fontsize=12, fontweight='bold')
         
-        categories = list(appliance_data.keys())
-        values = list(appliance_data.values())
+        # Convert to base64
+        buffer = io.BytesIO()
+        plt.tight_layout()
+        plt.savefig(buffer, format='png', dpi=150, bbox_inches='tight')
+        buffer.seek(0)
+        image_base64 = base64.b64encode(buffer.getvalue()).decode()
+        plt.close()
         
-        # Define colors for different categories
-        color_map = {
-            "Heating": "#FF6B6B",
-            "Heat Pump": "#FF8E53", 
-            "Cooling": "#4ECDC4",
-            "Hot Water": "#45B7D1",
-            "Electric Hot Water": "#96CEB4",
-            "Cooking": "#FFEAA7",
-            "Induction Cooking": "#DDA0DD",
-            "Appliances": "#FD79A8",
-            "Lighting": "#FDCB6E",
-            "Plug Loads": "#6C5CE7",
-            "Pool/Spa": "#00B894",
-            "Other Electric": "#A29BFE",
-            "Other Gas": "#E17055"
-        }
+        return image_base64
         
-        colors = [color_map.get(cat, "#BDC3C7") for cat in categories]
-        
-        # Create pie chart
-        wedges, texts, autotexts = ax.pie(values, labels=categories, colors=colors, autopct='%1.1f%%',
-                                        startangle=90, textprops={'fontsize': 10})
-        
-        # Improve readability
-        for autotext in autotexts:
-            autotext.set_color('white')
-            autotext.set_fontweight('bold')
-        
-        county_name = county_slug.replace('-', ' ').title()
-        scenario_name = scenario.replace('_', ' ').title()
-        ax.set_title(f'Annual Energy Consumption by End-Use\n{county_name} County - {scenario_name} Scenario', 
-                    fontsize=14, fontweight='bold', pad=20)
-        
-        # Add total consumption
-        total_kwh = sum(values)
-        ax.text(0, -1.3, f'Total: {total_kwh:,.0f} kWh/year', 
-               ha='center', fontsize=12, fontweight='bold')
+    except ImportError:
+        # Fallback to HTML table if matplotlib not available
+        return create_appliance_html_table(appliance_data, county_slug, scenario)
+    except Exception as e:
+        print(f"Error creating chart: {e}")
+        return create_appliance_html_table(appliance_data, county_slug, scenario)
+
+
+def create_appliance_html_table(appliance_data: dict, county_slug: str, scenario: str) -> str:
+    """
+    Create an HTML table showing appliance breakdown when charts are not available.
+    Returns HTML table as string.
+    """
+    county_name = county_slug.replace('-', ' ').title()
+    scenario_name = scenario.replace('_', ' ').title()
     
-    # Convert to base64
-    buffer = io.BytesIO()
-    plt.tight_layout()
-    plt.savefig(buffer, format='png', dpi=150, bbox_inches='tight')
-    buffer.seek(0)
-    image_base64 = base64.b64encode(buffer.getvalue()).decode()
-    plt.close()
+    if not appliance_data or "Data Not Available" in appliance_data:
+        return f"""
+        <div style="text-align: center; padding: 40px; border: 1px solid #ddd; border-radius: 8px;">
+            <h3>{county_name} County - {scenario_name} Scenario</h3>
+            <p>No appliance data available for this county</p>
+        </div>
+        """
     
-    return image_base64
+    # Sort by consumption 
+    total_kwh = sum(appliance_data.values())
+    sorted_data = sorted(appliance_data.items(), key=lambda x: x[1], reverse=True)
+    
+    # Create HTML table
+    table_rows = ""
+    for category, kwh in sorted_data:
+        percentage = (kwh / total_kwh) * 100 if total_kwh > 0 else 0
+        table_rows += f"""
+        <tr>
+            <td style="text-align: left; padding: 8px; border-bottom: 1px solid #eee;">{category}</td>
+            <td style="text-align: right; padding: 8px; border-bottom: 1px solid #eee;">{kwh:,.0f}</td>
+            <td style="text-align: right; padding: 8px; border-bottom: 1px solid #eee;">{percentage:.1f}%</td>
+        </tr>
+        """
+    
+    return f"""
+    <div style="border: 1px solid #ddd; border-radius: 8px; padding: 15px;">
+        <h3 style="text-align: center; margin-bottom: 15px; color: #333;">
+            {county_name} County - {scenario_name} Scenario
+        </h3>
+        <p style="text-align: center; margin-bottom: 15px; color: #666;">
+            Total: {total_kwh:,.0f} kWh/year
+        </p>
+        <table style="width: 100%; border-collapse: collapse; font-family: Arial, sans-serif;">
+            <thead>
+                <tr style="background-color: #f5f5f5;">
+                    <th style="text-align: left; padding: 12px; border-bottom: 2px solid #ddd;">End Use</th>
+                    <th style="text-align: right; padding: 12px; border-bottom: 2px solid #ddd;">kWh/year</th>
+                    <th style="text-align: right; padding: 12px; border-bottom: 2px solid #ddd;">%</th>
+                </tr>
+            </thead>
+            <tbody>
+                {table_rows}
+            </tbody>
+        </table>
+    </div>
+    """
 
 
 def create_single_map(base_input_dir: str, scenario: str, housing_type: str, counties: list, 
@@ -914,13 +982,24 @@ def create_appliance_breakdown_report(base_input_dir: str, scenario: str, housin
         county_slug = slugify_county_name(f"{county_name} County")
         
         try:
-            chart_b64 = create_appliance_breakdown_chart(base_input_dir, scenario, housing_type, county_slug)
-            html_content += f"""
-                <div class="chart-container">
-                    <div class="chart-title">{county_name} County</div>
-                    <img src="data:image/png;base64,{chart_b64}" alt="Appliance breakdown for {county_name}" style="max-width: 100%; height: auto;">
-                </div>
-            """
+            chart_data = create_appliance_breakdown_chart(base_input_dir, scenario, housing_type, county_slug)
+            
+            # Check if it's base64 image data or HTML table
+            if chart_data.startswith('<div'):
+                # It's an HTML table
+                html_content += f"""
+                    <div class="chart-container">
+                        {chart_data}
+                    </div>
+                """
+            else:
+                # It's base64 image data
+                html_content += f"""
+                    <div class="chart-container">
+                        <div class="chart-title">{county_name} County</div>
+                        <img src="data:image/png;base64,{chart_data}" alt="Appliance breakdown for {county_name}" style="max-width: 100%; height: auto;">
+                    </div>
+                """
         except Exception as e:
             print(f"Error creating appliance chart for {county_name}: {e}")
     
@@ -1138,13 +1217,24 @@ def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: 
         county_slug = slugify_county_name(f"{county_name} County")
         
         try:
-            chart_b64 = create_appliance_breakdown_chart(base_input_dir, scenario, housing_type, county_slug)
-            html_content += f"""
-                <div class="chart-container">
-                    <div class="chart-title">{county_name} County</div>
-                    <img src="data:image/png;base64,{chart_b64}" alt="Appliance breakdown for {county_name}" style="max-width: 100%; height: auto;">
-                </div>
-            """
+            chart_data = create_appliance_breakdown_chart(base_input_dir, scenario, housing_type, county_slug)
+            
+            # Check if it's base64 image data or HTML table
+            if chart_data.startswith('<div'):
+                # It's an HTML table
+                html_content += f"""
+                    <div class="chart-container">
+                        {chart_data}
+                    </div>
+                """
+            else:
+                # It's base64 image data
+                html_content += f"""
+                    <div class="chart-container">
+                        <div class="chart-title">{county_name} County</div>
+                        <img src="data:image/png;base64,{chart_data}" alt="Appliance breakdown for {county_name}" style="max-width: 100%; height: auto;">
+                    </div>
+                """
         except Exception as e:
             print(f"Error creating appliance chart for {county_name}: {e}")
             html_content += f"""
@@ -1228,6 +1318,56 @@ def process(base_input_dir: str, base_output_dir: str, scenario: str,
         return []
 
 
+def test_appliance_breakdown():
+    """Test function to debug appliance breakdown functionality"""
+    print("=" * 60)
+    print("TESTING APPLIANCE BREAKDOWN FUNCTIONALITY")
+    print("=" * 60)
+    
+    # Test scenarios and counties
+    test_cases = [
+        ("baseline", "alameda"),
+        ("heat_pump_and_induction_stove", "alameda"),
+        ("baseline", "los-angeles"),
+        ("baseline", "san-diego")
+    ]
+    
+    for scenario, county_slug in test_cases:
+        print(f"\nTesting scenario: {scenario}, county: {county_slug}")
+        print("-" * 40)
+        
+        data = load_appliance_breakdown_data(
+            base_input_dir='data/loadprofiles',
+            scenario=scenario,
+            housing_type='single-family-detached',
+            county_slug=county_slug
+        )
+        
+        if data:
+            print("SUCCESS: Found appliance data!")
+            total_kwh = sum(data.values())
+            print(f"Total consumption: {total_kwh:,.0f} kWh")
+            for category, value in sorted(data.items(), key=lambda x: x[1], reverse=True):
+                percentage = (value / total_kwh) * 100
+                print(f"  {category}: {value:,.0f} kWh ({percentage:.1f}%)")
+        else:
+            print("FAILED: No appliance data found")
+    
+    print("\n" + "=" * 60)
+    print("Creating test appliance breakdown report...")
+    
+    try:
+        create_appliance_breakdown_report(
+            base_input_dir='data/loadprofiles',
+            scenario='baseline',
+            housing_type='single-family-detached',
+            counties=['Alameda County', 'Los Angeles County']
+        )
+        print("SUCCESS: Created appliance breakdown report")
+    except Exception as e:
+        print(f"FAILED: Could not create report: {e}")
+
+
 if __name__ == "__main__":
     import argparse
     
@@ -1237,8 +1377,14 @@ if __name__ == "__main__":
                        help="Housing type (default: single-family-detached)")
     parser.add_argument("--counties", nargs="+", default=norcal_counties + central_counties + socal_counties,
                        help="Counties to analyze (default: Alameda County)")
+    parser.add_argument("--test-appliances", action="store_true",
+                       help="Run appliance breakdown test instead of main process")
     
     args = parser.parse_args()
+    
+    if args.test_appliances:
+        test_appliance_breakdown()
+        exit()
     
     # Test configuration
     desired_rate_plans = {
