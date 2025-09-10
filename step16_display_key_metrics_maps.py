@@ -477,7 +477,14 @@ def load_appliance_breakdown_data(
 ) -> dict:
     """
     Load appliance breakdown data by end-use category with proper time series handling.
-    For non-baseline scenarios, uses baseline electricity data + scenario-specific gas and simulated data.
+    
+    IMPORTANT: Only loads ELECTRIFIED end-uses for pie charts:
+    - For baseline: Shows only electricity end-uses (lighting, appliances, cooling, etc.) - NO gas appliances
+    - For electrified scenarios: Shows electricity end-uses + electrified appliances (Heat Pump, Induction, etc.)
+    
+    This approach provides meaningful comparison of electric load patterns across scenarios.
+    Gas appliances are intentionally excluded to focus on electric consumption breakdown.
+    
     Returns dictionary with appliance categories and their annual kWh consumption.
     """
     appliance_data = {}
@@ -537,50 +544,12 @@ def load_appliance_breakdown_data(
     else:
         print(f"Warning: Baseline electricity loads file not found: {electricity_file}")
     
-    # For gas loads, use scenario-specific gas data (what remains after electrification)
-    remaining_gas_appliances = scenario_gas_appliances.get(scenario, ["heating", "hot_water", "range_oven"])
+    # IMPORTANT: For pie charts, we only show ELECTRIFIED end-uses, not gas appliances
+    # Gas appliances are excluded from the pie chart to show only electric consumption breakdown
+    # This makes the chart meaningful for understanding electric load patterns
     
-    if remaining_gas_appliances:
-        # For baseline scenarios, gas data is in baseline directory
-        if scenario.startswith("baseline"):
-            gas_dir = os.path.join(base_input_dir, "baseline", housing_type, county_slug)
-        else:
-            # For electrified scenarios, check if gas data exists in scenario directory, otherwise fallback to baseline
-            scenario_gas_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
-            gas_file_scenario = os.path.join(scenario_gas_dir, f"gas_loads_{county_slug}.csv")
-            
-            if os.path.exists(gas_file_scenario):
-                gas_dir = scenario_gas_dir
-            else:
-                # Fallback to baseline gas data
-                gas_dir = os.path.join(base_input_dir, "baseline", housing_type, county_slug)
-        
-        gas_file = os.path.join(gas_dir, f"gas_loads_{county_slug}.csv")
-        
-        if os.path.exists(gas_file):
-            try:
-                # Load with timestamp parsing and resample 15-min to hourly
-                df = pd.read_csv(gas_file, parse_dates=['timestamp'])
-                df.set_index('timestamp', inplace=True)
-                df = df.resample('H').sum()  # Critical: resample 15-min intervals to hourly
-                
-                for category, appliances in gas_categories.items():
-                    # Only include appliances that remain in this scenario
-                    remaining_appliances = [app for app in appliances if app in remaining_gas_appliances]
-                    if remaining_appliances:
-                        category_consumption = pd.Series(0.0, index=df.index)
-                        for appliance in remaining_appliances:
-                            col_name = f"out.natural_gas.{appliance}.energy_consumption.gas.building_avg.kwh"
-                            if col_name in df.columns:
-                                category_consumption += df[col_name]
-                        
-                        if category_consumption.sum() > 0:
-                            appliance_data[category] = float(category_consumption.sum())
-                        
-            except Exception as e:
-                print(f"Warning: Error reading gas loads for {county_slug}: {e}")
-        else:
-            print(f"Warning: Gas loads file not found: {gas_file}")
+    # Skip gas appliances entirely - pie chart shows only electrified end-uses
+    print(f"Note: Excluding gas appliances from pie chart for {scenario} - showing only electrified end-uses")
     
     # Load simulated electric appliances for electrified scenarios
     if not scenario.startswith("baseline"):
@@ -690,7 +659,7 @@ def create_appliance_breakdown_chart(
             
             county_name = county_slug.replace('-', ' ').title()
             scenario_name = scenario.replace('_', ' ').title()
-            ax.set_title(f'Annual Energy Consumption by End-Use\n{county_name} County - {scenario_name} Scenario', 
+            ax.set_title(f'Annual Electricity Consumption by End-Use\n{county_name} County - {scenario_name} Scenario\n(Electrified End-Uses Only)', 
                         fontsize=14, fontweight='bold', pad=20)
             
             # Add total consumption
@@ -754,6 +723,7 @@ def create_appliance_html_table(appliance_data: dict, county_slug: str, scenario
             {county_name} County - {scenario_name} Scenario
         </h3>
         <p style="text-align: center; margin-bottom: 15px; color: #666;">
+            Electricity Consumption by End-Use (Electrified Only)<br>
             Total: {total_kwh:,.0f} kWh/year
         </p>
         <table style="width: 100%; border-collapse: collapse; font-family: Arial, sans-serif;">
