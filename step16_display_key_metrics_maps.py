@@ -533,6 +533,7 @@ def load_appliance_breakdown_data(
     print(f"DEBUG: Looking for gas file: {gas_file}")
     print(f"DEBUG: Gas file exists: {os.path.exists(gas_file)}")
     
+<<<<<<< Updated upstream
     if os.path.exists(gas_file):
         try:
             df = pd.read_csv(gas_file)
@@ -560,6 +561,18 @@ def load_appliance_breakdown_data(
         simulated_file = os.path.join(county_dir, f"electricity_loads_simulated_{county_slug}.csv")
         print(f"DEBUG: Looking for simulated file: {simulated_file}")
         print(f"DEBUG: Simulated file exists: {os.path.exists(simulated_file)}")
+=======
+    # Load simulated electric appliances for electrified scenarios
+    if not scenario.startswith("baseline"):
+        # For electrified scenarios, check scenario directory first, then fallback to baseline
+        scenario_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+        simulated_file = os.path.join(scenario_dir, f"electricity_loads_simulated_{county_slug}.csv")
+        
+        if not os.path.exists(simulated_file):
+            # Fallback to baseline simulated data
+            baseline_dir = os.path.join(base_input_dir, "baseline", housing_type, county_slug)
+            simulated_file = os.path.join(baseline_dir, f"electricity_loads_simulated_{county_slug}.csv")
+>>>>>>> Stashed changes
         
         if os.path.exists(simulated_file):
             try:
