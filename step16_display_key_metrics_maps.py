@@ -646,6 +646,168 @@ def create_appliance_breakdown_chart(
     return image_base64
 
 
+def load_battery_soc_data(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str
+) -> pd.DataFrame:
+    """
+    Load battery SOC data from SAM optimized load profiles.
+    Returns DataFrame with hourly battery SOC data, or None if not available.
+    """
+    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+    sam_file = os.path.join(county_dir, f"sam_optimized_load_profiles_{county_slug}.csv")
+    
+    if not os.path.exists(sam_file):
+        print(f"Warning: SAM load profiles file not found: {sam_file}")
+        return None
+    
+    try:
+        # Load with timestamp parsing and indexing
+        df = pd.read_csv(sam_file, parse_dates=[0], index_col=0)
+        
+        # Check if Battery SOC column exists
+        if 'Battery SOC' not in df.columns:
+            print(f"Warning: Battery SOC column not found in {sam_file}")
+            print(f"Available columns: {list(df.columns)}")
+            return None
+        
+        return df[['Battery SOC']]
+        
+    except Exception as e:
+        print(f"Warning: Error reading SAM load profiles for {county_slug}: {e}")
+        return None
+
+
+def create_battery_soc_chart(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    sample_counties: list = ["alameda", "los-angeles", "san-diego"]
+) -> str:
+    """
+    Create battery SOC charts showing the first week of January and July for sample counties.
+    Returns base64 encoded PNG image string.
+    """
+    try:
+        import matplotlib.pyplot as plt
+        import matplotlib.dates as mdates
+        from datetime import datetime
+        
+        # Create figure with subplots - 2 time periods x 3 counties
+        fig, axes = plt.subplots(2, 3, figsize=(18, 12))
+        fig.suptitle(f'Battery State of Charge (SOC) - {scenario.replace("_", " ").title()} Scenario', 
+                     fontsize=16, fontweight='bold')
+        
+        # Define time periods
+        periods = {
+            'January': ('2018-01-01', '2018-01-08'),
+            'July': ('2018-07-01', '2018-07-08')
+        }
+        
+        county_data_loaded = {}
+        
+        # Load data for all counties
+        for county_slug in sample_counties:
+            soc_df = load_battery_soc_data(base_input_dir, scenario, housing_type, county_slug)
+            county_data_loaded[county_slug] = soc_df
+        
+        # Create plots for each period and county
+        for period_idx, (period_name, (start_date, end_date)) in enumerate(periods.items()):
+            for county_idx, county_slug in enumerate(sample_counties):
+                ax = axes[period_idx, county_idx]
+                
+                soc_df = county_data_loaded[county_slug]
+                county_name = county_slug.replace('-', ' ').title()
+                
+                if soc_df is not None:
+                    try:
+                        # Extract the week's data
+                        week_data = soc_df.loc[start_date:end_date]
+                        
+                        if not week_data.empty:
+                            # Plot SOC over time
+                            ax.plot(week_data.index, week_data['Battery SOC'], 
+                                   linewidth=2, color='#2E86AB', alpha=0.8)
+                            
+                            # Customize the plot
+                            ax.set_ylim(0, 100)
+                            ax.set_ylabel('State of Charge (%)', fontsize=10)
+                            ax.set_title(f'{county_name} - {period_name}', fontsize=12, fontweight='bold')
+                            ax.grid(True, alpha=0.3)
+                            
+                            # Format x-axis
+                            ax.xaxis.set_major_locator(mdates.DayLocator())
+                            ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
+                            ax.xaxis.set_minor_locator(mdates.HourLocator(interval=6))
+                            
+                            # Rotate x-axis labels
+                            plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
+                            
+                            # Add horizontal reference lines
+                            ax.axhline(y=20, color='red', linestyle='--', alpha=0.5, linewidth=1)
+                            ax.axhline(y=80, color='green', linestyle='--', alpha=0.5, linewidth=1)
+                            
+                            # Calculate and show daily patterns
+                            daily_min = week_data['Battery SOC'].groupby(week_data.index.date).min().mean()
+                            daily_max = week_data['Battery SOC'].groupby(week_data.index.date).max().mean()
+                            
+                            # Add text annotation with daily stats
+                            ax.text(0.02, 0.98, f'Avg Daily Range:\n{daily_min:.1f}% - {daily_max:.1f}%', 
+                                   transform=ax.transAxes, fontsize=8, verticalalignment='top',
+                                   bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+                        else:
+                            ax.text(0.5, 0.5, f'No data available\nfor {period_name}', 
+                                   ha='center', va='center', transform=ax.transAxes,
+                                   fontsize=10, color='red')
+                            ax.set_title(f'{county_name} - {period_name}', fontsize=12, fontweight='bold')
+                    
+                    except Exception as e:
+                        print(f"Error plotting {county_name} {period_name}: {e}")
+                        ax.text(0.5, 0.5, f'Error loading\n{period_name} data', 
+                               ha='center', va='center', transform=ax.transAxes,
+                               fontsize=10, color='red')
+                        ax.set_title(f'{county_name} - {period_name}', fontsize=12, fontweight='bold')
+                else:
+                    ax.text(0.5, 0.5, f'No battery data\navailable', 
+                           ha='center', va='center', transform=ax.transAxes,
+                           fontsize=10, color='red')
+                    ax.set_title(f'{county_name} - {period_name}', fontsize=12, fontweight='bold')
+        
+        # Add overall legend and notes
+        fig.text(0.5, 0.02, 'Red dashed line: 20% SOC (low) | Green dashed line: 80% SOC (high) | Daily patterns show charge/discharge cycles', 
+                ha='center', fontsize=10, style='italic')
+        
+        # Convert to base64
+        plt.tight_layout()
+        plt.subplots_adjust(top=0.93, bottom=0.12)
+        
+        buffer = io.BytesIO()
+        plt.savefig(buffer, format='png', dpi=150, bbox_inches='tight')
+        buffer.seek(0)
+        image_base64 = base64.b64encode(buffer.getvalue()).decode()
+        plt.close()
+        
+        return image_base64
+        
+    except ImportError:
+        return f"""
+        <div style="text-align: center; padding: 40px; border: 1px solid #ddd; border-radius: 8px;">
+            <h3>Battery SOC Chart</h3>
+            <p>Matplotlib not available - cannot generate battery SOC charts</p>
+        </div>
+        """
+    except Exception as e:
+        print(f"Error creating battery SOC chart: {e}")
+        return f"""
+        <div style="text-align: center; padding: 40px; border: 1px solid #ddd; border-radius: 8px;">
+            <h3>Battery SOC Chart</h3>
+            <p>Error generating chart: {str(e)}</p>
+        </div>
+        """
+
+
 def create_single_map(base_input_dir: str, scenario: str, housing_type: str, counties: list, 
                      metric_name: str, data_loader_config: dict) -> folium.Map:
     """
@@ -1136,6 +1298,34 @@ def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: 
                     <p>Chart unavailable for this county</p>
                 </div>
             """
+    
+    html_content += """
+            </div>
+        </div>
+        
+        <div class="charts-section">
+            <h2>Battery State of Charge (SOC) Analysis</h2>
+            <p>Battery charging and discharging patterns during the first week of January and July for selected counties</p>
+            <div class="chart-container">
+    """
+    
+    # Generate battery SOC chart for scenarios with solar+storage
+    if not scenario.startswith("baseline"):
+        try:
+            battery_chart_b64 = create_battery_soc_chart(base_input_dir, scenario, housing_type)
+            if isinstance(battery_chart_b64, str) and battery_chart_b64.startswith('<div'):
+                # HTML fallback
+                html_content += battery_chart_b64
+            else:
+                # Base64 image
+                html_content += f"""
+                    <img src="data:image/png;base64,{battery_chart_b64}" alt="Battery SOC patterns" style="max-width: 100%; height: auto;">
+                """
+        except Exception as e:
+            print(f"Error creating battery SOC chart: {e}")
+            html_content += "<p>Battery SOC chart unavailable for this scenario</p>"
+    else:
+        html_content += "<p>Battery SOC analysis not applicable for baseline scenario (no battery storage)</p>"
     
     html_content += """
             </div>
