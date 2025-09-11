@@ -533,35 +533,6 @@ def load_appliance_breakdown_data(
     print(f"DEBUG: Looking for gas file: {gas_file}")
     print(f"DEBUG: Gas file exists: {os.path.exists(gas_file)}")
     
-<<<<<<< Updated upstream
-    if os.path.exists(gas_file):
-        try:
-            df = pd.read_csv(gas_file)
-            print(f"DEBUG: Gas file loaded. Columns: {list(df.columns[:10])}")  # Show first 10 columns
-            
-            for category, appliances in gas_categories.items():
-                category_total = 0.0
-                for appliance in appliances:
-                    col_name = f"out.natural_gas.{appliance}.energy_consumption.gas.building_avg.kwh"
-                    if col_name in df.columns:
-                        # Sum hourly values and convert to annual kWh
-                        appliance_sum = df[col_name].sum()
-                        category_total += appliance_sum
-                        print(f"DEBUG: {appliance}: {appliance_sum:.2f} kWh")
-                
-                if category_total > 0:
-                    appliance_data[category] = category_total
-                    print(f"DEBUG: {category}: {category_total:.2f} kWh")
-                    
-        except Exception as e:
-            print(f"Warning: Error reading gas loads for {county_slug}: {e}")
-    
-    # For electrified scenarios, load simulated electric appliances
-    if scenario != "baseline":
-        simulated_file = os.path.join(county_dir, f"electricity_loads_simulated_{county_slug}.csv")
-        print(f"DEBUG: Looking for simulated file: {simulated_file}")
-        print(f"DEBUG: Simulated file exists: {os.path.exists(simulated_file)}")
-=======
     # Load simulated electric appliances for electrified scenarios
     if not scenario.startswith("baseline"):
         # For electrified scenarios, check scenario directory first, then fallback to baseline
@@ -572,7 +543,6 @@ def load_appliance_breakdown_data(
             # Fallback to baseline simulated data
             baseline_dir = os.path.join(base_input_dir, "baseline", housing_type, county_slug)
             simulated_file = os.path.join(baseline_dir, f"electricity_loads_simulated_{county_slug}.csv")
->>>>>>> Stashed changes
         
         if os.path.exists(simulated_file):
             try:
