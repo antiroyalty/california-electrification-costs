@@ -1,0 +1,11 @@
+Battery Dispatch Analysis Summary
+Scenario: heat_pump
+County: alameda
+Analysis Date: 2025-09-11 18:17:00
+
+Total hours analyzed: 8,760
+Hours with grid purchases: 6,246
+Hours with SOC > 60%: 8,323
+Questionable dispatch events: 4,265
+Average SOC in questionable events: 82.0%
+Economically justified events: 0.0%

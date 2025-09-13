@@ -58,7 +58,7 @@ SAVINGS_BINS = [-2000, -1000, -500, 0, 500, 1000, 1500, 2000, 3000]
 CAPITAL_COSTS_BINS = [-1000, 0, 5000, 10000, 15000, 20000, 25000, 30000, 40000, 50000, 100000]
 PAYBACK_PERIOD_BINS = [0, 5, 10, 15, 20, 25, 30, 50, 100]
 NET_GRID_CONSUMPTION_BINS = [0, 5000, 10000, 15000, 20000, 25000, 30000, 40000, 50000]
-TOTAL_ELECTRICITY_CONSUMPTION_BINS = [0, 2000, 4000, 6000, 8000, 10000, 12000, 14000, 16000],
+TOTAL_ELECTRICITY_CONSUMPTION_BINS = [0, 2000, 4000, 6000, 8000, 10000, 12000, 14000, 16000]
 BATTERY_ENERGY_BINS = [0, 1000, 2000, 3000, 4000, 5000, 6000, 8000, 10000]
 SOLAR_ENERGY_BINS = [0, 5000, 10000, 15000, 20000, 25000, 30000, 40000, 50000]
 
@@ -469,6 +469,78 @@ def load_solar_energy_data(
     return 0.0
 
 
+def load_sam_metric_data(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+    metric_column: str
+) -> float:
+    """
+    Load annual data for any SAM load profile metric.
+    Returns annual kWh sum for the specified metric column.
+    """
+    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+    
+    # Try to find SAM optimized load profiles file
+    sam_file_patterns = [
+        f"sam_optimized_load_profiles_{county_slug}.csv",
+        f"sam_optimized_load_profiles_{scenario}_{county_slug}.csv"
+    ]
+    
+    for pattern in sam_file_patterns:
+        sam_file_path = os.path.join(county_dir, pattern)
+        if os.path.exists(sam_file_path):
+            try:
+                df = pd.read_csv(sam_file_path)
+                if metric_column in df.columns:
+                    # Sum hourly values to get annual kWh
+                    annual_value = df[metric_column].sum()
+                    return float(annual_value)
+            except Exception as e:
+                print(f"Warning: Error reading {sam_file_path}: {e}")
+                continue
+    
+    print(f"Warning: Could not find {metric_column} data for {county_slug} in scenario {scenario}")
+    return 0.0
+
+
+def load_sam_weekly_data(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+    metric_columns: list
+) -> pd.DataFrame:
+    """
+    Load weekly SAM data for multiple metrics.
+    Returns DataFrame with hourly data for all metrics, or None if not available.
+    """
+    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+    sam_file = os.path.join(county_dir, f"sam_optimized_load_profiles_{county_slug}.csv")
+    
+    if not os.path.exists(sam_file):
+        print(f"Warning: SAM load profiles file not found: {sam_file}")
+        return None
+    
+    try:
+        # Load with timestamp parsing and indexing
+        df = pd.read_csv(sam_file, parse_dates=[0], index_col=0)
+        
+        # Check if all metric columns exist
+        missing_columns = [col for col in metric_columns if col not in df.columns]
+        if missing_columns:
+            print(f"Warning: Missing columns in {sam_file}: {missing_columns}")
+            print(f"Available columns: {list(df.columns)}")
+            return None
+        
+        return df[metric_columns]
+        
+    except Exception as e:
+        print(f"Warning: Error reading SAM load profiles for {county_slug}: {e}")
+        return None
+
+
 def load_appliance_breakdown_data(
     base_input_dir: str,
     scenario: str, 
@@ -742,6 +814,362 @@ def create_appliance_html_table(appliance_data: dict, county_slug: str, scenario
     """
 
 
+def load_battery_soc_data(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str
+) -> pd.DataFrame:
+    """
+    Load battery SOC data from SAM optimized load profiles.
+    Returns DataFrame with hourly battery SOC data, or None if not available.
+    """
+    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+    sam_file = os.path.join(county_dir, f"sam_optimized_load_profiles_{county_slug}.csv")
+    
+    if not os.path.exists(sam_file):
+        print(f"Warning: SAM load profiles file not found: {sam_file}")
+        return None
+    
+    try:
+        # Load with timestamp parsing and indexing
+        df = pd.read_csv(sam_file, parse_dates=[0], index_col=0)
+        
+        # Check if Battery SOC column exists
+        if 'Battery SOC' not in df.columns:
+            print(f"Warning: Battery SOC column not found in {sam_file}")
+            print(f"Available columns: {list(df.columns)}")
+            return None
+        
+        return df[['Battery SOC']]
+        
+    except Exception as e:
+        print(f"Warning: Error reading SAM load profiles for {county_slug}: {e}")
+        return None
+
+
+def load_sam_metric_data(base_input_dir: str, scenario: str, housing_type: str, county_slug: str, metric_column: str) -> float:
+    """
+    Load annual SAM metric data for mapping visualization.
+    Returns total annual value for the specified metric column.
+    """
+    sam_file = os.path.join(base_input_dir, scenario, housing_type, county_slug, f"sam_optimized_load_profiles_{county_slug}.csv")
+    
+    try:
+        if not os.path.exists(sam_file):
+            print(f"Warning: SAM file not found: {sam_file}")
+            return 0.0
+            
+        df = pd.read_csv(sam_file)
+        if metric_column not in df.columns:
+            print(f"Warning: Column {metric_column} not found in {sam_file}")
+            return 0.0
+            
+        annual_total = df[metric_column].sum()
+        return float(annual_total)
+        
+    except Exception as e:
+        print(f"Error loading SAM metric {metric_column} for {county_slug}: {e}")
+        return 0.0
+
+
+def load_sam_weekly_data(base_input_dir: str, scenario: str, housing_type: str, county_slug: str, metric_columns: list) -> pd.DataFrame:
+    """
+    Load SAM data for weekly time series analysis.
+    Returns DataFrame with specified metric columns, or None if not available.
+    """
+    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+    sam_file = os.path.join(county_dir, f"sam_optimized_load_profiles_{county_slug}.csv")
+    
+    if not os.path.exists(sam_file):
+        print(f"Warning: SAM load profiles file not found: {sam_file}")
+        return None
+    
+    try:
+        # Load with timestamp parsing and indexing
+        df = pd.read_csv(sam_file, parse_dates=[0], index_col=0)
+        
+        # Check if all required columns exist
+        missing_columns = [col for col in metric_columns if col not in df.columns]
+        if missing_columns:
+            print(f"Warning: Columns not found in {sam_file}: {missing_columns}")
+            print(f"Available columns: {list(df.columns)}")
+            return None
+        
+        return df[metric_columns]
+        
+    except Exception as e:
+        print(f"Warning: Error reading SAM load profiles for {county_slug}: {e}")
+        return None
+
+
+def create_battery_soc_chart(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    sample_counties: list = ["alameda", "los-angeles", "san-diego"]
+) -> str:
+    """
+    Create battery SOC charts showing the first week of January and July for sample counties.
+    Returns base64 encoded PNG image string.
+    """
+    try:
+        import matplotlib.pyplot as plt
+        import matplotlib.dates as mdates
+        from datetime import datetime
+        
+        # Create figure with subplots - 2 time periods x 3 counties
+        fig, axes = plt.subplots(2, 3, figsize=(18, 12))
+        fig.suptitle(f'Battery State of Charge (SOC) - {scenario.replace("_", " ").title()} Scenario', 
+                     fontsize=16, fontweight='bold')
+        
+        # Define time periods
+        periods = {
+            'January': ('2018-01-01', '2018-01-08'),
+            'July': ('2018-07-01', '2018-07-08')
+        }
+        
+        county_data_loaded = {}
+        
+        # Load data for all counties
+        for county_slug in sample_counties:
+            soc_df = load_battery_soc_data(base_input_dir, scenario, housing_type, county_slug)
+            county_data_loaded[county_slug] = soc_df
+        
+        # Create plots for each period and county
+        for period_idx, (period_name, (start_date, end_date)) in enumerate(periods.items()):
+            for county_idx, county_slug in enumerate(sample_counties):
+                ax = axes[period_idx, county_idx]
+                
+                soc_df = county_data_loaded[county_slug]
+                county_name = county_slug.replace('-', ' ').title()
+                
+                if soc_df is not None:
+                    try:
+                        # Extract the week's data
+                        week_data = soc_df.loc[start_date:end_date]
+                        
+                        if not week_data.empty:
+                            # Plot SOC over time
+                            ax.plot(week_data.index, week_data['Battery SOC'], 
+                                   linewidth=2, color='#2E86AB', alpha=0.8)
+                            
+                            # Customize the plot
+                            ax.set_ylim(0, 100)
+                            ax.set_ylabel('State of Charge (%)', fontsize=10)
+                            ax.set_title(f'{county_name} - {period_name}', fontsize=12, fontweight='bold')
+                            ax.grid(True, alpha=0.3)
+                            
+                            # Format x-axis
+                            ax.xaxis.set_major_locator(mdates.DayLocator())
+                            ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
+                            ax.xaxis.set_minor_locator(mdates.HourLocator(interval=6))
+                            
+                            # Rotate x-axis labels
+                            plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
+                            
+                            # Add horizontal reference lines
+                            ax.axhline(y=20, color='red', linestyle='--', alpha=0.5, linewidth=1)
+                            ax.axhline(y=80, color='green', linestyle='--', alpha=0.5, linewidth=1)
+                            
+                            # Calculate and show daily patterns
+                            daily_min = week_data['Battery SOC'].groupby(week_data.index.date).min().mean()
+                            daily_max = week_data['Battery SOC'].groupby(week_data.index.date).max().mean()
+                            
+                            # Add text annotation with daily stats
+                            ax.text(0.02, 0.98, f'Avg Daily Range:\n{daily_min:.1f}% - {daily_max:.1f}%', 
+                                   transform=ax.transAxes, fontsize=8, verticalalignment='top',
+                                   bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+                        else:
+                            ax.text(0.5, 0.5, f'No data available\nfor {period_name}', 
+                                   ha='center', va='center', transform=ax.transAxes,
+                                   fontsize=10, color='red')
+                            ax.set_title(f'{county_name} - {period_name}', fontsize=12, fontweight='bold')
+                    
+                    except Exception as e:
+                        print(f"Error plotting {county_name} {period_name}: {e}")
+                        ax.text(0.5, 0.5, f'Error loading\n{period_name} data', 
+                               ha='center', va='center', transform=ax.transAxes,
+                               fontsize=10, color='red')
+                        ax.set_title(f'{county_name} - {period_name}', fontsize=12, fontweight='bold')
+                else:
+                    ax.text(0.5, 0.5, f'No battery data\navailable', 
+                           ha='center', va='center', transform=ax.transAxes,
+                           fontsize=10, color='red')
+                    ax.set_title(f'{county_name} - {period_name}', fontsize=12, fontweight='bold')
+        
+        # Add overall legend and notes
+        fig.text(0.5, 0.02, 'Red dashed line: 20% SOC (low) | Green dashed line: 80% SOC (high) | Daily patterns show charge/discharge cycles', 
+                ha='center', fontsize=10, style='italic')
+        
+        # Convert to base64
+        plt.tight_layout()
+        plt.subplots_adjust(top=0.93, bottom=0.12)
+        
+        buffer = io.BytesIO()
+        plt.savefig(buffer, format='png', dpi=150, bbox_inches='tight')
+        buffer.seek(0)
+        image_base64 = base64.b64encode(buffer.getvalue()).decode()
+        plt.close()
+        
+        return image_base64
+        
+    except ImportError:
+        return f"""
+        <div style="text-align: center; padding: 40px; border: 1px solid #ddd; border-radius: 8px;">
+            <h3>Battery SOC Chart</h3>
+            <p>Matplotlib not available - cannot generate battery SOC charts</p>
+        </div>
+        """
+    except Exception as e:
+        print(f"Error creating battery SOC chart: {e}")
+        return f"""
+        <div style="text-align: center; padding: 40px; border: 1px solid #ddd; border-radius: 8px;">
+            <h3>Battery SOC Chart</h3>
+            <p>Error generating chart: {str(e)}</p>
+        </div>
+        """
+
+
+def create_sam_weekly_chart(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str = "alameda"
+) -> str:
+    """
+    Create weekly analysis charts for SAM load profile metrics showing January and July.
+    Returns base64 encoded PNG image string.
+    """
+    try:
+        import matplotlib.pyplot as plt
+        import matplotlib.dates as mdates
+        from datetime import datetime
+        
+        # Define the SAM metrics we want to analyze
+        sam_metrics = [
+            'Load Profile',
+            'System to Load', 
+            'Battery to Load',
+            'Grid to Load',
+            'Solar + Battery to Load'
+        ]
+        
+        # Load SAM weekly data
+        sam_df = load_sam_weekly_data(base_input_dir, scenario, housing_type, county_slug, sam_metrics)
+        
+        if sam_df is None:
+            return f"""
+            <div style="text-align: center; padding: 40px; border: 1px solid #ddd; border-radius: 8px;">
+                <h3>SAM Weekly Analysis Chart</h3>
+                <p>SAM load profile data not available for {county_slug.replace('-', ' ').title()}</p>
+            </div>
+            """
+        
+        # Create figure with subplots - 2 time periods (Jan/July)
+        fig, axes = plt.subplots(2, 1, figsize=(16, 12))
+        fig.suptitle(f'SAM Load Profile Metrics - Weekly Analysis\n{county_slug.replace("-", " ").title()} County - {scenario.replace("_", " ").title()} Scenario', 
+                     fontsize=16, fontweight='bold')
+        
+        # Define time periods
+        periods = {
+            'January (Winter)': ('2018-01-01', '2018-01-08'),
+            'July (Summer)': ('2018-07-01', '2018-07-08')
+        }
+        
+        # Define colors for each metric
+        metric_colors = {
+            'Load Profile': '#2E86AB',         # Blue - total demand
+            'System to Load': '#F24236',       # Red - solar direct
+            'Battery to Load': '#F6AE2D',      # Yellow/Orange - battery discharge
+            'Grid to Load': '#2F9599',         # Teal - grid supply
+            'Solar + Battery to Load': '#F26419'  # Orange - combined renewable
+        }
+        
+        # Create plots for each period
+        for period_idx, (period_name, (start_date, end_date)) in enumerate(periods.items()):
+            ax = axes[period_idx]
+            
+            try:
+                # Extract the week's data
+                week_data = sam_df.loc[start_date:end_date]
+                
+                if not week_data.empty:
+                    # Plot each metric
+                    for metric in sam_metrics:
+                        color = metric_colors.get(metric, '#333333')
+                        ax.plot(week_data.index, week_data[metric], 
+                               linewidth=2, label=metric, color=color, alpha=0.8)
+                    
+                    # Customize the plot
+                    ax.set_ylabel('Power (kW)', fontsize=12)
+                    ax.set_title(f'{period_name}', fontsize=14, fontweight='bold')
+                    ax.grid(True, alpha=0.3)
+                    ax.legend(loc='upper right', fontsize=10)
+                    
+                    # Format x-axis
+                    ax.xaxis.set_major_locator(mdates.DayLocator())
+                    ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
+                    ax.xaxis.set_minor_locator(mdates.HourLocator(interval=6))
+                    
+                    # Rotate x-axis labels
+                    plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
+                    
+                    # Add summary statistics
+                    load_max = week_data['Load Profile'].max()
+                    solar_avg = week_data['System to Load'].mean()
+                    battery_total = week_data['Battery to Load'].sum()
+                    
+                    # Add text annotation with weekly stats
+                    ax.text(0.02, 0.98, f'Week Summary:\nPeak Load: {load_max:.2f} kW\nAvg Solar: {solar_avg:.2f} kW\nBattery Discharge: {battery_total:.1f} kWh', 
+                           transform=ax.transAxes, fontsize=9, verticalalignment='top',
+                           bbox=dict(boxstyle='round', facecolor='white', alpha=0.9))
+                else:
+                    ax.text(0.5, 0.5, f'No data available\nfor {period_name}', 
+                           ha='center', va='center', transform=ax.transAxes,
+                           fontsize=12, color='red')
+                    ax.set_title(f'{period_name}', fontsize=14, fontweight='bold')
+            
+            except Exception as e:
+                print(f"Error plotting {period_name}: {e}")
+                ax.text(0.5, 0.5, f'Error loading\n{period_name} data', 
+                       ha='center', va='center', transform=ax.transAxes,
+                       fontsize=12, color='red')
+                ax.set_title(f'{period_name}', fontsize=14, fontweight='bold')
+        
+        # Add overall notes
+        fig.text(0.5, 0.02, 'Load Profile = total demand | System to Load = solar direct to load | Battery to Load = battery discharge | Grid to Load = grid supply', 
+                ha='center', fontsize=10, style='italic')
+        
+        # Convert to base64
+        plt.tight_layout()
+        plt.subplots_adjust(top=0.92, bottom=0.10)
+        
+        buffer = io.BytesIO()
+        plt.savefig(buffer, format='png', dpi=150, bbox_inches='tight')
+        buffer.seek(0)
+        image_base64 = base64.b64encode(buffer.getvalue()).decode()
+        plt.close()
+        
+        return image_base64
+        
+    except ImportError:
+        return f"""
+        <div style="text-align: center; padding: 40px; border: 1px solid #ddd; border-radius: 8px;">
+            <h3>SAM Weekly Analysis Chart</h3>
+            <p>Matplotlib not available - cannot generate SAM analysis charts</p>
+        </div>
+        """
+    except Exception as e:
+        print(f"Error creating SAM weekly chart: {e}")
+        return f"""
+        <div style="text-align: center; padding: 40px; border: 1px solid #ddd; border-radius: 8px;">
+            <h3>SAM Weekly Analysis Chart</h3>
+            <p>Error generating chart: {str(e)}</p>
+        </div>
+        """
+
+
 def create_single_map(base_input_dir: str, scenario: str, housing_type: str, counties: list, 
                      metric_name: str, data_loader_config: dict) -> folium.Map:
     """
@@ -780,6 +1208,38 @@ def create_single_map(base_input_dir: str, scenario: str, housing_type: str, cou
                 gas_fmt = f"{gas_thm:,.0f}" if gas_thm >= 1000 else f"{gas_thm:.0f}"
                 pretty = f"{elec_fmt} kWh<br>{gas_fmt} therms"
                 gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
+
+            elif metric_name == "Net Grid Consumption (kWh)":
+                metric_value = load_net_grid_consumption_data(
+                    base_input_dir, scenario, housing_type, county_slug
+                )
+                # Format as kWh with comma separators
+                pretty = f"{to_decimal_number(metric_value)} kWh"
+                gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
+                
+            elif metric_name == "Total Electricity Consumption (kWh)":
+                metric_value = load_total_consumption_data(
+                    base_input_dir, scenario, housing_type, county_slug
+                )
+                # Format as kWh with comma separators
+                pretty = f"{to_decimal_number(metric_value)} kWh"
+                gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
+                
+            elif metric_name == "Battery Energy (kWh)":
+                metric_value = load_battery_energy_data(
+                    base_input_dir, scenario, housing_type, county_slug
+                )
+                # Format as kWh with comma separators
+                pretty = f"{to_decimal_number(metric_value)} kWh"
+                gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
+                
+            elif metric_name == "Solar Energy (kWh)":
+                metric_value = load_solar_energy_data(
+                    base_input_dir, scenario, housing_type, county_slug
+                )
+                # Format as kWh with comma separators
+                pretty = f"{to_decimal_number(metric_value)} kWh"
+                gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
                 
             elif metric_name == "Solar+Storage Annual Savings ($)":
                 metric_value = load_solar_savings_data(
@@ -809,38 +1269,26 @@ def create_single_map(base_input_dir: str, scenario: str, housing_type: str, cou
                     pretty = f"{metric_value:.1f} years"
                 gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
                 
-            elif metric_name == "Net Grid Consumption (kWh)":
-                metric_value = load_net_grid_consumption_data(
-                    base_input_dir, scenario, housing_type, county_slug
-                )
-                # Format as kWh with comma separators
-                pretty = f"{to_decimal_number(metric_value)} kWh"
-                gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
-                
-            elif metric_name == "Total Energy Consumption (kWh)":
-                metric_value = load_total_consumption_data(
-                    base_input_dir, scenario, housing_type, county_slug
-                )
-                # Format as kWh with comma separators
-                pretty = f"{to_decimal_number(metric_value)} kWh"
-                gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
-                
-            elif metric_name == "Battery Energy (kWh)":
-                metric_value = load_battery_energy_data(
-                    base_input_dir, scenario, housing_type, county_slug
-                )
-                # Format as kWh with comma separators
-                pretty = f"{to_decimal_number(metric_value)} kWh"
-                gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
-                
-            elif metric_name == "Solar Energy (kWh)":
-                metric_value = load_solar_energy_data(
-                    base_input_dir, scenario, housing_type, county_slug
-                )
-                # Format as kWh with comma separators
-                pretty = f"{to_decimal_number(metric_value)} kWh"
-                gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
-                
+            elif data_loader_config.get("sam_metric"):
+                # Handle SAM metrics using load_sam_metric_data
+                metric_column_map = {
+                    "Load Profile (kWh)": "Load Profile",
+                    "System to Load (kWh)": "System to Load", 
+                    "Battery to Load (kWh)": "Battery to Load",
+                    "Grid to Load (kWh)": "Grid to Load",
+                    "Solar + Battery to Load (kWh)": "Solar + Battery to Load"
+                }
+                column_name = metric_column_map.get(metric_name)
+                if column_name:
+                    metric_value = load_sam_metric_data(
+                        base_input_dir, scenario, housing_type, county_slug, column_name
+                    )
+                    # Format as kWh with comma separators
+                    pretty = f"{to_decimal_number(metric_value)} kWh"
+                    gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
+                else:
+                    metric_value = 0.0
+                    
             else:
                 # Use load_cost_data to get metric data
                 data = load_cost_data(
@@ -1050,6 +1498,26 @@ def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: 
             "bins": ENERGY_CONSUMPTION_BINS,
             "unit": "kWh equiv."
         },
+        "Total Electricity Consumption (kWh)": {
+            "color_scheme": "Blues",
+            "bins": TOTAL_ELECTRICITY_CONSUMPTION_BINS,
+            "unit": "kWh"
+        },
+        "Net Grid Consumption (kWh)": {
+            "color_scheme": "Reds",
+            "bins": NET_GRID_CONSUMPTION_BINS,
+            "unit": "kWh"
+        },
+        "Battery Energy (kWh)": {
+            "color_scheme": "Purples",
+            "bins": BATTERY_ENERGY_BINS,
+            "unit": "kWh"
+        },
+        "Solar Energy (kWh)": {
+            "color_scheme": "Oranges",
+            "bins": SOLAR_ENERGY_BINS,
+            "unit": "kWh"
+        },
         "Annual Electricity Bill ($)": {
             "subfolder": "electricity",
             "prefix": "RESULTS_electricity_annual_costs",
@@ -1083,25 +1551,35 @@ def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: 
             "bins": [0, 5, 10, 15, 20, 25, 30, 50, 100],
             "unit": "years"
         },
-        "Net Grid Consumption (kWh)": {
-            "color_scheme": "Reds",
-            "bins": NET_GRID_CONSUMPTION_BINS,
-            "unit": "kWh"
-        },
-        "Total Energy Consumption (kWh)": {
+        "Load Profile (kWh)": {
             "color_scheme": "Blues",
-            "bins": TOTAL_ELECTRICITY_CONSUMPTION_BINS,
-            "unit": "kWh"
+            "bins": [0, 2000, 4000, 6000, 8000, 10000, 12000, 14000, 16000],
+            "unit": "kWh",
+            "sam_metric": True
         },
-        "Battery Energy (kWh)": {
+        "System to Load (kWh)": {
+            "color_scheme": "Oranges", 
+            "bins": [0, 2000, 4000, 6000, 8000, 10000, 12000, 14000, 16000],
+            "unit": "kWh",
+            "sam_metric": True
+        },
+        "Battery to Load (kWh)": {
             "color_scheme": "Purples",
-            "bins": BATTERY_ENERGY_BINS,
-            "unit": "kWh"
+            "bins": [0, 500, 1000, 1500, 2000, 2500, 3000, 4000, 5000],
+            "unit": "kWh",
+            "sam_metric": True
         },
-        "Solar Energy (kWh)": {
-            "color_scheme": "Oranges",
-            "bins": SOLAR_ENERGY_BINS,
-            "unit": "kWh"
+        "Grid to Load (kWh)": {
+            "color_scheme": "Reds",
+            "bins": [0, 2000, 4000, 6000, 8000, 10000, 12000, 14000, 16000],
+            "unit": "kWh",
+            "sam_metric": True
+        },
+        "Solar + Battery to Load (kWh)": {
+            "color_scheme": "Greens",
+            "bins": [0, 2000, 4000, 6000, 8000, 10000, 12000, 14000, 16000],
+            "unit": "kWh",
+            "sam_metric": True
         },
     }
     
@@ -1254,6 +1732,62 @@ def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: 
                     <p>Chart unavailable for this county</p>
                 </div>
             """
+    
+    html_content += """
+            </div>
+        </div>
+        
+        <div class="charts-section">
+            <h2>Battery SOC Analysis</h2>
+            <p>Battery charging and discharging patterns during the first week of January and July for selected counties</p>
+            <div class="chart-container">
+    """
+    
+    # Generate battery SOC chart for scenarios with solar+storage
+    if not scenario.startswith("baseline"):
+        try:
+            battery_chart_b64 = create_battery_soc_chart(base_input_dir, scenario, housing_type)
+            if isinstance(battery_chart_b64, str) and battery_chart_b64.startswith('<div'):
+                # HTML fallback
+                html_content += battery_chart_b64
+            else:
+                # Base64 image
+                html_content += f"""
+                    <img src="data:image/png;base64,{battery_chart_b64}" alt="Battery SOC patterns" style="max-width: 100%; height: auto;">
+                """
+        except Exception as e:
+            print(f"Error creating battery SOC chart: {e}")
+            html_content += "<p>Battery SOC chart unavailable for this scenario</p>"
+    else:
+        html_content += "<p>Battery SOC analysis not applicable for baseline scenario (no battery storage)</p>"
+    
+    html_content += """
+            </div>
+        </div>
+        
+        <div class="charts-section">
+            <h2>SAM Load Profile Metrics Analysis</h2>
+            <p>Weekly analysis of SAM load profile metrics during the first week of January and July for Alameda County</p>
+            <div class="chart-container">
+    """
+    
+    # Generate SAM weekly chart for scenarios with solar+storage
+    if not scenario.startswith("baseline"):
+        try:
+            sam_chart_b64 = create_sam_weekly_chart(base_input_dir, scenario, housing_type, "alameda")
+            if isinstance(sam_chart_b64, str) and sam_chart_b64.startswith('<div'):
+                # HTML fallback
+                html_content += sam_chart_b64
+            else:
+                # Base64 image
+                html_content += f"""
+                    <img src="data:image/png;base64,{sam_chart_b64}" alt="SAM load profile metrics" style="max-width: 100%; height: auto;">
+                """
+        except Exception as e:
+            print(f"Error creating SAM weekly chart: {e}")
+            html_content += "<p>SAM weekly analysis chart unavailable for this scenario</p>"
+    else:
+        html_content += "<p>SAM load profile analysis not applicable for baseline scenario (no solar+storage system)</p>"
     
     html_content += """
             </div>
