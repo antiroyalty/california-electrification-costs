@@ -86,7 +86,7 @@ def fetch_weather_data(latitude, longitude, county):
         "wkt": f"POINT({longitude} {latitude})",
         "names": "tmy",  # Requesting Typical Meteorological Year data.
         "interval": REQUEST_INTERVAL,
-        "utc": "true",
+        "utc": "false",
         "email": DEFAULT_EMAIL
     }
 
