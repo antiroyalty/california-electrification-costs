@@ -53,7 +53,7 @@ def read_parquet_file(file_path, required_cols):
     if missing_cols:
         return None, f"Missing columns in {file_path}: {missing_cols}"
 
-    data["timestamp"] = pd.to_datetime(data["timestamp"])
+    data["timestamp"] = pd.to_datetime(data["timestamp"]).dt.tz_localize('US/Eastern').dt.tz_convert('US/Pacific').dt.tz_localize(None)
     return data[required_cols], None # Returns (data, error) tuple
 
 def read_building_profile(file_path, end_uses):
@@ -64,7 +64,7 @@ def read_building_profile(file_path, end_uses):
     data, error = read_parquet_file(file_path, ["timestamp"] + end_uses)
     if error:
         return None, error
-    data["timestamp"] = pd.to_datetime(data["timestamp"])
+    data["timestamp"] = pd.to_datetime(data["timestamp"]).dt.tz_localize('US/Eastern').dt.tz_convert('US/Pacific').dt.tz_localize(None)
     data = data.set_index("timestamp")
     return data[end_uses], None
 
