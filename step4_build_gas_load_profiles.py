@@ -21,7 +21,7 @@ def process_building_data(data, end_uses):
     if 'timestamp' not in data.columns or not all(col in data.columns for col in end_uses):
         raise ValueError("Missing required columns: 'timestamp' and/or end_uses.")
 
-    data['timestamp'] = pd.to_datetime(data['timestamp'])
+    data['timestamp'] = pd.to_datetime(data['timestamp']).dt.tz_localize('US/Eastern').dt.tz_convert('US/Pacific').dt.tz_localize(None)
     hourly_data = data[['timestamp'] + end_uses].copy()
     # Sum it to a total
     hourly_data['load.gas.total.kwh'] = hourly_data[end_uses].sum(axis=1)

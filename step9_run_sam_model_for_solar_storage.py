@@ -16,7 +16,24 @@ SOLAR_STORAGE_CAPACITY_PREFIX = "electrified_assets"
 CAPITAL_COSTS_FOLDER_NAME = "CAPITAL_COSTS"
 
 def prepare_data_and_compute_system_capacity(weather_file, load_file, years_of_analysis):
+    # Load weather data in UTC from NREL API
     solar_resource_data = tools.SAM_CSV_to_solar_data(weather_file)
+    
+    # Convert weather data from UTC to Pacific Time to align with load profiles
+    # Note: SAM internally handles solar position calculations based on location,
+    # but we need temporal alignment between weather and load data
+    # Since both datasets are 8760 hourly values for the same year,
+    # we apply a 3-hour shift to convert from UTC to Pacific Standard Time
+    weather_arrays = ['dn', 'df', 'gh', 'tdry', 'tdew', 'rhum', 'wdir', 'wspd']
+    utc_to_pst_shift = 8  # Hours to shift UTC to PST (8 hours behind UTC)
+    
+    for array_name in weather_arrays:
+        if array_name in solar_resource_data:
+            # Shift array by 8 hours (UTC to PST)
+            original_array = solar_resource_data[array_name]
+            # Roll array to shift timezone: positive shift moves data earlier in time
+            solar_resource_data[array_name] = [original_array[(i + utc_to_pst_shift) % 8760] for i in range(8760)]
+    
     load_data = pd.read_csv(load_file)
     load_profile = load_data[TOTAL_LOAD_COLUMN_NAME].tolist()
     # TEMP CONSTANT LOAD
@@ -294,8 +311,7 @@ def validate_and_save_results(county, load_profile, system_to_load, batt_to_load
         'Battery SOC': battery_soc,
     }, index=date_range)
 
-    # TODO: Ana, I think the load profiles need to be shifted by 3 hours 
-    # They are provided in ET, we're working with PT
+    # Load profiles (converted from EST) and weather data (converted from UTC) are both aligned to Pacific Time
     log(
         at="step8_run_sam_model_for_solar_storage",
         load_profile=format_load_profile(load_profile),
