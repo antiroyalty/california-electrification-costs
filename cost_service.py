@@ -40,10 +40,10 @@ class CostService:
         PullBuildings.process(scenario, self.housing_type, self.counties, output_base_dir="data", download_new_files=False) # output directory should just be 'data', not 'loadprofiles'
     
         self.log_step(3)
-        BuildElectricityLoadProfiles.process(scenario, SCENARIOS[scenario], self.housing_type, self.counties, "data", "data/loadprofiles", force_recompute=False)
+        BuildElectricityLoadProfiles.process(scenario, SCENARIOS[scenario], self.housing_type, self.counties, "data", "data/loadprofiles", force_recompute=True)
 
         self.log_step(4)
-        BuildGasLoadProfiles.process("data", "data/loadprofiles", scenario, SCENARIOS, self.housing_type, self.counties, force_recompute=False)
+        BuildGasLoadProfiles.process("data", "data/loadprofiles", scenario, SCENARIOS, self.housing_type, self.counties, force_recompute=True)
 
         self.log_step(5)
         ConvertGasToElectric.process("data/loadprofiles", "data/loadprofiles", self.counties, scenario, [self.housing_type], force_recompute=False)
