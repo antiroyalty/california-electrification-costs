@@ -1,6 +1,13 @@
 import os
 import pandas as pd
+from datetime import timedelta, timezone  # (kept in case you prefer fixed-offset objects)
 from main_helpers import get_counties, get_scenario_path, is_valid_csv, log, to_number, slugify_county_name
+
+# ResStock EULP timestamps are in EST (fixed UTC-5, no DST). Use a fixed-offset zone.
+# Note: 'Etc/GMT+5' corresponds to UTC-5 due to the POSIX sign convention.
+TZ_SOURCE_FIXED_EST = 'Etc/GMT+5'
+# Target local timezone (Pacific); you can swap for 'US/Pacific' if you prefer.
+TZ_TARGET_LOCAL = 'America/Los_Angeles'
 
 END_USE_COLUMNS = {
     "cooling": [
@@ -28,50 +35,67 @@ END_USE_COLUMNS = {
 
 INPUT_FOLDER_NAME = "buildings"
 OUTPUT_FILE_PREFIX = "electricity_loads"
-SPECIAL_CASE_COUNTIES = [] # [slugify_county_name(county) for county in ["Inyo County", "Lassen County", "Mariposa County", "Placer County", "Tuolumne County", "El Dorado County", "Yuba County", "Glenn County", "Modoc County", "Siskiyou County"]]
+SPECIAL_CASE_COUNTIES = []  # [slugify_county_name(c) for c in [...]]
 
 def get_end_use_columns(end_use_categories):
+    """
+    Build the list of end-use columns we will extract from each building file.
+    Only electric loads are handled by this script.
+    """
     end_uses = []
-
-    for category in end_use_categories["electric"]: # We're only building electric load profiles in this file
+    for category in end_use_categories["electric"]:
         end_uses.extend(END_USE_COLUMNS.get(category, []))
-
     return end_uses
+
 
 def list_parquet_files(input_dir):
     if not os.path.exists(input_dir):
         return []
-    return [f for f in os.listdir(input_dir) if f.endswith(".parquet")]
+    return [f for f in os.listdir(input_dir) if f.endswith(".parquet") and os.path.isfile(os.path.join(input_dir, f))]
 
 def read_parquet_file(file_path, required_cols):
+    """
+    Read a Parquet file and ensure required columns are present.
+    Returns (DataFrame, error_message_or_None)
+    """
     try:
         data = pd.read_parquet(file_path)
     except Exception as e:
-        return None, f"Error reading {file_path}: {e}" # Returns (data, error) tuple
+        return None, f"Error reading {file_path}: {e}"
 
     missing_cols = [col for col in required_cols if col not in data.columns]
     if missing_cols:
         return None, f"Missing columns in {file_path}: {missing_cols}"
 
-    data["timestamp"] = pd.to_datetime(data["timestamp"]).dt.tz_localize('US/Eastern').dt.tz_convert('US/Pacific').dt.tz_localize(None)
-    return data[required_cols], None # Returns (data, error) tuple
+    # Return only the columns we need, untouched
+    return data[required_cols], None
 
 def read_building_profile(file_path, end_uses):
     """
-    Reads a building's Parquet file, converts the timestamp to datetime, sets it as the index,
-    and returns only the columns of interest (end_uses).
+    Reads a building's Parquet file, converts the timestamp from fixed EST (UTC-5, no DST)
+    to Pacific time, sets it as the index, and returns only the columns of interest (end_uses).
+    Assumes source timestamps are 15-minute *ending* timestamps per ResStock EULP docs.
     """
     data, error = read_parquet_file(file_path, ["timestamp"] + end_uses)
     if error:
         return None, error
-    data["timestamp"] = pd.to_datetime(data["timestamp"]).dt.tz_localize('US/Eastern').dt.tz_convert('US/Pacific').dt.tz_localize(None)
-    data = data.set_index("timestamp")
+
+    ts = pd.to_datetime(data["timestamp"])
+    # Localize to fixed EST (no DST), convert to Pacific, then drop tz to get naive local time
+    data["timestamp"] = (
+        ts.dt.tz_localize(TZ_SOURCE_FIXED_EST)
+          .dt.tz_convert(TZ_TARGET_LOCAL)
+          .dt.tz_localize(None)
+    )
+
+    data = data.set_index("timestamp").sort_index()
     return data[end_uses], None
+
 
 def get_building_profiles(input_dir, end_uses):
     """
     Iterates over all Parquet files in the input directory, reading and collecting each building's data.
-    Returns a list of DataFrames.
+    Returns a list of DataFrames (one per building).
     """
     all_files = list_parquet_files(input_dir)
     profiles = []
@@ -88,41 +112,69 @@ def compute_typical_profile(profiles):
     """
     Combines individual building profiles side-by-side so that each building's data remains separate,
     then computes the average (typical) load for each end-use across buildings.
-    Returns a DataFrame at the native resolution (e.g. 15-minute intervals).
+    Returns a DataFrame at the native resolution (e.g., 15-minute intervals, *ending* timestamps).
     """
-    # Create a MultiIndex on the columns: level 0 will be the building index.
+    if not profiles:
+        return None
+
+    # Create a MultiIndex on the columns: level 0 is building index, level 1 is end-use name.
     combined = pd.concat(profiles, axis=1, keys=range(len(profiles)))
-    # Group by the end-use column names (level 1) and compute the mean across buildings.
+    # Group by end-use column names (level 1) and compute the mean across buildings.
+    # Note: axis=1 groupby is still fine; alternatively, combined.swaplevel(axis=1).groupby(level=0, axis=1).mean()
     typical_15min = combined.groupby(level=1, axis=1).mean()
     return typical_15min
 
+
 def resample_profile_to_hourly(typical_profile, agg_method="sum"):
     """
-    Resamples the typical profile from its native resolution (e.g. 15 minutes) to hourly.
-    The aggregation method can be 'sum' (to add up the 15-minute intervals) or 'mean' if needed.
-    Fills any missing timestamps with 0.
+    Resamples the typical profile from 15-minute *ending* timestamps to hourly.
+    Because the source is RIGHT-labeled (intervals end at the timestamp),
+    we resample with right-labeled/right-closed bins so totals align to the correct hour.
+
+    Example: the value labeled 01:00 represents 00:15–01:00; the hourly bin at 01:00
+    will capture the four 15-min periods ending at 00:15, 00:30, 00:45, 01:00.
     """
+    if typical_profile is None or typical_profile.empty:
+        return typical_profile
+
     if agg_method == "sum":
-        hourly_profile = typical_profile.resample("H").sum()
+        hourly_profile = typical_profile.resample("H", label="right", closed="right").sum()
     elif agg_method == "mean":
-        hourly_profile = typical_profile.resample("H").mean()
+        hourly_profile = typical_profile.resample("H", label="right", closed="right").mean()
     else:
         raise ValueError("Unsupported aggregation method: choose 'sum' or 'mean'")
-    return hourly_profile.fillna(0)
+
+    # Avoid blanket zero-fills; prefer to surface gaps. If you *expect* sparse data, you may enable:
+    # hourly_profile = hourly_profile.fillna(0)
+    return hourly_profile
+
 
 def compute_annual_totals(profile, end_uses):
     """
     Computes annual totals for each end-use by summing the values in the profile.
     """
+    if profile is None or profile.empty:
+        return {}
     return profile[end_uses].sum(axis=0).to_dict()
+
+
+# ---------------------------------------------------------------------------
+# Output + logging
+# ---------------------------------------------------------------------------
 
 def save_profile(profile, output_path):
     """
-    Saves the profile DataFrame to a CSV file.
+    Saves the profile DataFrame to a CSV file with a 'timestamp' column.
     """
+    if profile is None:
+        return
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    profile = profile.reset_index().rename(columns={"index": "timestamp"})
+    # Ensure the index carries the name 'timestamp' for a clean reset
+    profile = profile.copy()
+    profile.index.name = "timestamp"
+    profile = profile.reset_index()
     profile.to_csv(output_path, index=False)
+
 
 def format_end_use_name(key):
     prefix = "out.electricity."
@@ -133,22 +185,22 @@ def format_end_use_name(key):
         key = key[:-len(suffix)] + " kwh"
     return key
 
-def log_annual_totals(county, annual_totals):
-    dynamic_kwargs = { format_end_use_name(k): to_number(v) for k, v in annual_totals.items() }
 
+def log_annual_totals(county, annual_totals):
+    dynamic_kwargs = {format_end_use_name(k): to_number(v) for k, v in annual_totals.items()}
     log(at="step3_build_electricity_load_profiles", county=county, **dynamic_kwargs)
 
 def process_county_data(county, input_dir, output_path, end_uses):
     """
     Processes all building Parquet files in the county directory:
-      1. Reads each building file and collects the building profiles.
+      1. Reads each building file and collects the building profiles (with EST->PT conversion).
       2. Computes the typical (average) building load at each timestamp across buildings.
-      3. Resamples the resulting profile to hourly resolution.
+      3. Resamples the typical profile to hourly resolution (right-labeled bins).
       4. Computes annual totals for each end use.
       5. Saves the final typical load profile to CSV.
-      
+
     Returns:
-      status (str), num_files (int), annual_totals (dict)
+      status (str), num_files (int)
     """
     profiles = get_building_profiles(input_dir, end_uses)
     if not profiles:
@@ -171,11 +223,12 @@ def process_county_data(county, input_dir, output_path, end_uses):
 
     return "processed", len(profiles)
 
+
 def should_skip_processing(output_path, force_recompute):
     if force_recompute:
         return False  # Always regenerate if forced
-
     return os.path.exists(output_path) and is_valid_csv(output_path)
+
 
 def process(scenario_name, end_use_categories, housing_type, counties, base_input_dir, base_output_dir, force_recompute=True):
     summary = {
@@ -187,7 +240,7 @@ def process(scenario_name, end_use_categories, housing_type, counties, base_inpu
     # Should only get one scenario at a time
     if scenario_name != "baseline":
         log(at="step3_build_electricity_load_profiles", message="no new electricity profiles needed to be downloaded")
-        return
+        return summary
 
     scenario_path = get_scenario_path(base_input_dir, scenario_name, housing_type)
     counties = get_counties(scenario_path, counties)
@@ -204,7 +257,7 @@ def process(scenario_name, end_use_categories, housing_type, counties, base_inpu
 
         input_dir = os.path.join(base_input_dir, scenario_name, housing_type, county, INPUT_FOLDER_NAME)
         output_path = os.path.join(base_output_dir, scenario_name, housing_type, county, f"{OUTPUT_FILE_PREFIX}_{county}.csv")
-        
+
         # 1. Make sure processing is necessary
         if should_skip_processing(output_path, force_recompute):
             county_info["status"] = "skipped_existing"
@@ -220,7 +273,7 @@ def process(scenario_name, end_use_categories, housing_type, counties, base_inpu
         # 3. Process data
         end_uses = get_end_use_columns(end_use_categories)
 
-        # 4. Special case special counties: add additional end-uses for them
+        # 4. Special case special counties: add additional end-uses for them (if desired)
         # end_uses = special_case_counties(county, end_uses)
 
         status, num_files = process_county_data(county, input_dir, output_path, end_uses)
@@ -248,4 +301,12 @@ if __name__ == '__main__':
         "baseline": {"gas": {"heating", "hot_water", "cooking"}, "electric": {"appliances", "misc"}}
     }
 
-    process("baseline", BASELINE_SCENARIO["baseline"], "single-family-detached", ["Alameda County"], "data", "data/loadprofiles", force_recompute=True)
+    process(
+        "baseline",
+        BASELINE_SCENARIO["baseline"],
+        "single-family-detached",
+        ["Alameda County"],
+        "data",
+        "data/loadprofiles",
+        force_recompute=True
+    )
