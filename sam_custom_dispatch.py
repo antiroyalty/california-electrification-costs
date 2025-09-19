@@ -108,11 +108,14 @@ class CustomDispatchScheduleGenerator:
         max_discharge_power = 5.0  # kW
         
         # Operating SOC limits for peak hour strategy
-        peak_max_soc = 80.0  # Don't discharge below this during peak
+        peak_max_soc = 90.0  # Don't discharge below this during peak
         peak_min_soc = 20.0  # Don't charge above this for peak preparation
         
         # Track hourly decisions for analysis
         dispatch_log = []
+        
+        # Track daily predictions for logging
+        daily_predictions = {}
         
         # Process each hour
         for h in range(hours):
@@ -129,6 +132,7 @@ class CustomDispatchScheduleGenerator:
             day_end = min(day_start + 24, hours)
             peak_start_today = day_start + 16  # 4 PM
             peak_end_today = min(day_start + 21, hours)  # 9 PM
+            current_day = h // 24
             
             # Calculate total peak load for today
             if peak_end_today > peak_start_today:
@@ -140,6 +144,46 @@ class CustomDispatchScheduleGenerator:
             # (This is the target we want to have stored)
             peak_battery_target_kwh = min(today_peak_load, 
                                         (peak_max_soc - peak_min_soc) / 100 * self.battery_capacity)
+            
+            # Log daily predictions (only once per day at 6 AM)
+            if hour_of_day == 6 and current_day not in daily_predictions:
+                battery_available_for_peak = max(0, battery_kwh - (peak_min_soc / 100 * self.battery_capacity))
+                
+                daily_predictions[current_day] = {
+                    'day': current_day,
+                    'peak_load_kwh': today_peak_load,
+                    'peak_target_kwh': peak_battery_target_kwh,
+                    'battery_ready_kwh': battery_available_for_peak,
+                    'current_soc': current_soc,
+                    'battery_total_kwh': battery_kwh
+                }
+                
+                print(f"\n📊 Day {current_day + 1} Peak Prediction (6 AM):")
+                print(f"  Peak load (4-9 PM): {today_peak_load:.2f} kWh")
+                print(f"  Battery target: {peak_battery_target_kwh:.2f} kWh")
+                print(f"  Current battery SOC: {current_soc:.1f}% ({battery_kwh:.2f} kWh)")
+                print(f"  Available for peak: {battery_available_for_peak:.2f} kWh")
+                
+                coverage_pct = (battery_available_for_peak / today_peak_load * 100) if today_peak_load > 0 else 0
+                print(f"  Expected peak coverage: {coverage_pct:.1f}%")
+                
+                if battery_available_for_peak < peak_battery_target_kwh:
+                    shortfall = peak_battery_target_kwh - battery_available_for_peak
+                    print(f"  ⚠️ Battery shortfall: {shortfall:.2f} kWh (need to charge more)")
+                else:
+                    surplus = battery_available_for_peak - peak_battery_target_kwh
+                    print(f"  ✅ Battery surplus: {surplus:.2f} kWh (well prepared)")
+            
+            # Additional logging when entering peak hours
+            if hour_of_day == 16 and h > 0:  # 4 PM - start of peak
+                battery_available_for_peak = max(0, battery_kwh - (peak_min_soc / 100 * self.battery_capacity))
+                print(f"\n🔋 Peak Hour Start (4 PM) - Day {current_day + 1}:")
+                print(f"  Battery SOC: {current_soc:.1f}% ({battery_kwh:.2f} kWh)")
+                print(f"  Available for peak: {battery_available_for_peak:.2f} kWh")
+                print(f"  Peak load target: {today_peak_load:.2f} kWh")
+                
+                final_coverage = (battery_available_for_peak / today_peak_load * 100) if today_peak_load > 0 else 0
+                print(f"  Final peak coverage: {final_coverage:.1f}%")
             
             # Decision variables
             charge_action = 0.0
@@ -155,8 +199,35 @@ class CustomDispatchScheduleGenerator:
                         # Discharge to meet as much load as possible
                         discharge_amount = min(load, battery_available, max_discharge_power)
                         discharge_action = discharge_amount / max_discharge_power
+                        
+                        # Predict new SOC after discharge
+                        new_battery_kwh = battery_kwh - discharge_amount
+                        new_soc = (new_battery_kwh / self.battery_capacity) * 100
+                        
+                        # Debug logging for SOC violations
+                        if new_soc < peak_min_soc:
+                            print(f"⚠️ SOC VIOLATION DETECTED at hour {h} (Day {h//24 + 1}, {hour_of_day}:00)")
+                            print(f"  Current SOC: {current_soc:.1f}% ({battery_kwh:.2f} kWh)")
+                            print(f"  Attempted discharge: {discharge_amount:.2f} kWh")
+                            print(f"  Predicted new SOC: {new_soc:.1f}% ({new_battery_kwh:.2f} kWh)")
+                            print(f"  Min SOC limit: {peak_min_soc:.1f}%")
+                            print(f"  Load: {load:.2f} kW")
+                            print(f"  Battery available: {battery_available:.2f} kWh")
+                            
+                            # Adjust discharge to respect SOC limit
+                            safe_discharge = battery_kwh - (peak_min_soc / 100 * self.battery_capacity)
+                            discharge_amount = max(0, safe_discharge)
+                            discharge_action = discharge_amount / max_discharge_power if max_discharge_power > 0 else 0
+                            print(f"  Adjusted discharge: {discharge_amount:.2f} kWh")
+                        
                         battery_kwh -= discharge_amount
                         current_soc = (battery_kwh / self.battery_capacity) * 100
+                        
+                        # Final SOC check
+                        if current_soc < peak_min_soc - 0.1:  # Small tolerance for floating point
+                            print(f"🚨 CRITICAL: SOC still below limit after adjustment!")
+                            print(f"  Final SOC: {current_soc:.2f}%")
+                            print(f"  Limit: {peak_min_soc:.1f}%")
             
             else:
                 # NON-PEAK HOURS: Implement solar prioritization strategy
@@ -173,12 +244,39 @@ class CustomDispatchScheduleGenerator:
                             peak_prep_needed
                         )
                         
+                        # Debug charging logic
+                        if h < 100 or (h % 1000 == 0):  # Debug first 100 hours and every 1000th hour
+                            print(f"🔋 CHARGING DEBUG at hour {h} (Day {h//24 + 1}, {hour_of_day}:00)")
+                            print(f"  Current SOC: {current_soc:.1f}% ({battery_kwh:.2f} kWh)")
+                            print(f"  Solar available: {solar:.2f} kW")
+                            print(f"  Peak prep needed: {peak_prep_needed:.2f} kWh")
+                            print(f"  Peak max SOC limit: {peak_max_soc:.1f}%")
+                            print(f"  Battery capacity available: {battery_capacity_available:.2f} kWh")
+                        
                         if battery_capacity_available > 0:
                             charge_amount = min(solar, battery_capacity_available, max_charge_power)
                             charge_action = charge_amount / max_charge_power
+                            
+                            old_soc = current_soc
                             battery_kwh += charge_amount
                             current_soc = (battery_kwh / self.battery_capacity) * 100
                             solar -= charge_amount  # Reduce available solar
+                            
+                            # Debug successful charging
+                            if h < 100 or (h % 1000 == 0):
+                                print(f"  ✅ CHARGED: {charge_amount:.2f} kWh")
+                                print(f"  SOC: {old_soc:.1f}% → {current_soc:.1f}%")
+                                print(f"  Remaining solar: {solar:.2f} kW")
+                        else:
+                            if h < 100 or (h % 1000 == 0):
+                                print(f"  ❌ NO CHARGING: battery_capacity_available = 0")
+                    else:
+                        if h < 100 or (h % 1000 == 0) and solar > 0:
+                            print(f"🚫 CHARGING BLOCKED at hour {h}")
+                            print(f"  Peak prep needed: {peak_prep_needed:.2f} kWh")
+                            print(f"  Current SOC: {current_soc:.1f}%")
+                            print(f"  Peak max SOC: {peak_max_soc:.1f}%")
+                            print(f"  Solar available: {solar:.2f} kW")
                     
                     # 2. Second Priority: Meet household load with remaining solar
                     if solar > 0 and load > 0:
@@ -190,14 +288,45 @@ class CustomDispatchScheduleGenerator:
                     if solar > 0 and current_soc < self.max_soc:
                         battery_capacity_available = (self.max_soc - current_soc) / 100 * self.battery_capacity
                         
+                        if h < 100 or (h % 1000 == 0):
+                            print(f"🔋 TOP-UP DEBUG at hour {h}")
+                            print(f"  Remaining solar: {solar:.2f} kW")
+                            print(f"  Current SOC: {current_soc:.1f}%")
+                            print(f"  Max SOC limit: {self.max_soc:.1f}%")
+                            print(f"  Battery capacity available for top-up: {battery_capacity_available:.2f} kWh")
+                            print(f"  Current charge action: {charge_action:.3f}")
+                        
                         if battery_capacity_available > 0:
                             additional_charge = min(solar, battery_capacity_available, max_charge_power - charge_action * max_charge_power)
+                            
+                            if h < 100 or (h % 1000 == 0):
+                                print(f"  Additional charge calculated: {additional_charge:.2f} kWh")
+                                print(f"  Max charge power remaining: {max_charge_power - charge_action * max_charge_power:.2f} kW")
+                            
                             if additional_charge > 0:
                                 # Add to existing charge action
+                                old_soc = current_soc
                                 total_charge = charge_action * max_charge_power + additional_charge
                                 charge_action = min(total_charge / max_charge_power, 1.0)
                                 battery_kwh += additional_charge
                                 current_soc = (battery_kwh / self.battery_capacity) * 100
+                                
+                                if h < 100 or (h % 1000 == 0):
+                                    print(f"  ✅ TOP-UP CHARGED: {additional_charge:.2f} kWh")
+                                    print(f"  SOC: {old_soc:.1f}% → {current_soc:.1f}%")
+                                    print(f"  Total charge action: {charge_action:.3f}")
+                            else:
+                                if h < 100 or (h % 1000 == 0):
+                                    print(f"  ❌ NO TOP-UP: additional_charge = 0")
+                        else:
+                            if h < 100 or (h % 1000 == 0):
+                                print(f"  ❌ NO TOP-UP: battery_capacity_available = 0")
+                    else:
+                        if h < 100 or (h % 1000 == 0) and solar > 0:
+                            print(f"🚫 TOP-UP BLOCKED at hour {h}")
+                            print(f"  Solar: {solar:.2f} kW")
+                            print(f"  Current SOC: {current_soc:.1f}%")
+                            print(f"  Max SOC: {self.max_soc:.1f}%")
                 
                 # Handle any remaining load not met by solar (use grid)
                 # This is automatic in SAM, no dispatch action needed
@@ -206,6 +335,17 @@ class CustomDispatchScheduleGenerator:
             charge_schedule[h] = charge_action
             discharge_schedule[h] = discharge_action
             gridcharge_schedule[h] = gridcharge_action
+            
+            # Debug: Track SOC violations throughout simulation
+            if current_soc < 15.0:  # Below safe operating range
+                print(f"🔴 LOW SOC WARNING at hour {h} (Day {h//24 + 1}, {hour_of_day}:00)")
+                print(f"  SOC: {current_soc:.2f}% ({battery_kwh:.2f} kWh)")
+                print(f"  Is peak hour: {is_peak_hour}")
+                print(f"  Actions: charge={charge_action:.3f}, discharge={discharge_action:.3f}")
+                print(f"  Load: {load:.2f} kW, Solar: {solar:.2f} kW")
+                
+                if current_soc < 10.0:
+                    print(f"🚨 CRITICAL SOC at hour {h}: {current_soc:.2f}%")
             
             # Log for analysis
             dispatch_log.append({
@@ -224,6 +364,179 @@ class CustomDispatchScheduleGenerator:
         
         self.dispatch_log = pd.DataFrame(dispatch_log)
         
+        # Debug: Print algorithm parameters and initial diagnosis
+        print(f"\n🔍 ALGORITHM PARAMETERS DEBUG:")
+        print("=" * 50)
+        print(f"Battery capacity: {self.battery_capacity:.1f} kWh")
+        print(f"Starting SOC: 50.0%")
+        print(f"Peak operating range: {peak_min_soc:.1f}% - {peak_max_soc:.1f}%")
+        print(f"Max SOC limit: {self.max_soc:.1f}%")
+        print(f"Max charge power: {max_charge_power:.1f} kW")
+        print(f"Max discharge power: {max_discharge_power:.1f} kW")
+        
+        # Analyze why SOC might be limited
+        soc_values = [log['soc'] for log in dispatch_log]
+        max_soc_reached = max(soc_values)
+        charge_events = sum(1 for log in dispatch_log if log['charge'] > 0)
+        
+        print(f"\nSOC ANALYSIS:")
+        print(f"Maximum SOC reached: {max_soc_reached:.1f}%")
+        print(f"Total charging events: {charge_events}")
+        
+        if max_soc_reached < 60:
+            print(f"🚨 SOC ISSUE DETECTED: Battery never exceeded {max_soc_reached:.1f}%")
+            
+            # Check for common issues
+            total_solar = sum(log['solar'] for log in dispatch_log)
+            total_load = sum(log['load'] for log in dispatch_log)
+            
+            print(f"Total annual solar: {total_solar:.0f} kWh")
+            print(f"Total annual load: {total_load:.0f} kWh")
+            print(f"Solar/Load ratio: {total_solar/total_load:.2f}")
+            
+            if total_solar < total_load * 0.3:
+                print(f"⚠️ LIKELY CAUSE: Insufficient solar generation")
+            elif charge_events < 100:
+                print(f"⚠️ LIKELY CAUSE: Algorithm not triggering charging")
+            else:
+                print(f"⚠️ LIKELY CAUSE: Peak preparation limits or SAM override")
+        
+        # Print summary of daily predictions
+        if daily_predictions:
+            print(f"\n📈 Peak Prediction Summary ({len(daily_predictions)} days):")
+            print("=" * 60)
+            
+            total_peak_load = sum(pred['peak_load_kwh'] for pred in daily_predictions.values())
+            total_battery_ready = sum(pred['battery_ready_kwh'] for pred in daily_predictions.values())
+            avg_coverage = (total_battery_ready / total_peak_load * 100) if total_peak_load > 0 else 0
+            
+            print(f"Total peak load (all days): {total_peak_load:.2f} kWh")
+            print(f"Total battery available: {total_battery_ready:.2f} kWh")
+            print(f"Average peak coverage: {avg_coverage:.1f}%")
+            
+            # Count days with good/poor preparation
+            well_prepared = sum(1 for pred in daily_predictions.values() 
+                              if pred['battery_ready_kwh'] >= pred['peak_target_kwh'] * 0.9)
+            under_prepared = len(daily_predictions) - well_prepared
+            
+            print(f"Well-prepared days: {well_prepared}/{len(daily_predictions)}")
+            print(f"Under-prepared days: {under_prepared}/{len(daily_predictions)}")
+            
+            if under_prepared > 0:
+                print(f"⚠️ Strategy may need adjustment for better peak coverage")
+            else:
+                print(f"✅ Peak strategy performing well!")
+        
+        # SOC violation analysis
+        soc_data = [log['soc'] for log in dispatch_log]
+        min_soc_observed = min(soc_data)
+        low_soc_hours = sum(1 for soc in soc_data if soc < 15.0)
+        critical_soc_hours = sum(1 for soc in soc_data if soc < 10.0)
+        
+        print(f"\n🔋 SOC Analysis Summary:")
+        print("=" * 30)
+        print(f"Minimum SOC observed: {min_soc_observed:.2f}%")
+        print(f"Hours below 15% SOC: {low_soc_hours}")
+        print(f"Hours below 10% SOC: {critical_soc_hours}")
+        
+        if critical_soc_hours > 0:
+            print(f"🚨 CRITICAL: Battery went below 10% SOC for {critical_soc_hours} hours!")
+            print(f"   This indicates algorithm or SAM configuration issues")
+        elif low_soc_hours > 0:
+            print(f"⚠️ WARNING: Battery went below 15% SOC for {low_soc_hours} hours")
+            print(f"   Consider more conservative discharge limits")
+        else:
+            print(f"✅ SOC stayed within safe operating range")
+        
+        return charge_schedule, discharge_schedule, gridcharge_schedule
+
+    def generate_custom_dispatch_schedule_simple(self, load_profile, solar_profile):
+        """
+        Simplified rule-based schedule that meets the project goals:
+        - Keep SOC within 20%–80% using a shadow battery state.
+        - Charge using solar during the day for the amount needed in the 4–9pm block
+          (net of solar in those hours), capped by usable capacity.
+        - Discharge only during 4–9pm to serve load down to the 20% SOC floor.
+
+        Returns: (charge_schedule, discharge_schedule, gridcharge_schedule)
+        """
+        hours = len(load_profile)
+        charge_schedule = np.zeros(hours)
+        discharge_schedule = np.zeros(hours)
+        gridcharge_schedule = np.zeros(hours)
+
+        # Shadow battery state
+        soc = 50.0
+        energy_kwh = soc / 100.0 * self.battery_capacity
+        usable_kwh = (self.max_soc - self.min_soc) / 100.0 * self.battery_capacity
+        max_charge_kw = 5.0
+        max_discharge_kw = 5.0
+
+        log_rows = []
+
+        for h in range(hours):
+            hod = h % 24
+            day_start = (h // 24) * 24
+            day_end = min(day_start + 24, hours)
+            peak_start = day_start + 16  # 4 PM
+            peak_end = min(day_start + 21, hours)  # up to 9 PM (exclusive)
+
+            # Daily net need in peak block (load minus solar, not below 0)
+            if peak_start < peak_end:
+                peak_load = np.array(load_profile[peak_start:peak_end])
+                peak_solar = np.array(solar_profile[peak_start:peak_end]) if solar_profile else np.zeros_like(peak_load)
+                net_need_kwh = float(np.maximum(peak_load - peak_solar, 0).sum())
+            else:
+                net_need_kwh = 0.0
+            target_kwh = min(net_need_kwh, usable_kwh)
+
+            available_for_peak = max(0.0, energy_kwh - (self.min_soc / 100.0 * self.battery_capacity))
+
+            load = load_profile[h]
+            solar = solar_profile[h] if solar_profile else 0.0
+            is_peak = 16 <= hod <= 20
+
+            charge = 0.0
+            discharge = 0.0
+            gridcharge = 0.0
+
+            if is_peak and load > 0:
+                need_now = min(target_kwh, load)
+                can_discharge = max(0.0, energy_kwh - (self.min_soc / 100.0 * self.battery_capacity))
+                d_kwh = min(need_now, can_discharge, max_discharge_kw)
+                if d_kwh > 0:
+                    discharge = 1.0
+                    energy_kwh -= d_kwh
+                    soc = (energy_kwh / self.battery_capacity) * 100.0
+            else:
+                need_for_peak = max(0.0, target_kwh - available_for_peak)
+                if solar > 0 and need_for_peak > 0 and soc < self.max_soc:
+                    room_kwh = (self.max_soc / 100.0 * self.battery_capacity) - energy_kwh
+                    c_kwh = min(solar, room_kwh, max_charge_kw, need_for_peak)
+                    if c_kwh > 0:
+                        charge = 1.0
+                        energy_kwh += c_kwh
+                        soc = (energy_kwh / self.battery_capacity) * 100.0
+
+            charge_schedule[h] = charge
+            discharge_schedule[h] = discharge
+            gridcharge_schedule[h] = gridcharge
+
+            log_rows.append({
+                'hour': h,
+                'hour_of_day': hod,
+                'soc': soc,
+                'load': load,
+                'solar': solar,
+                'is_peak': is_peak,
+                'net_need_peak_kwh': target_kwh,
+                'charge': charge,
+                'discharge': discharge,
+                'gridcharge': gridcharge,
+                'action': (1 if discharge > 0 else (-1 if charge > 0 else 0))
+            })
+
+        self.dispatch_log = pd.DataFrame(log_rows)
         return charge_schedule, discharge_schedule, gridcharge_schedule
     
     def analyze_dispatch_strategy(self):
@@ -769,35 +1082,54 @@ def calculate_economic_benefits(custom_results, reference_data, dispatch_log, ra
     }
 
 
-def plot_custom_dispatch_analysis(custom_results, dispatch_log, reference_data=None):
+def plot_custom_dispatch_analysis(custom_results, dispatch_log, reference_data=None, month="January", week_offset=0):
     """
     Create comprehensive visualization of custom dispatch behavior
+    
+    Args:
+        custom_results: SAM simulation results
+        dispatch_log: Algorithm dispatch decisions
+        reference_data: Reference SAM data for comparison
+        month: Month name for title (e.g., "January", "July")
+        week_offset: Which week of the year to analyze (0 = first week)
     """
     if custom_results is None:
         print("Cannot create plots without custom dispatch results")
         return
     
-    # Use first week of January for detailed view
+    # Calculate week hours based on offset
     week_hours = 168
+    start_hour = week_offset * 24  # Start of the target week
+    end_hour = start_hour + week_hours
     hours = range(week_hours)
     
-    # Extract first week data
+    # Extract week data based on offset
+    max_hours = min(len(custom_results['load_profile']), len(dispatch_log))
+    actual_end = min(end_hour, max_hours)
+    actual_start = min(start_hour, max_hours - week_hours) if max_hours >= week_hours else 0
+    actual_week_hours = actual_end - actual_start
+    
     custom_week = {
-        'load': custom_results['load_profile'][:week_hours],
-        'solar': custom_results['system_to_load'][:week_hours],
-        'battery_soc': custom_results['battery_soc'][:week_hours],
-        'battery_discharge': custom_results['battery_to_load'][:week_hours],
-        'grid_usage': custom_results['grid_to_load'][:week_hours],
-        'grid_to_battery': custom_results['grid_to_batt'][:week_hours]
+        'load': custom_results['load_profile'][actual_start:actual_end],
+        'solar': custom_results['system_to_load'][actual_start:actual_end],
+        'battery_soc': custom_results['battery_soc'][actual_start:actual_end],
+        'battery_discharge': custom_results['battery_to_load'][actual_start:actual_end],
+        'grid_usage': custom_results['grid_to_load'][actual_start:actual_end],
+        'grid_to_battery': custom_results['grid_to_batt'][actual_start:actual_end]
     }
     
-    dispatch_week = dispatch_log.iloc[:week_hours]
+    dispatch_week = dispatch_log.iloc[actual_start:actual_end]
     
-    # Create subplots
-    fig, axes = plt.subplots(3, 2, figsize=(16, 14))
-    fig.suptitle('SAM Custom Dispatch Analysis: First Week of January', fontsize=16, fontweight='bold')
+    # Adjust hours range for actual data length
+    hours = range(len(custom_week['load']))
+    week_hours = len(custom_week['load'])
     
-    # 1. Battery SOC with dispatch signals
+    # Create subplots - extra row for solar analysis and peak predictions
+    fig, axes = plt.subplots(5, 2, figsize=(16, 20))
+    week_start_day = (actual_start // 24) + 1
+    fig.suptitle(f'SAM Custom Dispatch Analysis: Week Starting Day {week_start_day} ({month})', fontsize=16, fontweight='bold')
+    
+    # 1. Battery SOC with dispatch events
     ax1 = axes[0, 0]
     ax1.plot(hours, custom_week['battery_soc'], 'b-', linewidth=2, label='Battery SOC')
     
@@ -816,7 +1148,17 @@ def plot_custom_dispatch_analysis(custom_results, dispatch_log, reference_data=N
         if h < week_hours:
             ax1.axvline(x=h, color='orange', alpha=0.3, linewidth=0.8)
     
-    ax1.axhline(y=10, color='red', linestyle='--', alpha=0.7, label='Min SOC (10%)')
+    # Mark peak hours and SOC limits
+    week_days = set(h // 24 for h in hours if h < week_hours)
+    for day in week_days:
+        peak_start = day * 24 + 16
+        peak_end = day * 24 + 21
+        if peak_start < week_hours:
+            peak_end = min(peak_end, week_hours)
+            ax1.axvspan(peak_start, peak_end, alpha=0.2, color='yellow', label='Peak Hours' if day == min(week_days) else "")
+    
+    ax1.axhline(y=20, color='red', linestyle='--', alpha=0.7, label='Min Peak SOC (20%)')
+    ax1.axhline(y=80, color='orange', linestyle='--', alpha=0.7, label='Max Peak SOC (80%)')
     ax1.set_title('Battery SOC with Dispatch Events', fontweight='bold')
     ax1.set_ylabel('SOC (%)')
     ax1.legend()
@@ -956,8 +1298,435 @@ def plot_custom_dispatch_analysis(custom_results, dispatch_log, reference_data=N
     ax6.legend()
     ax6.grid(True, alpha=0.3)
     
+    # 7. Solar Generation Analysis - Check for clipping
+    ax7 = axes[3, 0]
+    
+    # Get the original solar profile from dispatch log (before any allocation)
+    original_solar_week = dispatch_week['solar'][:week_hours].values
+    system_to_load_week = np.array(custom_week['solar'])  # What actually went to load
+    system_to_batt_week = np.array([0] * week_hours)  # Initialize
+    
+    # Try to get system to battery data if available
+    try:
+        if 'system_to_batt' in custom_results:
+            system_to_batt_data = custom_results['system_to_batt']
+            if hasattr(system_to_batt_data, '__len__') and len(system_to_batt_data) >= week_hours:
+                system_to_batt_week = np.array(system_to_batt_data[:week_hours])
+    except:
+        pass
+    
+    # Calculate total solar utilization
+    total_solar_used = system_to_load_week + system_to_batt_week
+    
+    # Plot solar generation components
+    ax7.fill_between(hours, 0, system_to_load_week, alpha=0.7, color='gold', label='Solar to Load')
+    ax7.fill_between(hours, system_to_load_week, total_solar_used, 
+                    alpha=0.7, color='orange', label='Solar to Battery')
+    
+    # Show maximum available solar
+    ax7.plot(hours, original_solar_week, 'r-', linewidth=2, label='Max Solar Available')
+    
+    # Highlight potential clipping (when available > used)
+    solar_clipped = original_solar_week - total_solar_used
+    clipping_mask = solar_clipped > 0.1  # Threshold for meaningful clipping
+    
+    if np.any(clipping_mask):
+        clipped_hours = np.where(clipping_mask)[0]
+        clipped_amounts = solar_clipped[clipping_mask]
+        ax7.scatter(clipped_hours, original_solar_week[clipping_mask], 
+                   c='red', s=50, alpha=0.8, marker='x', label='Clipped Solar')
+        
+        # Fill clipped area
+        ax7.fill_between(hours, total_solar_used, original_solar_week, 
+                        where=(solar_clipped > 0.1), alpha=0.3, color='red', 
+                        label='Clipped Energy')
+    
+    ax7.set_title('Solar Generation & Clipping Analysis', fontweight='bold')
+    ax7.set_ylabel('Solar Power (kW)')
+    ax7.set_xlabel('Hours')
+    ax7.legend()
+    ax7.grid(True, alpha=0.3)
+    
+    # Add summary statistics
+    total_available = np.sum(original_solar_week)
+    total_used = np.sum(total_solar_used)
+    total_clipped = np.sum(solar_clipped[solar_clipped > 0])
+    clipping_pct = (total_clipped / total_available * 100) if total_available > 0 else 0
+    
+    stats_text = f'Week Solar Summary:\nAvailable: {total_available:.1f} kWh\nUsed: {total_used:.1f} kWh\nClipped: {total_clipped:.1f} kWh ({clipping_pct:.1f}%)'
+    ax7.text(0.02, 0.98, stats_text, transform=ax7.transAxes, fontsize=9, 
+            verticalalignment='top', bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8))
+    
+    # 8. Peak Hour Load Coverage Analysis
+    ax8 = axes[3, 1]
+    
+    # Identify peak hours in the week
+    peak_mask = dispatch_week['is_peak'][:week_hours]
+    peak_hours_list = [h for h in hours if h < len(peak_mask) and peak_mask.iloc[h]]
+    
+    if peak_hours_list:
+        # Get load and battery discharge during peak hours
+        peak_loads = [custom_week['load'][h] for h in peak_hours_list]
+        peak_battery_discharge = [custom_week['battery_discharge'][h] for h in peak_hours_list]
+        peak_grid_usage = [custom_week['grid_usage'][h] for h in peak_hours_list]
+        
+        # Create stacked bar chart for peak hours
+        width = 0.8
+        ax8.bar(peak_hours_list, peak_battery_discharge, width, alpha=0.7, 
+               color='green', label='Battery Discharge')
+        ax8.bar(peak_hours_list, peak_grid_usage, width, bottom=peak_battery_discharge, 
+               alpha=0.7, color='red', label='Grid Usage')
+        
+        # Show total load as line
+        ax8.plot(peak_hours_list, peak_loads, 'ko-', linewidth=2, label='Total Load')
+        
+        # Calculate peak coverage statistics
+        total_peak_load = sum(peak_loads)
+        total_battery_coverage = sum(peak_battery_discharge)
+        battery_coverage_pct = (total_battery_coverage / total_peak_load * 100) if total_peak_load > 0 else 0
+        
+        ax8.set_title('Peak Hour Load Coverage (4-9 PM)', fontweight='bold')
+        ax8.set_ylabel('Power (kW)')
+        ax8.set_xlabel('Hours')
+        ax8.legend()
+        ax8.grid(True, alpha=0.3)
+        
+        # Add coverage statistics
+        coverage_text = f'Peak Coverage:\nBattery: {battery_coverage_pct:.1f}%\nTotal Peak Load: {total_peak_load:.1f} kWh'
+        ax8.text(0.02, 0.98, coverage_text, transform=ax8.transAxes, fontsize=9,
+                verticalalignment='top', bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.8))
+    else:
+        ax8.text(0.5, 0.5, 'No peak hours in selected week', 
+                transform=ax8.transAxes, ha='center', va='center', fontsize=12)
+        ax8.set_title('Peak Hour Load Coverage (4-9 PM)', fontweight='bold')
+    
+    # 9. Peak Load Predictions Bar Chart
+    ax9 = axes[4, 0]
+    
+    # Get daily prediction data for the week
+    battery_capacity = 13.5  # kWh - should match dispatch generator
+    max_battery_usable = (80 - 20) / 100 * battery_capacity  # 8.1 kWh usable
+    
+    days_data = []
+    for day in week_days:
+        day_start_hour = day * 24
+        day_6am = day_start_hour + 6
+        day_4pm = day_start_hour + 16
+        
+        # Only process if these hours are in our week view
+        if day_6am < week_hours and day_4pm < week_hours and day_6am < len(dispatch_week):
+            # Get prediction data from dispatch log
+            pred_data = dispatch_week.iloc[day_6am]
+            peak_load_target = pred_data['peak_load_target']
+            
+            # Calculate battery capacities
+            soc_6am = custom_week['battery_soc'][day_6am] if day_6am < len(custom_week['battery_soc']) else 50
+            soc_4pm = custom_week['battery_soc'][day_4pm] if day_4pm < len(custom_week['battery_soc']) else 50
+            
+            battery_6am_kwh = soc_6am / 100 * battery_capacity
+            battery_4pm_kwh = soc_4pm / 100 * battery_capacity
+            
+            # Available energy (above 20% SOC)
+            available_6am = max(0, battery_6am_kwh - (20 / 100 * battery_capacity))
+            available_4pm = max(0, battery_4pm_kwh - (20 / 100 * battery_capacity))
+            
+            # Target energy needed for peak (limited by battery capacity)
+            peak_target_kwh = min(peak_load_target, max_battery_usable)
+            
+            days_data.append({
+                'day': day + 1,
+                'peak_target': peak_target_kwh,
+                'available_6am': available_6am,
+                'available_4pm': available_4pm,
+                'shortfall_6am': max(0, peak_target_kwh - available_6am),
+                'shortfall_4pm': max(0, peak_target_kwh - available_4pm)
+            })
+    
+    if days_data:
+        days = [d['day'] for d in days_data]
+        x_pos = np.arange(len(days))
+        width = 0.35
+        
+        # 6 AM bars (morning assessment)
+        available_6am = [d['available_6am'] for d in days_data]
+        shortfall_6am = [d['shortfall_6am'] for d in days_data]
+        
+        ax9.bar(x_pos - width/2, available_6am, width, alpha=0.7, color='lightblue', label='Available at 6 AM')
+        ax9.bar(x_pos - width/2, shortfall_6am, width, bottom=available_6am, alpha=0.7, color='lightcoral', label='Shortfall at 6 AM')
+        
+        # 4 PM bars (pre-peak assessment)  
+        available_4pm = [d['available_4pm'] for d in days_data]
+        shortfall_4pm = [d['shortfall_4pm'] for d in days_data]
+        
+        ax9.bar(x_pos + width/2, available_4pm, width, alpha=0.7, color='darkblue', label='Available at 4 PM')
+        ax9.bar(x_pos + width/2, shortfall_4pm, width, bottom=available_4pm, alpha=0.7, color='darkred', label='Shortfall at 4 PM')
+        
+        # Add target lines
+        peak_targets = [d['peak_target'] for d in days_data]
+        for i, target in enumerate(peak_targets):
+            ax9.plot([i - width/2 - 0.1, i + width/2 + 0.1], [target, target], 'g-', linewidth=2, alpha=0.8)
+        
+        # Formatting
+        ax9.set_xlabel('Day')
+        ax9.set_ylabel('Energy (kWh)')
+        ax9.set_title('Peak Load Predictions: Battery Readiness vs Target', fontweight='bold')
+        ax9.set_xticks(x_pos)
+        ax9.set_xticklabels([f'Day {d}' for d in days])
+        ax9.legend()
+        ax9.grid(True, alpha=0.3, axis='y')
+        
+        # Add statistics text
+        total_target = sum(peak_targets)
+        total_available_4pm = sum(available_4pm)
+        avg_coverage = (total_available_4pm / total_target * 100) if total_target > 0 else 0
+        
+        well_prepared = sum(1 for d in days_data if d['shortfall_4pm'] < 0.5)  # Less than 0.5 kWh shortfall
+        
+        stats_text = f'Week Summary:\nAvg Coverage: {avg_coverage:.1f}%\nWell-Prepared: {well_prepared}/{len(days)} days'
+        ax9.text(0.02, 0.98, stats_text, transform=ax9.transAxes, fontsize=9,
+                verticalalignment='top', bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.8))
+    else:
+        ax9.text(0.5, 0.5, 'No prediction data available', 
+                transform=ax9.transAxes, ha='center', va='center', fontsize=12)
+        ax9.set_title('Peak Load Predictions: Battery Readiness vs Target', fontweight='bold')
+    
+    # 10. Daily Energy Balance
+    ax10 = axes[4, 1]
+    
+    if days_data:
+        # Calculate daily energy flows
+        daily_energy = []
+        for day in week_days:
+            day_start = day * 24
+            day_end = min((day + 1) * 24, week_hours)
+            
+            if day_end > day_start:
+                day_hours = range(day_start, day_end)
+                day_solar = sum(custom_week['solar'][h] for h in day_hours if h < len(custom_week['solar']))
+                day_load = sum(custom_week['load'][h] for h in day_hours if h < len(custom_week['load']))
+                day_grid = sum(custom_week['grid_usage'][h] for h in day_hours if h < len(custom_week['grid_usage']))
+                
+                daily_energy.append({
+                    'day': day + 1,
+                    'solar': day_solar,
+                    'load': day_load,
+                    'grid': day_grid,
+                    'solar_fraction': (day_solar / day_load * 100) if day_load > 0 else 0
+                })
+        
+        if daily_energy:
+            days = [d['day'] for d in daily_energy]
+            solar_fractions = [d['solar_fraction'] for d in daily_energy]
+            
+            bars = ax10.bar(days, solar_fractions, alpha=0.7, color='gold')
+            
+            # Color code bars by performance
+            for i, (bar, fraction) in enumerate(zip(bars, solar_fractions)):
+                if fraction >= 70:
+                    bar.set_color('green')
+                elif fraction >= 40:
+                    bar.set_color('orange')
+                else:
+                    bar.set_color('red')
+            
+            ax10.axhline(y=50, color='blue', linestyle='--', alpha=0.7, label='50% Target')
+            ax10.set_xlabel('Day')
+            ax10.set_ylabel('Solar Fraction (%)')
+            ax10.set_title('Daily Solar Energy Fraction', fontweight='bold')
+            ax10.set_ylim(0, 100)
+            ax10.legend()
+            ax10.grid(True, alpha=0.3, axis='y')
+    else:
+        ax10.text(0.5, 0.5, 'No energy data available', 
+                 transform=ax10.transAxes, ha='center', va='center', fontsize=12)
+        ax10.set_title('Daily Solar Energy Fraction', fontweight='bold')
+    
     plt.tight_layout()
     plt.show()
+
+
+def plot_annual_soc_violations(dispatch_log):
+    """
+    Create a separate figure showing SOC violations across the full year
+    """
+    if dispatch_log is None or len(dispatch_log) == 0:
+        print("No dispatch log available for SOC violation analysis")
+        return
+    
+    print("📊 Generating annual SOC violation analysis...")
+    
+    # Create figure for annual analysis
+    fig, axes = plt.subplots(3, 1, figsize=(16, 12))
+    fig.suptitle('Annual Battery SOC Analysis: Violations & Performance', fontsize=16, fontweight='bold')
+    
+    # Convert hour index to day of year
+    hours = len(dispatch_log)
+    days = [h // 24 for h in range(hours)]
+    unique_days = sorted(set(days))
+    
+    # 1. Daily Minimum SOC
+    ax1 = axes[0]
+    daily_min_soc = []
+    daily_max_soc = []
+    violation_days = []
+    critical_days = []
+    
+    for day in unique_days:
+        day_start = day * 24
+        day_end = min((day + 1) * 24, hours)
+        day_data = dispatch_log.iloc[day_start:day_end]
+        
+        if len(day_data) > 0:
+            min_soc = day_data['soc'].min()
+            max_soc = day_data['soc'].max()
+            daily_min_soc.append(min_soc)
+            daily_max_soc.append(max_soc)
+            
+            # Track violation days
+            if min_soc < 15.0:
+                violation_days.append(day)
+            if min_soc < 10.0:
+                critical_days.append(day)
+        else:
+            daily_min_soc.append(50.0)
+            daily_max_soc.append(50.0)
+    
+    # Plot daily SOC range
+    ax1.fill_between(unique_days, daily_min_soc, daily_max_soc, alpha=0.3, color='blue', label='Daily SOC Range')
+    ax1.plot(unique_days, daily_min_soc, 'b-', linewidth=1, label='Daily Minimum SOC')
+    
+    # Mark violation days
+    if violation_days:
+        violation_min_soc = [daily_min_soc[day] for day in violation_days]
+        ax1.scatter(violation_days, violation_min_soc, c='orange', s=30, alpha=0.8, label=f'Low SOC Days (<15%): {len(violation_days)}')
+    
+    if critical_days:
+        critical_min_soc = [daily_min_soc[day] for day in critical_days]
+        ax1.scatter(critical_days, critical_min_soc, c='red', s=50, alpha=0.9, label=f'Critical SOC Days (<10%): {len(critical_days)}')
+    
+    # Reference lines
+    ax1.axhline(y=20, color='red', linestyle='--', alpha=0.7, label='Target Min SOC (20%)')
+    ax1.axhline(y=15, color='orange', linestyle='--', alpha=0.5, label='Warning Level (15%)')
+    ax1.axhline(y=10, color='red', linestyle='--', alpha=0.5, label='Critical Level (10%)')
+    ax1.axhline(y=80, color='green', linestyle='--', alpha=0.7, label='Target Max SOC (80%)')
+    
+    ax1.set_title('Daily SOC Range & Violations Throughout Year', fontweight='bold')
+    ax1.set_ylabel('SOC (%)')
+    ax1.set_ylim(0, 100)
+    ax1.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    ax1.grid(True, alpha=0.3)
+    
+    # 2. Monthly Violation Summary
+    ax2 = axes[1]
+    
+    # Group violations by month
+    monthly_violations = {month: {'low': 0, 'critical': 0, 'total_days': 0} for month in range(1, 13)}
+    
+    for day in unique_days:
+        # Approximate month (assuming 365-day year)
+        month = min(12, ((day * 12) // 365) + 1)
+        monthly_violations[month]['total_days'] += 1
+        
+        if day < len(daily_min_soc):
+            if daily_min_soc[day] < 15.0:
+                monthly_violations[month]['low'] += 1
+            if daily_min_soc[day] < 10.0:
+                monthly_violations[month]['critical'] += 1
+    
+    months = list(monthly_violations.keys())
+    low_violations = [monthly_violations[m]['low'] for m in months]
+    critical_violations = [monthly_violations[m]['critical'] for m in months]
+    
+    width = 0.35
+    x_pos = np.arange(len(months))
+    
+    bars1 = ax2.bar(x_pos - width/2, low_violations, width, alpha=0.7, color='orange', label='Low SOC Days (<15%)')
+    bars2 = ax2.bar(x_pos + width/2, critical_violations, width, alpha=0.7, color='red', label='Critical SOC Days (<10%)')
+    
+    ax2.set_title('Monthly SOC Violations', fontweight='bold')
+    ax2.set_xlabel('Month')
+    ax2.set_ylabel('Number of Days')
+    ax2.set_xticks(x_pos)
+    ax2.set_xticklabels(['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'])
+    ax2.legend()
+    ax2.grid(True, alpha=0.3, axis='y')
+    
+    # Add value labels on bars
+    for bar, value in zip(bars1, low_violations):
+        if value > 0:
+            ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.1, 
+                    str(value), ha='center', va='bottom', fontsize=9)
+    
+    for bar, value in zip(bars2, critical_violations):
+        if value > 0:
+            ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.1, 
+                    str(value), ha='center', va='bottom', fontsize=9)
+    
+    # 3. SOC Distribution Histogram
+    ax3 = axes[2]
+    
+    all_soc_values = dispatch_log['soc'].values
+    
+    # Create histogram
+    bins = np.arange(0, 101, 5)  # 5% bins
+    counts, _, patches = ax3.hist(all_soc_values, bins=bins, alpha=0.7, color='skyblue', edgecolor='black')
+    
+    # Color code bins by safety level
+    for i, patch in enumerate(patches):
+        bin_center = (bins[i] + bins[i+1]) / 2
+        if bin_center < 10:
+            patch.set_facecolor('red')
+        elif bin_center < 15:
+            patch.set_facecolor('orange')
+        elif bin_center < 20:
+            patch.set_facecolor('yellow')
+        else:
+            patch.set_facecolor('lightgreen')
+    
+    # Add reference lines
+    ax3.axvline(x=10, color='red', linestyle='--', alpha=0.8, label='Critical (10%)')
+    ax3.axvline(x=15, color='orange', linestyle='--', alpha=0.8, label='Warning (15%)')
+    ax3.axvline(x=20, color='green', linestyle='--', alpha=0.8, label='Target Min (20%)')
+    ax3.axvline(x=80, color='blue', linestyle='--', alpha=0.8, label='Target Max (80%)')
+    
+    ax3.set_title('SOC Distribution Throughout Year', fontweight='bold')
+    ax3.set_xlabel('State of Charge (%)')
+    ax3.set_ylabel('Hours')
+    ax3.legend()
+    ax3.grid(True, alpha=0.3, axis='y')
+    
+    # Add statistics text
+    stats_text = f'''Annual SOC Statistics:
+Min SOC: {all_soc_values.min():.1f}%
+Max SOC: {all_soc_values.max():.1f}%
+Avg SOC: {all_soc_values.mean():.1f}%
+Hours <10%: {sum(1 for x in all_soc_values if x < 10)} ({sum(1 for x in all_soc_values if x < 10)/len(all_soc_values)*100:.1f}%)
+Hours <15%: {sum(1 for x in all_soc_values if x < 15)} ({sum(1 for x in all_soc_values if x < 15)/len(all_soc_values)*100:.1f}%)'''
+    
+    ax3.text(0.98, 0.98, stats_text, transform=ax3.transAxes, fontsize=9,
+            verticalalignment='top', horizontalalignment='right',
+            bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    
+    plt.tight_layout()
+    plt.show()
+    
+    # Print summary
+    print(f"\n📋 Annual SOC Violation Summary:")
+    print("=" * 40)
+    print(f"Total violation days (<15% SOC): {len(violation_days)}/{len(unique_days)} ({len(violation_days)/len(unique_days)*100:.1f}%)")
+    print(f"Critical violation days (<10% SOC): {len(critical_days)}/{len(unique_days)} ({len(critical_days)/len(unique_days)*100:.1f}%)")
+    print(f"Worst month: {max(monthly_violations.keys(), key=lambda m: monthly_violations[m]['low'])} ({monthly_violations[max(monthly_violations.keys(), key=lambda m: monthly_violations[m]['low'])]['low']} days)")
+    
+    if critical_days:
+        print(f"\n🚨 Critical violation days: {critical_days[:10]}{'...' if len(critical_days) > 10 else ''}")
+    
+    return {
+        'violation_days': violation_days,
+        'critical_days': critical_days,
+        'monthly_violations': monthly_violations,
+        'daily_min_soc': daily_min_soc
+    }
 
 
 def main():
@@ -1067,13 +1836,33 @@ def main():
         pge_rate_plan
     )
     
-    # Generate plots
+    # Generate plots for different time periods
     print("\n📈 Generating visualization plots...")
+    
+    # Figure 1: First week of January (winter analysis)
+    print("  📊 Figure 1: January analysis (first week)...")
     plot_custom_dispatch_analysis(
         custom_sam_results, 
         dispatch_generator.dispatch_log, 
-        reference_sam_data
+        reference_sam_data,
+        month="January",
+        week_offset=0  # First week of year
     )
+    
+    # Figure 2: First week of July (summer analysis) 
+    print("  📊 Figure 2: July analysis (mid-summer week)...")
+    july_start_day = 31 + 28 + 31 + 30 + 31 + 30  # Jan+Feb+Mar+Apr+May+Jun = 181 days
+    plot_custom_dispatch_analysis(
+        custom_sam_results, 
+        dispatch_generator.dispatch_log, 
+        reference_sam_data,
+        month="July", 
+        week_offset=july_start_day + 7  # Second week of July for better summer representation
+    )
+    
+    # Figure 3: Annual SOC violation analysis
+    print("  📊 Figure 3: Annual SOC violation analysis...")
+    plot_annual_soc_violations(dispatch_generator.dispatch_log)
     
     print("\n✅ Custom dispatch demo completed successfully!")
     print("Check the displayed plots for detailed analysis.")
