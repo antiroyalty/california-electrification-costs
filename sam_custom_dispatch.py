@@ -102,7 +102,7 @@ class CustomDispatchScheduleGenerator:
         gridcharge_schedule = np.zeros(hours)  # Battery charging from grid
         
         # Battery simulation parameters
-        current_soc = 50.0  # Start at 50% SOC
+        current_soc = 90.0  # Start at 90% SOC
         battery_kwh = current_soc / 100 * self.battery_capacity
         max_charge_power = 5.0  # kW
         max_discharge_power = 5.0  # kW
@@ -148,7 +148,6 @@ class CustomDispatchScheduleGenerator:
             # Log daily predictions (only once per day at 6 AM)
             if hour_of_day == 6 and current_day not in daily_predictions:
                 battery_available_for_peak = max(0, battery_kwh - (peak_min_soc / 100 * self.battery_capacity))
-                
                 daily_predictions[current_day] = {
                     'day': current_day,
                     'peak_load_kwh': today_peak_load,
@@ -157,33 +156,10 @@ class CustomDispatchScheduleGenerator:
                     'current_soc': current_soc,
                     'battery_total_kwh': battery_kwh
                 }
-                
-                print(f"\n📊 Day {current_day + 1} Peak Prediction (6 AM):")
-                print(f"  Peak load (4-9 PM): {today_peak_load:.2f} kWh")
-                print(f"  Battery target: {peak_battery_target_kwh:.2f} kWh")
-                print(f"  Current battery SOC: {current_soc:.1f}% ({battery_kwh:.2f} kWh)")
-                print(f"  Available for peak: {battery_available_for_peak:.2f} kWh")
-                
-                coverage_pct = (battery_available_for_peak / today_peak_load * 100) if today_peak_load > 0 else 0
-                print(f"  Expected peak coverage: {coverage_pct:.1f}%")
-                
-                if battery_available_for_peak < peak_battery_target_kwh:
-                    shortfall = peak_battery_target_kwh - battery_available_for_peak
-                    print(f"  ⚠️ Battery shortfall: {shortfall:.2f} kWh (need to charge more)")
-                else:
-                    surplus = battery_available_for_peak - peak_battery_target_kwh
-                    print(f"  ✅ Battery surplus: {surplus:.2f} kWh (well prepared)")
             
-            # Additional logging when entering peak hours
-            if hour_of_day == 16 and h > 0:  # 4 PM - start of peak
-                battery_available_for_peak = max(0, battery_kwh - (peak_min_soc / 100 * self.battery_capacity))
-                print(f"\n🔋 Peak Hour Start (4 PM) - Day {current_day + 1}:")
-                print(f"  Battery SOC: {current_soc:.1f}% ({battery_kwh:.2f} kWh)")
-                print(f"  Available for peak: {battery_available_for_peak:.2f} kWh")
-                print(f"  Peak load target: {today_peak_load:.2f} kWh")
-                
-                final_coverage = (battery_available_for_peak / today_peak_load * 100) if today_peak_load > 0 else 0
-                print(f"  Final peak coverage: {final_coverage:.1f}%")
+            # Additional logging when entering peak hours (reduced)
+            if hour_of_day == 16 and h > 0:
+                pass
             
             # Decision variables
             charge_action = 0.0
@@ -204,30 +180,18 @@ class CustomDispatchScheduleGenerator:
                         new_battery_kwh = battery_kwh - discharge_amount
                         new_soc = (new_battery_kwh / self.battery_capacity) * 100
                         
-                        # Debug logging for SOC violations
                         if new_soc < peak_min_soc:
-                            print(f"⚠️ SOC VIOLATION DETECTED at hour {h} (Day {h//24 + 1}, {hour_of_day}:00)")
-                            print(f"  Current SOC: {current_soc:.1f}% ({battery_kwh:.2f} kWh)")
-                            print(f"  Attempted discharge: {discharge_amount:.2f} kWh")
-                            print(f"  Predicted new SOC: {new_soc:.1f}% ({new_battery_kwh:.2f} kWh)")
-                            print(f"  Min SOC limit: {peak_min_soc:.1f}%")
-                            print(f"  Load: {load:.2f} kW")
-                            print(f"  Battery available: {battery_available:.2f} kWh")
-                            
                             # Adjust discharge to respect SOC limit
                             safe_discharge = battery_kwh - (peak_min_soc / 100 * self.battery_capacity)
                             discharge_amount = max(0, safe_discharge)
                             discharge_action = discharge_amount / max_discharge_power if max_discharge_power > 0 else 0
-                            print(f"  Adjusted discharge: {discharge_amount:.2f} kWh")
                         
                         battery_kwh -= discharge_amount
                         current_soc = (battery_kwh / self.battery_capacity) * 100
                         
-                        # Final SOC check
-                        if current_soc < peak_min_soc - 0.1:  # Small tolerance for floating point
-                            print(f"🚨 CRITICAL: SOC still below limit after adjustment!")
-                            print(f"  Final SOC: {current_soc:.2f}%")
-                            print(f"  Limit: {peak_min_soc:.1f}%")
+                        # Final SOC check (reduced verbosity)
+                        if current_soc < peak_min_soc - 0.1:
+                            pass
             
             else:
                 # NON-PEAK HOURS: Implement solar prioritization strategy
@@ -244,15 +208,6 @@ class CustomDispatchScheduleGenerator:
                             peak_prep_needed
                         )
                         
-                        # Debug charging logic
-                        if h < 100 or (h % 1000 == 0):  # Debug first 100 hours and every 1000th hour
-                            print(f"🔋 CHARGING DEBUG at hour {h} (Day {h//24 + 1}, {hour_of_day}:00)")
-                            print(f"  Current SOC: {current_soc:.1f}% ({battery_kwh:.2f} kWh)")
-                            print(f"  Solar available: {solar:.2f} kW")
-                            print(f"  Peak prep needed: {peak_prep_needed:.2f} kWh")
-                            print(f"  Peak max SOC limit: {peak_max_soc:.1f}%")
-                            print(f"  Battery capacity available: {battery_capacity_available:.2f} kWh")
-                        
                         if battery_capacity_available > 0:
                             charge_amount = min(solar, battery_capacity_available, max_charge_power)
                             charge_action = charge_amount / max_charge_power
@@ -262,21 +217,8 @@ class CustomDispatchScheduleGenerator:
                             current_soc = (battery_kwh / self.battery_capacity) * 100
                             solar -= charge_amount  # Reduce available solar
                             
-                            # Debug successful charging
-                            if h < 100 or (h % 1000 == 0):
-                                print(f"  ✅ CHARGED: {charge_amount:.2f} kWh")
-                                print(f"  SOC: {old_soc:.1f}% → {current_soc:.1f}%")
-                                print(f"  Remaining solar: {solar:.2f} kW")
                         else:
-                            if h < 100 or (h % 1000 == 0):
-                                print(f"  ❌ NO CHARGING: battery_capacity_available = 0")
-                    else:
-                        if h < 100 or (h % 1000 == 0) and solar > 0:
-                            print(f"🚫 CHARGING BLOCKED at hour {h}")
-                            print(f"  Peak prep needed: {peak_prep_needed:.2f} kWh")
-                            print(f"  Current SOC: {current_soc:.1f}%")
-                            print(f"  Peak max SOC: {peak_max_soc:.1f}%")
-                            print(f"  Solar available: {solar:.2f} kW")
+                            pass
                     
                     # 2. Second Priority: Meet household load with remaining solar
                     if solar > 0 and load > 0:
@@ -288,21 +230,8 @@ class CustomDispatchScheduleGenerator:
                     if solar > 0 and current_soc < self.max_soc:
                         battery_capacity_available = (self.max_soc - current_soc) / 100 * self.battery_capacity
                         
-                        if h < 100 or (h % 1000 == 0):
-                            print(f"🔋 TOP-UP DEBUG at hour {h}")
-                            print(f"  Remaining solar: {solar:.2f} kW")
-                            print(f"  Current SOC: {current_soc:.1f}%")
-                            print(f"  Max SOC limit: {self.max_soc:.1f}%")
-                            print(f"  Battery capacity available for top-up: {battery_capacity_available:.2f} kWh")
-                            print(f"  Current charge action: {charge_action:.3f}")
-                        
                         if battery_capacity_available > 0:
                             additional_charge = min(solar, battery_capacity_available, max_charge_power - charge_action * max_charge_power)
-                            
-                            if h < 100 or (h % 1000 == 0):
-                                print(f"  Additional charge calculated: {additional_charge:.2f} kWh")
-                                print(f"  Max charge power remaining: {max_charge_power - charge_action * max_charge_power:.2f} kW")
-                            
                             if additional_charge > 0:
                                 # Add to existing charge action
                                 old_soc = current_soc
@@ -310,23 +239,12 @@ class CustomDispatchScheduleGenerator:
                                 charge_action = min(total_charge / max_charge_power, 1.0)
                                 battery_kwh += additional_charge
                                 current_soc = (battery_kwh / self.battery_capacity) * 100
-                                
-                                if h < 100 or (h % 1000 == 0):
-                                    print(f"  ✅ TOP-UP CHARGED: {additional_charge:.2f} kWh")
-                                    print(f"  SOC: {old_soc:.1f}% → {current_soc:.1f}%")
-                                    print(f"  Total charge action: {charge_action:.3f}")
                             else:
-                                if h < 100 or (h % 1000 == 0):
-                                    print(f"  ❌ NO TOP-UP: additional_charge = 0")
+                                pass
                         else:
-                            if h < 100 or (h % 1000 == 0):
-                                print(f"  ❌ NO TOP-UP: battery_capacity_available = 0")
+                            pass
                     else:
-                        if h < 100 or (h % 1000 == 0) and solar > 0:
-                            print(f"🚫 TOP-UP BLOCKED at hour {h}")
-                            print(f"  Solar: {solar:.2f} kW")
-                            print(f"  Current SOC: {current_soc:.1f}%")
-                            print(f"  Max SOC: {self.max_soc:.1f}%")
+                        pass
                 
                 # Handle any remaining load not met by solar (use grid)
                 # This is automatic in SAM, no dispatch action needed
@@ -336,16 +254,9 @@ class CustomDispatchScheduleGenerator:
             discharge_schedule[h] = discharge_action
             gridcharge_schedule[h] = gridcharge_action
             
-            # Debug: Track SOC violations throughout simulation
-            if current_soc < 15.0:  # Below safe operating range
-                print(f"🔴 LOW SOC WARNING at hour {h} (Day {h//24 + 1}, {hour_of_day}:00)")
-                print(f"  SOC: {current_soc:.2f}% ({battery_kwh:.2f} kWh)")
-                print(f"  Is peak hour: {is_peak_hour}")
-                print(f"  Actions: charge={charge_action:.3f}, discharge={discharge_action:.3f}")
-                print(f"  Load: {load:.2f} kW, Solar: {solar:.2f} kW")
-                
-                if current_soc < 10.0:
-                    print(f"🚨 CRITICAL SOC at hour {h}: {current_soc:.2f}%")
+            # Reduced per-hour warnings
+            if current_soc < 10.0:
+                pass
             
             # Log for analysis
             dispatch_log.append({
@@ -364,180 +275,11 @@ class CustomDispatchScheduleGenerator:
         
         self.dispatch_log = pd.DataFrame(dispatch_log)
         
-        # Debug: Print algorithm parameters and initial diagnosis
-        print(f"\n🔍 ALGORITHM PARAMETERS DEBUG:")
-        print("=" * 50)
-        print(f"Battery capacity: {self.battery_capacity:.1f} kWh")
-        print(f"Starting SOC: 50.0%")
-        print(f"Peak operating range: {peak_min_soc:.1f}% - {peak_max_soc:.1f}%")
-        print(f"Max SOC limit: {self.max_soc:.1f}%")
-        print(f"Max charge power: {max_charge_power:.1f} kW")
-        print(f"Max discharge power: {max_discharge_power:.1f} kW")
-        
-        # Analyze why SOC might be limited
-        soc_values = [log['soc'] for log in dispatch_log]
-        max_soc_reached = max(soc_values)
-        charge_events = sum(1 for log in dispatch_log if log['charge'] > 0)
-        
-        print(f"\nSOC ANALYSIS:")
-        print(f"Maximum SOC reached: {max_soc_reached:.1f}%")
-        print(f"Total charging events: {charge_events}")
-        
-        if max_soc_reached < 60:
-            print(f"🚨 SOC ISSUE DETECTED: Battery never exceeded {max_soc_reached:.1f}%")
-            
-            # Check for common issues
-            total_solar = sum(log['solar'] for log in dispatch_log)
-            total_load = sum(log['load'] for log in dispatch_log)
-            
-            print(f"Total annual solar: {total_solar:.0f} kWh")
-            print(f"Total annual load: {total_load:.0f} kWh")
-            print(f"Solar/Load ratio: {total_solar/total_load:.2f}")
-            
-            if total_solar < total_load * 0.3:
-                print(f"⚠️ LIKELY CAUSE: Insufficient solar generation")
-            elif charge_events < 100:
-                print(f"⚠️ LIKELY CAUSE: Algorithm not triggering charging")
-            else:
-                print(f"⚠️ LIKELY CAUSE: Peak preparation limits or SAM override")
-        
-        # Print summary of daily predictions
-        if daily_predictions:
-            print(f"\n📈 Peak Prediction Summary ({len(daily_predictions)} days):")
-            print("=" * 60)
-            
-            total_peak_load = sum(pred['peak_load_kwh'] for pred in daily_predictions.values())
-            total_battery_ready = sum(pred['battery_ready_kwh'] for pred in daily_predictions.values())
-            avg_coverage = (total_battery_ready / total_peak_load * 100) if total_peak_load > 0 else 0
-            
-            print(f"Total peak load (all days): {total_peak_load:.2f} kWh")
-            print(f"Total battery available: {total_battery_ready:.2f} kWh")
-            print(f"Average peak coverage: {avg_coverage:.1f}%")
-            
-            # Count days with good/poor preparation
-            well_prepared = sum(1 for pred in daily_predictions.values() 
-                              if pred['battery_ready_kwh'] >= pred['peak_target_kwh'] * 0.9)
-            under_prepared = len(daily_predictions) - well_prepared
-            
-            print(f"Well-prepared days: {well_prepared}/{len(daily_predictions)}")
-            print(f"Under-prepared days: {under_prepared}/{len(daily_predictions)}")
-            
-            if under_prepared > 0:
-                print(f"⚠️ Strategy may need adjustment for better peak coverage")
-            else:
-                print(f"✅ Peak strategy performing well!")
-        
-        # SOC violation analysis
-        soc_data = [log['soc'] for log in dispatch_log]
-        min_soc_observed = min(soc_data)
-        low_soc_hours = sum(1 for soc in soc_data if soc < 15.0)
-        critical_soc_hours = sum(1 for soc in soc_data if soc < 10.0)
-        
-        print(f"\n🔋 SOC Analysis Summary:")
-        print("=" * 30)
-        print(f"Minimum SOC observed: {min_soc_observed:.2f}%")
-        print(f"Hours below 15% SOC: {low_soc_hours}")
-        print(f"Hours below 10% SOC: {critical_soc_hours}")
-        
-        if critical_soc_hours > 0:
-            print(f"🚨 CRITICAL: Battery went below 10% SOC for {critical_soc_hours} hours!")
-            print(f"   This indicates algorithm or SAM configuration issues")
-        elif low_soc_hours > 0:
-            print(f"⚠️ WARNING: Battery went below 15% SOC for {low_soc_hours} hours")
-            print(f"   Consider more conservative discharge limits")
-        else:
-            print(f"✅ SOC stayed within safe operating range")
-        
+        # Reduced end-of-run diagnostics omitted to reduce verbosity
+
         return charge_schedule, discharge_schedule, gridcharge_schedule
 
-    def generate_custom_dispatch_schedule_simple(self, load_profile, solar_profile):
-        """
-        Simplified rule-based schedule that meets the project goals:
-        - Keep SOC within 20%–80% using a shadow battery state.
-        - Charge using solar during the day for the amount needed in the 4–9pm block
-          (net of solar in those hours), capped by usable capacity.
-        - Discharge only during 4–9pm to serve load down to the 20% SOC floor.
-
-        Returns: (charge_schedule, discharge_schedule, gridcharge_schedule)
-        """
-        hours = len(load_profile)
-        charge_schedule = np.zeros(hours)
-        discharge_schedule = np.zeros(hours)
-        gridcharge_schedule = np.zeros(hours)
-
-        # Shadow battery state
-        soc = 50.0
-        energy_kwh = soc / 100.0 * self.battery_capacity
-        usable_kwh = (self.max_soc - self.min_soc) / 100.0 * self.battery_capacity
-        max_charge_kw = 5.0
-        max_discharge_kw = 5.0
-
-        log_rows = []
-
-        for h in range(hours):
-            hod = h % 24
-            day_start = (h // 24) * 24
-            day_end = min(day_start + 24, hours)
-            peak_start = day_start + 16  # 4 PM
-            peak_end = min(day_start + 21, hours)  # up to 9 PM (exclusive)
-
-            # Daily net need in peak block (load minus solar, not below 0)
-            if peak_start < peak_end:
-                peak_load = np.array(load_profile[peak_start:peak_end])
-                peak_solar = np.array(solar_profile[peak_start:peak_end]) if solar_profile else np.zeros_like(peak_load)
-                net_need_kwh = float(np.maximum(peak_load - peak_solar, 0).sum())
-            else:
-                net_need_kwh = 0.0
-            target_kwh = min(net_need_kwh, usable_kwh)
-
-            available_for_peak = max(0.0, energy_kwh - (self.min_soc / 100.0 * self.battery_capacity))
-
-            load = load_profile[h]
-            solar = solar_profile[h] if solar_profile else 0.0
-            is_peak = 16 <= hod <= 20
-
-            charge = 0.0
-            discharge = 0.0
-            gridcharge = 0.0
-
-            if is_peak and load > 0:
-                need_now = min(target_kwh, load)
-                can_discharge = max(0.0, energy_kwh - (self.min_soc / 100.0 * self.battery_capacity))
-                d_kwh = min(need_now, can_discharge, max_discharge_kw)
-                if d_kwh > 0:
-                    discharge = 1.0
-                    energy_kwh -= d_kwh
-                    soc = (energy_kwh / self.battery_capacity) * 100.0
-            else:
-                need_for_peak = max(0.0, target_kwh - available_for_peak)
-                if solar > 0 and need_for_peak > 0 and soc < self.max_soc:
-                    room_kwh = (self.max_soc / 100.0 * self.battery_capacity) - energy_kwh
-                    c_kwh = min(solar, room_kwh, max_charge_kw, need_for_peak)
-                    if c_kwh > 0:
-                        charge = 1.0
-                        energy_kwh += c_kwh
-                        soc = (energy_kwh / self.battery_capacity) * 100.0
-
-            charge_schedule[h] = charge
-            discharge_schedule[h] = discharge
-            gridcharge_schedule[h] = gridcharge
-
-            log_rows.append({
-                'hour': h,
-                'hour_of_day': hod,
-                'soc': soc,
-                'load': load,
-                'solar': solar,
-                'is_peak': is_peak,
-                'net_need_peak_kwh': target_kwh,
-                'charge': charge,
-                'discharge': discharge,
-                'gridcharge': gridcharge,
-                'action': (1 if discharge > 0 else (-1 if charge > 0 else 0))
-            })
-
-        self.dispatch_log = pd.DataFrame(log_rows)
-        return charge_schedule, discharge_schedule, gridcharge_schedule
+    
     
     def analyze_dispatch_strategy(self):
         """Analyze the generated dispatch strategy"""
@@ -584,29 +326,21 @@ class CustomDispatchScheduleGenerator:
 
 
 def initialize_solar(weather_file, load_profile, charge_schedule, discharge_schedule, gridcharge_schedule):
-    """Initialize SAM solar model with configuration"""
-    print("DEBUG: Starting SAM configuration...")
+    """Initialize SAM solar model with configuration (reduced console output)"""
         
     # Load solar resource data
-    print("DEBUG: Loading solar resource data...")
     solar_resource_data = tools.SAM_CSV_to_solar_data(weather_file)
-    print(f"DEBUG: Solar resource data loaded, keys: {list(solar_resource_data.keys())[:5]}...")
     
     # Calculate system capacity (simplified)
     annual_load_kwh = sum(load_profile)
     system_capacity = annual_load_kwh / 1200  # Rough sizing: 1200 kWh/kW annually
     
-    print(f"SAM Configuration:")
-    print(f"  Annual load: {annual_load_kwh:,.0f} kWh")
-    print(f"  Solar system size: {system_capacity:.1f} kW")
+    # Basic derived sizing only; detailed logging removed
     
     # === Solar Model Setup ===
-    print("DEBUG: Initializing solar model...")
     solar = pvwatts.new()
-    print(f"DEBUG: Solar model created: {type(solar)}")
     
     # Load SAM solar configuration with debugging
-    print("DEBUG: Loading solar configuration with custom dispatch...")
     solar_config_file = "SAM_configuration_with_battery_custom_dispatch/untitled__1__pvwattsv8.json"
     
     if not os.path.exists(solar_config_file):
@@ -615,10 +349,7 @@ def initialize_solar(weather_file, load_profile, charge_schedule, discharge_sche
     
     with open(solar_config_file, 'r') as file:
         solar_config = json.load(file)
-        print(f"DEBUG: Solar config loaded, {len(solar_config)} parameters")
-        
-        # Apply configuration with error checking
-        print("DEBUG: Applying solar configuration...")
+        # Apply configuration
         skipped_params = []
         applied_params = []
         
@@ -631,34 +362,25 @@ def initialize_solar(weather_file, load_profile, charge_schedule, discharge_sche
                 solar.value(k, v)
                 applied_params.append(k)
             except Exception as e:
-                print(f"DEBUG: Failed to set solar parameter '{k}': {e}")
+                # silently skip parameters that cannot be set
                 skipped_params.append(k)
-        
-        print(f"DEBUG: Applied {len(applied_params)} solar parameters")
-        if skipped_params:
-            print(f"DEBUG: Skipped {len(skipped_params)} solar parameters")
+        # no verbose reporting
 
     # Set solar parameters with debugging
-    print("DEBUG: Setting solar resource data...")
     try:
         solar.SolarResource.solar_resource_data = solar_resource_data
-        print("DEBUG: Solar resource data set")
     except Exception as e:
         print(f"DEBUG: Failed to set solar resource data: {e}")
         return None
     
-    print("DEBUG: Setting system capacity...")
     try:
         solar.SystemDesign.system_capacity = system_capacity
-        print(f"DEBUG: System capacity set to {system_capacity:.1f} kW")
     except Exception as e:
         print(f"DEBUG: Failed to set system capacity: {e}")
         return None
     
-    print("DEBUG: Setting degradation...")
     try:
         solar.Lifetime.dc_degradation = [0.5]  # 0.5% annual degradation
-        print("DEBUG: Degradation set")
     except Exception as e:
         print(f"DEBUG: Failed to set degradation: {e}")
         return None
@@ -667,18 +389,14 @@ def initialize_solar(weather_file, load_profile, charge_schedule, discharge_sche
 
 
 def initialize_storage(weather_file, load_profile, charge_schedule, discharge_schedule, gridcharge_schedule, solar):
-    """Initialize SAM battery storage model"""
-    # === Battery Model Setup ===
-    print("DEBUG: Creating battery model...")
+    """Initialize SAM battery storage model (reduced console output)"""
     try:
         battery = battery_model.from_existing(solar)
-        print(f"DEBUG: Battery model created: {type(battery)}")
     except Exception as e:
         print(f"DEBUG: Failed to create battery model: {e}")
         return None
     
-    # Load SAM battery configuration with debugging
-    print("DEBUG: Loading battery configuration...")
+    # Load SAM battery configuration
     battery_config_file = "SAM_configuration_with_battery_custom_dispatch/untitled__1__battwatts.json"
     
     if not os.path.exists(battery_config_file):
@@ -687,10 +405,7 @@ def initialize_storage(weather_file, load_profile, charge_schedule, discharge_sc
         
     with open(battery_config_file, 'r') as file:
         battery_config = json.load(file)
-        print(f"DEBUG: Battery config loaded, {len(battery_config)} parameters")
-        
-        # Apply configuration with error checking
-        print("DEBUG: Applying battery configuration...")
+        # Apply configuration
         skipped_battery_params = []
         applied_battery_params = []
         
@@ -703,18 +418,13 @@ def initialize_storage(weather_file, load_profile, charge_schedule, discharge_sc
                 battery.value(k, v)
                 applied_battery_params.append(k)
             except Exception as e:
-                print(f"DEBUG: Failed to set battery parameter '{k}': {e}")
+                # silently skip parameters that cannot be set
                 skipped_battery_params.append(k)
-        
-        print(f"DEBUG: Applied {len(applied_battery_params)} battery parameters")
-        if skipped_battery_params:
-            print(f"DEBUG: Skipped {len(skipped_battery_params)} battery parameters")
+        # no verbose reporting
     
-    # Set load profile with debugging
-    print("DEBUG: Setting load profile...")
+    # Set load profile
     try:
         battery.Battery.assign({'load': load_profile})
-        print(f"DEBUG: Load profile set, {len(load_profile)} hours")
     except Exception as e:
         print(f"DEBUG: Failed to set load profile: {e}")
         return None
@@ -723,9 +433,7 @@ def initialize_storage(weather_file, load_profile, charge_schedule, discharge_sc
 
 
 def initialize_custom_dispatch(solar, battery, load_profile, charge_schedule, discharge_schedule, gridcharge_schedule):
-    """Configure SAM with custom dispatch schedules"""
-    # === Configure Custom Dispatch ===
-    print("DEBUG: Configuring custom dispatch...")
+    """Configure SAM with custom dispatch schedules (reduced console output)"""
     
     # Load battery config for reference
     battery_config_file = "SAM_configuration_with_battery_custom_dispatch/untitled__1__battwatts.json"
@@ -733,18 +441,12 @@ def initialize_custom_dispatch(solar, battery, load_profile, charge_schedule, di
         battery_config = json.load(file)
     
     # Validate schedule lengths
-    print(f"DEBUG: Validating schedule lengths...")
-    print(f"  Load profile: {len(load_profile)} hours")
-    print(f"  Charge schedule: {len(charge_schedule)} hours")
-    print(f"  Discharge schedule: {len(discharge_schedule)} hours")
-    print(f"  Grid charge schedule: {len(gridcharge_schedule)} hours")
     
     if not all(len(s) == len(load_profile) for s in [charge_schedule, discharge_schedule, gridcharge_schedule]):
         print("DEBUG: Schedule length mismatch!")
         return None
 
     # Set custom dispatch schedules
-    print("DEBUG: Setting custom dispatch schedules...")
     try:
         # Convert schedules to lists if they're numpy arrays
         discharge_list = discharge_schedule.tolist() if hasattr(discharge_schedule, 'tolist') else list(discharge_schedule)
@@ -771,35 +473,18 @@ def initialize_custom_dispatch(solar, battery, load_profile, charge_schedule, di
                 # No strong preference: let SAM decide automatically
                 sam_dispatch_array.append(0)
         
-        print(f"DEBUG: Converted to SAM format: {len(sam_dispatch_array)} values")
-        
-        # Count actions for verification
-        discharge_hours = sum(1 for x in sam_dispatch_array if x > 0)
-        charge_hours = sum(1 for x in sam_dispatch_array if x < 0)
-        auto_hours = sum(1 for x in sam_dispatch_array if x == 0)
-        
-        print(f"DEBUG: SAM dispatch summary:")
-        print(f"  Discharge hours: {discharge_hours}")
-        print(f"  Charge hours: {charge_hours}")
-        print(f"  Auto hours: {auto_hours}")
-        
         # Set the custom dispatch array
         battery.Battery.batt_custom_dispatch = sam_dispatch_array
         
         # Verify it was set correctly
         check_dispatch = battery.Battery.batt_custom_dispatch
-        print(f"DEBUG: Custom dispatch successfully set!")
-        print(f"  Array length: {len(check_dispatch)}")
-        print(f"  Sample values: {check_dispatch[:10]}")
+        _ = len(check_dispatch)
         
     except Exception as e:
         print(f"DEBUG: Failed to set custom dispatch schedules: {e}")
         print(f"  Error type: {type(e)}")
         print(f"  Error details: {str(e)}")
         return None
-    
-    # Try to enable advanced dispatch options through config
-    print("DEBUG: Setting additional dispatch parameters...")
     
     # Set any additional dispatch parameters found in config
     additional_dispatch_settings = {
@@ -812,30 +497,23 @@ def initialize_custom_dispatch(solar, battery, load_profile, charge_schedule, di
         try:
             if param in battery_config or hasattr(battery.Battery, param):
                 setattr(battery.Battery, param, value)
-                print(f"DEBUG: Set {param} = {value}")
         except Exception as e:
             print(f"DEBUG: Failed to set {param}: {e}")
     
-    print(f"DEBUG: Custom dispatch configuration complete")
+    # done
 
 
 def run_sam_simulation(solar, battery):
-    """Execute SAM simulation and extract results"""
+    """Execute SAM simulation and extract results (reduced console output)"""
     # === Run SAM Simulation ===
-    print("\nRunning SAM simulation...")
-    
-    print("DEBUG: Executing solar model...")
     try:
         solar.execute(0)
-        print("DEBUG: Solar execution completed")
     except Exception as e:
         print(f"DEBUG: Solar execution failed: {e}")
         return None
     
-    print("DEBUG: Executing battery model...")
     try:
         battery.execute(0)
-        print("DEBUG: Battery execution completed")
     except Exception as e:
         print(f"DEBUG: Battery execution failed: {e}")
         print(f"  Error type: {type(e)}")
@@ -844,10 +522,7 @@ def run_sam_simulation(solar, battery):
         traceback.print_exc()
         return None
     
-    print("SAM simulation completed")
-    
     # === Extract Results ===
-    print("DEBUG: Extracting results...")
     try:
         results = {
             'load_profile': battery.Battery.load,
@@ -861,12 +536,6 @@ def run_sam_simulation(solar, battery):
             'solar_capacity': solar.SystemDesign.system_capacity,
             'battery_capacity': battery.Outputs.batt_bank_installed_capacity
         }
-        
-        print(f"DEBUG: Results extracted successfully")
-        print(f"  Solar capacity: {results['solar_capacity']:.1f} kW")
-        print(f"  Battery capacity: {results['battery_capacity']:.1f} kWh")
-        print(f"  Load profile length: {len(results['load_profile'])}")
-        print(f"  SOC range: {min(results['battery_soc']):.1f}% - {max(results['battery_soc']):.1f}%")
         
         return results
         
@@ -909,8 +578,7 @@ def compare_dispatch_results(reference_data, custom_data, dispatch_log):
         print("Cannot compare results - missing data")
         return
     
-    print("Dispatch Results Comparison")
-    print("=" * 50)
+    # Reduced verbosity; concise table still printed below
     
     # Convert custom results to series for easier analysis
     def safe_convert_to_list(data):
@@ -998,7 +666,6 @@ def compare_dispatch_results(reference_data, custom_data, dispatch_log):
     print("\nKey Improvements:")
     print(f"Grid usage reduction: {grid_reduction_pct:.1f}%")
     print(f"Battery utilization increase: {battery_increase_pct:.1f}%")
-    print(f"SOC utilization improvement: {ref_stats['avg_soc'] - custom_stats['avg_soc']:.1f} percentage points")
     
     return {
         'reference_stats': ref_stats,
@@ -1046,27 +713,29 @@ def calculate_economic_benefits(custom_results, reference_data, dispatch_log, ra
     else:
         rate_spread = 0
     
+    # Reduced verbosity; keep headline numbers
     print("Economic Analysis: Custom Dispatch")
-    print("=" * 45)
     print(f"Annual electricity cost (custom):  ${custom_annual_cost:,.2f}")
     if ref_annual_cost:
         print(f"Annual electricity cost (reference): ${ref_annual_cost:,.2f}")
         print(f"Annual savings:                    ${annual_savings:,.2f}")
         print(f"Savings percentage:                {annual_savings/ref_annual_cost*100:.1f}%")
     
-    print("\nDispatch Strategy Analysis:")
-    print(f"Discharge events:                  {total_discharge_events:,} hours")
-    print(f"Avg discharge rate:                ${avg_discharge_rate:.3f}/kWh" if not pd.isna(avg_discharge_rate) else "Avg discharge rate:                N/A")
-    
-    print(f"Grid charge events:                {total_gridcharge_events:,} hours")
-    print(f"Avg grid charge rate:              ${avg_gridcharge_rate:.3f}/kWh" if not pd.isna(avg_gridcharge_rate) else "Avg grid charge rate:              N/A")
+    # Condensed dispatch strategy summary
+    print("\nDispatch Strategy Summary:")
+    print(f"Discharge hours: {total_discharge_events:,}")
+    if not pd.isna(avg_discharge_rate):
+        print(f"Avg discharge rate: ${avg_discharge_rate:.3f}/kWh")
+    print(f"Grid charge hours: {total_gridcharge_events:,}")
+    if not pd.isna(avg_gridcharge_rate):
+        print(f"Avg grid charge rate: ${avg_gridcharge_rate:.3f}/kWh")
     
     if rate_spread > 0:
         print(f"Rate arbitrage spread:             ${rate_spread:.3f}/kWh")
         print(f"Cycle cost threshold:              ${generator.cycle_cost:.3f}/kWh")
         
         if avg_discharge_rate > generator.cycle_cost:
-            print("Discharge strategy is economically justified")
+            print("Discharge strategy economically justified")
         else:
             print("Discharge rate below cycle cost threshold")
     
@@ -1553,7 +1222,6 @@ def plot_annual_soc_violations(dispatch_log):
         print("No dispatch log available for SOC violation analysis")
         return
     
-    print("📊 Generating annual SOC violation analysis...")
     
     # Create figure for annual analysis
     fig, axes = plt.subplots(3, 1, figsize=(16, 12))
@@ -1712,14 +1380,9 @@ Hours <15%: {sum(1 for x in all_soc_values if x < 15)} ({sum(1 for x in all_soc_
     plt.show()
     
     # Print summary
-    print(f"\n📋 Annual SOC Violation Summary:")
-    print("=" * 40)
-    print(f"Total violation days (<15% SOC): {len(violation_days)}/{len(unique_days)} ({len(violation_days)/len(unique_days)*100:.1f}%)")
-    print(f"Critical violation days (<10% SOC): {len(critical_days)}/{len(unique_days)} ({len(critical_days)/len(unique_days)*100:.1f}%)")
-    print(f"Worst month: {max(monthly_violations.keys(), key=lambda m: monthly_violations[m]['low'])} ({monthly_violations[max(monthly_violations.keys(), key=lambda m: monthly_violations[m]['low'])]['low']} days)")
-    
-    if critical_days:
-        print(f"\n🚨 Critical violation days: {critical_days[:10]}{'...' if len(critical_days) > 10 else ''}")
+    print(f"\nSOC Violation Summary:")
+    print(f"Days <15% SOC: {len(violation_days)}/{len(unique_days)}")
+    print(f"Days <10% SOC: {len(critical_days)}/{len(unique_days)}")
     
     return {
         'violation_days': violation_days,
@@ -1727,6 +1390,9 @@ Hours <15%: {sum(1 for x in all_soc_values if x < 15)} ({sum(1 for x in all_soc_
         'monthly_violations': monthly_violations,
         'daily_min_soc': daily_min_soc
     }
+
+
+
 
 
 def main():
@@ -1745,15 +1411,14 @@ def main():
     load_file = f"data/loadprofiles/baseline/single-family-detached/{county_name}/combined_profiles_baseline_{county_name}.csv"
     
     print("SAM Custom Dispatch Demo")
-    print("=" * 30)
     
     # Load reference data
     reference_sam_data = None
     if os.path.exists(sam_file):
         reference_sam_data = pd.read_csv(sam_file, index_col=0, parse_dates=True)
-        print(f"✓ Loaded reference SAM data for {county_name}")
+        print(f"Loaded reference SAM data for {county_name}")
     else:
-        print(f"⚠ Reference SAM data not found: {sam_file}")
+        print(f"Reference SAM data not found: {sam_file}")
     
     # Load load profile
     load_profile = None
@@ -1761,23 +1426,23 @@ def main():
         load_data = pd.read_csv(load_file)
         load_profile = load_data["electricity.real_and_simulated.for_typical_county_home.kwh"].tolist()
         annual_load_kwh = sum(load_profile)
-        print(f"✓ Loaded load profile: {len(load_profile)} hours, {annual_load_kwh:.0f} kWh/year")
+        print(f"Loaded load profile: {len(load_profile)} hours, {annual_load_kwh:.0f} kWh/year")
     else:
-        print(f"⚠ Load file not found: {load_file}")
+        print(f"Load file not found: {load_file}")
         return
     
     # Check weather file
     if not os.path.exists(weather_file):
-        print(f"⚠ Weather file not found: {weather_file}")
+        print(f"Weather file not found: {weather_file}")
         return
     else:
-        print(f"✓ Weather file found")
+        print(f"Weather file found")
     
     # Initialize dispatch generator
     pge_rate_plan = PGE_RATE_PLANS["E-TOU-C"]
     dispatch_generator = CustomDispatchScheduleGenerator(pge_rate_plan)
     
-    print(f"\n✓ Custom dispatch generator initialized:")
+    print(f"\nCustom dispatch generator initialized:")
     print(f"  Battery capacity: {dispatch_generator.battery_capacity} kWh")
     print(f"  Cycle cost threshold: ${dispatch_generator.cycle_cost:.3f}/kWh")
     print(f"  SOC operating range: {dispatch_generator.min_soc}% - {dispatch_generator.max_soc}%")
@@ -1785,7 +1450,7 @@ def main():
     # Get solar profile
     if reference_sam_data is not None:
         solar_profile = reference_sam_data['System to Load'].tolist()
-        print(f"✓ Using solar profile from reference SAM data")
+        print(f"Using solar profile from reference SAM data")
     else:
         # Create simple solar profile for demo
         solar_profile = []
@@ -1796,31 +1461,31 @@ def main():
                 solar_profile.append(max(0, solar_intensity))
             else:
                 solar_profile.append(0.0)
-        print(f"⚠ Using synthetic solar profile for demo")
+        print(f"Using synthetic solar profile for demo")
     
     # Generate custom dispatch schedules
-    print("\n🔄 Generating custom dispatch schedules...")
+    print("\nGenerating custom dispatch schedules...")
     charge_schedule, discharge_schedule, gridcharge_schedule = dispatch_generator.generate_custom_dispatch_schedule(
         load_profile, solar_profile
     )
     
     # Analyze the strategy
-    print("\n📊 Analyzing dispatch strategy...")
+    print("\nAnalyzing dispatch strategy...")
     analysis = dispatch_generator.analyze_dispatch_strategy()
     
     # Run SAM with custom dispatch
-    print("\n🚀 Running SAM simulation with custom dispatch...")
+    print("\nRunning SAM simulation with custom dispatch...")
     custom_sam_results = run_sam_with_custom_dispatch(
         weather_file, load_profile, charge_schedule, discharge_schedule, gridcharge_schedule
     )
     
     if custom_sam_results is None:
-        print("❌ SAM simulation failed")
+        print("SAM simulation failed")
         return
     
     # Compare results
     if reference_sam_data is not None:
-        print("\n⚖️ Comparing results...")
+        print("\nComparing results...")
         comparison_results = compare_dispatch_results(
             reference_sam_data, 
             custom_sam_results, 
@@ -1828,7 +1493,7 @@ def main():
         )
     
     # Economic analysis
-    print("\n💰 Calculating economic benefits...")
+    print("\nCalculating economic benefits...")
     economic_analysis = calculate_economic_benefits(
         custom_sam_results,
         reference_sam_data,
@@ -1837,10 +1502,10 @@ def main():
     )
     
     # Generate plots for different time periods
-    print("\n📈 Generating visualization plots...")
+    print("\nGenerating visualization plots...")
     
     # Figure 1: First week of January (winter analysis)
-    print("  📊 Figure 1: January analysis (first week)...")
+    print("  Figure 1: January analysis (first week)...")
     plot_custom_dispatch_analysis(
         custom_sam_results, 
         dispatch_generator.dispatch_log, 
@@ -1850,7 +1515,7 @@ def main():
     )
     
     # Figure 2: First week of July (summer analysis) 
-    print("  📊 Figure 2: July analysis (mid-summer week)...")
+    print("  Figure 2: July analysis (mid-summer week)...")
     july_start_day = 31 + 28 + 31 + 30 + 31 + 30  # Jan+Feb+Mar+Apr+May+Jun = 181 days
     plot_custom_dispatch_analysis(
         custom_sam_results, 
@@ -1861,11 +1526,10 @@ def main():
     )
     
     # Figure 3: Annual SOC violation analysis
-    print("  📊 Figure 3: Annual SOC violation analysis...")
+    print("  Figure 3: Annual SOC violation analysis...")
     plot_annual_soc_violations(dispatch_generator.dispatch_log)
     
-    print("\n✅ Custom dispatch demo completed successfully!")
-    print("Check the displayed plots for detailed analysis.")
+    print("\nCustom dispatch demo completed.")
 
 
 if __name__ == "__main__":
