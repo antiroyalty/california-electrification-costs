@@ -83,7 +83,14 @@ class CustomDispatchScheduleGenerator:
     
     def generate_custom_dispatch_schedule(self, load_profile, solar_profile):
         """
-        Generate SAM custom dispatch schedule arrays
+        Generate SAM custom dispatch schedule arrays using peak-hour optimization logic
+        
+        Strategy:
+        1) Look ahead to calculate daily peak load (4-9pm)
+        2) Prioritize solar for charging battery up to peak load requirement
+        3) Use remaining solar for household load, then top up battery
+        4) Discharge battery during 4-9pm peak hours (80% max, 20% min SOC)
+        
         Returns: (charge_schedule, discharge_schedule, gridcharge_schedule)
         """
         hours = len(load_profile)
@@ -94,57 +101,106 @@ class CustomDispatchScheduleGenerator:
         discharge_schedule = np.zeros(hours)   # Battery discharging to load
         gridcharge_schedule = np.zeros(hours)  # Battery charging from grid
         
-        # Simulate battery SOC to inform dispatch decisions
+        # Battery simulation parameters
         current_soc = 50.0  # Start at 50% SOC
         battery_kwh = current_soc / 100 * self.battery_capacity
+        max_charge_power = 5.0  # kW
+        max_discharge_power = 5.0  # kW
+        
+        # Operating SOC limits for peak hour strategy
+        peak_max_soc = 80.0  # Don't discharge below this during peak
+        peak_min_soc = 20.0  # Don't charge above this for peak preparation
         
         # Track hourly decisions for analysis
         dispatch_log = []
         
+        # Process each hour
         for h in range(hours):
             load = load_profile[h]
             solar = solar_profile[h] if solar_profile else 0
             rate = hourly_rates[h]
-            net_load = load - solar  # Positive = need more energy, Negative = excess solar
+            hour_of_day = h % 24
+            
+            # Determine if we're in peak hours (4 PM - 9 PM)
+            is_peak_hour = 16 <= hour_of_day <= 20  # 4 PM to 8 PM (inclusive)
+            
+            # Look ahead to calculate today's peak load requirement
+            day_start = (h // 24) * 24
+            day_end = min(day_start + 24, hours)
+            peak_start_today = day_start + 16  # 4 PM
+            peak_end_today = min(day_start + 21, hours)  # 9 PM
+            
+            # Calculate total peak load for today
+            if peak_end_today > peak_start_today:
+                today_peak_load = sum(load_profile[peak_start_today:peak_end_today])
+            else:
+                today_peak_load = 0
+            
+            # Calculate energy needed from battery for today's peak
+            # (This is the target we want to have stored)
+            peak_battery_target_kwh = min(today_peak_load, 
+                                        (peak_max_soc - peak_min_soc) / 100 * self.battery_capacity)
             
             # Decision variables
             charge_action = 0.0
             discharge_action = 0.0
             gridcharge_action = 0.0
             
-            # Strategy 1: Handle excess solar (charge battery when possible)
-            if net_load < 0 and current_soc < self.max_soc:
-                excess_energy = abs(net_load)
-                battery_capacity_available = (self.max_soc - current_soc) / 100 * self.battery_capacity
-                
-                if battery_capacity_available > 0:
-                    # Charge from excess solar (prioritize this over grid charging)
-                    charge_amount = min(excess_energy, battery_capacity_available, 5.0)  # 5kW max charge rate
-                    charge_action = charge_amount / 5.0  # Normalize to 0-1
-                    battery_kwh += charge_amount
-                    current_soc = (battery_kwh / self.battery_capacity) * 100
+            if is_peak_hour:
+                # PEAK HOURS (4-9 PM): Discharge battery to meet load
+                if current_soc > peak_min_soc and load > 0:
+                    battery_available = battery_kwh - (peak_min_soc / 100 * self.battery_capacity)
+                    
+                    if battery_available > 0:
+                        # Discharge to meet as much load as possible
+                        discharge_amount = min(load, battery_available, max_discharge_power)
+                        discharge_action = discharge_amount / max_discharge_power
+                        battery_kwh -= discharge_amount
+                        current_soc = (battery_kwh / self.battery_capacity) * 100
             
-            # Strategy 2: Discharge during high-rate periods when economically justified
-            elif net_load > 0 and current_soc > self.min_soc:
-                battery_available = battery_kwh - (self.min_soc / 100 * self.battery_capacity)
+            else:
+                # NON-PEAK HOURS: Implement solar prioritization strategy
+                if solar > 0:
+                    # Calculate how much battery capacity we need for peak preparation
+                    current_battery_energy = battery_kwh
+                    peak_prep_target = peak_battery_target_kwh + (peak_min_soc / 100 * self.battery_capacity)
+                    peak_prep_needed = max(0, peak_prep_target - current_battery_energy)
+                    
+                    # 1. First Priority: Charge battery for peak hours
+                    if peak_prep_needed > 0 and current_soc < peak_max_soc:
+                        battery_capacity_available = min(
+                            (peak_max_soc - current_soc) / 100 * self.battery_capacity,
+                            peak_prep_needed
+                        )
+                        
+                        if battery_capacity_available > 0:
+                            charge_amount = min(solar, battery_capacity_available, max_charge_power)
+                            charge_action = charge_amount / max_charge_power
+                            battery_kwh += charge_amount
+                            current_soc = (battery_kwh / self.battery_capacity) * 100
+                            solar -= charge_amount  # Reduce available solar
+                    
+                    # 2. Second Priority: Meet household load with remaining solar
+                    if solar > 0 and load > 0:
+                        load_met_by_solar = min(solar, load)
+                        solar -= load_met_by_solar  # Reduce available solar
+                        # Note: This doesn't require a dispatch action in SAM as it's automatic
+                    
+                    # 3. Third Priority: Top up battery with any remaining solar
+                    if solar > 0 and current_soc < self.max_soc:
+                        battery_capacity_available = (self.max_soc - current_soc) / 100 * self.battery_capacity
+                        
+                        if battery_capacity_available > 0:
+                            additional_charge = min(solar, battery_capacity_available, max_charge_power - charge_action * max_charge_power)
+                            if additional_charge > 0:
+                                # Add to existing charge action
+                                total_charge = charge_action * max_charge_power + additional_charge
+                                charge_action = min(total_charge / max_charge_power, 1.0)
+                                battery_kwh += additional_charge
+                                current_soc = (battery_kwh / self.battery_capacity) * 100
                 
-                if battery_available > 0 and rate > self.cycle_cost:
-                    # Economic discharge: rate exceeds battery degradation cost
-                    discharge_amount = min(net_load, battery_available, 5.0)  # 5kW max discharge rate
-                    discharge_action = discharge_amount / 5.0  # Normalize to 0-1
-                    battery_kwh -= discharge_amount
-                    current_soc = (battery_kwh / self.battery_capacity) * 100
-            
-            # Strategy 3: Grid charging during very low-rate periods
-            if rate < self.cycle_cost * 0.6 and current_soc < 90:  # Very cheap electricity
-                battery_capacity_available = (90 - current_soc) / 100 * self.battery_capacity  # Don't charge to 100%
-                
-                if battery_capacity_available > 0:
-                    # Charge from grid during super off-peak
-                    gridcharge_amount = min(battery_capacity_available, 2.0)  # 2kW grid charging
-                    gridcharge_action = gridcharge_amount / 5.0  # Normalize to 0-1 scale
-                    battery_kwh += gridcharge_amount
-                    current_soc = (battery_kwh / self.battery_capacity) * 100
+                # Handle any remaining load not met by solar (use grid)
+                # This is automatic in SAM, no dispatch action needed
             
             # Store dispatch decisions
             charge_schedule[h] = charge_action
@@ -154,11 +210,13 @@ class CustomDispatchScheduleGenerator:
             # Log for analysis
             dispatch_log.append({
                 'hour': h,
+                'hour_of_day': hour_of_day,
                 'rate': rate,
                 'soc': current_soc,
                 'load': load,
-                'solar': solar,
-                'net_load': net_load,
+                'solar': solar_profile[h] if solar_profile else 0,
+                'is_peak': is_peak_hour,
+                'peak_load_target': today_peak_load,
                 'charge': charge_action,
                 'discharge': discharge_action,
                 'gridcharge': gridcharge_action
@@ -380,37 +438,47 @@ def initialize_custom_dispatch(solar, battery, load_profile, charge_schedule, di
         charge_list = charge_schedule.tolist() if hasattr(charge_schedule, 'tolist') else list(charge_schedule)
         gridcharge_list = gridcharge_schedule.tolist() if hasattr(gridcharge_schedule, 'tolist') else list(gridcharge_schedule)
         
-        # Try different formats for custom dispatch
-        custom_dispatch_formats = [
-            # Format 1: List of lists (most common)
-            [discharge_list, charge_list, gridcharge_list],
-            # Format 2: Flattened approach
-            discharge_list + charge_list + gridcharge_list,
-            # Format 3: Transposed (hour-by-hour)
-            [[d, c, g] for d, c, g in zip(discharge_list, charge_list, gridcharge_list)]
-        ]
+        # Convert our optimization schedules to SAM's simple format
+        # SAM expects: positive = discharge, negative = charge, zero = no action
+        sam_dispatch_array = []
         
-        success = False
-        for i, custom_dispatch_array in enumerate(custom_dispatch_formats):
-            try:
-                print(f"DEBUG: Trying custom dispatch format {i+1}...")
-                battery.Battery.batt_custom_dispatch = custom_dispatch_array
-                
-                # Verify it was set
-                check_dispatch = battery.Battery.batt_custom_dispatch
-                print(f"DEBUG: Custom dispatch format {i+1} successful!")
-                print(f"  Array shape: {len(custom_dispatch_array)} x {len(custom_dispatch_array[0]) if isinstance(custom_dispatch_array[0], list) else 'flat'}")
-                success = True
-                break
-                
-            except Exception as e:
-                print(f"DEBUG: Format {i+1} failed: {e}")
-                continue
-        
-        if not success:
-            print("DEBUG: All custom dispatch formats failed")
-            return None
+        for h in range(len(load_profile)):
+            discharge_signal = discharge_list[h]
+            charge_signal = charge_list[h] 
+            gridcharge_signal = gridcharge_list[h]
             
+            # Decision logic: prioritize the strongest signal
+            if discharge_signal > 0.1:  # Threshold to avoid tiny values
+                # Want to discharge: positive value in SAM
+                sam_dispatch_array.append(1)
+            elif charge_signal > 0.1 or gridcharge_signal > 0.1:
+                # Want to charge (from solar or grid): negative value in SAM
+                sam_dispatch_array.append(-1)
+            else:
+                # No strong preference: let SAM decide automatically
+                sam_dispatch_array.append(0)
+        
+        print(f"DEBUG: Converted to SAM format: {len(sam_dispatch_array)} values")
+        
+        # Count actions for verification
+        discharge_hours = sum(1 for x in sam_dispatch_array if x > 0)
+        charge_hours = sum(1 for x in sam_dispatch_array if x < 0)
+        auto_hours = sum(1 for x in sam_dispatch_array if x == 0)
+        
+        print(f"DEBUG: SAM dispatch summary:")
+        print(f"  Discharge hours: {discharge_hours}")
+        print(f"  Charge hours: {charge_hours}")
+        print(f"  Auto hours: {auto_hours}")
+        
+        # Set the custom dispatch array
+        battery.Battery.batt_custom_dispatch = sam_dispatch_array
+        
+        # Verify it was set correctly
+        check_dispatch = battery.Battery.batt_custom_dispatch
+        print(f"DEBUG: Custom dispatch successfully set!")
+        print(f"  Array length: {len(check_dispatch)}")
+        print(f"  Sample values: {check_dispatch[:10]}")
+        
     except Exception as e:
         print(f"DEBUG: Failed to set custom dispatch schedules: {e}")
         print(f"  Error type: {type(e)}")
@@ -753,6 +821,140 @@ def plot_custom_dispatch_analysis(custom_results, dispatch_log, reference_data=N
     ax1.set_ylabel('SOC (%)')
     ax1.legend()
     ax1.grid(True, alpha=0.3)
+    
+    # 2. Electricity rates vs dispatch decisions
+    ax2 = axes[0, 1]
+    rates_week = dispatch_week['rate'][:week_hours].values
+    ax2.plot(hours, rates_week, 'purple', linewidth=2, label='Electricity Rate')
+    
+    # Get cycle cost from dispatch generator (need to access it)
+    cycle_cost = 0.185  # Default value, should match dispatch generator
+    ax2.axhline(y=cycle_cost, color='red', linestyle='--', alpha=0.7, 
+               label=f'Cycle Cost (${cycle_cost:.3f}/kWh)')
+    
+    # Mark discharge events with scatter plot
+    discharge_mask = dispatch_week['discharge'][:week_hours] > 0
+    if discharge_mask.any():
+        discharge_hours_scatter = [h for h in hours if h < len(discharge_mask) and discharge_mask.iloc[h]]
+        discharge_rates = [rates_week[h] for h in discharge_hours_scatter]
+        ax2.scatter(discharge_hours_scatter, discharge_rates, 
+                   c='red', alpha=0.8, s=30, label='Discharge Events')
+    
+    ax2.set_title('Rates vs Discharge Decisions', fontweight='bold')
+    ax2.set_ylabel('Rate ($/kWh)')
+    ax2.legend()
+    ax2.grid(True, alpha=0.3)
+    
+    # 3. Energy flows stacked area chart
+    ax3 = axes[1, 0]
+    solar_data = np.array(custom_week['solar'])
+    battery_data = np.array(custom_week['battery_discharge'])
+    grid_data = np.array(custom_week['grid_usage'])
+    load_data = np.array(custom_week['load'])
+    
+    # Create stacked areas for energy sources
+    ax3.fill_between(hours, 0, solar_data, alpha=0.7, color='gold', label='Solar')
+    ax3.fill_between(hours, solar_data, solar_data + battery_data, 
+                    alpha=0.7, color='green', label='Battery Discharge')
+    ax3.fill_between(hours, solar_data + battery_data, 
+                    solar_data + battery_data + grid_data,
+                    alpha=0.7, color='red', label='Grid')
+    
+    # Plot total load as a line
+    ax3.plot(hours, load_data, 'k-', linewidth=2, label='Total Load')
+    
+    ax3.set_title('Energy Sources (Custom Dispatch)', fontweight='bold')
+    ax3.set_ylabel('Power (kW)')
+    ax3.legend()
+    ax3.grid(True, alpha=0.3)
+    
+    # 4. Grid charging events with rate overlay
+    ax4 = axes[1, 1]
+    grid_to_battery = np.array(custom_week['grid_to_battery'])
+    ax4.bar(hours, grid_to_battery, alpha=0.7, color='orange', label='Grid to Battery')
+    
+    # Add rate overlay on secondary y-axis
+    ax4_rate = ax4.twinx()
+    ax4_rate.plot(hours, rates_week * 5, 'purple', linewidth=1, alpha=0.7, label='Rate (×5)')
+    ax4_rate.set_ylabel('Rate ($/kWh × 5)', color='purple')
+    
+    ax4.set_title('Grid Charging Events', fontweight='bold')
+    ax4.set_ylabel('Power (kW)')
+    ax4.legend(loc='upper left')
+    ax4_rate.legend(loc='upper right')
+    ax4.grid(True, alpha=0.3)
+    
+    # 5. Comparison with reference (if available)
+    ax5 = axes[2, 0]
+    if reference_data is not None:
+        ref_week_soc = reference_data['Battery SOC'].iloc[:week_hours].values
+        ax5.plot(hours, ref_week_soc, 'b--', linewidth=2, alpha=0.7, label='Reference SAM')
+        ax5.plot(hours, custom_week['battery_soc'], 'g-', linewidth=2, label='Custom Dispatch')
+        ax5.set_title('SOC Comparison: Reference vs Custom', fontweight='bold')
+        
+        # Add difference area
+        soc_diff = np.array(custom_week['battery_soc']) - ref_week_soc
+        ax5.fill_between(hours, ref_week_soc, custom_week['battery_soc'], 
+                        where=(soc_diff > 0), alpha=0.3, color='green', label='Custom Higher')
+        ax5.fill_between(hours, ref_week_soc, custom_week['battery_soc'], 
+                        where=(soc_diff < 0), alpha=0.3, color='red', label='Reference Higher')
+    else:
+        ax5.plot(hours, custom_week['battery_soc'], 'g-', linewidth=2, label='Custom Dispatch SOC')
+        ax5.set_title('Custom Dispatch Battery SOC', fontweight='bold')
+    
+    ax5.set_ylabel('SOC (%)')
+    ax5.set_xlabel('Hours')
+    ax5.legend()
+    ax5.grid(True, alpha=0.3)
+    
+    # 6. Economic benefit visualization
+    ax6 = axes[2, 1]
+    
+    # Calculate hourly savings (simplified)
+    if reference_data is not None:
+        ref_grid_week = reference_data['Grid to Load'].iloc[:week_hours].values
+        custom_grid_week = np.array(custom_week['grid_usage'])
+        hourly_savings = (ref_grid_week - custom_grid_week) * rates_week
+        cumulative_savings = np.cumsum(hourly_savings)
+        
+        ax6.plot(hours, cumulative_savings, 'g-', linewidth=2, label='Cumulative Savings')
+        ax6.fill_between(hours, 0, cumulative_savings, alpha=0.3, color='green')
+        
+        # Add hourly savings as bars
+        positive_savings = np.where(hourly_savings > 0, hourly_savings, 0)
+        negative_savings = np.where(hourly_savings < 0, hourly_savings, 0)
+        ax6.bar(hours, positive_savings, alpha=0.6, color='green', width=0.8)
+        ax6.bar(hours, negative_savings, alpha=0.6, color='red', width=0.8)
+        
+        ax6.set_title('Economic Benefits', fontweight='bold')
+        ax6.set_ylabel('Savings ($)')
+        
+        # Add summary text
+        total_savings = cumulative_savings[-1]
+        ax6.text(0.05, 0.95, f'Week Total: ${total_savings:.2f}', 
+                transform=ax6.transAxes, fontsize=10, verticalalignment='top',
+                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+    else:
+        # Show dispatch activity level
+        dispatch_intensity = (dispatch_week['discharge'][:week_hours] + 
+                            dispatch_week['charge'][:week_hours] + 
+                            dispatch_week['gridcharge'][:week_hours])
+        
+        bars = ax6.bar(hours, dispatch_intensity, alpha=0.7, color='blue', label='Dispatch Activity')
+        ax6.set_title('Dispatch Activity Level', fontweight='bold')
+        ax6.set_ylabel('Activity Level')
+        
+        # Color bars by activity type
+        for i, (h, activity) in enumerate(zip(hours, dispatch_intensity)):
+            if h < len(dispatch_week):
+                if dispatch_week['discharge'].iloc[h] > 0:
+                    bars[i].set_color('red')
+                elif dispatch_week['charge'].iloc[h] > 0 or dispatch_week['gridcharge'].iloc[h] > 0:
+                    bars[i].set_color('green')
+    
+    ax6.set_xlabel('Hours')
+    ax6.legend()
+    ax6.grid(True, alpha=0.3)
     
     plt.tight_layout()
     plt.show()
