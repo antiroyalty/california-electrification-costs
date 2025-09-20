@@ -1196,70 +1196,62 @@ def plot_custom_dispatch_analysis(custom_results, dispatch_log, reference_data=N
                 transform=ax5.transAxes, ha='center', va='center', fontsize=12)
         ax5.set_title('Peak Hour Load Coverage (4-9 PM)', fontweight='bold')
     
-    # 6. Battery Utilization Summary
+    # 6. Load Profile Analysis
     ax6 = axes[1, 2]
     
-    # Calculate daily battery utilization metrics
-    days_in_week = set(h // 24 for h in hours if h < week_hours)
-    daily_stats = []
+    # Plot the load profile for the week
+    load_data = np.array(custom_week['load'])
+    ax6.plot(hours, load_data, 'b-', linewidth=2, label='Household Load')
     
-    for day in days_in_week:
-        day_start = day * 24
-        day_end = min((day + 1) * 24, week_hours)
-        
-        if day_end > day_start:
-            day_hours = range(day_start, day_end)
-            day_soc = [custom_week['battery_soc'][h] for h in day_hours if h < len(custom_week['battery_soc'])]
-            day_charge = sum(dispatch_week['charge'].iloc[h] for h in day_hours if h < len(dispatch_week))
-            day_discharge = sum(dispatch_week['discharge'].iloc[h] for h in day_hours if h < len(dispatch_week))
-            
-            if day_soc:
-                daily_stats.append({
-                    'day': day + 1,
-                    'min_soc': min(day_soc),
-                    'max_soc': max(day_soc),
-                    'soc_range': max(day_soc) - min(day_soc),
-                    'charge_hours': day_charge,
-                    'discharge_hours': day_discharge,
-                    'total_activity': day_charge + day_discharge
-                })
+    # Highlight peak hours with background shading
+    week_days = set(h // 24 for h in hours if h < week_hours)
+    for day in week_days:
+        peak_start = day * 24 + 16  # 4 PM
+        peak_end = day * 24 + 21    # 9 PM
+        if peak_start < week_hours:
+            peak_end = min(peak_end, week_hours)
+            ax6.axvspan(peak_start, peak_end, alpha=0.2, color='orange', label='Peak Hours (4-9 PM)' if day == min(week_days) else "")
     
-    if daily_stats:
-        days = [d['day'] for d in daily_stats]
-        soc_ranges = [d['soc_range'] for d in daily_stats]
-        activities = [d['total_activity'] for d in daily_stats]
+    # Add daily average line
+    if len(load_data) > 0:
+        daily_avg = np.mean(load_data)
+        ax6.axhline(y=daily_avg, color='red', linestyle='--', alpha=0.7, label=f'Week Average ({daily_avg:.2f} kW)')
+    
+    # Calculate and show load statistics
+    if len(load_data) > 0:
+        load_min = np.min(load_data)
+        load_max = np.max(load_data)
+        load_range = load_max - load_min
         
-        # Create dual-axis plot
-        ax6_2 = ax6.twinx()
+        # Identify peak and off-peak periods
+        peak_loads = []
+        off_peak_loads = []
+        for h in hours:
+            hour_of_day = h % 24
+            if 16 <= hour_of_day <= 20:  # Peak hours
+                peak_loads.append(load_data[h])
+            else:
+                off_peak_loads.append(load_data[h])
         
-        bars = ax6.bar(days, soc_ranges, alpha=0.7, color='lightblue', label='SOC Range (%)')
-        line = ax6_2.plot(days, activities, 'ro-', linewidth=2, label='Activity Hours')
+        peak_avg = np.mean(peak_loads) if peak_loads else 0
+        off_peak_avg = np.mean(off_peak_loads) if off_peak_loads else 0
         
-        ax6.set_xlabel('Day')
-        ax6.set_ylabel('SOC Range (%)', color='blue')
-        ax6_2.set_ylabel('Activity Hours', color='red')
-        ax6.set_title('Daily Battery Utilization', fontweight='bold')
+        # Add statistics text
+        stats_text = f'''Load Statistics:
+Min: {load_min:.2f} kW
+Max: {load_max:.2f} kW
+Range: {load_range:.2f} kW
+Peak Avg: {peak_avg:.2f} kW
+Off-Peak Avg: {off_peak_avg:.2f} kW'''
         
-        # Add reference line for good utilization (30% SOC range)
-        ax6.axhline(y=30, color='green', linestyle='--', alpha=0.7, label='Target Range (30%)')
-        
-        # Combine legends
-        lines1, labels1 = ax6.get_legend_handles_labels()
-        lines2, labels2 = ax6_2.get_legend_handles_labels()
-        ax6.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
-        
-        ax6.grid(True, alpha=0.3, axis='y')
-        
-        # Add summary text
-        avg_range = np.mean(soc_ranges)
-        avg_activity = np.mean(activities)
-        util_text = f'Avg SOC Range: {avg_range:.1f}%\nAvg Activity: {avg_activity:.1f}h/day'
-        ax6.text(0.02, 0.98, util_text, transform=ax6.transAxes, fontsize=9,
-                verticalalignment='top', bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.8))
-    else:
-        ax6.text(0.5, 0.5, 'No utilization data available', 
-                transform=ax6.transAxes, ha='center', va='center', fontsize=12)
-        ax6.set_title('Daily Battery Utilization', fontweight='bold')
+        ax6.text(0.02, 0.98, stats_text, transform=ax6.transAxes, fontsize=9,
+                verticalalignment='top', bbox=dict(boxstyle='round', facecolor='lightcyan', alpha=0.8))
+    
+    ax6.set_title('Household Load Profile', fontweight='bold')
+    ax6.set_xlabel('Hours')
+    ax6.set_ylabel('Load (kW)')
+    ax6.legend()
+    ax6.grid(True, alpha=0.3)
     
     plt.tight_layout()
     plt.show()
