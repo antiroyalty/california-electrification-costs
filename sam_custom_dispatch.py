@@ -37,7 +37,6 @@ import PySAM.ResourceTools as tools
 sys.path.append('helpers')
 from electricity_rate_helpers import PGE_RATE_PLANS
 
-
 class CustomDispatchScheduleGenerator:
     """
     Generate SAM custom dispatch schedules based on utility rates and economic optimization
@@ -281,48 +280,48 @@ class CustomDispatchScheduleGenerator:
 
     
     
-    def analyze_dispatch_strategy(self):
-        """Analyze the generated dispatch strategy"""
-        if not hasattr(self, 'dispatch_log'):
-            print("No dispatch log available. Run generate_custom_dispatch_schedule first.")
-            return
+    # def analyze_dispatch_strategy(self):
+    #     """Analyze the generated dispatch strategy"""
+    #     if not hasattr(self, 'dispatch_log'):
+    #         print("No dispatch log available. Run generate_custom_dispatch_schedule first.")
+    #         return
         
-        log = self.dispatch_log
+    #     log = self.dispatch_log
         
-        # Calculate statistics
-        total_charge_events = (log['charge'] > 0).sum()
-        total_discharge_events = (log['discharge'] > 0).sum()
-        total_gridcharge_events = (log['gridcharge'] > 0).sum()
+    #     # Calculate statistics
+    #     total_charge_events = (log['charge'] > 0).sum()
+    #     total_discharge_events = (log['discharge'] > 0).sum()
+    #     total_gridcharge_events = (log['gridcharge'] > 0).sum()
         
-        avg_discharge_rate = log[log['discharge'] > 0]['rate'].mean()
-        avg_gridcharge_rate = log[log['gridcharge'] > 0]['rate'].mean()
+    #     avg_discharge_rate = log[log['discharge'] > 0]['rate'].mean()
+    #     avg_gridcharge_rate = log[log['gridcharge'] > 0]['rate'].mean()
         
-        min_soc = log['soc'].min()
-        max_soc = log['soc'].max()
-        avg_soc = log['soc'].mean()
+    #     min_soc = log['soc'].min()
+    #     max_soc = log['soc'].max()
+    #     avg_soc = log['soc'].mean()
         
-        print("Custom Dispatch Strategy Analysis")
-        print("=" * 45)
-        print(f"Charge events (solar):        {total_charge_events:,} hours")
-        print(f"Discharge events:             {total_discharge_events:,} hours")
-        print(f"Grid charge events:           {total_gridcharge_events:,} hours")
-        print()
-        print(f"Avg discharge rate:           ${avg_discharge_rate:.3f}/kWh" if not np.isnan(avg_discharge_rate) else "Avg discharge rate:           N/A")
-        print(f"Avg grid charge rate:         ${avg_gridcharge_rate:.3f}/kWh" if not np.isnan(avg_gridcharge_rate) else "Avg grid charge rate:         N/A")
-        print(f"Battery cycle cost:           ${self.cycle_cost:.3f}/kWh")
-        print()
-        print(f"SOC range: {min_soc:.1f}% - {max_soc:.1f}% (avg: {avg_soc:.1f}%)")
+    #     print("Custom Dispatch Strategy Analysis")
+    #     print("=" * 45)
+    #     print(f"Charge events (solar):        {total_charge_events:,} hours")
+    #     print(f"Discharge events:             {total_discharge_events:,} hours")
+    #     print(f"Grid charge events:           {total_gridcharge_events:,} hours")
+    #     print()
+    #     print(f"Avg discharge rate:           ${avg_discharge_rate:.3f}/kWh" if not np.isnan(avg_discharge_rate) else "Avg discharge rate:           N/A")
+    #     print(f"Avg grid charge rate:         ${avg_gridcharge_rate:.3f}/kWh" if not np.isnan(avg_gridcharge_rate) else "Avg grid charge rate:         N/A")
+    #     print(f"Battery cycle cost:           ${self.cycle_cost:.3f}/kWh")
+    #     print()
+    #     print(f"SOC range: {min_soc:.1f}% - {max_soc:.1f}% (avg: {avg_soc:.1f}%)")
         
-        return {
-            'charge_events': total_charge_events,
-            'discharge_events': total_discharge_events,
-            'gridcharge_events': total_gridcharge_events,
-            'avg_discharge_rate': avg_discharge_rate,
-            'avg_gridcharge_rate': avg_gridcharge_rate,
-            'min_soc': min_soc,
-            'max_soc': max_soc,
-            'avg_soc': avg_soc
-        }
+    #     return {
+    #         'charge_events': total_charge_events,
+    #         'discharge_events': total_discharge_events,
+    #         'gridcharge_events': total_gridcharge_events,
+    #         'avg_discharge_rate': avg_discharge_rate,
+    #         'avg_gridcharge_rate': avg_gridcharge_rate,
+    #         'min_soc': min_soc,
+    #         'max_soc': max_soc,
+    #         'avg_soc': avg_soc
+    #     }
 
 
 def initialize_solar(weather_file, load_profile, charge_schedule, discharge_schedule, gridcharge_schedule):
@@ -428,7 +427,18 @@ def initialize_storage(weather_file, load_profile, charge_schedule, discharge_sc
     except Exception as e:
         print(f"DEBUG: Failed to set load profile: {e}")
         return None
-    
+
+    # Align SAM's initial SOC with desired start (Battwatts expects this on Battery)
+    try:
+        # Prefer value() to cover cases where group attribute access differs
+        battery.value('batt_initial_SOC', 90.0)
+    except Exception:
+        try:
+            if hasattr(battery, 'Battery') and hasattr(battery.Battery, 'batt_initial_SOC'):
+                battery.Battery.batt_initial_SOC = 90.0
+        except Exception:
+            pass
+
     return battery
 
 
@@ -1470,8 +1480,8 @@ def main():
     )
     
     # Analyze the strategy
-    print("\nAnalyzing dispatch strategy...")
-    analysis = dispatch_generator.analyze_dispatch_strategy()
+    # print("\nAnalyzing dispatch strategy...")
+    # analysis = dispatch_generator.analyze_dispatch_strategy()
     
     # Run SAM with custom dispatch
     print("\nRunning SAM simulation with custom dispatch...")
