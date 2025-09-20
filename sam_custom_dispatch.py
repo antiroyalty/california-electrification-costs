@@ -100,8 +100,8 @@ class CustomDispatchScheduleGenerator:
         discharge_schedule = np.zeros(hours)   # Battery discharging to load
         gridcharge_schedule = np.zeros(hours)  # Battery charging from grid
         
-        # Battery simulation parameters
-        current_soc = 90.0  # Start at 90% SOC
+        # Battery simulation parameters (align with Battwatts default ~50% so plots match SAM)
+        current_soc = 50.0
         battery_kwh = current_soc / 100 * self.battery_capacity
         max_charge_power = 5.0  # kW
         max_discharge_power = 5.0  # kW
@@ -404,6 +404,13 @@ def initialize_storage(weather_file, load_profile, charge_schedule, discharge_sc
         
     with open(battery_config_file, 'r') as file:
         battery_config = json.load(file)
+        # DEBUG: show configured simple capacity
+        try:
+            conf_kwh = battery_config.get('batt_simple_kwh', None)
+            conf_kw = battery_config.get('batt_simple_kw', None)
+            print(f"DEBUG: Config batt_simple_kwh={conf_kwh}, batt_simple_kw={conf_kw} (from {battery_config_file})")
+        except Exception:
+            pass
         # Apply configuration
         skipped_battery_params = []
         applied_battery_params = []
@@ -432,12 +439,50 @@ def initialize_storage(weather_file, load_profile, charge_schedule, discharge_sc
     try:
         # Prefer value() to cover cases where group attribute access differs
         battery.value('batt_initial_SOC', 90.0)
+        # Also align min/max SOC bounds if available
+        try:
+            battery.value('batt_minimum_SOC', 20.0)
+        except Exception:
+            pass
+        try:
+            battery.value('batt_maximum_SOC', 80.0)
+        except Exception:
+            pass
     except Exception:
         try:
             if hasattr(battery, 'Battery') and hasattr(battery.Battery, 'batt_initial_SOC'):
                 battery.Battery.batt_initial_SOC = 90.0
+            if hasattr(battery.Battery, 'batt_minimum_SOC'):
+                battery.Battery.batt_minimum_SOC = 20.0
+            if hasattr(battery.Battery, 'batt_maximum_SOC'):
+                battery.Battery.batt_maximum_SOC = 80.0
         except Exception:
             pass
+
+    # DEBUG: Report SOC inputs as seen before execution
+    try:
+        soc_init = None
+        soc_min = None
+        soc_max = None
+        if hasattr(battery, 'Battery'):
+            if hasattr(battery.Battery, 'batt_initial_SOC'):
+                soc_init = battery.Battery.batt_initial_SOC
+            if hasattr(battery.Battery, 'batt_minimum_SOC'):
+                soc_min = battery.Battery.batt_minimum_SOC
+            if hasattr(battery.Battery, 'batt_maximum_SOC'):
+                soc_max = battery.Battery.batt_maximum_SOC
+        print(f"DEBUG: Pre-exec Battwatts SOC params -> initial: {soc_init}, min: {soc_min}, max: {soc_max}")
+        # Also report simple capacity values as seen on the model
+        model_kwh = None
+        model_kw = None
+        if hasattr(battery, 'Battery'):
+            if hasattr(battery.Battery, 'batt_simple_kwh'):
+                model_kwh = battery.Battery.batt_simple_kwh
+            if hasattr(battery.Battery, 'batt_simple_kw'):
+                model_kw = battery.Battery.batt_simple_kw
+        print(f"DEBUG: Pre-exec Battwatts capacity (input) kWh={model_kwh}, kW={model_kw}")
+    except Exception:
+        pass
 
     return battery
 
@@ -514,7 +559,6 @@ def initialize_custom_dispatch(solar, battery, load_profile, charge_schedule, di
 
 
 def run_sam_simulation(solar, battery):
-    """Execute SAM simulation and extract results (reduced console output)"""
     # === Run SAM Simulation ===
     try:
         solar.execute(0)
@@ -523,6 +567,23 @@ def run_sam_simulation(solar, battery):
         return None
     
     try:
+        # Ensure initial SOC is set just before execution (Battwatts expects percent 0–100)
+        try:
+            battery.value('batt_initial_SOC', 90.0)
+        except Exception:
+            try:
+                if hasattr(battery, 'Battery') and hasattr(battery.Battery, 'batt_initial_SOC'):
+                    battery.Battery.batt_initial_SOC = 90.0
+            except Exception:
+                pass
+        # DEBUG: Echo the current SOC inputs right before execution
+        try:
+            soc_init = None
+            if hasattr(battery, 'Battery') and hasattr(battery.Battery, 'batt_initial_SOC'):
+                soc_init = battery.Battery.batt_initial_SOC
+            print(f"DEBUG: Pre-execute batt_initial_SOC = {soc_init}")
+        except Exception:
+            pass
         battery.execute(0)
     except Exception as e:
         print(f"DEBUG: Battery execution failed: {e}")
@@ -546,6 +607,23 @@ def run_sam_simulation(solar, battery):
             'solar_capacity': solar.SystemDesign.system_capacity,
             'battery_capacity': battery.Outputs.batt_bank_installed_capacity
         }
+        # DEBUG: Show first day SOC to verify starting state
+        try:
+            soc = results['battery_soc']
+            print(f"DEBUG: SOC first 12 hours: {[round(x,1) for x in soc[:12]]}")
+        except Exception:
+            pass
+        # DEBUG: Report installed battery capacity and simple input if available
+        try:
+            installed_kwh = results.get('battery_capacity', None)
+            simple_kwh = None
+            simple_kw = None
+            if hasattr(battery, 'Battery'):
+                simple_kwh = getattr(battery.Battery, 'batt_simple_kwh', None)
+                simple_kw = getattr(battery.Battery, 'batt_simple_kw', None)
+            print(f"DEBUG: Post-exec Battwatts capacity -> installed_kwh={installed_kwh}, simple_kwh={simple_kwh}, simple_kw={simple_kw}")
+        except Exception:
+            pass
         
         return results
         
@@ -578,6 +656,35 @@ def run_sam_with_custom_dispatch(weather_file, load_profile, charge_schedule, di
         import traceback
         traceback.print_exc()
         return None
+
+
+def generate_simple_precharge_schedule(load_profile, precharge_hours=24, target_soc=90.0):
+    """
+    Build a very simple custom dispatch schedule that forces charging for a given
+    number of hours (default: first 24 hours). Intended for diagnostics to see if
+    SOC can reach a high value (e.g., 90%).
+
+    Notes:
+    - SAM's Battwatts honors SOC limits; to reach `target_soc`, ensure the model's
+      maximum SOC is >= target_soc (e.g., set batt_maximum_SOC to 90 or 100).
+    - With custom dispatch in simple mode, SAM will source charging from PV and/or
+      grid (if grid charging is enabled). Our initializer sets
+      batt_dispatch_auto_can_gridcharge = 1 so grid charging is allowed.
+
+    Returns:
+      (charge_schedule, discharge_schedule, gridcharge_schedule) as arrays of 0/1.
+    """
+    hours = len(load_profile)
+    charge_schedule = np.zeros(hours)
+    discharge_schedule = np.zeros(hours)
+    gridcharge_schedule = np.zeros(hours)
+
+    # Force charge for the first `precharge_hours` (cap to available hours)
+    end = min(precharge_hours, hours)
+    charge_schedule[:end] = 1.0
+    gridcharge_schedule[:end] = 1.0  # Redundant for our converter, but explicit
+
+    return charge_schedule, discharge_schedule, gridcharge_schedule
 
 
 def compare_dispatch_results(reference_data, custom_data, dispatch_log):
@@ -803,8 +910,8 @@ def plot_custom_dispatch_analysis(custom_results, dispatch_log, reference_data=N
     hours = range(len(custom_week['load']))
     week_hours = len(custom_week['load'])
     
-    # Create subplots - extra row for solar analysis and peak predictions
-    fig, axes = plt.subplots(5, 2, figsize=(16, 20))
+    # Create subplots (reduced to 3x2 after removing 4 plots)
+    fig, axes = plt.subplots(3, 2, figsize=(16, 12))
     week_start_day = (actual_start // 24) + 1
     fig.suptitle(f'SAM Custom Dispatch Analysis: Week Starting Day {week_start_day} ({month})', fontsize=16, fontweight='bold')
     
@@ -843,93 +950,52 @@ def plot_custom_dispatch_analysis(custom_results, dispatch_log, reference_data=N
     ax1.legend()
     ax1.grid(True, alpha=0.3)
     
-    # 2. Electricity rates vs dispatch decisions
+    # Skip Rates vs Discharge Decisions plot - removed per user request
+    
+    # 2. Energy flows stacked area chart
     ax2 = axes[0, 1]
-    rates_week = dispatch_week['rate'][:week_hours].values
-    ax2.plot(hours, rates_week, 'purple', linewidth=2, label='Electricity Rate')
-    
-    # Get cycle cost from dispatch generator (need to access it)
-    cycle_cost = 0.185  # Default value, should match dispatch generator
-    ax2.axhline(y=cycle_cost, color='red', linestyle='--', alpha=0.7, 
-               label=f'Cycle Cost (${cycle_cost:.3f}/kWh)')
-    
-    # Mark discharge events with scatter plot
-    discharge_mask = dispatch_week['discharge'][:week_hours] > 0
-    if discharge_mask.any():
-        discharge_hours_scatter = [h for h in hours if h < len(discharge_mask) and discharge_mask.iloc[h]]
-        discharge_rates = [rates_week[h] for h in discharge_hours_scatter]
-        ax2.scatter(discharge_hours_scatter, discharge_rates, 
-                   c='red', alpha=0.8, s=30, label='Discharge Events')
-    
-    ax2.set_title('Rates vs Discharge Decisions', fontweight='bold')
-    ax2.set_ylabel('Rate ($/kWh)')
-    ax2.legend()
-    ax2.grid(True, alpha=0.3)
-    
-    # 3. Energy flows stacked area chart
-    ax3 = axes[1, 0]
     solar_data = np.array(custom_week['solar'])
     battery_data = np.array(custom_week['battery_discharge'])
     grid_data = np.array(custom_week['grid_usage'])
     load_data = np.array(custom_week['load'])
     
     # Create stacked areas for energy sources
-    ax3.fill_between(hours, 0, solar_data, alpha=0.7, color='gold', label='Solar')
-    ax3.fill_between(hours, solar_data, solar_data + battery_data, 
+    ax2.fill_between(hours, 0, solar_data, alpha=0.7, color='gold', label='Solar')
+    ax2.fill_between(hours, solar_data, solar_data + battery_data, 
                     alpha=0.7, color='green', label='Battery Discharge')
-    ax3.fill_between(hours, solar_data + battery_data, 
+    ax2.fill_between(hours, solar_data + battery_data, 
                     solar_data + battery_data + grid_data,
                     alpha=0.7, color='red', label='Grid')
     
     # Plot total load as a line
-    ax3.plot(hours, load_data, 'k-', linewidth=2, label='Total Load')
+    ax2.plot(hours, load_data, 'k-', linewidth=2, label='Total Load')
     
-    ax3.set_title('Energy Sources (Custom Dispatch)', fontweight='bold')
-    ax3.set_ylabel('Power (kW)')
-    ax3.legend()
-    ax3.grid(True, alpha=0.3)
+    ax2.set_title('Energy Sources (Custom Dispatch)', fontweight='bold')
+    ax2.set_ylabel('Power (kW)')
+    ax2.legend()
+    ax2.grid(True, alpha=0.3)
     
-    # 4. Grid charging events with rate overlay
-    ax4 = axes[1, 1]
+    # 3. Grid charging events with rate overlay
+    ax3 = axes[1, 0]
     grid_to_battery = np.array(custom_week['grid_to_battery'])
-    ax4.bar(hours, grid_to_battery, alpha=0.7, color='orange', label='Grid to Battery')
+    ax3.bar(hours, grid_to_battery, alpha=0.7, color='orange', label='Grid to Battery')
     
     # Add rate overlay on secondary y-axis
-    ax4_rate = ax4.twinx()
-    ax4_rate.plot(hours, rates_week * 5, 'purple', linewidth=1, alpha=0.7, label='Rate (×5)')
-    ax4_rate.set_ylabel('Rate ($/kWh × 5)', color='purple')
+    rates_week = dispatch_week['rate'][:week_hours].values
+    ax3_rate = ax3.twinx()
+    ax3_rate.plot(hours, rates_week * 5, 'purple', linewidth=1, alpha=0.7, label='Rate (×5)')
+    ax3_rate.set_ylabel('Rate ($/kWh × 5)', color='purple')
     
-    ax4.set_title('Grid Charging Events', fontweight='bold')
-    ax4.set_ylabel('Power (kW)')
-    ax4.legend(loc='upper left')
-    ax4_rate.legend(loc='upper right')
-    ax4.grid(True, alpha=0.3)
+    ax3.set_title('Grid Charging Events', fontweight='bold')
+    ax3.set_ylabel('Power (kW)')
+    ax3.legend(loc='upper left')
+    ax3_rate.legend(loc='upper right')
+    ax3.grid(True, alpha=0.3)
     
-    # 5. Comparison with reference (if available)
-    ax5 = axes[2, 0]
-    if reference_data is not None:
-        ref_week_soc = reference_data['Battery SOC'].iloc[:week_hours].values
-        ax5.plot(hours, ref_week_soc, 'b--', linewidth=2, alpha=0.7, label='Reference SAM')
-        ax5.plot(hours, custom_week['battery_soc'], 'g-', linewidth=2, label='Custom Dispatch')
-        ax5.set_title('SOC Comparison: Reference vs Custom', fontweight='bold')
-        
-        # Add difference area
-        soc_diff = np.array(custom_week['battery_soc']) - ref_week_soc
-        ax5.fill_between(hours, ref_week_soc, custom_week['battery_soc'], 
-                        where=(soc_diff > 0), alpha=0.3, color='green', label='Custom Higher')
-        ax5.fill_between(hours, ref_week_soc, custom_week['battery_soc'], 
-                        where=(soc_diff < 0), alpha=0.3, color='red', label='Reference Higher')
-    else:
-        ax5.plot(hours, custom_week['battery_soc'], 'g-', linewidth=2, label='Custom Dispatch SOC')
-        ax5.set_title('Custom Dispatch Battery SOC', fontweight='bold')
+    # Skip SOC comparison plot - removed per user request
     
-    ax5.set_ylabel('SOC (%)')
-    ax5.set_xlabel('Hours')
-    ax5.legend()
-    ax5.grid(True, alpha=0.3)
-    
-    # 6. Economic benefit visualization
-    ax6 = axes[2, 1]
+    # 4. Economic benefit visualization
+    ax4 = axes[1, 1]
     
     # Calculate hourly savings (simplified)
     if reference_data is not None:
@@ -938,22 +1004,22 @@ def plot_custom_dispatch_analysis(custom_results, dispatch_log, reference_data=N
         hourly_savings = (ref_grid_week - custom_grid_week) * rates_week
         cumulative_savings = np.cumsum(hourly_savings)
         
-        ax6.plot(hours, cumulative_savings, 'g-', linewidth=2, label='Cumulative Savings')
-        ax6.fill_between(hours, 0, cumulative_savings, alpha=0.3, color='green')
+        ax4.plot(hours, cumulative_savings, 'g-', linewidth=2, label='Cumulative Savings')
+        ax4.fill_between(hours, 0, cumulative_savings, alpha=0.3, color='green')
         
         # Add hourly savings as bars
         positive_savings = np.where(hourly_savings > 0, hourly_savings, 0)
         negative_savings = np.where(hourly_savings < 0, hourly_savings, 0)
-        ax6.bar(hours, positive_savings, alpha=0.6, color='green', width=0.8)
-        ax6.bar(hours, negative_savings, alpha=0.6, color='red', width=0.8)
+        ax4.bar(hours, positive_savings, alpha=0.6, color='green', width=0.8)
+        ax4.bar(hours, negative_savings, alpha=0.6, color='red', width=0.8)
         
-        ax6.set_title('Economic Benefits', fontweight='bold')
-        ax6.set_ylabel('Savings ($)')
+        ax4.set_title('Economic Benefits', fontweight='bold')
+        ax4.set_ylabel('Savings ($)')
         
         # Add summary text
         total_savings = cumulative_savings[-1]
-        ax6.text(0.05, 0.95, f'Week Total: ${total_savings:.2f}', 
-                transform=ax6.transAxes, fontsize=10, verticalalignment='top',
+        ax4.text(0.05, 0.95, f'Week Total: ${total_savings:.2f}', 
+                transform=ax4.transAxes, fontsize=10, verticalalignment='top',
                 bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
     else:
         # Show dispatch activity level
@@ -961,9 +1027,9 @@ def plot_custom_dispatch_analysis(custom_results, dispatch_log, reference_data=N
                             dispatch_week['charge'][:week_hours] + 
                             dispatch_week['gridcharge'][:week_hours])
         
-        bars = ax6.bar(hours, dispatch_intensity, alpha=0.7, color='blue', label='Dispatch Activity')
-        ax6.set_title('Dispatch Activity Level', fontweight='bold')
-        ax6.set_ylabel('Activity Level')
+        bars = ax4.bar(hours, dispatch_intensity, alpha=0.7, color='blue', label='Dispatch Activity')
+        ax4.set_title('Dispatch Activity Level', fontweight='bold')
+        ax4.set_ylabel('Activity Level')
         
         # Color bars by activity type
         for i, (h, activity) in enumerate(zip(hours, dispatch_intensity)):
@@ -973,12 +1039,12 @@ def plot_custom_dispatch_analysis(custom_results, dispatch_log, reference_data=N
                 elif dispatch_week['charge'].iloc[h] > 0 or dispatch_week['gridcharge'].iloc[h] > 0:
                     bars[i].set_color('green')
     
-    ax6.set_xlabel('Hours')
-    ax6.legend()
-    ax6.grid(True, alpha=0.3)
+    ax4.set_xlabel('Hours')
+    ax4.legend()
+    ax4.grid(True, alpha=0.3)
     
-    # 7. Solar Generation Analysis - Check for clipping
-    ax7 = axes[3, 0]
+    # 5. Solar Generation Analysis - Check for clipping
+    ax5 = axes[2, 0]
     
     # Get the original solar profile from dispatch log (before any allocation)
     original_solar_week = dispatch_week['solar'][:week_hours].values
@@ -998,12 +1064,12 @@ def plot_custom_dispatch_analysis(custom_results, dispatch_log, reference_data=N
     total_solar_used = system_to_load_week + system_to_batt_week
     
     # Plot solar generation components
-    ax7.fill_between(hours, 0, system_to_load_week, alpha=0.7, color='gold', label='Solar to Load')
-    ax7.fill_between(hours, system_to_load_week, total_solar_used, 
+    ax5.fill_between(hours, 0, system_to_load_week, alpha=0.7, color='gold', label='Solar to Load')
+    ax5.fill_between(hours, system_to_load_week, total_solar_used, 
                     alpha=0.7, color='orange', label='Solar to Battery')
     
     # Show maximum available solar
-    ax7.plot(hours, original_solar_week, 'r-', linewidth=2, label='Max Solar Available')
+    ax5.plot(hours, original_solar_week, 'r-', linewidth=2, label='Max Solar Available')
     
     # Highlight potential clipping (when available > used)
     solar_clipped = original_solar_week - total_solar_used
@@ -1012,19 +1078,19 @@ def plot_custom_dispatch_analysis(custom_results, dispatch_log, reference_data=N
     if np.any(clipping_mask):
         clipped_hours = np.where(clipping_mask)[0]
         clipped_amounts = solar_clipped[clipping_mask]
-        ax7.scatter(clipped_hours, original_solar_week[clipping_mask], 
+        ax5.scatter(clipped_hours, original_solar_week[clipping_mask], 
                    c='red', s=50, alpha=0.8, marker='x', label='Clipped Solar')
         
         # Fill clipped area
-        ax7.fill_between(hours, total_solar_used, original_solar_week, 
+        ax5.fill_between(hours, total_solar_used, original_solar_week, 
                         where=(solar_clipped > 0.1), alpha=0.3, color='red', 
                         label='Clipped Energy')
     
-    ax7.set_title('Solar Generation & Clipping Analysis', fontweight='bold')
-    ax7.set_ylabel('Solar Power (kW)')
-    ax7.set_xlabel('Hours')
-    ax7.legend()
-    ax7.grid(True, alpha=0.3)
+    ax5.set_title('Solar Generation & Clipping Analysis', fontweight='bold')
+    ax5.set_ylabel('Solar Power (kW)')
+    ax5.set_xlabel('Hours')
+    ax5.legend()
+    ax5.grid(True, alpha=0.3)
     
     # Add summary statistics
     total_available = np.sum(original_solar_week)
@@ -1033,11 +1099,11 @@ def plot_custom_dispatch_analysis(custom_results, dispatch_log, reference_data=N
     clipping_pct = (total_clipped / total_available * 100) if total_available > 0 else 0
     
     stats_text = f'Week Solar Summary:\nAvailable: {total_available:.1f} kWh\nUsed: {total_used:.1f} kWh\nClipped: {total_clipped:.1f} kWh ({clipping_pct:.1f}%)'
-    ax7.text(0.02, 0.98, stats_text, transform=ax7.transAxes, fontsize=9, 
+    ax5.text(0.02, 0.98, stats_text, transform=ax5.transAxes, fontsize=9, 
             verticalalignment='top', bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8))
     
-    # 8. Peak Hour Load Coverage Analysis
-    ax8 = axes[3, 1]
+    # 6. Peak Hour Load Coverage Analysis
+    ax6 = axes[2, 1]
     
     # Identify peak hours in the week
     peak_mask = dispatch_week['is_peak'][:week_hours]
@@ -1051,174 +1117,37 @@ def plot_custom_dispatch_analysis(custom_results, dispatch_log, reference_data=N
         
         # Create stacked bar chart for peak hours
         width = 0.8
-        ax8.bar(peak_hours_list, peak_battery_discharge, width, alpha=0.7, 
+        ax6.bar(peak_hours_list, peak_battery_discharge, width, alpha=0.7, 
                color='green', label='Battery Discharge')
-        ax8.bar(peak_hours_list, peak_grid_usage, width, bottom=peak_battery_discharge, 
+        ax6.bar(peak_hours_list, peak_grid_usage, width, bottom=peak_battery_discharge, 
                alpha=0.7, color='red', label='Grid Usage')
         
         # Show total load as line
-        ax8.plot(peak_hours_list, peak_loads, 'ko-', linewidth=2, label='Total Load')
+        ax6.plot(peak_hours_list, peak_loads, 'ko-', linewidth=2, label='Total Load')
         
         # Calculate peak coverage statistics
         total_peak_load = sum(peak_loads)
         total_battery_coverage = sum(peak_battery_discharge)
         battery_coverage_pct = (total_battery_coverage / total_peak_load * 100) if total_peak_load > 0 else 0
         
-        ax8.set_title('Peak Hour Load Coverage (4-9 PM)', fontweight='bold')
-        ax8.set_ylabel('Power (kW)')
-        ax8.set_xlabel('Hours')
-        ax8.legend()
-        ax8.grid(True, alpha=0.3)
+        ax6.set_title('Peak Hour Load Coverage (4-9 PM)', fontweight='bold')
+        ax6.set_ylabel('Power (kW)')
+        ax6.set_xlabel('Hours')
+        ax6.legend()
+        ax6.grid(True, alpha=0.3)
         
         # Add coverage statistics
         coverage_text = f'Peak Coverage:\nBattery: {battery_coverage_pct:.1f}%\nTotal Peak Load: {total_peak_load:.1f} kWh'
-        ax8.text(0.02, 0.98, coverage_text, transform=ax8.transAxes, fontsize=9,
+        ax6.text(0.02, 0.98, coverage_text, transform=ax6.transAxes, fontsize=9,
                 verticalalignment='top', bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.8))
     else:
-        ax8.text(0.5, 0.5, 'No peak hours in selected week', 
-                transform=ax8.transAxes, ha='center', va='center', fontsize=12)
-        ax8.set_title('Peak Hour Load Coverage (4-9 PM)', fontweight='bold')
+        ax6.text(0.5, 0.5, 'No peak hours in selected week', 
+                transform=ax6.transAxes, ha='center', va='center', fontsize=12)
+        ax6.set_title('Peak Hour Load Coverage (4-9 PM)', fontweight='bold')
     
-    # 9. Peak Load Predictions Bar Chart
-    ax9 = axes[4, 0]
+    # Skip Peak Load Predictions plot - removed per user request
     
-    # Get daily prediction data for the week
-    battery_capacity = 13.5  # kWh - should match dispatch generator
-    max_battery_usable = (80 - 20) / 100 * battery_capacity  # 8.1 kWh usable
-    
-    days_data = []
-    for day in week_days:
-        day_start_hour = day * 24
-        day_6am = day_start_hour + 6
-        day_4pm = day_start_hour + 16
-        
-        # Only process if these hours are in our week view
-        if day_6am < week_hours and day_4pm < week_hours and day_6am < len(dispatch_week):
-            # Get prediction data from dispatch log
-            pred_data = dispatch_week.iloc[day_6am]
-            peak_load_target = pred_data['peak_load_target']
-            
-            # Calculate battery capacities
-            soc_6am = custom_week['battery_soc'][day_6am] if day_6am < len(custom_week['battery_soc']) else 50
-            soc_4pm = custom_week['battery_soc'][day_4pm] if day_4pm < len(custom_week['battery_soc']) else 50
-            
-            battery_6am_kwh = soc_6am / 100 * battery_capacity
-            battery_4pm_kwh = soc_4pm / 100 * battery_capacity
-            
-            # Available energy (above 20% SOC)
-            available_6am = max(0, battery_6am_kwh - (20 / 100 * battery_capacity))
-            available_4pm = max(0, battery_4pm_kwh - (20 / 100 * battery_capacity))
-            
-            # Target energy needed for peak (limited by battery capacity)
-            peak_target_kwh = min(peak_load_target, max_battery_usable)
-            
-            days_data.append({
-                'day': day + 1,
-                'peak_target': peak_target_kwh,
-                'available_6am': available_6am,
-                'available_4pm': available_4pm,
-                'shortfall_6am': max(0, peak_target_kwh - available_6am),
-                'shortfall_4pm': max(0, peak_target_kwh - available_4pm)
-            })
-    
-    if days_data:
-        days = [d['day'] for d in days_data]
-        x_pos = np.arange(len(days))
-        width = 0.35
-        
-        # 6 AM bars (morning assessment)
-        available_6am = [d['available_6am'] for d in days_data]
-        shortfall_6am = [d['shortfall_6am'] for d in days_data]
-        
-        ax9.bar(x_pos - width/2, available_6am, width, alpha=0.7, color='lightblue', label='Available at 6 AM')
-        ax9.bar(x_pos - width/2, shortfall_6am, width, bottom=available_6am, alpha=0.7, color='lightcoral', label='Shortfall at 6 AM')
-        
-        # 4 PM bars (pre-peak assessment)  
-        available_4pm = [d['available_4pm'] for d in days_data]
-        shortfall_4pm = [d['shortfall_4pm'] for d in days_data]
-        
-        ax9.bar(x_pos + width/2, available_4pm, width, alpha=0.7, color='darkblue', label='Available at 4 PM')
-        ax9.bar(x_pos + width/2, shortfall_4pm, width, bottom=available_4pm, alpha=0.7, color='darkred', label='Shortfall at 4 PM')
-        
-        # Add target lines
-        peak_targets = [d['peak_target'] for d in days_data]
-        for i, target in enumerate(peak_targets):
-            ax9.plot([i - width/2 - 0.1, i + width/2 + 0.1], [target, target], 'g-', linewidth=2, alpha=0.8)
-        
-        # Formatting
-        ax9.set_xlabel('Day')
-        ax9.set_ylabel('Energy (kWh)')
-        ax9.set_title('Peak Load Predictions: Battery Readiness vs Target', fontweight='bold')
-        ax9.set_xticks(x_pos)
-        ax9.set_xticklabels([f'Day {d}' for d in days])
-        ax9.legend()
-        ax9.grid(True, alpha=0.3, axis='y')
-        
-        # Add statistics text
-        total_target = sum(peak_targets)
-        total_available_4pm = sum(available_4pm)
-        avg_coverage = (total_available_4pm / total_target * 100) if total_target > 0 else 0
-        
-        well_prepared = sum(1 for d in days_data if d['shortfall_4pm'] < 0.5)  # Less than 0.5 kWh shortfall
-        
-        stats_text = f'Week Summary:\nAvg Coverage: {avg_coverage:.1f}%\nWell-Prepared: {well_prepared}/{len(days)} days'
-        ax9.text(0.02, 0.98, stats_text, transform=ax9.transAxes, fontsize=9,
-                verticalalignment='top', bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.8))
-    else:
-        ax9.text(0.5, 0.5, 'No prediction data available', 
-                transform=ax9.transAxes, ha='center', va='center', fontsize=12)
-        ax9.set_title('Peak Load Predictions: Battery Readiness vs Target', fontweight='bold')
-    
-    # 10. Daily Energy Balance
-    ax10 = axes[4, 1]
-    
-    if days_data:
-        # Calculate daily energy flows
-        daily_energy = []
-        for day in week_days:
-            day_start = day * 24
-            day_end = min((day + 1) * 24, week_hours)
-            
-            if day_end > day_start:
-                day_hours = range(day_start, day_end)
-                day_solar = sum(custom_week['solar'][h] for h in day_hours if h < len(custom_week['solar']))
-                day_load = sum(custom_week['load'][h] for h in day_hours if h < len(custom_week['load']))
-                day_grid = sum(custom_week['grid_usage'][h] for h in day_hours if h < len(custom_week['grid_usage']))
-                
-                daily_energy.append({
-                    'day': day + 1,
-                    'solar': day_solar,
-                    'load': day_load,
-                    'grid': day_grid,
-                    'solar_fraction': (day_solar / day_load * 100) if day_load > 0 else 0
-                })
-        
-        if daily_energy:
-            days = [d['day'] for d in daily_energy]
-            solar_fractions = [d['solar_fraction'] for d in daily_energy]
-            
-            bars = ax10.bar(days, solar_fractions, alpha=0.7, color='gold')
-            
-            # Color code bars by performance
-            for i, (bar, fraction) in enumerate(zip(bars, solar_fractions)):
-                if fraction >= 70:
-                    bar.set_color('green')
-                elif fraction >= 40:
-                    bar.set_color('orange')
-                else:
-                    bar.set_color('red')
-            
-            ax10.axhline(y=50, color='blue', linestyle='--', alpha=0.7, label='50% Target')
-            ax10.set_xlabel('Day')
-            ax10.set_ylabel('Solar Fraction (%)')
-            ax10.set_title('Daily Solar Energy Fraction', fontweight='bold')
-            ax10.set_ylim(0, 100)
-            ax10.legend()
-            ax10.grid(True, alpha=0.3, axis='y')
-    else:
-        ax10.text(0.5, 0.5, 'No energy data available', 
-                 transform=ax10.transAxes, ha='center', va='center', fontsize=12)
-        ax10.set_title('Daily Solar Energy Fraction', fontweight='bold')
+    # Skip Daily Energy Balance plot - removed per user request
     
     plt.tight_layout()
     plt.show()
@@ -1401,10 +1330,6 @@ Hours <15%: {sum(1 for x in all_soc_values if x < 15)} ({sum(1 for x in all_soc_
         'daily_min_soc': daily_min_soc
     }
 
-
-
-
-
 def main():
     """
     Main execution function to run the custom dispatch demo
@@ -1475,13 +1400,37 @@ def main():
     
     # Generate custom dispatch schedules
     print("\nGenerating custom dispatch schedules...")
-    charge_schedule, discharge_schedule, gridcharge_schedule = dispatch_generator.generate_custom_dispatch_schedule(
-        load_profile, solar_profile
+    # Use a simple precharge schedule to force charging and verify achievable SOC
+    charge_schedule, discharge_schedule, gridcharge_schedule = generate_simple_precharge_schedule(
+        load_profile, precharge_hours=24, target_soc=90.0
     )
-    
-    # Analyze the strategy
-    # print("\nAnalyzing dispatch strategy...")
-    # analysis = dispatch_generator.analyze_dispatch_strategy()
+    # Build a minimal dispatch_log so downstream comparisons/plots work
+    try:
+        hourly_rates = dispatch_generator.get_hourly_rates()
+    except Exception:
+        hourly_rates = [0.0] * len(load_profile)
+    rows = []
+    for h in range(len(load_profile)):
+        hod = h % 24
+        rows.append({
+            'hour': h,
+            'hour_of_day': hod,
+            'rate': hourly_rates[h] if h < len(hourly_rates) else 0.0,
+            'soc': None,
+            'load': load_profile[h],
+            'solar': solar_profile[h] if 'solar_profile' in locals() and h < len(solar_profile) else 0.0,
+            'is_peak': 16 <= hod <= 20,
+            'peak_load_target': 0.0,
+            'charge': charge_schedule[h],
+            'discharge': discharge_schedule[h],
+            'gridcharge': gridcharge_schedule[h]
+        })
+    dispatch_generator.dispatch_log = pd.DataFrame(rows)
+
+    # Try a simple dispatch schedule to get the battery to charge to 90%
+    # charge_schedule, discharge_schedule, gridcharge_schedule = generate_simple_precharge_schedule(
+    #         load_profile, precharge_hours=24, target_soc=90.0
+    #     )
     
     # Run SAM with custom dispatch
     print("\nRunning SAM simulation with custom dispatch...")
@@ -1492,6 +1441,12 @@ def main():
     if custom_sam_results is None:
         print("SAM simulation failed")
         return
+    else:
+        try:
+            first24 = [round(x, 1) for x in custom_sam_results['battery_soc'][:24]]
+            print(f"DEBUG: SAM SOC first 24 hours: {first24}")
+        except Exception:
+            pass
     
     # Compare results
     if reference_sam_data is not None:
