@@ -1080,20 +1080,33 @@ def plot_custom_dispatch_analysis(custom_results, dispatch_log, reference_data=N
     ax1 = axes[0, 0]
     ax1.plot(hours, custom_week['battery_soc'], 'b-', linewidth=2, label='Battery SOC')
     
-    # Highlight dispatch events
+    # Highlight dispatch events with proper legend labels
     charge_hours = dispatch_week[dispatch_week['charge'] > 0].index
     discharge_hours = dispatch_week[dispatch_week['discharge'] > 0].index  
     gridcharge_hours = dispatch_week[dispatch_week['gridcharge'] > 0].index
     
+    # Add legend entries for dispatch events
+    charge_plotted = False
+    discharge_plotted = False
+    gridcharge_plotted = False
+    
     for h in charge_hours:
         if h < week_hours:
-            ax1.axvline(x=h, color='green', alpha=0.3, linewidth=0.8)
+            label = 'Solar Charging (6AM-4PM)' if not charge_plotted else None
+            ax1.axvline(x=h, color='green', alpha=0.3, linewidth=0.8, label=label)
+            charge_plotted = True
+            
     for h in discharge_hours:
         if h < week_hours:
-            ax1.axvline(x=h, color='red', alpha=0.3, linewidth=0.8)
+            label = 'Peak Discharge (4-9PM)' if not discharge_plotted else None
+            ax1.axvline(x=h, color='red', alpha=0.3, linewidth=0.8, label=label)
+            discharge_plotted = True
+            
     for h in gridcharge_hours:
         if h < week_hours:
-            ax1.axvline(x=h, color='orange', alpha=0.3, linewidth=0.8)
+            label = 'Grid Charging (Overnight)' if not gridcharge_plotted else None
+            ax1.axvline(x=h, color='orange', alpha=0.3, linewidth=0.8, label=label)
+            gridcharge_plotted = True
     
     # Mark peak hours and SOC limits
     week_days = set(h // 24 for h in hours if h < week_hours)
