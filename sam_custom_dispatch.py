@@ -1008,8 +1008,8 @@ def plot_custom_dispatch_analysis(custom_results, dispatch_log, reference_data=N
     hours = range(len(custom_week['load']))
     week_hours = len(custom_week['load'])
     
-    # Create subplots (reduced to 2x3 after removing 5 plots)
-    fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+    # Create subplots (expanded to 2x4 layout for 8 plots total)
+    fig, axes = plt.subplots(2, 4, figsize=(24, 10))
     week_start_day = (actual_start // 24) + 1
     fig.suptitle(f'SAM Custom Dispatch Analysis: Week Starting Day {week_start_day} ({month})', fontsize=16, fontweight='bold')
     
@@ -1043,6 +1043,22 @@ def plot_custom_dispatch_analysis(custom_results, dispatch_log, reference_data=N
     
     ax1.axhline(y=20, color='red', linestyle='--', alpha=0.7, label='Min Peak SOC (20%)')
     ax1.axhline(y=80, color='orange', linestyle='--', alpha=0.7, label='Max Peak SOC (80%)')
+    
+    # Add vertical lines for peak price windows (4-9 PM each day)
+    week_days = set(h // 24 for h in hours if h < week_hours)
+    for day in week_days:
+        peak_start = day * 24 + 16  # 4 PM
+        peak_end = day * 24 + 21    # 9 PM
+        if peak_start < week_hours:
+            ax1.axvline(x=peak_start, color='grey', linestyle='--', alpha=0.6, linewidth=1)
+            if peak_end < week_hours:
+                ax1.axvline(x=peak_end, color='grey', linestyle='--', alpha=0.6, linewidth=1)
+            # Add label only for the first day
+            if day == min(week_days):
+                ax1.text(peak_start + 2.5, 85, 'Peak\n4-9PM', 
+                        fontsize=8, ha='center', va='center', alpha=0.7,
+                        bbox=dict(boxstyle='round,pad=0.2', facecolor='lightgrey', alpha=0.5))
+    
     ax1.set_title('Battery SOC with Dispatch Events', fontweight='bold')
     ax1.set_ylabel('SOC (%)')
     ax1.legend()
@@ -1068,34 +1084,147 @@ def plot_custom_dispatch_analysis(custom_results, dispatch_log, reference_data=N
     # Plot total load as a line
     ax2.plot(hours, load_data, 'k-', linewidth=2, label='Total Load')
     
+    # Add vertical lines for peak price windows (4-9 PM each day)
+    week_days = set(h // 24 for h in hours if h < week_hours)
+    for day in week_days:
+        peak_start = day * 24 + 16  # 4 PM
+        peak_end = day * 24 + 21    # 9 PM
+        if peak_start < week_hours:
+            ax2.axvline(x=peak_start, color='grey', linestyle='--', alpha=0.6, linewidth=1)
+            if peak_end < week_hours:
+                ax2.axvline(x=peak_end, color='grey', linestyle='--', alpha=0.6, linewidth=1)
+            # Add label only for the first day
+            if day == min(week_days):
+                ax2.text(peak_start + 2.5, max(load_data) * 0.9, 'Peak\n4-9PM', 
+                        fontsize=8, ha='center', va='center', alpha=0.7,
+                        bbox=dict(boxstyle='round,pad=0.2', facecolor='lightgrey', alpha=0.5))
+    
     ax2.set_title('Energy Sources (Custom Dispatch)', fontweight='bold')
     ax2.set_ylabel('Power (kW)')
     ax2.legend()
     ax2.grid(True, alpha=0.3)
     
-    # 3. Grid charging events with rate overlay
+    # 3. Battery Charge in kWh
     ax3 = axes[0, 2]
-    grid_to_battery = np.array(custom_week['grid_to_battery'])
-    ax3.bar(hours, grid_to_battery, alpha=0.7, color='orange', label='Grid to Battery')
     
-    # Add rate overlay on secondary y-axis
-    rates_week = dispatch_week['rate'][:week_hours].values
-    ax3_rate = ax3.twinx()
-    ax3_rate.plot(hours, rates_week * 5, 'purple', linewidth=1, alpha=0.7, label='Rate (×5)')
-    ax3_rate.set_ylabel('Rate ($/kWh × 5)', color='purple')
+    # Calculate battery charge in kWh from SOC percentage
+    battery_capacity_kwh = 13.5  # Tesla Powerwall capacity
+    battery_charge_kwh = np.array(custom_week['battery_soc']) / 100 * battery_capacity_kwh
     
-    ax3.set_title('Grid Charging Events', fontweight='bold')
-    ax3.set_ylabel('Power (kW)')
-    ax3.legend(loc='upper left')
-    ax3_rate.legend(loc='upper right')
+    ax3.plot(hours, battery_charge_kwh, 'g-', linewidth=2, label='Battery Charge')
+    ax3.fill_between(hours, 0, battery_charge_kwh, alpha=0.3, color='green', label='Stored Energy')
+    
+    # Add capacity reference lines
+    min_charge_kwh = 20 / 100 * battery_capacity_kwh  # 20% minimum
+    max_charge_kwh = 80 / 100 * battery_capacity_kwh  # 80% maximum
+    ax3.axhline(y=min_charge_kwh, color='red', linestyle='--', alpha=0.7, label=f'Min Charge ({min_charge_kwh:.1f} kWh)')
+    ax3.axhline(y=max_charge_kwh, color='orange', linestyle='--', alpha=0.7, label=f'Max Charge ({max_charge_kwh:.1f} kWh)')
+    
+    # Add vertical lines for peak price windows
+    week_days = set(h // 24 for h in hours if h < week_hours)
+    for day in week_days:
+        peak_start = day * 24 + 16  # 4 PM
+        peak_end = day * 24 + 21    # 9 PM
+        if peak_start < week_hours:
+            ax3.axvline(x=peak_start, color='grey', linestyle='--', alpha=0.6, linewidth=1)
+            if peak_end < week_hours:
+                ax3.axvline(x=peak_end, color='grey', linestyle='--', alpha=0.6, linewidth=1)
+            # Add label only for the first day
+            if day == min(week_days):
+                ax3.text(peak_start + 2.5, max_charge_kwh * 0.9, 'Peak\n4-9PM', 
+                        fontsize=8, ha='center', va='center', alpha=0.7,
+                        bbox=dict(boxstyle='round,pad=0.2', facecolor='lightgrey', alpha=0.5))
+    
+    ax3.set_title('Battery Charge (kWh)', fontweight='bold')
+    ax3.set_ylabel('Energy (kWh)')
+    ax3.legend()
     ax3.grid(True, alpha=0.3)
+    
+    # 4. Solar Power Available (kWh)
+    ax4 = axes[0, 3]
+    
+    # Get solar generation data
+    original_solar_week = dispatch_week['solar'][:week_hours].values
+    system_to_load_week = np.array(custom_week['solar'])  # What actually went to load
+    
+    # Try to get system to battery data if available
+    system_to_batt_week = np.array([0] * week_hours)  # Initialize
+    try:
+        if 'system_to_batt' in custom_results:
+            system_to_batt_data = custom_results['system_to_batt']
+            if hasattr(system_to_batt_data, '__len__') and len(system_to_batt_data) >= week_hours:
+                system_to_batt_week = np.array(system_to_batt_data[actual_start:actual_end])
+    except:
+        pass
+    
+    # Plot available vs used solar
+    ax4.fill_between(hours, 0, original_solar_week, alpha=0.3, color='yellow', label='Total Solar Available')
+    ax4.fill_between(hours, 0, system_to_load_week, alpha=0.7, color='gold', label='Solar to Load')
+    ax4.fill_between(hours, system_to_load_week, system_to_load_week + system_to_batt_week, 
+                    alpha=0.7, color='orange', label='Solar to Battery')
+    
+    # Show solar clipping (unused solar)
+    total_solar_used = system_to_load_week + system_to_batt_week
+    solar_clipped = original_solar_week - total_solar_used
+    clipping_mask = solar_clipped > 0.1
+    
+    if np.any(clipping_mask):
+        ax4.fill_between(hours, total_solar_used, original_solar_week, 
+                        where=(solar_clipped > 0.1), alpha=0.5, color='red', 
+                        label='Clipped Solar')
+    
+    # Add vertical lines for peak price windows
+    for day in week_days:
+        peak_start = day * 24 + 16  # 4 PM
+        peak_end = day * 24 + 21    # 9 PM
+        if peak_start < week_hours:
+            ax4.axvline(x=peak_start, color='grey', linestyle='--', alpha=0.6, linewidth=1)
+            if peak_end < week_hours:
+                ax4.axvline(x=peak_end, color='grey', linestyle='--', alpha=0.6, linewidth=1)
+            # Add label only for the first day
+            if day == min(week_days):
+                ax4.text(peak_start + 2.5, max(original_solar_week) * 0.9, 'Peak\n4-9PM', 
+                        fontsize=8, ha='center', va='center', alpha=0.7,
+                        bbox=dict(boxstyle='round,pad=0.2', facecolor='lightgrey', alpha=0.5))
+    
+    ax4.set_title('Solar Power Available vs Used (kWh)', fontweight='bold')
+    ax4.set_ylabel('Solar Power (kW)')
+    ax4.legend()
+    ax4.grid(True, alpha=0.3)
     
     # Skip SOC comparison plot - removed per user request
     
     # Skip Economic Benefits plot - removed per user request
     
-    # 4. Solar Generation Analysis - Check for clipping
-    ax4 = axes[1, 0]
+    # 5. Grid Charging Events  
+    ax5 = axes[1, 0]
+    
+    grid_to_battery = np.array(custom_week['grid_to_battery'])
+    ax5.bar(hours, grid_to_battery, alpha=0.7, color='orange', label='Grid to Battery')
+    
+    # Add rate overlay on secondary y-axis
+    rates_week = dispatch_week['rate'][:week_hours].values
+    ax5_rate = ax5.twinx()
+    ax5_rate.plot(hours, rates_week * 5, 'purple', linewidth=1, alpha=0.7, label='Rate (×5)')
+    ax5_rate.set_ylabel('Rate ($/kWh × 5)', color='purple')
+    
+    # Add vertical lines for peak price windows
+    for day in week_days:
+        peak_start = day * 24 + 16  # 4 PM
+        peak_end = day * 24 + 21    # 9 PM
+        if peak_start < week_hours:
+            ax5.axvline(x=peak_start, color='grey', linestyle='--', alpha=0.6, linewidth=1)
+            if peak_end < week_hours:
+                ax5.axvline(x=peak_end, color='grey', linestyle='--', alpha=0.6, linewidth=1)
+    
+    ax5.set_title('Grid Charging Events', fontweight='bold')
+    ax5.set_ylabel('Power (kW)')
+    ax5.legend(loc='upper left')
+    ax5_rate.legend(loc='upper right')
+    ax5.grid(True, alpha=0.3)
+    
+    # 6. Solar Generation Analysis - Check for clipping  
+    ax6 = axes[1, 1]
     
     # Get the original solar profile from dispatch log (before any allocation)
     original_solar_week = dispatch_week['solar'][:week_hours].values
@@ -1115,12 +1244,12 @@ def plot_custom_dispatch_analysis(custom_results, dispatch_log, reference_data=N
     total_solar_used = system_to_load_week + system_to_batt_week
     
     # Plot solar generation components
-    ax4.fill_between(hours, 0, system_to_load_week, alpha=0.7, color='gold', label='Solar to Load')
-    ax4.fill_between(hours, system_to_load_week, total_solar_used, 
+    ax6.fill_between(hours, 0, system_to_load_week, alpha=0.7, color='gold', label='Solar to Load')
+    ax6.fill_between(hours, system_to_load_week, total_solar_used, 
                     alpha=0.7, color='orange', label='Solar to Battery')
     
     # Show maximum available solar
-    ax4.plot(hours, original_solar_week, 'r-', linewidth=2, label='Max Solar Available')
+    ax6.plot(hours, original_solar_week, 'r-', linewidth=2, label='Max Solar Available')
     
     # Highlight potential clipping (when available > used)
     solar_clipped = original_solar_week - total_solar_used
@@ -1129,19 +1258,19 @@ def plot_custom_dispatch_analysis(custom_results, dispatch_log, reference_data=N
     if np.any(clipping_mask):
         clipped_hours = np.where(clipping_mask)[0]
         clipped_amounts = solar_clipped[clipping_mask]
-        ax4.scatter(clipped_hours, original_solar_week[clipping_mask], 
+        ax6.scatter(clipped_hours, original_solar_week[clipping_mask], 
                    c='red', s=50, alpha=0.8, marker='x', label='Clipped Solar')
         
         # Fill clipped area
-        ax4.fill_between(hours, total_solar_used, original_solar_week, 
+        ax6.fill_between(hours, total_solar_used, original_solar_week, 
                         where=(solar_clipped > 0.1), alpha=0.3, color='red', 
                         label='Clipped Energy')
     
-    ax4.set_title('Solar Generation & Clipping Analysis', fontweight='bold')
-    ax4.set_ylabel('Solar Power (kW)')
-    ax4.set_xlabel('Hours')
-    ax4.legend()
-    ax4.grid(True, alpha=0.3)
+    ax6.set_title('Solar Generation & Clipping Analysis', fontweight='bold')
+    ax6.set_ylabel('Solar Power (kW)')
+    ax6.set_xlabel('Hours')
+    ax6.legend()
+    ax6.grid(True, alpha=0.3)
     
     # Add summary statistics
     total_available = np.sum(original_solar_week)
@@ -1150,11 +1279,11 @@ def plot_custom_dispatch_analysis(custom_results, dispatch_log, reference_data=N
     clipping_pct = (total_clipped / total_available * 100) if total_available > 0 else 0
     
     stats_text = f'Week Solar Summary:\nAvailable: {total_available:.1f} kWh\nUsed: {total_used:.1f} kWh\nClipped: {total_clipped:.1f} kWh ({clipping_pct:.1f}%)'
-    ax4.text(0.02, 0.98, stats_text, transform=ax4.transAxes, fontsize=9, 
+    ax6.text(0.02, 0.98, stats_text, transform=ax6.transAxes, fontsize=9, 
             verticalalignment='top', bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8))
     
-    # 5. Peak Hour Load Coverage Analysis
-    ax5 = axes[1, 1]
+    # 7. Peak Hour Load Coverage Analysis
+    ax7 = axes[1, 2]
     
     # Identify peak hours in the week
     peak_mask = dispatch_week['is_peak'][:week_hours]
@@ -1168,40 +1297,40 @@ def plot_custom_dispatch_analysis(custom_results, dispatch_log, reference_data=N
         
         # Create stacked bar chart for peak hours
         width = 0.8
-        ax5.bar(peak_hours_list, peak_battery_discharge, width, alpha=0.7, 
+        ax7.bar(peak_hours_list, peak_battery_discharge, width, alpha=0.7, 
                color='green', label='Battery Discharge')
-        ax5.bar(peak_hours_list, peak_grid_usage, width, bottom=peak_battery_discharge, 
+        ax7.bar(peak_hours_list, peak_grid_usage, width, bottom=peak_battery_discharge, 
                alpha=0.7, color='red', label='Grid Usage')
         
         # Show total load as line
-        ax5.plot(peak_hours_list, peak_loads, 'ko-', linewidth=2, label='Total Load')
+        ax7.plot(peak_hours_list, peak_loads, 'ko-', linewidth=2, label='Total Load')
         
         # Calculate peak coverage statistics
         total_peak_load = sum(peak_loads)
         total_battery_coverage = sum(peak_battery_discharge)
         battery_coverage_pct = (total_battery_coverage / total_peak_load * 100) if total_peak_load > 0 else 0
         
-        ax5.set_title('Peak Hour Load Coverage (4-9 PM)', fontweight='bold')
-        ax5.set_ylabel('Power (kW)')
-        ax5.set_xlabel('Hours')
-        ax5.legend()
-        ax5.grid(True, alpha=0.3)
+        ax7.set_title('Peak Hour Load Coverage (4-9 PM)', fontweight='bold')
+        ax7.set_ylabel('Power (kW)')
+        ax7.set_xlabel('Hours')
+        ax7.legend()
+        ax7.grid(True, alpha=0.3)
         
         # Add coverage statistics
         coverage_text = f'Peak Coverage:\nBattery: {battery_coverage_pct:.1f}%\nTotal Peak Load: {total_peak_load:.1f} kWh'
-        ax5.text(0.02, 0.98, coverage_text, transform=ax5.transAxes, fontsize=9,
+        ax7.text(0.02, 0.98, coverage_text, transform=ax7.transAxes, fontsize=9,
                 verticalalignment='top', bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.8))
     else:
-        ax5.text(0.5, 0.5, 'No peak hours in selected week', 
-                transform=ax5.transAxes, ha='center', va='center', fontsize=12)
-        ax5.set_title('Peak Hour Load Coverage (4-9 PM)', fontweight='bold')
+        ax7.text(0.5, 0.5, 'No peak hours in selected week', 
+                transform=ax7.transAxes, ha='center', va='center', fontsize=12)
+        ax7.set_title('Peak Hour Load Coverage (4-9 PM)', fontweight='bold')
     
-    # 6. Load Profile Analysis
-    ax6 = axes[1, 2]
+    # 8. Load Profile Analysis
+    ax8 = axes[1, 3]
     
     # Plot the load profile for the week
     load_data = np.array(custom_week['load'])
-    ax6.plot(hours, load_data, 'b-', linewidth=2, label='Household Load')
+    ax8.plot(hours, load_data, 'b-', linewidth=2, label='Household Load')
     
     # Highlight peak hours with background shading
     week_days = set(h // 24 for h in hours if h < week_hours)
@@ -1210,12 +1339,12 @@ def plot_custom_dispatch_analysis(custom_results, dispatch_log, reference_data=N
         peak_end = day * 24 + 21    # 9 PM
         if peak_start < week_hours:
             peak_end = min(peak_end, week_hours)
-            ax6.axvspan(peak_start, peak_end, alpha=0.2, color='orange', label='Peak Hours (4-9 PM)' if day == min(week_days) else "")
+            ax8.axvspan(peak_start, peak_end, alpha=0.2, color='orange', label='Peak Hours (4-9 PM)' if day == min(week_days) else "")
     
     # Add daily average line
     if len(load_data) > 0:
         daily_avg = np.mean(load_data)
-        ax6.axhline(y=daily_avg, color='red', linestyle='--', alpha=0.7, label=f'Week Average ({daily_avg:.2f} kW)')
+        ax8.axhline(y=daily_avg, color='red', linestyle='--', alpha=0.7, label=f'Week Average ({daily_avg:.2f} kW)')
     
     # Calculate and show load statistics
     if len(load_data) > 0:
@@ -1244,14 +1373,14 @@ Range: {load_range:.2f} kW
 Peak Avg: {peak_avg:.2f} kW
 Off-Peak Avg: {off_peak_avg:.2f} kW'''
         
-        ax6.text(0.02, 0.98, stats_text, transform=ax6.transAxes, fontsize=9,
+        ax8.text(0.02, 0.98, stats_text, transform=ax8.transAxes, fontsize=9,
                 verticalalignment='top', bbox=dict(boxstyle='round', facecolor='lightcyan', alpha=0.8))
     
-    ax6.set_title('Household Load Profile', fontweight='bold')
-    ax6.set_xlabel('Hours')
-    ax6.set_ylabel('Load (kW)')
-    ax6.legend()
-    ax6.grid(True, alpha=0.3)
+    ax8.set_title('Household Load Profile', fontweight='bold')
+    ax8.set_xlabel('Hours')
+    ax8.set_ylabel('Load (kW)')
+    ax8.legend()
+    ax8.grid(True, alpha=0.3)
     
     plt.tight_layout()
     plt.show()
