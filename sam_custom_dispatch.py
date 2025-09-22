@@ -562,6 +562,8 @@ def initialize_custom_dispatch(battery, load_profile, charge_schedule, discharge
         'batt_dispatch_discharge_only_load_exceeds_system': 1,
         # For manual/custom schedules, prioritize system (PV) charging first
         'dispatch_manual_system_charge_first': 1,
+        # Ensure Battwatts uses Custom dispatch mode
+        'batt_simple_dispatch': 2,
     }
 
     for param, val in flags.items():
@@ -584,7 +586,8 @@ def initialize_custom_dispatch(battery, load_profile, charge_schedule, discharge
               f"btm_discharge_to_grid={_get('batt_dispatch_auto_btm_can_discharge_to_grid')}, "
               f"charge_only_if_pv_exceeds_load={_get('batt_dispatch_charge_only_system_exceeds_load')}, "
               f"discharge_only_if_load_exceeds_system={_get('batt_dispatch_discharge_only_load_exceeds_system')}, "
-              f"system_charge_first={_get('dispatch_manual_system_charge_first')}")
+              f"system_charge_first={_get('dispatch_manual_system_charge_first')}, "
+              f"simple_dispatch_mode={_get('batt_simple_dispatch')}")
     except Exception:
         pass
     
@@ -687,6 +690,15 @@ def run_sam_simulation(solar, battery):
     simple_kwh = getattr(battery.Battery, 'batt_simple_kwh', None) if hasattr(battery, 'Battery') else None
     simple_kw = getattr(battery.Battery, 'batt_simple_kw', None) if hasattr(battery, 'Battery') else None
     print(f"DEBUG: Post-exec Battwatts capacity -> installed_kwh={installed_kwh}, simple_kwh={simple_kwh}, simple_kw={simple_kw}")
+
+    # DEBUG: Surface batt_grid_charge_percent from Outputs (if available)
+    if hasattr(battery, 'Outputs') and hasattr(battery.Outputs, 'batt_grid_charge_percent'):
+        import numpy as _np
+        grid_pct = _np.asarray(battery.Outputs.batt_grid_charge_percent, dtype=float).ravel()
+        first24 = [round(float(x), 3) for x in grid_pct[:24]]
+        nonzero_total = int((grid_pct > 0).sum())
+        print(f"DEBUG: batt_grid_charge_percent first 24 hours: {first24}")
+        print(f"DEBUG: batt_grid_charge_percent nonzero hours (total year): {nonzero_total}")
 
     return results
 
