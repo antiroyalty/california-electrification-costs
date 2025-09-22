@@ -1,4 +1,4 @@
-"""
+git """
 SAM Custom Dispatch Module: Economically Optimal Battery Dispatch
 
 This module implements custom dispatch schedules for SAM's Custom Dispatch mode (mode 3)
@@ -445,47 +445,79 @@ def initialize_storage(weather_file, load_profile, charge_schedule, discharge_sc
     return battery
 
 def set_custom_dispatch_schedule(battery, load_profile, charge_schedule, discharge_schedule, gridcharge_schedule):
-    # Set custom dispatch schedules
+    """
+    Set SAM Battwatts custom dispatch array with magnitude support.
+
+    Convention:
+      +value = discharge target (kW), -value = charge target (kW)
+      0 = idle/auto
+
+    Magnitudes in the input schedules are preserved and mapped to Battwatts' batt_custom_dispatch.
+    If both charge and discharge are requested in the same hour, discharge takes precedence.
+    """
     try:
         # Convert schedules to lists if they're numpy arrays
         discharge_list = discharge_schedule.tolist() if hasattr(discharge_schedule, 'tolist') else list(discharge_schedule)
         charge_list = charge_schedule.tolist() if hasattr(charge_schedule, 'tolist') else list(charge_schedule)
         gridcharge_list = gridcharge_schedule.tolist() if hasattr(gridcharge_schedule, 'tolist') else list(gridcharge_schedule)
-        
-        # Convert our optimization schedules to SAM's simple format
-        # SAM expects: positive = discharge, negative = charge, zero = no action
+
+        # Optional clipping to battery max power if available
+        max_kw = None
+        try:
+            if hasattr(battery, 'Battery') and hasattr(battery.Battery, 'batt_simple_kw'):
+                max_kw = float(battery.Battery.batt_simple_kw)
+        except Exception:
+            max_kw = None
+
         sam_dispatch_array = []
-        
-        for h in range(len(load_profile)):
-            discharge_signal = discharge_list[h]
-            charge_signal = charge_list[h] 
-            gridcharge_signal = gridcharge_list[h]
-            
-            # Decision logic: prioritize the strongest signal
-            if discharge_signal > 0.1:  # Threshold to avoid tiny values
-                # Want to discharge: positive value in SAM
-                sam_dispatch_array.append(1)
-            elif charge_signal > 0.1 or gridcharge_signal > 0.1:
-                # Want to charge (from solar or grid): negative value in SAM
-                sam_dispatch_array.append(-1)
+        n = len(load_profile)
+        for h in range(n):
+            d = float(discharge_list[h]) if h < len(discharge_list) else 0.0
+            c = float(charge_list[h]) if h < len(charge_list) else 0.0
+            g = float(gridcharge_list[h]) if h < len(gridcharge_list) else 0.0
+
+            # Discharge takes precedence if both are signaled
+            if d > 0.0:
+                power = d  # positive = discharge
+            elif (c > 0.0) or (g > 0.0):
+                # Negative = charge; if both provided, combine magnitudes
+                power = -(c + g)
             else:
-                # No strong preference: let SAM decide automatically
-                sam_dispatch_array.append(0)
-        
-        # Set the custom dispatch array
+                power = 0.0
+
+            if max_kw is not None and power != 0.0:
+                power = max(-max_kw, min(max_kw, power))
+
+            sam_dispatch_array.append(power)
+
         battery.Battery.batt_custom_dispatch = sam_dispatch_array
-        # print(f"sam_dispatch_array: {sam_dispatch_array}")
-        # print(f"battery.Battery.batt_custom_dispatch: {battery.Battery.batt_custom_dispatch}")
-        
+
         # Verify it was set correctly
-        check_dispatch = battery.Battery.batt_custom_dispatch
-        _ = len(check_dispatch)
-        
+        _ = len(battery.Battery.batt_custom_dispatch)
+
+        # Print first-day mapping for sanity
+        preview = sam_dispatch_array[:24]
+        print(f"DEBUG: batt_custom_dispatch first 24h: {[round(x,3) for x in preview]}")
+
     except Exception as e:
         print(f"DEBUG: Failed to set custom dispatch schedules: {e}")
         print(f"  Error type: {type(e)}")
         print(f"  Error details: {str(e)}")
         return None
+
+def _set_batt_param(battery, name, value):
+    """Set a battery dispatch parameter on the correct group if available."""
+    try:
+        if hasattr(battery, 'Battery') and hasattr(battery.Battery, name):
+            setattr(battery.Battery, name, value)
+            return True
+        if hasattr(battery, 'BatteryDispatch') and hasattr(battery.BatteryDispatch, name):
+            setattr(battery.BatteryDispatch, name, value)
+            return True
+    except Exception:
+        pass
+    return False
+
 
 def initialize_custom_dispatch(battery, load_profile, charge_schedule, discharge_schedule, gridcharge_schedule):
     """
@@ -519,20 +551,42 @@ def initialize_custom_dispatch(battery, load_profile, charge_schedule, discharge
     set_custom_dispatch_schedule(battery, load_profile, charge_schedule, discharge_schedule, gridcharge_schedule)
     
     # Set any additional dispatch parameters found in config
-    additional_dispatch_settings = {
-        # Disallow grid charging moving forward
+    # Disallow grid charging; restrict to PV-only charging and load-only discharging
+    flags = {
         'batt_dispatch_auto_can_gridcharge': 0,
-        # Allow charging (from PV) and disallow discharge to grid
         'batt_dispatch_auto_can_charge': 1,
         'batt_dispatch_auto_btm_can_discharge_to_grid': 0,
+        # Charge priority: PV to battery first (do NOT require PV > load)
+        'batt_dispatch_charge_only_system_exceeds_load': 0,
+        # Discharge only when load exceeds PV system output
+        'batt_dispatch_discharge_only_load_exceeds_system': 1,
+        # For manual/custom schedules, prioritize system (PV) charging first
+        'dispatch_manual_system_charge_first': 1,
     }
-    
-    for param, value in additional_dispatch_settings.items():
-        try:
-            if param in battery_config or hasattr(battery.Battery, param):
-                setattr(battery.Battery, param, value)
-        except Exception as e:
-            print(f"DEBUG: Failed to set {param}: {e}")
+
+    for param, val in flags.items():
+        ok = _set_batt_param(battery, param, val)
+        if not ok:
+            # Best-effort on both groups already tried; leave a concise note once
+            pass
+
+    # Echo effective flag values (if readable)
+    try:
+        def _get(name):
+            if hasattr(battery, 'Battery') and hasattr(battery.Battery, name):
+                return getattr(battery.Battery, name)
+            if hasattr(battery, 'BatteryDispatch') and hasattr(battery.BatteryDispatch, name):
+                return getattr(battery.BatteryDispatch, name)
+            return None
+        print("DEBUG: Dispatch flags -> "
+              f"can_gridcharge={_get('batt_dispatch_auto_can_gridcharge')}, "
+              f"can_charge={_get('batt_dispatch_auto_can_charge')}, "
+              f"btm_discharge_to_grid={_get('batt_dispatch_auto_btm_can_discharge_to_grid')}, "
+              f"charge_only_if_pv_exceeds_load={_get('batt_dispatch_charge_only_system_exceeds_load')}, "
+              f"discharge_only_if_load_exceeds_system={_get('batt_dispatch_discharge_only_load_exceeds_system')}, "
+              f"system_charge_first={_get('dispatch_manual_system_charge_first')}")
+    except Exception:
+        pass
     
     # done
 
@@ -543,16 +597,16 @@ def run_sam_simulation(solar, battery):
         solar.execute(0)
     except Exception as e:
         print(f"DEBUG: Solar execution failed: {e}")
-        return None
+        raise Exception
     
     try:
         # Ensure initial SOC is set just before execution (Battwatts expects percent 0–100)
         try:
-            battery.value('batt_initial_SOC', 90.0)
+            battery.value('batt_initial_SOC', 80.0)
         except Exception:
             try:
                 if hasattr(battery, 'Battery') and hasattr(battery.Battery, 'batt_initial_SOC'):
-                    battery.Battery.batt_initial_SOC = 90.0
+                    battery.Battery.batt_initial_SOC = 80.0
             except Exception:
                 pass
         # DEBUG: Echo the current SOC inputs right before execution
@@ -645,19 +699,20 @@ def log_first_day_power_flows(custom_results, charge_schedule, discharge_schedul
     start = day_index * 24
     end = min(start + 24, len(custom_results['battery_soc']))
     print("\nDEBUG: First 24-hour power flow breakdown (kW where applicable):")
-    print("hour hod  cmdC cmdD cmdG  PV->Load  PV->Batt  Grid->Load  Grid->Batt  Batt->Load  SOC(%)")
+    print("hour hod  cmdC cmdD cmdG   Load   PV->Load  PV->Batt  Grid->Load  Grid->Batt  Batt->Load  SOC(%)")
     for h in range(start, end):
         hod = h % 24
         cmdC = charge_schedule[h] if h < len(charge_schedule) else 0
         cmdD = discharge_schedule[h] if h < len(discharge_schedule) else 0
         cmdG = gridcharge_schedule[h] if h < len(gridcharge_schedule) else 0
+        load_val = float(custom_results['load_profile'][h]) if h < len(custom_results['load_profile']) else 0.0
         pv_to_load = float(custom_results['system_to_load'][h]) if h < len(custom_results['system_to_load']) else 0.0
         pv_to_batt = float(custom_results['system_to_batt'][h]) if h < len(custom_results['system_to_batt']) else 0.0
         grid_to_load = float(custom_results['grid_to_load'][h]) if h < len(custom_results['grid_to_load']) else 0.0
         grid_to_batt = float(custom_results['grid_to_batt'][h]) if h < len(custom_results['grid_to_batt']) else 0.0
         batt_to_load = float(custom_results['battery_to_load'][h]) if h < len(custom_results['battery_to_load']) else 0.0
         soc = float(custom_results['battery_soc'][h]) if h < len(custom_results['battery_soc']) else 0.0
-        print(f"{h:4d} {hod:3d}  {cmdC:4.2f} {cmdD:4.2f} {cmdG:4.2f}  {pv_to_load:7.3f}  {pv_to_batt:7.3f}  {grid_to_load:9.3f}  {grid_to_batt:9.3f}  {batt_to_load:9.3f}  {soc:6.3f}")
+        print(f"{h:4d} {hod:3d}  {cmdC:4.2f} {cmdD:4.2f} {cmdG:4.2f}  {load_val:7.3f}  {pv_to_load:7.3f}  {pv_to_batt:7.3f}  {grid_to_load:9.3f}  {grid_to_batt:9.3f}  {batt_to_load:9.3f}  {soc:6.3f}")
 
 
 def plot_soc_one_day(custom_results, dispatch_log, day_index=0, title_prefix="Battery SOC with Dispatch Events - Day"):
@@ -1910,7 +1965,7 @@ def main():
     
     if custom_sam_results is None:
         print("SAM simulation failed")
-        return
+        raise Exception
     else:
         try:
             first24 = [round(float(x), 3) for x in custom_sam_results['battery_soc'][:24]]
