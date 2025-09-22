@@ -507,13 +507,24 @@ def initialize_custom_dispatch(battery, load_profile, charge_schedule, discharge
         print("DEBUG: Schedule length mismatch!")
         return None
 
+    print("--------------")
+    cs0 = charge_schedule[:24]
+    ds0 = discharge_schedule[:24]
+    gs0 = gridcharge_schedule[:24]
+    print("First-day schedules (hours 0–23):")
+    print(f"  charge_schedule:     {[int(x) if x in (0,1) else round(float(x),3) for x in cs0]}")
+    print(f"  discharge_schedule:  {[int(x) if x in (0,1) else round(float(x),3) for x in ds0]}")
+    print(f"  gridcharge_schedule: {[int(x) if x in (0,1) else round(float(x),3) for x in gs0]}")
+    print("--------------")
     set_custom_dispatch_schedule(battery, load_profile, charge_schedule, discharge_schedule, gridcharge_schedule)
     
     # Set any additional dispatch parameters found in config
     additional_dispatch_settings = {
-        'batt_dispatch_auto_can_gridcharge': 1,
+        # Disallow grid charging moving forward
+        'batt_dispatch_auto_can_gridcharge': 0,
+        # Allow charging (from PV) and disallow discharge to grid
         'batt_dispatch_auto_can_charge': 1,
-        'batt_dispatch_auto_btm_can_discharge_to_grid': 0,  # Don't discharge to grid
+        'batt_dispatch_auto_btm_can_discharge_to_grid': 0,
     }
     
     for param, value in additional_dispatch_settings.items():
@@ -607,11 +618,11 @@ def run_sam_with_custom_dispatch(weather_file, load_profile, charge_schedule, di
     try:
         solar = initialize_solar(weather_file, load_profile, charge_schedule, discharge_schedule, gridcharge_schedule)
         if solar is None:
-            return None
+            raise Exception
             
         battery = initialize_storage(weather_file, load_profile, charge_schedule, discharge_schedule, gridcharge_schedule, solar)
         if battery is None:
-            return None
+            raise Exception
             
         initialize_custom_dispatch(battery, load_profile, charge_schedule, discharge_schedule, gridcharge_schedule)
         
@@ -626,6 +637,69 @@ def run_sam_with_custom_dispatch(weather_file, load_profile, charge_schedule, di
         return None
 
 
+def log_first_day_power_flows(custom_results, charge_schedule, discharge_schedule, gridcharge_schedule, day_index=0):
+    """
+    Print a concise, hour-by-hour power flow summary for the first 24 hours
+    of the selected day to trace how energy moves among PV, battery, grid, and load.
+    """
+    start = day_index * 24
+    end = min(start + 24, len(custom_results['battery_soc']))
+    print("\nDEBUG: First 24-hour power flow breakdown (kW where applicable):")
+    print("hour hod  cmdC cmdD cmdG  PV->Load  PV->Batt  Grid->Load  Grid->Batt  Batt->Load  SOC(%)")
+    for h in range(start, end):
+        hod = h % 24
+        cmdC = charge_schedule[h] if h < len(charge_schedule) else 0
+        cmdD = discharge_schedule[h] if h < len(discharge_schedule) else 0
+        cmdG = gridcharge_schedule[h] if h < len(gridcharge_schedule) else 0
+        pv_to_load = float(custom_results['system_to_load'][h]) if h < len(custom_results['system_to_load']) else 0.0
+        pv_to_batt = float(custom_results['system_to_batt'][h]) if h < len(custom_results['system_to_batt']) else 0.0
+        grid_to_load = float(custom_results['grid_to_load'][h]) if h < len(custom_results['grid_to_load']) else 0.0
+        grid_to_batt = float(custom_results['grid_to_batt'][h]) if h < len(custom_results['grid_to_batt']) else 0.0
+        batt_to_load = float(custom_results['battery_to_load'][h]) if h < len(custom_results['battery_to_load']) else 0.0
+        soc = float(custom_results['battery_soc'][h]) if h < len(custom_results['battery_soc']) else 0.0
+        print(f"{h:4d} {hod:3d}  {cmdC:4.2f} {cmdD:4.2f} {cmdG:4.2f}  {pv_to_load:7.3f}  {pv_to_batt:7.3f}  {grid_to_load:9.3f}  {grid_to_batt:9.3f}  {batt_to_load:9.3f}  {soc:6.3f}")
+
+
+def plot_soc_one_day(custom_results, dispatch_log, day_index=0, title_prefix="Battery SOC with Dispatch Events - Day"):
+    """
+    Plot a single 24-hour period for SOC with dispatch event markers (charge/discharge) and peak shading.
+    """
+    start = day_index * 24
+    end = min(start + 24, len(custom_results['battery_soc']))
+    hours = range(end - start)
+
+    soc = custom_results['battery_soc'][start:end]
+    sublog = dispatch_log.iloc[start:end]
+
+    plt.figure(figsize=(14, 4))
+    plt.title(f"{title_prefix} {day_index + 1}")
+    plt.plot(hours, soc, 'b-', linewidth=2, label='Battery SOC')
+
+    # Mark charge/discharge events
+    charge_hours = [i for i, v in enumerate(sublog['charge']) if v > 0]
+    discharge_hours = [i for i, v in enumerate(sublog['discharge']) if v > 0]
+    for h in charge_hours:
+        plt.axvline(x=h, color='green', alpha=0.25, linewidth=0.8)
+    for h in discharge_hours:
+        plt.axvline(x=h, color='red', alpha=0.25, linewidth=0.8)
+
+    # Peak window shading (4–9pm)
+    peak_start = 16
+    peak_end = 21
+    if peak_start < (end - start):
+        plt.axvspan(peak_start, min(peak_end, end - start), alpha=0.2, color='yellow', label='Peak 4–9pm')
+
+    plt.axhline(y=20, color='red', linestyle='--', alpha=0.5, label='Min SOC 20%')
+    plt.axhline(y=80, color='orange', linestyle='--', alpha=0.5, label='Max SOC 80%')
+    plt.ylabel('SOC (%)')
+    plt.xlabel('Hour of Day')
+    plt.xlim(0, end - start - 1)
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.show()
+
+
 def generate_simple_precharge_schedule(load_profile, precharge_hours=24, target_soc=90.0):
     """
     Build a very simple custom dispatch schedule that forces charging for a given
@@ -637,7 +711,7 @@ def generate_simple_precharge_schedule(load_profile, precharge_hours=24, target_
       maximum SOC is >= target_soc (e.g., set batt_maximum_SOC to 90 or 100).
     - With custom dispatch in simple mode, SAM will source charging from PV and/or
       grid (if grid charging is enabled). Our initializer sets
-      batt_dispatch_auto_can_gridcharge = 1 so grid charging is allowed.
+      batt_dispatch_auto_can_gridcharge = 0 so grid charging is not allowed.
 
     Returns:
       (charge_schedule, discharge_schedule, gridcharge_schedule) as arrays of 0/1.
@@ -728,13 +802,14 @@ def generate_solar_priority_battery_schedule(load_profile, solar_profile, peak_s
     """
     Generate a schedule using actual power values with clear time-based priorities:
     - Peak hours (4-9 PM): Discharge actual household load from battery (priority)
-    - Daylight hours (6 AM - 6 PM, excluding peak): Charge with excess solar
-    - Overnight hours: Charge from grid as needed
+    - Daylight hours (6 AM - 6 PM, excluding peak): Charge with excess solar ONLY
+    - Overnight hours: No battery activity (no grid charging allowed)
     
     Logic:
     1. Peak period discharge takes absolute priority over charging
-    2. During non-peak daylight: charge with (solar - household_load)
-    3. Overnight: moderate grid charging to prepare for next day
+    2. During non-peak daylight: charge with (solar - household_load) 
+    3. Overnight: battery idle (grid charging disabled)
+    4. Battery relies entirely on solar for replenishment
     
     Args:
         load_profile: Hourly household electricity demand (kW)
@@ -767,9 +842,9 @@ def generate_solar_priority_battery_schedule(load_profile, solar_profile, peak_s
             charge[h] = excess_solar
             
         else:
-            # Overnight hours: charge from grid as needed (moderate rate)
-            charge[h] = 2.0  # 2 kW grid charging rate
-            gridcharge[h] = 2.0
+            # Overnight hours: no grid charging allowed
+            charge[h] = 0.0  # No charging during overnight
+            gridcharge[h] = 0.0  # Grid charging disabled
     
     return charge, discharge, gridcharge
 
@@ -1639,6 +1714,68 @@ Hours <15%: {sum(1 for x in all_soc_values if x < 15)} ({sum(1 for x in all_soc_
         'daily_min_soc': daily_min_soc
     }
 
+def get_raw_solar_profile(weather_file, load_profile):
+    """
+    Generate raw solar profile using the same method as step8_run_sam_model_for_solar_storage.py
+    
+    Args:
+        weather_file: Path to TMY weather data file
+        load_profile: Hourly load profile for system sizing
+        
+    Returns:
+        list: Hourly solar generation profile (kW AC)
+    """
+    print(f"Generating raw solar profile from weather data...")
+    
+    try:
+        import PySAM.Pvwattsv8 as pvwatts
+        import PySAM.ResourceTools as tools
+        
+        # Load solar resource data from weather file (same as step8)
+        solar_resource_data = tools.SAM_CSV_to_solar_data(weather_file)
+        
+        # Create solar model
+        solar_model = pvwatts.new()
+        
+        # Load solar configuration
+        solar_config_file = "SAM_configuration_with_battery_custom_dispatch/untitled__1__pvwattsv8.json"
+        with open(solar_config_file, 'r') as file:
+            solar_config = json.load(file)
+            for k, v in solar_config.items():
+                if k not in ["number_inputs"]:
+                    try:
+                        solar_model.value(k, v)
+                    except:
+                        pass
+        
+        # Set solar resource data
+        solar_model.SolarResource.solar_resource_data = solar_resource_data
+        
+        # Calculate system capacity based on annual load (same logic as step8)
+        annual_load_kwh = sum(load_profile)
+        system_capacity = annual_load_kwh / 1200  # Rough sizing: 1200 kWh/kW annually
+        solar_model.SystemDesign.system_capacity = system_capacity
+        
+        # Execute solar model to get raw generation
+        solar_model.execute(0)
+        
+        # Get the raw solar generation (AC output)
+        ac_output = solar_model.Outputs.ac
+        # Convert to a flat Python list (handles tuple/ndarray/SSC types)
+        solar_profile = np.asarray(ac_output, dtype=float).ravel().tolist()
+        
+        print(f"  Raw solar profile generated: {len(solar_profile)} hours")
+        print(f"  Annual solar generation: {sum(solar_profile):.0f} kWh/year")
+        print(f"  System capacity: {system_capacity:.2f} kW")
+        print(f"  Peak solar output: {max(solar_profile):.2f} kW")
+        
+        return solar_profile
+        
+    except Exception as e:
+        print(f"Error generating solar profile: {e}")
+        raise Exception(f"Failed to generate raw solar profile: {e}")
+
+
 def main():
     """
     Main execution function to run the custom dispatch demo
@@ -1691,30 +1828,16 @@ def main():
     print(f"  Cycle cost threshold: ${dispatch_generator.cycle_cost:.3f}/kWh")
     print(f"  SOC operating range: {dispatch_generator.min_soc}% - {dispatch_generator.max_soc}%")
     
-    # Get solar profile
-    if reference_sam_data is not None:
-        solar_profile = reference_sam_data['System to Load'].tolist()
-        print(f"Using solar profile from reference SAM data")
-    else:
-        # Create simple solar profile for demo
-        solar_profile = []
-        for h in range(8760):
-            hour_of_day = h % 24
-            if 6 <= hour_of_day <= 18:
-                solar_intensity = np.sin((hour_of_day - 6) * np.pi / 12) * 3.0
-                solar_profile.append(max(0, solar_intensity))
-            else:
-                solar_profile.append(0.0)
-        print(f"Using synthetic solar profile for demo")
+    solar_profile = get_raw_solar_profile(weather_file, load_profile)
     
     # Generate custom dispatch schedules
     print("\nGenerating custom dispatch schedules...")
     # Use solar-priority schedule: prioritize battery replenishment during daylight hours
-    print("Using solar-priority battery charging strategy...")
+    print("Using solar-only battery charging strategy...")
     print("  Solar Priority: Battery Charging → Load → Grid Export")
-    print("  Daylight hours (6 AM - 6 PM): Prioritize battery charging")
+    print("  Daylight hours (6 AM - 4 PM): Charge with excess solar only")
     print("  Peak hours (4-9 PM): Discharge battery")
-    print("  Overnight hours: Grid charging as needed")
+    print("  Overnight hours: No battery activity (grid charging disabled)")
     
     charge_schedule, discharge_schedule, gridcharge_schedule = generate_solar_priority_battery_schedule(
         load_profile,
@@ -1722,6 +1845,15 @@ def main():
         peak_start_hour=16,
         peak_end_hour=21
     )
+
+    # Print first-day (0-23) schedule values for quick inspection
+    cs0 = charge_schedule[:24]
+    ds0 = discharge_schedule[:24]
+    gs0 = gridcharge_schedule[:24]
+    print("First-day schedules (hours 0–23):")
+    print(f"  charge_schedule:     {[int(x) if x in (0,1) else round(float(x),3) for x in cs0]}")
+    print(f"  discharge_schedule:  {[int(x) if x in (0,1) else round(float(x),3) for x in ds0]}")
+    print(f"  gridcharge_schedule: {[int(x) if x in (0,1) else round(float(x),3) for x in gs0]}")
     
     # Show schedule statistics
     total_charge_energy = np.sum(charge_schedule)
@@ -1781,8 +1913,16 @@ def main():
         return
     else:
         try:
-            first24 = [round(x, 1) for x in custom_sam_results['battery_soc'][:24]]
+            first24 = [round(float(x), 3) for x in custom_sam_results['battery_soc'][:24]]
             print(f"DEBUG: SAM SOC first 24 hours: {first24}")
+            # Detailed power flow log for the first day
+            log_first_day_power_flows(
+                custom_sam_results,
+                charge_schedule,
+                discharge_schedule,
+                gridcharge_schedule,
+                day_index=0,
+            )
         except Exception:
             pass
     
@@ -1804,33 +1944,16 @@ def main():
         pge_rate_plan
     )
     
-    # Generate plots for different time periods
+    # Generate plots (single-day SOC view)
     print("\nGenerating visualization plots...")
+    print("  Figure: Battery SOC with Dispatch Events (Day 1)...")
+    plot_soc_one_day(custom_sam_results, dispatch_generator.dispatch_log, day_index=0)
     
-    # Figure 1: First week of January (winter analysis)
-    print("  Figure 1: January analysis (first week)...")
-    plot_custom_dispatch_analysis(
-        custom_sam_results, 
-        dispatch_generator.dispatch_log, 
-        reference_sam_data,
-        month="January",
-        week_offset=0  # First week of year
-    )
-    
-    # Figure 2: First week of July (summer analysis) 
-    print("  Figure 2: July analysis (mid-summer week)...")
-    july_start_day = 31 + 28 + 31 + 30 + 31 + 30  # Jan+Feb+Mar+Apr+May+Jun = 181 days
-    plot_custom_dispatch_analysis(
-        custom_sam_results, 
-        dispatch_generator.dispatch_log, 
-        reference_sam_data,
-        month="July", 
-        week_offset=july_start_day + 7  # Second week of July for better summer representation
-    )
-    
-    # Figure 3: Annual SOC violation analysis
-    print("  Figure 3: Annual SOC violation analysis...")
-    plot_annual_soc_violations(dispatch_generator.dispatch_log)
+    # Optional: retain weekly/annual plots if needed by uncommenting below
+    # plot_custom_dispatch_analysis(custom_sam_results, dispatch_generator.dispatch_log, reference_sam_data, month="January", week_offset=0)
+    # july_start_day = 31 + 28 + 31 + 30 + 31 + 30
+    # plot_custom_dispatch_analysis(custom_sam_results, dispatch_generator.dispatch_log, reference_sam_data, month="July", week_offset=july_start_day + 7)
+    # plot_annual_soc_violations(dispatch_generator.dispatch_log)
     
     print("\nCustom dispatch demo completed.")
 
