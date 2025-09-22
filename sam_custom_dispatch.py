@@ -2042,11 +2042,11 @@ def main():
     print("  Figure: Battery SOC with Dispatch Events (Day 1)...")
     plot_soc_one_day(custom_sam_results, dispatch_generator.dispatch_log, day_index=0)
     
-    # Optional: retain weekly/annual plots if needed by uncommenting below
-    # plot_custom_dispatch_analysis(custom_sam_results, dispatch_generator.dispatch_log, reference_sam_data, month="January", week_offset=0)
-    # july_start_day = 31 + 28 + 31 + 30 + 31 + 30
-    # plot_custom_dispatch_analysis(custom_sam_results, dispatch_generator.dispatch_log, reference_sam_data, month="July", week_offset=july_start_day + 7)
-    # plot_annual_soc_violations(dispatch_generator.dispatch_log)
+    # Weekly and annual plots
+    plot_custom_dispatch_analysis(custom_sam_results, dispatch_generator.dispatch_log, reference_sam_data, month="January", week_offset=0)
+    july_start_day = 31 + 28 + 31 + 30 + 31 + 30
+    plot_custom_dispatch_analysis(custom_sam_results, dispatch_generator.dispatch_log, reference_sam_data, month="July", week_offset=july_start_day + 7)
+    plot_annual_soc_violations(dispatch_generator.dispatch_log)
     
     print("\nCustom dispatch demo completed.")
 
