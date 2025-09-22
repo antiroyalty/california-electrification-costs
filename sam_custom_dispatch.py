@@ -1,4 +1,4 @@
-git """
+"""
 SAM Custom Dispatch Module: Economically Optimal Battery Dispatch
 
 This module implements custom dispatch schedules for SAM's Custom Dispatch mode (mode 3)
@@ -593,76 +593,102 @@ def initialize_custom_dispatch(battery, load_profile, charge_schedule, discharge
 
 def run_sam_simulation(solar, battery):
     # === Run SAM Simulation ===
-    try:
-        solar.execute(0)
-    except Exception as e:
-        print(f"DEBUG: Solar execution failed: {e}")
-        raise Exception
-    
-    try:
-        # Ensure initial SOC is set just before execution (Battwatts expects percent 0–100)
+    solar.execute(0)
+
+    # Snapshot and diff battery properties (exclude Outputs for clarity)
+    import numpy as _np
+
+    def _export_inputs(batt):
+        data = batt.export()
+        return {k: v for k, v in data.items() if k != 'Outputs'}
+
+    def _is_seq(x):
+        return isinstance(x, (list, tuple))
+
+    def _to_list(x):
         try:
-            battery.value('batt_initial_SOC', 80.0)
+            return _np.asarray(x).tolist()
         except Exception:
-            try:
-                if hasattr(battery, 'Battery') and hasattr(battery.Battery, 'batt_initial_SOC'):
-                    battery.Battery.batt_initial_SOC = 80.0
-            except Exception:
-                pass
-        # DEBUG: Echo the current SOC inputs right before execution
-        try:
-            soc_init = None
-            if hasattr(battery, 'Battery') and hasattr(battery.Battery, 'batt_initial_SOC'):
-                soc_init = battery.Battery.batt_initial_SOC
-            print(f"DEBUG: Pre-execute batt_initial_SOC = {soc_init}")
-        except Exception:
-            pass
-        battery.execute(0)
-    except Exception as e:
-        print(f"DEBUG: Battery execution failed: {e}")
-        print(f"  Error type: {type(e)}")
-        print(f"  Error details: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return None
-    
+            return list(x) if _is_seq(x) else x
+
+    def _pretty_val(v, max_len=40):
+        vv = _to_list(v)
+        if _is_seq(vv) and len(vv) > max_len:
+            return f"list(len={len(vv)}) head={vv[:5]} ... tail={vv[-5:]}"
+        return vv
+
+    def _print_props(label, exp):
+        print(f"DEBUG: {label}")
+        for grp in sorted(exp.keys()):
+            print(f"  [{grp}]")
+            for k in sorted(exp[grp].keys()):
+                print(f"    {k}: {_pretty_val(exp[grp][k])}")
+
+    def _diff_props(before, after, rtol=1e-9, atol=1e-12):
+        diffs = []
+        all_grps = sorted(set(before.keys()) | set(after.keys()))
+        for grp in all_grps:
+            b = before.get(grp, {})
+            a = after.get(grp, {})
+            keys = sorted(set(b.keys()) | set(a.keys()))
+            for k in keys:
+                bv = b.get(k, None)
+                av = a.get(k, None)
+                if bv is None and av is None:
+                    continue
+                b_arr = _np.asarray(bv) if bv is not None else None
+                a_arr = _np.asarray(av) if av is not None else None
+                if (b_arr is not None) and (a_arr is not None):
+                    try:
+                        equal = _np.array_equal(b_arr, a_arr) or _np.allclose(b_arr, a_arr, rtol=rtol, atol=atol)
+                    except Exception:
+                        equal = (bv == av)
+                else:
+                    equal = (bv == av)
+                if not equal:
+                    diffs.append((grp, k, _pretty_val(bv), _pretty_val(av)))
+        return diffs
+
+    pre_inputs = _export_inputs(battery)
+    _print_props("Battery properties BEFORE execute() (inputs only)", pre_inputs)
+
+    battery.execute(0)
+
+    post_inputs = _export_inputs(battery)
+    _print_props("Battery properties AFTER execute() (inputs only)", post_inputs)
+    diffs = _diff_props(pre_inputs, post_inputs)
+    if diffs:
+        print("DEBUG: Changed battery properties (inputs):")
+        for grp, k, bv, av in diffs:
+            print(f"  {grp}.{k}: {bv} -> {av}")
+    else:
+        print("DEBUG: No input property changes detected during execute().")
+
     # === Extract Results ===
-    try:
-        results = {
-            'load_profile': battery.Battery.load,
-            'system_to_load': battery.Outputs.system_to_load,
-            'battery_to_load': battery.Outputs.batt_to_load,
-            'grid_to_load': battery.Outputs.grid_to_load,
-            'grid_to_batt': battery.Outputs.grid_to_batt,
-            'system_to_batt': battery.Outputs.system_to_batt,
-            'system_to_grid': battery.Outputs.system_to_grid,
-            'battery_soc': battery.Outputs.batt_SOC,
-            'solar_capacity': solar.SystemDesign.system_capacity,
-            'battery_capacity': battery.Outputs.batt_bank_installed_capacity
-        }
-        # DEBUG: Show first day SOC to verify starting state
-        try:
-            soc = results['battery_soc']
-            print(f"DEBUG: SOC first 12 hours: {[round(x,1) for x in soc[:12]]}")
-        except Exception:
-            pass
-        # DEBUG: Report installed battery capacity and simple input if available
-        try:
-            installed_kwh = results.get('battery_capacity', None)
-            simple_kwh = None
-            simple_kw = None
-            if hasattr(battery, 'Battery'):
-                simple_kwh = getattr(battery.Battery, 'batt_simple_kwh', None)
-                simple_kw = getattr(battery.Battery, 'batt_simple_kw', None)
-            print(f"DEBUG: Post-exec Battwatts capacity -> installed_kwh={installed_kwh}, simple_kwh={simple_kwh}, simple_kw={simple_kw}")
-        except Exception:
-            pass
-        
-        return results
-        
-    except Exception as e:
-        print(f"DEBUG: Failed to extract results: {e}")
-        return None
+    results = {
+        'load_profile': battery.Battery.load,
+        'system_to_load': battery.Outputs.system_to_load,
+        'battery_to_load': battery.Outputs.batt_to_load,
+        'grid_to_load': battery.Outputs.grid_to_load,
+        'grid_to_batt': battery.Outputs.grid_to_batt,
+        'system_to_batt': battery.Outputs.system_to_batt,
+        'system_to_grid': battery.Outputs.system_to_grid,
+        'battery_soc': battery.Outputs.batt_SOC,
+        'solar_capacity': solar.SystemDesign.system_capacity,
+        'battery_capacity': battery.Outputs.batt_bank_installed_capacity
+    }
+
+    # DEBUG: Show first day SOC to verify starting state
+    soc = results['battery_soc']
+    print(f"DEBUG: SOC first 12 hours: {[round(x,1) for x in soc[:12]]}")
+
+    # DEBUG: Report installed battery capacity and simple input if available
+    installed_kwh = results.get('battery_capacity', None)
+    simple_kwh = getattr(battery.Battery, 'batt_simple_kwh', None) if hasattr(battery, 'Battery') else None
+    simple_kw = getattr(battery.Battery, 'batt_simple_kw', None) if hasattr(battery, 'Battery') else None
+    print(f"DEBUG: Post-exec Battwatts capacity -> installed_kwh={installed_kwh}, simple_kwh={simple_kwh}, simple_kw={simple_kw}")
+
+    return results
 
 
 def run_sam_with_custom_dispatch(weather_file, load_profile, charge_schedule, discharge_schedule, gridcharge_schedule):
