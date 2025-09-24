@@ -264,9 +264,23 @@ def create_battery_model(solar, load_profile, years_of_analysis):
 
 def run_models_and_extract_outputs(solar, battery, load_profile):
     solar.execute(0)
-    # print(solar.Outputs.export().keys()) 
-    # print(solar.Outputs.annual_energy)
-    # print(solar.Outputs.ac_monthly)
+    try:
+        solar_outputs = solar.Outputs.export()
+    except Exception:
+        solar_outputs = {}
+    # Prefer PVWatts hourly AC, fall back to 'gen' if present
+    solar_ac = solar_outputs.get('ac', solar_outputs.get('gen', []))
+    solar_annual = solar_outputs.get('ac_annual', solar_outputs.get('annual_energy', None))
+    try:
+        first24 = [round(float(x), 3) for x in (solar_ac[:24] if hasattr(solar_ac, '__len__') else [])]
+    except Exception:
+        first24 = []
+    # Concise debug: keys and a small summary
+    log(
+        debug_solar_outputs_keys=sorted(list(solar_outputs.keys())) if solar_outputs else [],
+        debug_solar_annual_ac_or_energy=solar_annual,
+        debug_solar_ac_first24=first24,
+    )
     battery.execute(0)
 
     load = battery.Battery.load
