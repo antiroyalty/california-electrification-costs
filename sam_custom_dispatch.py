@@ -597,6 +597,27 @@ def initialize_custom_dispatch(battery, load_profile, charge_schedule, discharge
 def run_sam_simulation(solar, battery):
     # === Run SAM Simulation ===
     solar.execute(0)
+    # Export solar (PVWatts) outputs for downstream use and debugging
+    try:
+        _solar_outputs = solar.Outputs.export()
+    except Exception:
+        _solar_outputs = {}
+    
+    # Prefer hourly AC array from PVWatts; fall back to 'gen' if present
+    _solar_ac = _solar_outputs.get('ac', _solar_outputs.get('gen', []))
+    _solar_ac_annual = _solar_outputs.get('ac_annual', _solar_outputs.get('annual_energy', None))
+    try:
+        _first24 = [round(float(x), 3) for x in (_solar_ac[:24] if hasattr(_solar_ac, '__len__') else [])]
+    except Exception:
+        _first24 = []
+    print("DEBUG: Solar model outputs available:")
+    try:
+        print(f"  keys={sorted(list(_solar_outputs.keys()))}")
+    except Exception:
+        pass
+    print(f"  annual_ac_or_energy={_solar_ac_annual}")
+    if _first24:
+        print(f"  solar_ac first 24 hours: {_first24}")
 
     # Snapshot and diff battery properties (exclude Outputs for clarity)
     import numpy as _np
@@ -678,7 +699,11 @@ def run_sam_simulation(solar, battery):
         'system_to_grid': battery.Outputs.system_to_grid,
         'battery_soc': battery.Outputs.batt_SOC,
         'solar_capacity': solar.SystemDesign.system_capacity,
-        'battery_capacity': battery.Outputs.batt_bank_installed_capacity
+        'battery_capacity': battery.Outputs.batt_bank_installed_capacity,
+        # Solar model outputs (PVWatts): include raw export and a convenient AC series
+        'solar_outputs': _solar_outputs,
+        'solar_ac': _solar_ac,
+        'solar_ac_annual': _solar_ac_annual,
     }
 
     # DEBUG: Show first day SOC to verify starting state
@@ -889,6 +914,87 @@ def generate_peak_window_discharge_schedule(load_profile, peak_start_hour=16, pe
             gridcharge[h] = 1.0
 
     return charge, discharge, gridcharge
+
+
+def force_solar_to_battery_first_via_zero_load(load_profile, solar_hours_start=6, solar_hours_end=18):
+    """
+    EXPERIMENTAL FUNCTION: Force solar-to-battery-first routing by zeroing household load during solar hours.
+    
+    WARNING: This function implements non-standard behavior that manipulates SAM's internal
+    assumptions to achieve solar-to-battery-first routing. Use with extreme caution.
+    
+    BACKGROUND:
+    SAM (System Advisor Model) has a fundamental architectural assumption that solar energy
+    should serve household load first, then charge the battery with excess solar. This is
+    the economically optimal behavior for most real-world scenarios.
+    
+    PROBLEM:
+    Some research scenarios require forcing ALL solar energy to charge the battery first,
+    with household load served entirely from grid/battery. SAM does not natively support
+    this "solar-to-battery-first" routing priority.
+    
+    WORKAROUND MECHANISM:
+    This function temporarily zeros the household load profile during solar generation hours,
+    which tricks SAM into thinking there is no load to serve. Consequently, ALL solar energy
+    is treated as "excess" and routed to battery charging. The original load still exists
+    in the simulation but must be served from grid or battery discharge.
+    
+    SIDE EFFECTS & RISKS:
+    1. **Load Mismatch**: The modified load profile no longer represents actual household demand
+    2. **Economic Distortion**: Cost calculations may be incorrect due to artificial load patterns
+    3. **Grid Dependency**: Household load during solar hours must be served entirely from grid
+    4. **Battery Oversizing**: Battery may need to be larger to serve all daytime load
+    5. **Unrealistic Behavior**: This routing violates normal energy management principles
+    6. **SAM Compatibility**: May trigger unexpected behaviors in SAM's internal algorithms
+    
+    DEBUGGING VERIFICATION:
+    When this function is active, expect to see in power flow debug output:
+    - PV->Load = 0.000 during solar hours (6 AM - 6 PM)
+    - PV->Batt = [full solar generation] during solar hours
+    - Grid->Load = [original household load] during solar hours
+    
+    ALTERNATIVE APPROACHES:
+    1. Accept SAM's load-first behavior (recommended for most research)
+    2. Post-process results to simulate battery-first economics
+    3. Use different modeling software designed for non-standard dispatch
+    
+    Args:
+        load_profile (list): Original hourly household load profile [kWh]
+        solar_hours_start (int): Hour when solar-to-battery-first routing begins (default: 6 AM)
+        solar_hours_end (int): Hour when solar-to-battery-first routing ends (default: 6 PM)
+        
+    Returns:
+        list: Modified load profile with zeros during solar hours
+        
+    Example Usage:
+        # To enable solar-to-battery-first routing:
+        modified_load = force_solar_to_battery_first_via_zero_load(original_load)
+        
+        # To disable (use normal behavior):
+        modified_load = original_load  # Comment out the function call
+    """
+    print(f"\n⚠️  WARNING: Using experimental solar-to-battery-first routing")
+    print(f"   Original load will be zeroed during hours {solar_hours_start}-{solar_hours_end}")
+    print(f"   This forces ALL solar energy to charge battery instead of serving household load")
+    print(f"   Household load during these hours will be served from grid/battery only")
+    
+    modified_load = load_profile.copy()
+    hours_modified = 0
+    total_load_redirected = 0.0
+    
+    for h in range(len(load_profile)):
+        hour_of_day = h % 24
+        if solar_hours_start <= hour_of_day < solar_hours_end:
+            original_load = modified_load[h]
+            modified_load[h] = 0.0  # Zero out load during solar hours
+            hours_modified += 1
+            total_load_redirected += original_load
+    
+    print(f"   Modified {hours_modified} hours per day ({hours_modified * 365} hours annually)")
+    print(f"   Redirected {total_load_redirected:.1f} kWh of daily load from solar to grid/battery")
+    print(f"   Annual load redirected: {total_load_redirected * 365:.0f} kWh/year")
+    
+    return modified_load
 
 
 def generate_solar_priority_battery_schedule(load_profile, solar_profile, peak_start_hour=16, peak_end_hour=21):
@@ -1844,18 +1950,42 @@ def get_raw_solar_profile(weather_file, load_profile):
         # Set solar resource data
         solar_model.SolarResource.solar_resource_data = solar_resource_data
         
-        # Calculate system capacity based on annual load (same logic as step8)
+        # Calculate system capacity using proper physics-based method (same as step9)
         annual_load_kwh = sum(load_profile)
-        system_capacity = annual_load_kwh / 1200  # Rough sizing: 1200 kWh/kW annually
+        
+        # Extract global horizontal irradiance data
+        gh_w_per_m2 = solar_resource_data["gh"]
+        mean_gh_w_per_m2 = sum(gh_w_per_m2) / len(gh_w_per_m2)
+        
+        # Convert to daily energy [kWh/m²/day]
+        daily_irradiance_kWh_per_m2_per_day = mean_gh_w_per_m2 * 24 / 1000
+        annual_irradiance_kWh_per_m2 = daily_irradiance_kWh_per_m2_per_day * 365
+        
+        # Apply PV physics parameters (matching step9)
+        oversizing_factor = 1.0
+        panel_nameplate_power_density_kW_per_m2 = 0.193  # Tesla panels: 420W/2.171m²
+        system_performance_ratio = 0.80  # 80% efficiency after losses
+        pv_cell_efficiency = 0.206  # 20.6% Tesla panel efficiency
+        
+        # Calculate energy production per square meter
+        annual_energy_production_kWh_per_m2 = (annual_irradiance_kWh_per_m2 * 
+                                               pv_cell_efficiency * 
+                                               system_performance_ratio)
+        
+        # Calculate required panel area and DC capacity
+        required_panel_area_m2 = (annual_load_kwh * oversizing_factor) / annual_energy_production_kWh_per_m2
+        system_capacity = required_panel_area_m2 * panel_nameplate_power_density_kW_per_m2
         solar_model.SystemDesign.system_capacity = system_capacity
+        print(f"solar system capacity: {system_capacity}")
         
         # Execute solar model to get raw generation
         solar_model.execute(0)
         
-        # Get the raw solar generation (AC output)
+        # Get the raw solar generation (AC output in Watts)
         ac_output = solar_model.Outputs.ac
-        # Convert to a flat Python list (handles tuple/ndarray/SSC types)
-        solar_profile = np.asarray(ac_output, dtype=float).ravel().tolist()
+        # Convert to a flat Python list and convert from Watts to kW
+        solar_profile_watts = np.asarray(ac_output, dtype=float).ravel().tolist()
+        solar_profile = [w / 1000.0 for w in solar_profile_watts]  # Convert W to kW
         
         print(f"  Raw solar profile generated: {len(solar_profile)} hours")
         print(f"  Annual solar generation: {sum(solar_profile):.0f} kWh/year")
