@@ -181,6 +181,22 @@ def create_default_battery_module() -> BatteryMod.Battery:
     # Chemistry and initial SOC (use direct value() to avoid getters raising)
     _set("batt_chem", 1, required=False)  # 1 = Li-ion (if supported)
     _set("batt_initial_SOC", 50.0, required=False)
+    # Nominal voltage is required by many Battery builds
+    _set("batt_Vnom_default", 50.0, required=True)
+    # Provide a simple voltage vs SOC curve (fractional SOC 0..1, pack voltage V)
+    _set("batt_voltage_choice", 1, required=False)
+    soc_points = [i / 10.0 for i in range(11)]
+    v_points = [46.0, 47.0, 48.0, 49.0, 49.5, 50.0, 50.5, 51.0, 51.5, 52.0, 53.0]
+    volt_matrix = [[s, v] for s, v in zip(soc_points, v_points)]
+    _set("batt_voltage_matrix", volt_matrix, required=True)
+    # Minimal required cell parameters (pack-level approximations)
+    _set("batt_Vfull", 53.0, required=True)
+    _set("batt_Vexp", 51.0, required=False)
+    _set("batt_Vnom", 50.0, required=False)
+    _set("batt_Vcut", 44.0, required=False)
+    # Capacity (Ah) for ~13.5 kWh at 50 V -> 270 Ah
+    _set("batt_Qfull", 270.0, required=True)
+    _set("batt_Qnom", 270.0, required=False)
 
     # Core system efficiencies & topology
     _set("batt_meter_position", 0, required=False)  # 0=behind-the-meter
@@ -338,13 +354,15 @@ def configure_battery_dispatch(
 
 def log_first_day(batt: BatteryMod.Battery, day_index: int = 0) -> None:
     start = day_index * 24
-    end = min(start + 24, len(batt.Outputs.batt_SOC))
-    soc = np.asarray(batt.Outputs.batt_SOC, dtype=float).ravel()
-    p_dc = (
-        np.asarray(getattr(batt.Outputs, "batt_power", np.zeros_like(soc)), dtype=float).ravel()
-        if hasattr(batt.Outputs, "batt_power")
-        else np.zeros_like(soc)
-    )
+    exp = batt.export()
+    outputs = exp.get("Outputs", {}) if isinstance(exp, dict) else {}
+    soc = np.asarray(outputs.get("batt_SOC", []), dtype=float).ravel()
+    end = min(start + 24, len(soc))
+    p_dc_arr = outputs.get("batt_power", None)
+    if p_dc_arr is not None:
+        p_dc = np.asarray(p_dc_arr, dtype=float).ravel()
+    else:
+        p_dc = np.zeros_like(soc)
     print("\nDEBUG: Battery first 24 hours (SOC %, batt_power kW if available):")
     for h in range(start, end):
         print(f"  h={h:04d} hod={h%24:02d}  SOC={soc[h]:6.2f}  batt_power={p_dc[h]:7.3f}")
