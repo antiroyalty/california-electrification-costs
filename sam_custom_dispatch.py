@@ -594,101 +594,213 @@ def initialize_custom_dispatch(battery, load_profile, charge_schedule, discharge
     # done
 
 
-def run_sam_simulation(solar, battery):
-    # === Run SAM Simulation ===
+def _solar_execute_and_export(solar):
+    """Execute PVWatts model and return useful outputs, with concise debug prints."""
     solar.execute(0)
-    # Export solar (PVWatts) outputs for downstream use and debugging
     try:
-        _solar_outputs = solar.Outputs.export()
+        solar_outputs = solar.Outputs.export()
     except Exception:
-        _solar_outputs = {}
-    
+        solar_outputs = {}
+
     # Prefer hourly AC array from PVWatts; fall back to 'gen' if present
-    _solar_ac = _solar_outputs.get('ac', _solar_outputs.get('gen', []))
-    _solar_ac_annual = _solar_outputs.get('ac_annual', _solar_outputs.get('annual_energy', None))
+    solar_ac = solar_outputs.get('ac', solar_outputs.get('gen', []))
+    solar_ac_annual = solar_outputs.get('ac_annual', solar_outputs.get('annual_energy', None))
     try:
-        _first24 = [round(float(x), 3) for x in (_solar_ac[:24] if hasattr(_solar_ac, '__len__') else [])]
+        first24 = [round(float(x), 3) for x in (solar_ac[:24] if hasattr(solar_ac, '__len__') else [])]
     except Exception:
-        _first24 = []
+        first24 = []
+
     print("DEBUG: Solar model outputs available:")
     try:
-        print(f"  keys={sorted(list(_solar_outputs.keys()))}")
+        print(f"  keys={sorted(list(solar_outputs.keys()))}")
     except Exception:
         pass
-    print(f"  annual_ac_or_energy={_solar_ac_annual}")
-    if _first24:
-        print(f"  solar_ac first 24 hours: {_first24}")
+    print(f"  annual_ac_or_energy={solar_ac_annual}")
+    if first24:
+        print(f"  solar_ac first 24 hours: {first24}")
 
-    # Snapshot and diff battery properties (exclude Outputs for clarity)
-    import numpy as _np
+    return solar_outputs, solar_ac, solar_ac_annual
 
-    def _export_inputs(batt):
-        data = batt.export()
-        return {k: v for k, v in data.items() if k != 'Outputs'}
 
-    def _is_seq(x):
+def _export_battery_inputs(batt):
+    """Export battery inputs as a nested dict, excluding the Outputs group."""
+    data = batt.export()
+    return {k: v for k, v in data.items() if k != 'Outputs'}
+
+
+def _pretty_val(v, max_len=40):
+    """Format lists/arrays compactly for console printing."""
+    def is_seq(x):
         return isinstance(x, (list, tuple))
 
-    def _to_list(x):
-        try:
-            return _np.asarray(x).tolist()
-        except Exception:
-            return list(x) if _is_seq(x) else x
+    try:
+        vv = np.asarray(v).tolist()
+    except Exception:
+        vv = list(v) if is_seq(v) else v
 
-    def _pretty_val(v, max_len=40):
-        vv = _to_list(v)
-        if _is_seq(vv) and len(vv) > max_len:
-            return f"list(len={len(vv)}) head={vv[:5]} ... tail={vv[-5:]}"
-        return vv
+    if is_seq(vv) and len(vv) > max_len:
+        return f"list(len={len(vv)}) head={vv[:5]} ... tail={vv[-5:]}"
+    return vv
 
-    def _print_props(label, exp):
-        print(f"DEBUG: {label}")
-        for grp in sorted(exp.keys()):
-            print(f"  [{grp}]")
-            for k in sorted(exp[grp].keys()):
-                print(f"    {k}: {_pretty_val(exp[grp][k])}")
 
-    def _diff_props(before, after, rtol=1e-9, atol=1e-12):
-        diffs = []
-        all_grps = sorted(set(before.keys()) | set(after.keys()))
-        for grp in all_grps:
-            b = before.get(grp, {})
-            a = after.get(grp, {})
-            keys = sorted(set(b.keys()) | set(a.keys()))
-            for k in keys:
-                bv = b.get(k, None)
-                av = a.get(k, None)
-                if bv is None and av is None:
-                    continue
-                b_arr = _np.asarray(bv) if bv is not None else None
-                a_arr = _np.asarray(av) if av is not None else None
-                if (b_arr is not None) and (a_arr is not None):
-                    try:
-                        equal = _np.array_equal(b_arr, a_arr) or _np.allclose(b_arr, a_arr, rtol=rtol, atol=atol)
-                    except Exception:
-                        equal = (bv == av)
-                else:
+def _print_battery_props(label, props):
+    """Pretty-print nested battery properties (inputs only)."""
+    print(f"DEBUG: {label}")
+    for grp in sorted(props.keys()):
+        print(f"  [{grp}]")
+        for k in sorted(props[grp].keys()):
+            print(f"    {k}: {_pretty_val(props[grp][k])}")
+
+
+def _diff_battery_props(before, after, rtol=1e-9, atol=1e-12):
+    """Return list of (group, key, before, after) for changed input properties."""
+    diffs = []
+    all_grps = sorted(set(before.keys()) | set(after.keys()))
+    for grp in all_grps:
+        b = before.get(grp, {})
+        a = after.get(grp, {})
+        keys = sorted(set(b.keys()) | set(a.keys()))
+        for k in keys:
+            bv = b.get(k, None)
+            av = a.get(k, None)
+            if bv is None and av is None:
+                continue
+            b_arr = np.asarray(bv) if bv is not None else None
+            a_arr = np.asarray(av) if av is not None else None
+            if (b_arr is not None) and (a_arr is not None):
+                try:
+                    equal = np.array_equal(b_arr, a_arr) or np.allclose(b_arr, a_arr, rtol=rtol, atol=atol)
+                except Exception:
                     equal = (bv == av)
-                if not equal:
-                    diffs.append((grp, k, _pretty_val(bv), _pretty_val(av)))
-        return diffs
+            else:
+                equal = (bv == av)
+            if not equal:
+                diffs.append((grp, k, _pretty_val(bv), _pretty_val(av)))
+    return diffs
 
-    pre_inputs = _export_inputs(battery)
-    _print_props("Battery properties BEFORE execute() (inputs only)", pre_inputs)
 
+def _execute_battery_quiet(battery):
+    """Execute battery model without verbose before/after logs."""
     battery.execute(0)
 
-    post_inputs = _export_inputs(battery)
-    _print_props("Battery properties AFTER execute() (inputs only)", post_inputs)
-    diffs = _diff_props(pre_inputs, post_inputs)
-    if diffs:
-        print("DEBUG: Changed battery properties (inputs):")
-        for grp, k, bv, av in diffs:
-            print(f"  {grp}.{k}: {bv} -> {av}")
-    else:
-        print("DEBUG: No input property changes detected during execute().")
 
-    # === Extract Results ===
+def _to_hourly_kwh(solar_ac, annual_kwh=None):
+    """Return hourly PV energy in kWh from PVWatts AC output (auto-units).
+
+    Heuristic: choose scale 1.0 or 1/1000 so that sum matches annual_kwh
+    when provided; otherwise, use 1/1000 if p95(ac) > 100 (likely Wh/W).
+    """
+    arr = np.asarray(solar_ac, dtype=float).ravel()
+    if arr.size == 0:
+        return arr
+    cands = [1.0, 1.0 / 1000.0]
+    if annual_kwh is not None:
+        try:
+            annual_kwh = float(annual_kwh)
+        except Exception:
+            annual_kwh = None
+    if annual_kwh is not None and np.isfinite(annual_kwh) and annual_kwh > 0:
+        sums = [float(np.nansum(arr * s)) for s in cands]
+        errs = [abs(s - annual_kwh) for s in sums]
+        scale = cands[int(np.argmin(errs))]
+        return arr * scale
+    # Fallback heuristic
+    try:
+        p95 = float(np.nanpercentile(arr, 95))
+    except Exception:
+        p95 = np.nan
+    scale = 1.0 / 1000.0 if (np.isfinite(p95) and p95 > 100.0) else 1.0
+    return arr * scale
+
+
+def _log_hour_of_day_solar_breakdown(solar_ac, solar_ac_annual, battery):
+    """Print average kWh by hour-of-day for solar and its allocation.
+
+    Columns per hour-of-day (0..23):
+    - Solar_kWh: average PV AC per hour-of-day
+    - PV->Batt, PV->Load, PV->Grid: average allocations
+    - BattFraction: PV->Batt / Solar_kWh (0 if Solar_kWh==0)
+    """
+    # Normalize PV AC to kWh to align with battery flow units
+    ac = _to_hourly_kwh(solar_ac, solar_ac_annual)
+    s2b = np.asarray(getattr(battery.Outputs, 'system_to_batt', []), dtype=float).ravel()
+    s2l = np.asarray(getattr(battery.Outputs, 'system_to_load', []), dtype=float).ravel()
+    s2g = np.asarray(getattr(battery.Outputs, 'system_to_grid', []), dtype=float).ravel()
+
+    n = min(ac.size if ac.size else 0, s2b.size if s2b.size else 0, s2l.size if s2l.size else 0, s2g.size if s2g.size else 0)
+    if n == 0:
+        print("DEBUG: Hour-of-day solar breakdown unavailable (missing arrays).")
+        return
+    ac = ac[:n]; s2b = s2b[:n]; s2l = s2l[:n]; s2g = s2g[:n]
+    idx = np.arange(n)
+
+    def hod_avg(arr):
+        return np.array([float(np.mean(arr[idx % 24 == h])) if np.any(idx % 24 == h) else 0.0 for h in range(24)])
+
+    ac_h = hod_avg(ac)
+    s2b_h = hod_avg(s2b)
+    s2l_h = hod_avg(s2l)
+    s2g_h = hod_avg(s2g)
+
+    print("\nDEBUG: Hour-of-day solar breakdown (average kWh per hour across the year):")
+    print("hod  Solar_kWh  PV->Batt  PV->Load  PV->Grid  BattFraction")
+    for h in range(24):
+        solar = ac_h[h]
+        batt = s2b_h[h]
+        load = s2l_h[h]
+        grid = s2g_h[h]
+        frac = (batt / solar) if solar > 1e-12 else 0.0
+        print(f"{h:3d}  {solar:9.3f}  {batt:8.3f}  {load:8.3f}  {grid:8.3f}  {frac:12.3f}")
+
+    resid = ac_h - (s2b_h + s2l_h + s2g_h)
+    print(f"DEBUG: Avg identity residual |solar - (PV->Batt+PV->Load+PV->Grid)|: mean={np.mean(np.abs(resid)):.4f} kWh")
+
+
+def _log_first_day_pv_allocation(solar_ac, solar_ac_annual, battery, day_index=0):
+    """Print first 24 hours of PV vs allocation to Batt/Load/Grid.
+
+    Shows a direct, hour-by-hour table for the selected day to validate
+    that PV is being consumed by battery charging (and/or load), and how
+    much, if any, is exported to grid.
+    """
+    # Normalize PV AC to kWh for hour-by-hour comparison
+    ac = _to_hourly_kwh(solar_ac, solar_ac_annual)
+    s2b = np.asarray(getattr(battery.Outputs, 'system_to_batt', []), dtype=float).ravel()
+    s2l = np.asarray(getattr(battery.Outputs, 'system_to_load', []), dtype=float).ravel()
+    s2g = np.asarray(getattr(battery.Outputs, 'system_to_grid', []), dtype=float).ravel()
+
+    n = min(ac.size if ac.size else 0, s2b.size if s2b.size else 0, s2l.size if s2l.size else 0, s2g.size if s2g.size else 0)
+    if n == 0:
+        print("DEBUG: First-day PV allocation table unavailable (missing arrays).")
+        return
+
+    start = day_index * 24
+    end = min(start + 24, n)
+    print("\nDEBUG: First 24-hour PV allocation (kWh per hour):")
+    print("hour hod   PV(kWh)  PV->Batt  PV->Load  PV->Grid   Residual")
+    for h in range(start, end):
+        hod = h % 24
+        pv = ac[h]
+        to_batt = s2b[h]
+        to_load = s2l[h]
+        to_grid = s2g[h]
+        resid = pv - (to_batt + to_load + to_grid)
+        print(f"{h:4d} {hod:3d}  {pv:8.3f}  {to_batt:8.3f}  {to_load:8.3f}  {to_grid:8.3f}  {resid:9.3f}")
+
+
+def run_sam_simulation(solar, battery):
+    """Run PVWatts and Battwatts, log key debug info, and return results.
+
+    Returns a dict with hourly flows, SOC, capacities, and solar outputs.
+    """
+    # 1) Execute solar and capture outputs
+    solar_outputs, solar_ac, solar_ac_annual = _solar_execute_and_export(solar)
+    solar_ac_kwh = _to_hourly_kwh(solar_ac, solar_ac_annual)
+
+    # 2) Execute battery quietly (no verbose input dumps)
+    _execute_battery_quiet(battery)
+
+    # 3) Build results payload
     results = {
         'load_profile': battery.Battery.load,
         'system_to_load': battery.Outputs.system_to_load,
@@ -701,29 +813,24 @@ def run_sam_simulation(solar, battery):
         'solar_capacity': solar.SystemDesign.system_capacity,
         'battery_capacity': battery.Outputs.batt_bank_installed_capacity,
         # Solar model outputs (PVWatts): include raw export and a convenient AC series
-        'solar_outputs': _solar_outputs,
-        'solar_ac': _solar_ac,
-        'solar_ac_annual': _solar_ac_annual,
+        'solar_outputs': solar_outputs,
+        'solar_ac': solar_ac,
+        'solar_ac_annual': solar_ac_annual,
+        'solar_ac_kwh': solar_ac_kwh,
     }
 
-    # DEBUG: Show first day SOC to verify starting state
-    soc = results['battery_soc']
-    print(f"DEBUG: SOC first 12 hours: {[round(x,1) for x in soc[:12]]}")
+    # 4) Solar utilization diagnostics
+    #    a) Hour-of-day averages (yearwide)
+    _log_hour_of_day_solar_breakdown(solar_ac, solar_ac_annual, battery)
+    #    b) First-day hour-by-hour PV vs allocation
+    _log_first_day_pv_allocation(solar_ac, solar_ac_annual, battery, day_index=0)
 
-    # DEBUG: Report installed battery capacity and simple input if available
-    installed_kwh = results.get('battery_capacity', None)
-    simple_kwh = getattr(battery.Battery, 'batt_simple_kwh', None) if hasattr(battery, 'Battery') else None
-    simple_kw = getattr(battery.Battery, 'batt_simple_kw', None) if hasattr(battery, 'Battery') else None
-    print(f"DEBUG: Post-exec Battwatts capacity -> installed_kwh={installed_kwh}, simple_kwh={simple_kwh}, simple_kw={simple_kw}")
-
-    # DEBUG: Surface batt_grid_charge_percent from Outputs (if available)
-    if hasattr(battery, 'Outputs') and hasattr(battery.Outputs, 'batt_grid_charge_percent'):
-        import numpy as _np
-        grid_pct = _np.asarray(battery.Outputs.batt_grid_charge_percent, dtype=float).ravel()
-        first24 = [round(float(x), 3) for x in grid_pct[:24]]
-        nonzero_total = int((grid_pct > 0).sum())
-        print(f"DEBUG: batt_grid_charge_percent first 24 hours: {first24}")
-        print(f"DEBUG: batt_grid_charge_percent nonzero hours (total year): {nonzero_total}")
+    # Optional: quick preview of first day's PV in kWh
+    try:
+        first24_kwh = [round(float(x), 3) for x in solar_ac_kwh[:24]]
+        print(f"DEBUG: solar_ac first 24 hours (kWh): {first24_kwh}")
+    except Exception:
+        pass
 
     return results
 
@@ -1303,12 +1410,17 @@ def calculate_economic_benefits(custom_results, reference_data, dispatch_log, ra
     }
 
 
-def plot_custom_dispatch_analysis(custom_results, dispatch_log, reference_data=None, month="January", week_offset=0):
+def plot_custom_dispatch_analysis(custom_results, dispatch_log, reference_data=None, month="January", week_offset=0, original_load_profile=None):
     """
     Create comprehensive visualization of custom dispatch behavior
     
     Args:
         custom_results: SAM simulation results
+        dispatch_log: Custom dispatch log with schedules
+        reference_data: Optional reference SAM data for comparison  
+        month: Month name for plot title
+        week_offset: Day offset for week selection
+        original_load_profile: Original unmodified load profile (for accurate plotting when using solar-to-battery-first routing)
         dispatch_log: Algorithm dispatch decisions
         reference_data: Reference SAM data for comparison
         month: Month name for title (e.g., "January", "July")
@@ -2124,6 +2236,11 @@ def main():
             'gridcharge': gridcharge_schedule[h]
         })
     dispatch_generator.dispatch_log = pd.DataFrame(rows)
+    
+    # EXPERIMENTAL: Force solar-to-battery-first routing (OPTIONAL - comment out to disable)
+    # WARNING: This modifies the load profile to trick SAM into routing ALL solar to battery first
+    # Uncomment the next line to enable solar-to-battery-first behavior:
+    load_profile = force_solar_to_battery_first_via_zero_load(load_profile)
     
     # Run SAM with custom dispatch
     print("\nRunning SAM simulation with custom dispatch...")
