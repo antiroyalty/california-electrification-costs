@@ -75,6 +75,10 @@ def get_raw_solar_profile(weather_file: str, hours_hint: int | None = None) -> L
         if k == "number_inputs":
             continue
         try:
+            # Skip deprecated parameters that no longer exist in PySAM
+            if k in ["en_batt_lifetime", "batt_adjust_periods"]:
+                print(f"DEBUG: Skipping deprecated parameter {k}")
+                continue
             pv.value(k, v)
         except Exception as e:
             print(f"DEBUG: Failed to set {k}={v}: {e}")
@@ -89,6 +93,27 @@ def get_raw_solar_profile(weather_file: str, hours_hint: int | None = None) -> L
             print(f"DEBUG: Failed to set system_capacity={adjusted_capacity}: {e}")
 
     pv.SolarResource.solar_resource_data = solar_resource_data
+    
+    # Disable lifetime analysis and battery replacements - we only want single-year output
+    pv.value("system_use_lifetime_output", 0)
+    pv.value("analysis_period", 1)
+    
+    # Disable battery replacements (they require lifetime analysis)
+    pv.value("batt_replacement_option", 0)
+    # Note: en_batt_lifetime parameter no longer exists in current PySAM version
+    
+    # PVSAMv1 requires additional load-related parameters
+    # Set critical load to zero (no critical load requirements)
+    pv.value("crit_load", [0.0] * 8760)
+    
+    # Set load profile if we have one (optional for PV-only simulation)
+    if hours_hint:
+        # Create a simple load profile for sizing purposes
+        avg_load = hours_hint / 8760.0  # Convert annual kWh to average hourly kW
+        pv.value("load", [avg_load] * 8760)
+    else:
+        pv.value("load", [0.0] * 8760)
+    
     pv.execute(0)
     
     # Get AC output from PVSAMv1
@@ -185,11 +210,19 @@ def create_battery_from_config() -> BatteryMod.Battery:
     with open(BATTERY_CONFIG_FILE, "r") as f:
         battery_config = json.load(f)
     
-    # Apply all configuration parameters from JSON
+    # Apply all configuration parameters from JSON, except problematic ones
     for key, value in battery_config.items():
         if key == "number_inputs":
             continue  # Skip this metadata field
         try:
+            # Skip deprecated parameters that no longer exist in PySAM
+            if key in ["en_batt_lifetime", "batt_adjust_periods"]:
+                print(f"DEBUG: Skipping deprecated parameter {key}")
+                continue
+            # Skip crit_load from JSON - we'll set it dynamically with correct length
+            if key == "crit_load":
+                print(f"DEBUG: Skipping crit_load from JSON - will set dynamically")
+                continue
             batt.value(key, value)
         except Exception as e:
             print(f"DEBUG: Failed to set {key}={value}: {e}")
@@ -297,6 +330,10 @@ def configure_standalone_mode(batt: BatteryMod.Battery, pv_ac: List[float], load
     # Forecasts (required)
     _set("batt_pv_ac_forecast", pv_ac, required=True)
     _set("batt_load_ac_forecast", load_ac, required=True)
+    
+    # Critical load must match load array length
+    crit_load = [0.0] * len(load_ac)
+    _set("crit_load", crit_load, required=False)
 
     # Timestep (required; try a few common keys)
     ok_ts = (
