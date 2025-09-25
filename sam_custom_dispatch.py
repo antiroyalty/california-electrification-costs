@@ -656,7 +656,19 @@ def _log_hour_of_day_solar_breakdown(solar_ac, solar_ac_annual, battery):
     if n == 0:
         print("DEBUG: Hour-of-day solar breakdown unavailable (missing arrays).")
         return
+    # Attempt to include hourly load (kW average over the hour)
+    try:
+        load_series = np.asarray(getattr(battery.Battery, 'load', []), dtype=float).ravel()
+    except Exception:
+        load_series = np.array([])
+
+    # Constrain all arrays to a common length, including load if present
+    if load_series.size:
+        n = min(n, load_series.size)
     ac = ac[:n]; s2b = s2b[:n]; s2l = s2l[:n]; s2g = s2g[:n]
+    if load_series.size:
+        load_series = load_series[:n]
+
     idx = np.arange(n)
 
     def hod_avg(arr):
@@ -666,16 +678,19 @@ def _log_hour_of_day_solar_breakdown(solar_ac, solar_ac_annual, battery):
     s2b_h = hod_avg(s2b)
     s2l_h = hod_avg(s2l)
     s2g_h = hod_avg(s2g)
+    load_h = hod_avg(load_series) if load_series.size else np.zeros(24)
 
     print("\nDEBUG: Hour-of-day solar breakdown (average kWh per hour across the year):")
-    print("hod  Solar_kWh  PV->Batt  PV->Load  PV->Grid  BattFraction")
+    # Note: Load is reported as average kW for the hour (kWh/h)
+    print("hod  Solar_kWh  Load_kW  PV->Batt  PV->Load  PV->Grid  BattFraction")
     for h in range(24):
         solar = ac_h[h]
+        load_kw = load_h[h]
         batt = s2b_h[h]
-        load = s2l_h[h]
+        pvload = s2l_h[h]
         grid = s2g_h[h]
         frac = (batt / solar) if solar > 1e-12 else 0.0
-        print(f"{h:3d}  {solar:9.3f}  {batt:8.3f}  {load:8.3f}  {grid:8.3f}  {frac:12.3f}")
+        print(f"{h:3d}  {solar:9.3f}  {load_kw:8.3f}  {batt:8.3f}  {pvload:8.3f}  {grid:8.3f}  {frac:12.3f}")
 
     resid = ac_h - (s2b_h + s2l_h + s2g_h)
     print(f"DEBUG: Avg identity residual |solar - (PV->Batt+PV->Load+PV->Grid)|: mean={np.mean(np.abs(resid)):.4f} kWh")
