@@ -16,10 +16,9 @@ Notes
   See "CONFIGURATION" below for details.
 
 Configuration
-- Provide a Battery JSON config file exported from SAM for a battery model
-  (not Battwatts). Place it at, for example:
-    SAM_configuration/battery_module_default.json
-  Then set BATTERY_CONFIG_FILE accordingly.
+- Uses SAM configuration files from SAM_Detailed-PV-Battery/ folder:
+  - untitled_pvsamv1.json: Detailed PV system with battery configuration
+- This file contains integrated PV+Battery system configuration with weather-based solar modeling
 
 What this script does
 1) Builds a PV profile with PVWatts from the local weather CSV (same as
@@ -48,13 +47,14 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-import PySAM.Pvwattsv8 as Pvwatts
+import PySAM.Pvsamv1 as Pvsamv1
 import PySAM.ResourceTools as ResourceTools
 import PySAM.Battery as BatteryMod
 
 
 # Defaults / Paths
-PV_CONFIG_FILE = "SAM_configuration/untitled__1__pvwattsv8.json"
+PV_CONFIG_FILE = "SAM_Detailed-PV-Battery/untitled_pvsamv1.json"
+BATTERY_CONFIG_FILE = "SAM_Detailed-PV-Battery/untitled_pvsamv1.json"  # Same file contains both PV and battery config
 
 
 # ------------------------------
@@ -63,12 +63,12 @@ PV_CONFIG_FILE = "SAM_configuration/untitled__1__pvwattsv8.json"
 
 def get_raw_solar_profile(weather_file: str, hours_hint: int | None = None) -> List[float]:
     """
-    Generate PV AC output via PVWatts for the provided weather file.
+    Generate PV AC output via PVSAMv1 detailed PV model for the provided weather file.
     System size is heuristically scaled if hours_hint is passed (annual load proxy).
     """
     solar_resource_data = ResourceTools.SAM_CSV_to_solar_data(weather_file)
 
-    pv = Pvwatts.new()
+    pv = Pvsamv1.new()
     with open(PV_CONFIG_FILE, "r") as f:
         cfg = json.load(f)
     for k, v in cfg.items():
@@ -76,17 +76,28 @@ def get_raw_solar_profile(weather_file: str, hours_hint: int | None = None) -> L
             continue
         try:
             pv.value(k, v)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"DEBUG: Failed to set {k}={v}: {e}")
 
     # Heuristic sizing (optional)
     if hours_hint is not None:
-        # 1200 kWh/kW/yr typical
-        pv.SystemDesign.system_capacity = max(0.1, hours_hint / 1200.0)
+        # 1200 kWh/kW/yr typical capacity factor
+        adjusted_capacity = max(0.1, hours_hint / 1200.0)
+        try:
+            pv.value("system_capacity", adjusted_capacity)
+        except Exception as e:
+            print(f"DEBUG: Failed to set system_capacity={adjusted_capacity}: {e}")
 
     pv.SolarResource.solar_resource_data = solar_resource_data
     pv.execute(0)
-    ac = np.asarray(pv.Outputs.ac, dtype=float).ravel().tolist()
+    
+    # Get AC output from PVSAMv1
+    try:
+        ac = np.asarray(pv.Outputs.gen, dtype=float).ravel().tolist()  # PVSAMv1 uses 'gen' output
+    except Exception as e:
+        print(f"DEBUG: Error getting generation output: {e}")
+        ac = [0.0] * 8760  # Fallback
+    
     return ac
 
 
@@ -154,16 +165,42 @@ def generate_full_peak_discharge_and_pv_charge_schedule(
 # Battery model (PySAM.Battery) initialization
 # --------------------------------------------
 
-def create_default_battery_module() -> BatteryMod.Battery:
+def create_battery_from_config() -> BatteryMod.Battery:
     """
-    Create and configure a Battery compute module instance with reasonable defaults
-    suitable for manual dispatch exploration without requiring a JSON export.
-
-    This sets:
+    Create and configure a Battery compute module instance from the JSON configuration
+    in SAM_Custom_Generation_No_Grid_Export_Settings folder.
+    
+    This loads the pre-configured battery settings that include:
       - Lithium-ion chemistry, initial SOC
-      - Basic efficiencies and meter position
+      - Basic efficiencies and meter position  
       - Manual dispatch mode and PV-first charging preference
       - Disallow grid charging and export
+    """
+    batt = BatteryMod.new()
+    
+    # Load configuration from JSON file
+    if not os.path.exists(BATTERY_CONFIG_FILE):
+        raise FileNotFoundError(f"Battery config file not found: {BATTERY_CONFIG_FILE}")
+    
+    with open(BATTERY_CONFIG_FILE, "r") as f:
+        battery_config = json.load(f)
+    
+    # Apply all configuration parameters from JSON
+    for key, value in battery_config.items():
+        if key == "number_inputs":
+            continue  # Skip this metadata field
+        try:
+            batt.value(key, value)
+        except Exception as e:
+            print(f"DEBUG: Failed to set {key}={value}: {e}")
+    
+    print(f"DEBUG: Loaded battery configuration from {BATTERY_CONFIG_FILE}")
+    return batt
+
+
+def create_default_battery_module() -> BatteryMod.Battery:
+    """
+    LEGACY: Create battery with hardcoded defaults. Use create_battery_from_config() instead.
     """
     batt = BatteryMod.new()
 
@@ -413,7 +450,7 @@ def main():
     )
 
     # Initialize Battery module
-    batt = create_default_battery_module()
+    batt = create_battery_from_config()
 
     # Configure stand‑alone mode (forecasts + timestep + standalone flag)
     try:
