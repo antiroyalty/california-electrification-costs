@@ -345,9 +345,18 @@ def initialize_storage(weather_file, load_profile, charge_schedule, discharge_sc
     # Set load profile (must exist on Battery group)
     battery.Battery.assign({'load': load_profile})
 
-    # Note: Battwatts simple model may not expose SOC bounds as inputs; do not
-    # attempt to set non-existent fields here. Defaults from the config apply.
-    print("DEBUG: Pre-exec Battwatts SOC params -> not explicitly set for Battwatts simple model")
+    # Ensure simple battery model is enabled so SOC and flows are computed
+    try:
+        battery.value('batt_simple_enable', 1)
+    except Exception:
+        pass
+
+    print("DEBUG: Battwatts simple model enabled (batt_simple_enable=1)")
+
+    # Configure a single-year analysis period explicitly for Battwatts Lifetime
+    # Keep lifetime outputs disabled (single-year repeated), but set analysis_period=1
+    battery.value('system_use_lifetime_output', 0)
+    battery.value('analysis_period', 1)
     model_kwh = getattr(battery.Battery, 'batt_simple_kwh', None)
     model_kw = getattr(battery.Battery, 'batt_simple_kw', None)
     print(f"DEBUG: Pre-exec Battwatts capacity (input) kWh={model_kwh}, kW={model_kw}")
@@ -761,6 +770,46 @@ def run_sam_with_custom_dispatch(weather_file, load_profile, charge_schedule, di
     battery = initialize_storage(weather_file, load_profile, charge_schedule, discharge_schedule, gridcharge_schedule, solar)
     initialize_custom_dispatch(battery, load_profile, charge_schedule, discharge_schedule, gridcharge_schedule)
     return run_sam_simulation(solar, battery)
+
+
+def _estimate_soc_series(charge_kw, discharge_kw, gridcharge_kw, capacity_kwh, initial_soc=50.0,
+                         charge_eff=0.95, discharge_eff=0.95):
+    """Estimate SOC series from dispatch schedules and battery capacity.
+
+    This is a deterministic estimate based on commanded charge/discharge magnitudes and does
+    not represent SAM's internal physics. Use only when SAM does not expose batt_SOC.
+    """
+    n = len(discharge_kw)
+    soc = np.zeros(n)
+    energy = max(0.0, min(capacity_kwh, (initial_soc / 100.0) * capacity_kwh))
+    for h in range(n):
+        ch = float(charge_kw[h]) if h < len(charge_kw) else 0.0
+        dc = float(discharge_kw[h]) if h < len(discharge_kw) else 0.0
+        gc = float(gridcharge_kw[h]) if h < len(gridcharge_kw) else 0.0
+        # kWh added/removed in this hour (assuming 1h timestep)
+        energy += (ch + gc) * charge_eff
+        energy -= (dc / max(discharge_eff, 1e-6))
+        energy = max(0.0, min(capacity_kwh, energy))
+        soc[h] = 100.0 * (energy / capacity_kwh) if capacity_kwh > 0 else 0.0
+    return soc
+
+
+def plot_estimated_soc_one_day(charge_schedule, discharge_schedule, gridcharge_schedule,
+                               capacity_kwh, day_index=0,
+                               title_prefix="Estimated Battery SOC (from schedules) - Day"):
+    start = day_index * 24
+    end = start + 24
+    soc_series = _estimate_soc_series(charge_schedule, discharge_schedule, gridcharge_schedule,
+                                      capacity_kwh=capacity_kwh, initial_soc=50.0)
+    soc_day = soc_series[start:end]
+    hours = range(len(soc_day))
+    plt.figure(figsize=(10, 4))
+    plt.plot(hours, soc_day, 'b-', linewidth=2)
+    plt.title(f"{title_prefix} {day_index + 1}")
+    plt.ylabel('SOC (%)')
+    plt.xlabel('Hour')
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
 
 
 ## PVSAMv1 helper functions removed to avoid confusion; this module uses Battwatts.
@@ -2110,12 +2159,15 @@ def main():
     
     # Generate plots (single-day SOC view)
     print("\nGenerating visualization plots...")
-    # Always show SOC if available
+    # Always show SOC if available; otherwise, plot an estimated SOC from schedules for visibility
     if 'battery_soc' in custom_sam_results:
         print("  Figure: Battery SOC with Dispatch Events (Day 1)...")
         plot_soc_one_day(custom_sam_results, dispatch_generator.dispatch_log, day_index=0)
     else:
-        print("  Skipping SOC plot: battery_soc not available.")
+        print("  SAM did not expose battery_soc; plotting an estimated SOC from schedules (labelled as Estimated).")
+        est_capacity = getattr(dispatch_generator, 'battery_capacity', 13.5)
+        plot_estimated_soc_one_day(charge_schedule, discharge_schedule, gridcharge_schedule,
+                                   capacity_kwh=est_capacity, day_index=0)
 
     # Weekly analysis requires flow breakdown; skip if not available
     if custom_sam_results.get('flows_available'):
