@@ -705,18 +705,9 @@ def run_sam_simulation(solar, battery):
     # 2) Execute battery quietly (no verbose input dumps)
     _execute_battery_quiet(battery)
 
-    # 3) Build results payload strictly from exported dict
+    # 3) Build results payload strictly from what's actually present
     batt_out = battery.Outputs.export()
     print(f"DEBUG: Battery outputs available keys: {sorted(list(batt_out.keys()))}")
-
-    # Verify required keys are present
-    required_batt_keys = [
-        'system_to_load', 'batt_to_load', 'grid_to_load', 'grid_to_batt',
-        'system_to_batt', 'system_to_grid', 'batt_SOC', 'batt_bank_installed_capacity'
-    ]
-    missing = [k for k in required_batt_keys if k not in batt_out]
-    if missing:
-        raise KeyError(f"Battery outputs missing required keys: {missing}")
 
     # Ensure load profile attribute exists
     if not hasattr(battery, 'Battery') or not hasattr(battery.Battery, 'load'):
@@ -724,21 +715,28 @@ def run_sam_simulation(solar, battery):
 
     results = {
         'load_profile': battery.Battery.load,
-        'system_to_load': batt_out['system_to_load'],
-        'battery_to_load': batt_out['batt_to_load'],
-        'grid_to_load': batt_out['grid_to_load'],
-        'grid_to_batt': batt_out['grid_to_batt'],
-        'system_to_batt': batt_out['system_to_batt'],
-        'system_to_grid': batt_out['system_to_grid'],
-        'battery_soc': batt_out['batt_SOC'],
         'solar_capacity': solar.SystemDesign.system_capacity,
-        'battery_capacity': batt_out['batt_bank_installed_capacity'],
-        # Solar model outputs (PVWatts): include raw export and a convenient AC series
         'solar_outputs': solar_outputs,
         'solar_ac': solar_ac,
         'solar_ac_annual': solar_ac_annual,
         'solar_ac_kwh': solar_ac_kwh,
     }
+
+    # Include flows only if Battwatts provided them
+    flow_keys = ['system_to_load', 'batt_to_load', 'grid_to_load', 'grid_to_batt', 'system_to_batt', 'system_to_grid']
+    flows_available = all(k in batt_out for k in flow_keys)
+    results['flows_available'] = bool(flows_available)
+    if flows_available:
+        for k in flow_keys:
+            results[
+                'battery_to_load' if k == 'batt_to_load' else k
+            ] = batt_out[k]
+
+    # Include SOC and capacity if present
+    if 'batt_SOC' in batt_out:
+        results['battery_soc'] = batt_out['batt_SOC']
+    if 'batt_bank_installed_capacity' in batt_out:
+        results['battery_capacity'] = batt_out['batt_bank_installed_capacity']
 
     # 4) Solar utilization diagnostics
     #    a) Hour-of-day averages (yearwide)
@@ -747,11 +745,8 @@ def run_sam_simulation(solar, battery):
     _log_first_day_pv_allocation(solar_ac, solar_ac_annual, battery, day_index=0)
 
     # Optional: quick preview of first day's PV in kWh
-    try:
-        first24_kwh = [round(float(x), 3) for x in solar_ac_kwh[:24]]
-        print(f"DEBUG: solar_ac first 24 hours (kWh): {first24_kwh}")
-    except Exception:
-        pass
+    first24_kwh = [round(float(x), 3) for x in (solar_ac_kwh[:24] if hasattr(solar_ac_kwh, '__len__') else [])]
+    print(f"DEBUG: solar_ac first 24 hours (kWh): {first24_kwh}")
 
     return results
 
@@ -766,6 +761,9 @@ def run_sam_with_custom_dispatch(weather_file, load_profile, charge_schedule, di
     battery = initialize_storage(weather_file, load_profile, charge_schedule, discharge_schedule, gridcharge_schedule, solar)
     initialize_custom_dispatch(battery, load_profile, charge_schedule, discharge_schedule, gridcharge_schedule)
     return run_sam_simulation(solar, battery)
+
+
+## PVSAMv1 helper functions removed to avoid confusion; this module uses Battwatts.
 
 
 def log_first_day_power_flows(custom_results, charge_schedule, discharge_schedule, gridcharge_schedule, day_index=0):
@@ -2070,7 +2068,7 @@ def main():
     # the load profile remains accurate and unmodified.
     
     # Run SAM with custom dispatch
-    print("\nRunning SAM simulation with custom dispatch...")
+    print("\nRunning SAM simulation with custom dispatch (Battwatts)...")
     custom_sam_results = run_sam_with_custom_dispatch(
         weather_file, load_profile, charge_schedule, discharge_schedule, gridcharge_schedule
     )
@@ -2079,48 +2077,54 @@ def main():
         print("SAM simulation failed")
         raise Exception
     else:
-        try:
+        if 'battery_soc' in custom_sam_results:
             first24 = [round(float(x), 3) for x in custom_sam_results['battery_soc'][:24]]
             print(f"DEBUG: SAM SOC first 24 hours: {first24}")
-            # Detailed power flow log for the first day
-            log_first_day_power_flows(
-                custom_sam_results,
-                charge_schedule,
-                discharge_schedule,
-                gridcharge_schedule,
-                day_index=0,
-            )
-        except Exception:
-            pass
+        else:
+            print("DEBUG: battery_soc not available from Battwatts outputs.")
     
     # Compare results
-    if reference_sam_data is not None:
+    # Comparison requires disaggregated flows; skip if not available
+    if reference_sam_data is not None and custom_sam_results.get('flows_available'):
         print("\nComparing results...")
         comparison_results = compare_dispatch_results(
             reference_sam_data, 
             custom_sam_results, 
             dispatch_generator.dispatch_log
         )
+    else:
+        print("\nSkipping comparison: disaggregated flow outputs not available with Battwatts.")
     
-    # Economic analysis
-    print("\nCalculating economic benefits...")
-    economic_analysis = calculate_economic_benefits(
-        custom_sam_results,
-        reference_sam_data,
-        dispatch_generator.dispatch_log,
-        pge_rate_plan
-    )
+    # Economic analysis requires disaggregated grid_to_load flows; skip if unavailable
+    if custom_sam_results.get('flows_available'):
+        print("\nCalculating economic benefits...")
+        economic_analysis = calculate_economic_benefits(
+            custom_sam_results,
+            reference_sam_data,
+            dispatch_generator.dispatch_log,
+            pge_rate_plan
+        )
+    else:
+        print("\nSkipping economic analysis: disaggregated flow outputs not available with Battwatts.")
+        economic_analysis = None
     
     # Generate plots (single-day SOC view)
     print("\nGenerating visualization plots...")
-    print("  Figure: Battery SOC with Dispatch Events (Day 1)...")
-    plot_soc_one_day(custom_sam_results, dispatch_generator.dispatch_log, day_index=0)
-    
-    # Weekly and annual plots
-    plot_custom_dispatch_analysis(custom_sam_results, dispatch_generator.dispatch_log, reference_sam_data, month="January", week_offset=0)
-    july_start_day = 31 + 28 + 31 + 30 + 31 + 30
-    plot_custom_dispatch_analysis(custom_sam_results, dispatch_generator.dispatch_log, reference_sam_data, month="July", week_offset=july_start_day + 7)
-    plot_annual_soc_violations(dispatch_generator.dispatch_log)
+    # Always show SOC if available
+    if 'battery_soc' in custom_sam_results:
+        print("  Figure: Battery SOC with Dispatch Events (Day 1)...")
+        plot_soc_one_day(custom_sam_results, dispatch_generator.dispatch_log, day_index=0)
+    else:
+        print("  Skipping SOC plot: battery_soc not available.")
+
+    # Weekly analysis requires flow breakdown; skip if not available
+    if custom_sam_results.get('flows_available'):
+        plot_custom_dispatch_analysis(custom_sam_results, dispatch_generator.dispatch_log, reference_sam_data, month="January", week_offset=0)
+        july_start_day = 31 + 28 + 31 + 30 + 31 + 30
+        plot_custom_dispatch_analysis(custom_sam_results, dispatch_generator.dispatch_log, reference_sam_data, month="July", week_offset=july_start_day + 7)
+        plot_annual_soc_violations(dispatch_generator.dispatch_log)
+    else:
+        print("  Skipping weekly/annual flow plots: flows not available from Battwatts.")
     
     print("\nCustom dispatch demo completed.")
 
