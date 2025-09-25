@@ -861,13 +861,12 @@ def generate_solar_priority_battery_schedule(load_profile, solar_profile, peak_s
     """
     Generate a schedule using clear time-based priorities:
     - Peak hours (4-9 PM): Discharge household load from battery (priority)
-    - Daylight hours (6 AM - 6 PM, excluding peak): Charge from solar (PV-first), even if PV <= load
-      This may shift some mid‑day load to the grid to prepare for peak discharge.
+    - Daylight hours (6 AM - 6 PM, excluding peak): Charge command equals PV magnitude (kW)
     - Overnight hours: No battery activity (grid charging disabled)
     
     Logic:
     1. Peak period discharge takes absolute priority over charging
-    2. During non-peak daylight: charge with (solar - household_load) 
+    2. During non-peak daylight: set charge command = PV (kW)
     3. Overnight: battery idle (grid charging disabled)
     4. Battery relies entirely on solar for replenishment
     
@@ -897,9 +896,10 @@ def generate_solar_priority_battery_schedule(load_profile, solar_profile, peak_s
             discharge[h] = household_load
             
         elif 6 <= hod < 18:  # Daylight hours (6 AM - 6 PM), excluding peak hours
-            # PV-first charging: request charging during solar hours regardless of "excess" status.
-            # Magnitude is treated as a flag; will be scaled to battery kW elsewhere.
-            charge[h] = 1.0
+            # Set the charge command to the PV magnitude (kW) for this hour.
+            # Battwatts will still give load priority; this command expresses
+            # the desired battery charge power up to PV availability.
+            charge[h] = max(0.0, float(solar_available))
             
         else:
             # Overnight hours: no grid charging allowed
@@ -1923,7 +1923,7 @@ def main():
     # Use solar-priority schedule: prioritize battery replenishment during daylight hours
     print("Using solar-only battery charging strategy...")
     print("  Solar Priority: Battery Charging → Load → Grid Export")
-    print("  Daylight hours (6 AM - 4 PM): Charge with excess solar only")
+    print("  Daylight hours (6 AM - 4 PM): Charge with PV magnitude (kW)")
     print("  Peak hours (4-9 PM): Discharge battery")
     print("  Overnight hours: No battery activity (grid charging disabled)")
     
