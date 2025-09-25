@@ -380,21 +380,23 @@ def initialize_storage(weather_file, load_profile, charge_schedule, discharge_sc
 
 def set_custom_dispatch_schedule(battery, load_profile, charge_schedule, discharge_schedule, gridcharge_schedule):
     """
-    Set SAM Battwatts custom dispatch array with magnitude support.
+    Configure custom/manual dispatch schedules with proper PV charging support.
 
-    Convention:
-      +value = discharge target (kW), -value = charge target (kW)
-      0 = idle/auto
+    Implements both:
+    - Manual arrays: `dispatch_manual_charge`, `dispatch_manual_discharge`,
+      `dispatch_manual_gridcharge` (kW), with PV-first policy
+    - Fallback `batt_custom_dispatch` (kW): positive=discharge, negative=charge
 
-    Magnitudes in the input schedules are preserved and mapped to Battwatts' batt_custom_dispatch.
-    If both charge and discharge are requested in the same hour, discharge takes precedence.
+    If an input schedule looks like 0/1 flags, it is scaled by the battery's
+    `batt_simple_kw` rating. If it already contains kW magnitudes (>1), the
+    values are used as-is (clipped to max power if available).
     """
-    # Convert schedules to lists if they're numpy arrays
+    # Convert schedules to plain Python lists
     discharge_list = discharge_schedule.tolist() if hasattr(discharge_schedule, 'tolist') else list(discharge_schedule)
     charge_list = charge_schedule.tolist() if hasattr(charge_schedule, 'tolist') else list(charge_schedule)
     gridcharge_list = gridcharge_schedule.tolist() if hasattr(gridcharge_schedule, 'tolist') else list(gridcharge_schedule)
 
-    # Optional clipping to battery max power if available
+    # Battery power limit (kW), if exposed by the simple model
     max_kw = None
     if hasattr(battery, 'Battery') and hasattr(battery.Battery, 'batt_simple_kw'):
         try:
@@ -402,35 +404,54 @@ def set_custom_dispatch_schedule(battery, load_profile, charge_schedule, dischar
         except Exception:
             max_kw = None
 
-    sam_dispatch_array = []
+    def to_kw(seq):
+        vals = [float(x) if x is not None else 0.0 for x in seq]
+        if not vals:
+            return []
+        mx = max(abs(v) for v in vals)
+        # Treat as 0/1 flags if all values are within [0,1]
+        if max_kw is not None and mx <= 1.0 + 1e-9:
+            vals = [v * max_kw for v in vals]
+        # Enforce non-negative magnitudes for manual arrays
+        vals = [max(0.0, v) for v in vals]
+        # Clip to max power if provided
+        if max_kw is not None:
+            vals = [min(max_kw, v) for v in vals]
+        return vals
+
     n = len(load_profile)
+    charge_kw = to_kw(charge_list)[:n]
+    discharge_kw = to_kw(discharge_list)[:n]
+    gridcharge_kw = to_kw(gridcharge_list)[:n]
+
+    # Assign manual arrays where supported (Battwatts exposes BatteryDispatch group)
+    _set_batt_param(battery, 'dispatch_manual_charge', charge_kw)
+    _set_batt_param(battery, 'dispatch_manual_discharge', discharge_kw)
+    _set_batt_param(battery, 'dispatch_manual_gridcharge', gridcharge_kw)
+    print(f"DEBUG: manual dispatch arrays set (len={n}) | charge/discharge/gridcharge kW (first 24):\n"
+          f"  charge    -> {[round(x,3) for x in charge_kw[:24]]}\n"
+          f"  discharge -> {[round(x,3) for x in discharge_kw[:24]]}\n"
+          f"  gridchg   -> {[round(x,3) for x in gridcharge_kw[:24]]}")
+
+    # PV-first charging preference in manual mode
+    _set_batt_param(battery, 'dispatch_manual_system_charge_first', 1)
+
+    # Build a fallback `batt_custom_dispatch` array for simple custom mode
+    sam_dispatch_array = []
     for h in range(n):
-        d = float(discharge_list[h]) if h < len(discharge_list) else 0.0
-        c = float(charge_list[h]) if h < len(charge_list) else 0.0
-        g = float(gridcharge_list[h]) if h < len(gridcharge_list) else 0.0
-
-        # Discharge takes precedence if both are signaled
-        if d > 0.0:
-            power = d  # positive = discharge
-        elif (c > 0.0) or (g > 0.0):
-            # Negative = charge; if both provided, combine magnitudes
-            power = -(c + g)
-        else:
-            power = 0.0
-
+        d = discharge_kw[h] if h < len(discharge_kw) else 0.0
+        c = charge_kw[h] if h < len(charge_kw) else 0.0
+        g = gridcharge_kw[h] if h < len(gridcharge_kw) else 0.0
+        power = d - (c + g)  # + = discharge, - = charge
         if max_kw is not None and power != 0.0:
             power = max(-max_kw, min(max_kw, power))
-
         sam_dispatch_array.append(power)
 
-    battery.Battery.batt_custom_dispatch = sam_dispatch_array
-
-    # Verify it was set correctly
-    _ = len(battery.Battery.batt_custom_dispatch)
-
-    # Print first-day mapping for sanity
-    preview = sam_dispatch_array[:24]
-    print(f"DEBUG: batt_custom_dispatch first 24h: {[round(x,3) for x in preview]}")
+    # Assign fallback schedule on the Battery group when available
+    if hasattr(battery, 'Battery') and hasattr(battery.Battery, 'batt_custom_dispatch'):
+        battery.Battery.batt_custom_dispatch = sam_dispatch_array
+        preview = sam_dispatch_array[:24]
+        print(f"DEBUG: batt_custom_dispatch first 24h: {[round(x,3) for x in preview]}")
 
 def _set_batt_param(battery, name, value):
     """Set a battery dispatch parameter if it exists on known groups.
@@ -479,21 +500,37 @@ def initialize_custom_dispatch(battery, load_profile, charge_schedule, discharge
     print("--------------")
     set_custom_dispatch_schedule(battery, load_profile, charge_schedule, discharge_schedule, gridcharge_schedule)
     
-    # Ensure Battwatts uses Custom dispatch mode (required)
-    # Use strict setter by name; this must exist for Battwatts
-    battery.value('batt_simple_dispatch', 2)
+    # Enable manual dispatch controls and PV-first policy per BattWatts docs
+    # Prefer manual mode if supported; otherwise fall back to simple custom dispatch
+    try:
+        # 3 = manual dispatch (uses dispatch_manual_* arrays)
+        battery.value('batt_dispatch_choice', 3)
+    except Exception:
+        pass
+    try:
+        # For Battwatts simple model: 2 = custom power commands (batt_custom_dispatch)
+        battery.value('batt_simple_dispatch', 2)
+    except Exception:
+        pass
 
     # Optional flags: apply only if present on this model
     optional_flags = {
+        # Allow PV charging; prevent unintended auto grid charging
         'batt_dispatch_auto_can_gridcharge': 0,
         'batt_dispatch_auto_can_charge': 1,
         'batt_dispatch_auto_btm_can_discharge_to_grid': 0,
+        # Allow battery to charge from PV even if PV does not exceed load (PV-first behavior)
         'batt_dispatch_charge_only_system_exceeds_load': 0,
+        # Only discharge when load exceeds PV system power
         'batt_dispatch_discharge_only_load_exceeds_system': 1,
+        # In manual mode, take PV before grid for charging
         'dispatch_manual_system_charge_first': 1,
     }
     for param, val in optional_flags.items():
         _set_batt_param(battery, param, val)
+
+    # Prefer behind-the-meter topology if supported (ensure PV can directly feed battery)
+    _set_batt_param(battery, 'batt_meter_position', 0)
 
     # Echo effective flag values (if readable)
     def _get(name):
@@ -1013,10 +1050,11 @@ def generate_peak_window_discharge_schedule(load_profile, peak_start_hour=16, pe
 
 def generate_solar_priority_battery_schedule(load_profile, solar_profile, peak_start_hour=16, peak_end_hour=21):
     """
-    Generate a schedule using actual power values with clear time-based priorities:
-    - Peak hours (4-9 PM): Discharge actual household load from battery (priority)
-    - Daylight hours (6 AM - 6 PM, excluding peak): Charge with excess solar ONLY
-    - Overnight hours: No battery activity (no grid charging allowed)
+    Generate a schedule using clear time-based priorities:
+    - Peak hours (4-9 PM): Discharge household load from battery (priority)
+    - Daylight hours (6 AM - 6 PM, excluding peak): Charge from solar (PV-first), even if PV <= load
+      This may shift some mid‑day load to the grid to prepare for peak discharge.
+    - Overnight hours: No battery activity (grid charging disabled)
     
     Logic:
     1. Peak period discharge takes absolute priority over charging
@@ -1050,9 +1088,9 @@ def generate_solar_priority_battery_schedule(load_profile, solar_profile, peak_s
             discharge[h] = household_load
             
         elif 6 <= hod < 18:  # Daylight hours (6 AM - 6 PM), excluding peak hours
-            # Solar hours: charge battery with excess solar after serving load
-            excess_solar = max(0, solar_available - household_load)
-            charge[h] = excess_solar
+            # PV-first charging: request charging during solar hours regardless of "excess" status.
+            # Magnitude is treated as a flag; will be scaled to battery kW elsewhere.
+            charge[h] = 1.0
             
         else:
             # Overnight hours: no grid charging allowed
