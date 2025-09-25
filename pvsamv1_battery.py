@@ -104,9 +104,8 @@ def print_first_day_flow_table(pv: Pvsamv1.Pvsamv1, day_index: int = 0) -> None:
     sG = arr("system_to_grid")
     bL = arr("batt_to_load")
     soc = arr("batt_SOC")
-    gen = arr("gen")
-    if gen.size == 0:
-        gen = arr("ac")
+    # Define PV(kWh) as the sum of PV flows to avoid negative night values
+    gen_flows = sB + sL + sG
 
     # Battery capacity (kWh) for converting SOC -> kWh — do not assume defaults.
     batt_cap = None
@@ -135,12 +134,12 @@ def print_first_day_flow_table(pv: Pvsamv1.Pvsamv1, day_index: int = 0) -> None:
             "Battery capacity not found (missing batt_bank_installed_capacity and batt_computed_bank_capacity)."
         )
     # Compute battery energy from SOC
-    batt_kwh = (soc / 100.0) * batt_cap if soc.size > 0 else np.zeros_like(gen)
+    batt_kwh = (soc / 100.0) * batt_cap if soc.size > 0 else np.zeros_like(gen_flows)
 
     start = day_index * 24
     end = start + 24
 
-    nmax = max(gen.size, sB.size, sL.size, sG.size, bL.size, batt_kwh.size)
+    nmax = max(gen_flows.size, sB.size, sL.size, sG.size, bL.size, batt_kwh.size)
     if nmax == 0:
         print("No outputs available to build table.")
         return
@@ -148,15 +147,13 @@ def print_first_day_flow_table(pv: Pvsamv1.Pvsamv1, day_index: int = 0) -> None:
     print("hour hod   PV(kWh)  PV->Batt  PV->Load  PV->Grid   Batt->Load  Batt(kWh)   Residual")
     for h in range(start, min(end, nmax)):
         hod = h % 24
-        g = gen[h] if h < gen.size else 0.0
+        g = gen_flows[h] if h < gen_flows.size else 0.0
         sb = sB[h] if h < sB.size else 0.0
         sl = sL[h] if h < sL.size else 0.0
         sg = sG[h] if h < sG.size else 0.0
         bl = bL[h] if h < bL.size else 0.0
         bk = batt_kwh[h] if h < batt_kwh.size else 0.0
-        # If gen is missing, reconstruct PV from flows so residual is 0
-        if gen.size == 0:
-            g = sb + sl + sg
+        # Residual built from flows should be identically zero
         residual = g - (sb + sl + sg)
         print(
             f"{h:4d} {hod:3d}  "
