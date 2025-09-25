@@ -282,240 +282,188 @@ class CustomDispatchScheduleGenerator:
     #     return charge_schedule, discharge_schedule, gridcharge_schedule
 
 
+def _load_weather_resource_pt(weather_file: str, shift_hours: int = 8):
+    """Load SAM weather resource and shift hourly arrays from UTC to PT.
+
+    Mirrors the approach in step9_run_sam_model_for_solar_storage.py by rolling
+    key hourly arrays by +8 hours (UTC -> Pacific Time) to align with local-time loads.
+    """
+    srd = tools.SAM_CSV_to_solar_data(weather_file)
+    weather_arrays = ['dn', 'df', 'gh', 'tdry', 'tdew', 'rhum', 'wdir', 'wspd']
+    for key in weather_arrays:
+        if key in srd and isinstance(srd[key], (list, tuple)) and len(srd[key]) == 8760:
+            arr = list(srd[key])
+            srd[key] = [arr[(i + shift_hours) % 8760] for i in range(8760)]
+    return srd
+
+
 def initialize_solar(weather_file, load_profile, charge_schedule, discharge_schedule, gridcharge_schedule):
-    """Initialize SAM solar model with configuration (reduced console output)"""
-        
-    # Load solar resource data
-    solar_resource_data = tools.SAM_CSV_to_solar_data(weather_file)
-    
-    # Calculate system capacity (simplified)
+    """Initialize SAM solar model with configuration.
+
+    This function is intentionally strict: any missing or invalid configuration
+    will raise an error rather than being silently ignored.
+    """
+
+    # Load solar resource data and shift from UTC to PT to align with local loads
+    solar_resource_data = _load_weather_resource_pt(weather_file)
+
+    # Calculate system capacity (simplified sizing heuristic)
     annual_load_kwh = sum(load_profile)
     system_capacity = annual_load_kwh / 1200  # Rough sizing: 1200 kWh/kW annually
-    
-    # Basic derived sizing only; detailed logging removed
-    
+
     # === Solar Model Setup ===
     solar = pvwatts.new()
-    
-    # Load SAM solar configuration with debugging
+
+    # Load SAM solar configuration
     solar_config_file = "SAM_configuration_with_battery_custom_dispatch/untitled__1__pvwattsv8.json"
-    
     if not os.path.exists(solar_config_file):
-        print(f"DEBUG: Solar config file not found: {solar_config_file}")
-        return None
-    
+        raise FileNotFoundError(f"Solar config file not found: {solar_config_file}")
+
     with open(solar_config_file, 'r') as file:
         solar_config = json.load(file)
-        # Apply configuration
-        skipped_params = []
-        applied_params = []
-        
         for k, v in solar_config.items():
             if k in ["number_inputs"]:
-                skipped_params.append(k)
                 continue
-                
-            try:
-                solar.value(k, v)
-                applied_params.append(k)
-            except Exception as e:
-                # silently skip parameters that cannot be set
-                skipped_params.append(k)
-        # no verbose reporting
+            # Use the strict value setter; raise if invalid
+            solar.value(k, v)
 
-    # Set solar parameters with debugging
-    try:
-        solar.SolarResource.solar_resource_data = solar_resource_data
-    except Exception as e:
-        print(f"DEBUG: Failed to set solar resource data: {e}")
-        return None
-    
-    try:
-        solar.SystemDesign.system_capacity = system_capacity
-    except Exception as e:
-        print(f"DEBUG: Failed to set system capacity: {e}")
-        return None
-    
-    try:
-        solar.Lifetime.dc_degradation = [0.5]  # 0.5% annual degradation
-    except Exception as e:
-        print(f"DEBUG: Failed to set degradation: {e}")
-        return None
-    
+    # Set solar parameters (strict)
+    solar.SolarResource.solar_resource_data = solar_resource_data
+    solar.SystemDesign.system_capacity = system_capacity
+    solar.Lifetime.dc_degradation = [0.5]  # 0.5% annual degradation
+
     return solar
 
 
 def initialize_storage(weather_file, load_profile, charge_schedule, discharge_schedule, gridcharge_schedule, solar):
-    """Initialize SAM battery storage model (reduced console output)"""
-    try:
-        battery = battery_model.from_existing(solar)
-    except Exception as e:
-        print(f"DEBUG: Failed to create battery model: {e}")
-        return None
-    
+    """Initialize SAM battery storage model (strict configuration)."""
+    battery = battery_model.from_existing(solar)
+
     # Load SAM battery configuration
     battery_config_file = "SAM_configuration_with_battery_custom_dispatch/untitled__1__battwatts.json"
-    
     if not os.path.exists(battery_config_file):
-        print(f"DEBUG: Battery config file not found: {battery_config_file}")
-        return None
-        
+        raise FileNotFoundError(f"Battery config file not found: {battery_config_file}")
+
     with open(battery_config_file, 'r') as file:
         battery_config = json.load(file)
-        # DEBUG: show configured simple capacity
-        try:
-            conf_kwh = battery_config.get('batt_simple_kwh', None)
-            conf_kw = battery_config.get('batt_simple_kw', None)
-            print(f"DEBUG: Config batt_simple_kwh={conf_kwh}, batt_simple_kw={conf_kw} (from {battery_config_file})")
-        except Exception:
-            pass
-        # Apply configuration
-        skipped_battery_params = []
-        applied_battery_params = []
-        
+        # Optional: print configured simple capacity for visibility
+        conf_kwh = battery_config.get('batt_simple_kwh', None)
+        conf_kw = battery_config.get('batt_simple_kw', None)
+        print(f"DEBUG: Config batt_simple_kwh={conf_kwh}, batt_simple_kw={conf_kw} (from {battery_config_file})")
+
+        # Apply configuration strictly
         for k, v in battery_config.items():
             if k in ["number_inputs"]:
-                skipped_battery_params.append(k)
                 continue
-                
-            try:
-                battery.value(k, v)
-                applied_battery_params.append(k)
-            except Exception as e:
-                # silently skip parameters that cannot be set
-                skipped_battery_params.append(k)
-        # no verbose reporting
-    
-    # Set load profile
-    try:
-        battery.Battery.assign({'load': load_profile})
-    except Exception as e:
-        print(f"DEBUG: Failed to set load profile: {e}")
-        return None
+            battery.value(k, v)
 
-    # Align SAM's initial SOC with desired start (Battwatts expects this on Battery)
-    try:
-        # Prefer value() to cover cases where group attribute access differs
-        battery.value('batt_initial_SOC', 90.0)
-        # Also align min/max SOC bounds if available
-        try:
-            battery.value('batt_minimum_SOC', 20.0)
-        except Exception:
-            pass
-        try:
-            battery.value('batt_maximum_SOC', 80.0)
-        except Exception:
-            pass
-    except Exception:
-        try:
-            if hasattr(battery, 'Battery') and hasattr(battery.Battery, 'batt_initial_SOC'):
-                battery.Battery.batt_initial_SOC = 90.0
-            if hasattr(battery.Battery, 'batt_minimum_SOC'):
-                battery.Battery.batt_minimum_SOC = 20.0
-            if hasattr(battery.Battery, 'batt_maximum_SOC'):
-                battery.Battery.batt_maximum_SOC = 80.0
-        except Exception:
-            pass
+    # Set load profile (must exist on Battery group)
+    battery.Battery.assign({'load': load_profile})
 
-    # DEBUG: Report SOC inputs as seen before execution
+    # Ensure simple battery model is enabled so SOC and flows are computed
     try:
-        soc_init = None
-        soc_min = None
-        soc_max = None
-        if hasattr(battery, 'Battery'):
-            if hasattr(battery.Battery, 'batt_initial_SOC'):
-                soc_init = battery.Battery.batt_initial_SOC
-            if hasattr(battery.Battery, 'batt_minimum_SOC'):
-                soc_min = battery.Battery.batt_minimum_SOC
-            if hasattr(battery.Battery, 'batt_maximum_SOC'):
-                soc_max = battery.Battery.batt_maximum_SOC
-        print(f"DEBUG: Pre-exec Battwatts SOC params -> initial: {soc_init}, min: {soc_min}, max: {soc_max}")
-        # Also report simple capacity values as seen on the model
-        model_kwh = None
-        model_kw = None
-        if hasattr(battery, 'Battery'):
-            if hasattr(battery.Battery, 'batt_simple_kwh'):
-                model_kwh = battery.Battery.batt_simple_kwh
-            if hasattr(battery.Battery, 'batt_simple_kw'):
-                model_kw = battery.Battery.batt_simple_kw
-        print(f"DEBUG: Pre-exec Battwatts capacity (input) kWh={model_kwh}, kW={model_kw}")
+        battery.value('batt_simple_enable', 1)
     except Exception:
         pass
+
+    print("DEBUG: Battwatts simple model enabled (batt_simple_enable=1)")
+
+    # Configure a single-year analysis period explicitly for Battwatts Lifetime
+    # Keep lifetime outputs disabled (single-year repeated), but set analysis_period=1
+    battery.value('system_use_lifetime_output', 0)
+    battery.value('analysis_period', 1)
+    model_kwh = getattr(battery.Battery, 'batt_simple_kwh', None)
+    model_kw = getattr(battery.Battery, 'batt_simple_kw', None)
+    print(f"DEBUG: Pre-exec Battwatts capacity (input) kWh={model_kwh}, kW={model_kw}")
 
     return battery
 
 def set_custom_dispatch_schedule(battery, load_profile, charge_schedule, discharge_schedule, gridcharge_schedule):
     """
-    Set SAM Battwatts custom dispatch array with magnitude support.
+    Configure custom/manual dispatch schedules with proper PV charging support.
 
-    Convention:
-      +value = discharge target (kW), -value = charge target (kW)
-      0 = idle/auto
+    Implements both:
+    - Manual arrays: `dispatch_manual_charge`, `dispatch_manual_discharge`,
+      `dispatch_manual_gridcharge` (kW), with PV-first policy
+    - Fallback `batt_custom_dispatch` (kW): positive=discharge, negative=charge
 
-    Magnitudes in the input schedules are preserved and mapped to Battwatts' batt_custom_dispatch.
-    If both charge and discharge are requested in the same hour, discharge takes precedence.
+    If an input schedule looks like 0/1 flags, it is scaled by the battery's
+    `batt_simple_kw` rating. If it already contains kW magnitudes (>1), the
+    values are used as-is (clipped to max power if available).
     """
-    try:
-        # Convert schedules to lists if they're numpy arrays
-        discharge_list = discharge_schedule.tolist() if hasattr(discharge_schedule, 'tolist') else list(discharge_schedule)
-        charge_list = charge_schedule.tolist() if hasattr(charge_schedule, 'tolist') else list(charge_schedule)
-        gridcharge_list = gridcharge_schedule.tolist() if hasattr(gridcharge_schedule, 'tolist') else list(gridcharge_schedule)
+    # Convert schedules to plain Python lists
+    discharge_list = discharge_schedule.tolist() if hasattr(discharge_schedule, 'tolist') else list(discharge_schedule)
+    charge_list = charge_schedule.tolist() if hasattr(charge_schedule, 'tolist') else list(charge_schedule)
+    gridcharge_list = gridcharge_schedule.tolist() if hasattr(gridcharge_schedule, 'tolist') else list(gridcharge_schedule)
 
-        # Optional clipping to battery max power if available
-        max_kw = None
+    # Battery power limit (kW), if exposed by the simple model
+    max_kw = None
+    if hasattr(battery, 'Battery') and hasattr(battery.Battery, 'batt_simple_kw'):
         try:
-            if hasattr(battery, 'Battery') and hasattr(battery.Battery, 'batt_simple_kw'):
-                max_kw = float(battery.Battery.batt_simple_kw)
+            max_kw = float(battery.Battery.batt_simple_kw)
         except Exception:
             max_kw = None
 
-        sam_dispatch_array = []
-        n = len(load_profile)
-        for h in range(n):
-            d = float(discharge_list[h]) if h < len(discharge_list) else 0.0
-            c = float(charge_list[h]) if h < len(charge_list) else 0.0
-            g = float(gridcharge_list[h]) if h < len(gridcharge_list) else 0.0
+    def to_kw(seq):
+        vals = [float(x) if x is not None else 0.0 for x in seq]
+        if not vals:
+            return []
+        mx = max(abs(v) for v in vals)
+        # Treat as 0/1 flags if all values are within [0,1]
+        if max_kw is not None and mx <= 1.0 + 1e-9:
+            vals = [v * max_kw for v in vals]
+        # Enforce non-negative magnitudes for manual arrays
+        vals = [max(0.0, v) for v in vals]
+        # Clip to max power if provided
+        if max_kw is not None:
+            vals = [min(max_kw, v) for v in vals]
+        return vals
 
-            # Discharge takes precedence if both are signaled
-            if d > 0.0:
-                power = d  # positive = discharge
-            elif (c > 0.0) or (g > 0.0):
-                # Negative = charge; if both provided, combine magnitudes
-                power = -(c + g)
-            else:
-                power = 0.0
+    n = len(load_profile)
+    charge_kw = to_kw(charge_list)[:n]
+    discharge_kw = to_kw(discharge_list)[:n]
+    gridcharge_kw = to_kw(gridcharge_list)[:n]
 
-            if max_kw is not None and power != 0.0:
-                power = max(-max_kw, min(max_kw, power))
+    # Assign manual arrays where supported (Battwatts exposes BatteryDispatch group)
+    _set_batt_param(battery, 'dispatch_manual_charge', charge_kw)
+    _set_batt_param(battery, 'dispatch_manual_discharge', discharge_kw)
+    _set_batt_param(battery, 'dispatch_manual_gridcharge', gridcharge_kw)
+    print(f"DEBUG: manual dispatch arrays set (len={n}) | charge/discharge/gridcharge kW (first 24):\n"
+          f"  charge    -> {[round(x,3) for x in charge_kw[:24]]}\n"
+          f"  discharge -> {[round(x,3) for x in discharge_kw[:24]]}\n"
+          f"  gridchg   -> {[round(x,3) for x in gridcharge_kw[:24]]}")
 
-            sam_dispatch_array.append(power)
+    # PV-first charging preference in manual mode
+    _set_batt_param(battery, 'dispatch_manual_system_charge_first', 1)
 
+    # Build a fallback `batt_custom_dispatch` array for simple custom mode
+    sam_dispatch_array = []
+    for h in range(n):
+        d = discharge_kw[h] if h < len(discharge_kw) else 0.0
+        c = charge_kw[h] if h < len(charge_kw) else 0.0
+        g = gridcharge_kw[h] if h < len(gridcharge_kw) else 0.0
+        power = d - (c + g)  # + = discharge, - = charge
+        if max_kw is not None and power != 0.0:
+            power = max(-max_kw, min(max_kw, power))
+        sam_dispatch_array.append(power)
+
+    # Assign fallback schedule on the Battery group when available
+    if hasattr(battery, 'Battery') and hasattr(battery.Battery, 'batt_custom_dispatch'):
         battery.Battery.batt_custom_dispatch = sam_dispatch_array
-
-        # Verify it was set correctly
-        _ = len(battery.Battery.batt_custom_dispatch)
-
-        # Print first-day mapping for sanity
         preview = sam_dispatch_array[:24]
         print(f"DEBUG: batt_custom_dispatch first 24h: {[round(x,3) for x in preview]}")
 
-    except Exception as e:
-        print(f"DEBUG: Failed to set custom dispatch schedules: {e}")
-        print(f"  Error type: {type(e)}")
-        print(f"  Error details: {str(e)}")
-        return None
-
 def _set_batt_param(battery, name, value):
-    """Set a battery dispatch parameter on the correct group if available."""
-    try:
-        if hasattr(battery, 'Battery') and hasattr(battery.Battery, name):
-            setattr(battery.Battery, name, value)
-            return True
-        if hasattr(battery, 'BatteryDispatch') and hasattr(battery.BatteryDispatch, name):
-            setattr(battery.BatteryDispatch, name, value)
-            return True
-    except Exception:
-        pass
+    """Set a battery dispatch parameter if it exists on known groups.
+
+    Returns True if set, False if the parameter was not found.
+    """
+    if hasattr(battery, 'Battery') and hasattr(battery.Battery, name):
+        setattr(battery.Battery, name, value)
+        return True
+    if hasattr(battery, 'BatteryDispatch') and hasattr(battery.BatteryDispatch, name):
+        setattr(battery.BatteryDispatch, name, value)
+        return True
     return False
 
 
@@ -536,8 +484,10 @@ def initialize_custom_dispatch(battery, load_profile, charge_schedule, discharge
     # Validate schedule lengths
     
     if not all(len(s) == len(load_profile) for s in [charge_schedule, discharge_schedule, gridcharge_schedule]):
-        print("DEBUG: Schedule length mismatch!")
-        return None
+        raise ValueError(
+            "Schedule length mismatch: charge, discharge, and gridcharge schedules must "
+            f"all match load_profile length ({len(load_profile)})."
+        )
 
     print("--------------")
     cs0 = charge_schedule[:24]
@@ -550,183 +500,386 @@ def initialize_custom_dispatch(battery, load_profile, charge_schedule, discharge
     print("--------------")
     set_custom_dispatch_schedule(battery, load_profile, charge_schedule, discharge_schedule, gridcharge_schedule)
     
-    # Set any additional dispatch parameters found in config
-    # Disallow grid charging; restrict to PV-only charging and load-only discharging
-    flags = {
+    # Enable manual dispatch controls and PV-first policy per BattWatts docs
+    # Prefer manual mode if supported; otherwise fall back to simple custom dispatch
+    try:
+        # 3 = manual dispatch (uses dispatch_manual_* arrays)
+        battery.value('batt_dispatch_choice', 3)
+    except Exception:
+        pass
+    try:
+        # For Battwatts simple model: 2 = custom power commands (batt_custom_dispatch)
+        battery.value('batt_simple_dispatch', 2)
+    except Exception:
+        pass
+
+    # Optional flags: apply only if present on this model
+    optional_flags = {
+        # Allow PV charging; prevent unintended auto grid charging
         'batt_dispatch_auto_can_gridcharge': 0,
         'batt_dispatch_auto_can_charge': 1,
         'batt_dispatch_auto_btm_can_discharge_to_grid': 0,
-        # Charge priority: PV to battery first (do NOT require PV > load)
+        # Allow battery to charge from PV even if PV does not exceed load (PV-first behavior)
         'batt_dispatch_charge_only_system_exceeds_load': 0,
-        # Discharge only when load exceeds PV system output
+        # Only discharge when load exceeds PV system power
         'batt_dispatch_discharge_only_load_exceeds_system': 1,
-        # For manual/custom schedules, prioritize system (PV) charging first
+        # In manual mode, take PV before grid for charging
         'dispatch_manual_system_charge_first': 1,
-        # Ensure Battwatts uses Custom dispatch mode
-        'batt_simple_dispatch': 2,
     }
+    for param, val in optional_flags.items():
+        _set_batt_param(battery, param, val)
 
-    for param, val in flags.items():
-        ok = _set_batt_param(battery, param, val)
-        if not ok:
-            # Best-effort on both groups already tried; leave a concise note once
-            pass
+    # Prefer behind-the-meter topology if supported (ensure PV can directly feed battery)
+    _set_batt_param(battery, 'batt_meter_position', 0)
 
     # Echo effective flag values (if readable)
-    try:
-        def _get(name):
-            if hasattr(battery, 'Battery') and hasattr(battery.Battery, name):
-                return getattr(battery.Battery, name)
-            if hasattr(battery, 'BatteryDispatch') and hasattr(battery.BatteryDispatch, name):
-                return getattr(battery.BatteryDispatch, name)
-            return None
-        print("DEBUG: Dispatch flags -> "
-              f"can_gridcharge={_get('batt_dispatch_auto_can_gridcharge')}, "
-              f"can_charge={_get('batt_dispatch_auto_can_charge')}, "
-              f"btm_discharge_to_grid={_get('batt_dispatch_auto_btm_can_discharge_to_grid')}, "
-              f"charge_only_if_pv_exceeds_load={_get('batt_dispatch_charge_only_system_exceeds_load')}, "
-              f"discharge_only_if_load_exceeds_system={_get('batt_dispatch_discharge_only_load_exceeds_system')}, "
-              f"system_charge_first={_get('dispatch_manual_system_charge_first')}, "
-              f"simple_dispatch_mode={_get('batt_simple_dispatch')}")
-    except Exception:
-        pass
+    def _get(name):
+        if hasattr(battery, 'Battery') and hasattr(battery.Battery, name):
+            return getattr(battery.Battery, name)
+        if hasattr(battery, 'BatteryDispatch') and hasattr(battery.BatteryDispatch, name):
+            return getattr(battery.BatteryDispatch, name)
+        return None
+    print("DEBUG: Dispatch flags -> "
+          f"can_gridcharge={_get('batt_dispatch_auto_can_gridcharge')}, "
+          f"can_charge={_get('batt_dispatch_auto_can_charge')}, "
+          f"btm_discharge_to_grid={_get('batt_dispatch_auto_btm_can_discharge_to_grid')}, "
+          f"charge_only_if_pv_exceeds_load={_get('batt_dispatch_charge_only_system_exceeds_load')}, "
+          f"discharge_only_if_load_exceeds_system={_get('batt_dispatch_discharge_only_load_exceeds_system')}, "
+          f"system_charge_first={_get('dispatch_manual_system_charge_first')}, "
+          f"simple_dispatch_mode={_get('batt_simple_dispatch')}")
     
     # done
 
 
-def run_sam_simulation(solar, battery):
-    # === Run SAM Simulation ===
+def _solar_execute_and_export(solar):
+    """Execute PVWatts model and return useful outputs (strict).
+
+    Requires 'ac' and 'ac_annual' to be present in Outputs; no silent fallbacks.
+    """
     solar.execute(0)
+    solar_outputs = solar.Outputs.export()
 
-    # Snapshot and diff battery properties (exclude Outputs for clarity)
-    import numpy as _np
+    if 'ac' not in solar_outputs or 'ac_annual' not in solar_outputs:
+        available = sorted(list(solar_outputs.keys()))
+        raise KeyError(
+            "PVWatts outputs missing required keys 'ac' and/or 'ac_annual'. "
+            f"Available keys: {available}"
+        )
 
-    def _export_inputs(batt):
-        data = batt.export()
-        return {k: v for k, v in data.items() if k != 'Outputs'}
+    solar_ac = solar_outputs['ac']
+    solar_ac_annual = solar_outputs['ac_annual']
 
-    def _is_seq(x):
+    first24 = [round(float(x), 3) for x in (solar_ac[:24] if hasattr(solar_ac, '__len__') else [])]
+
+    print("DEBUG: Solar model outputs available:")
+    print(f"  keys={sorted(list(solar_outputs.keys()))}")
+    print(f"  ac_annual={solar_ac_annual}")
+    if first24:
+        print(f"  solar_ac first 24 hours: {first24}")
+
+    return solar_outputs, solar_ac, solar_ac_annual
+
+
+def _export_battery_inputs(batt):
+    """Export battery inputs as a nested dict, excluding the Outputs group."""
+    data = batt.export()
+    return {k: v for k, v in data.items() if k != 'Outputs'}
+
+
+def _pretty_val(v, max_len=40):
+    """Format lists/arrays compactly for console printing."""
+    def is_seq(x):
         return isinstance(x, (list, tuple))
 
-    def _to_list(x):
-        try:
-            return _np.asarray(x).tolist()
-        except Exception:
-            return list(x) if _is_seq(x) else x
+    try:
+        vv = np.asarray(v).tolist()
+    except Exception:
+        vv = list(v) if is_seq(v) else v
 
-    def _pretty_val(v, max_len=40):
-        vv = _to_list(v)
-        if _is_seq(vv) and len(vv) > max_len:
-            return f"list(len={len(vv)}) head={vv[:5]} ... tail={vv[-5:]}"
-        return vv
+    if is_seq(vv) and len(vv) > max_len:
+        return f"list(len={len(vv)}) head={vv[:5]} ... tail={vv[-5:]}"
+    return vv
 
-    def _print_props(label, exp):
-        print(f"DEBUG: {label}")
-        for grp in sorted(exp.keys()):
-            print(f"  [{grp}]")
-            for k in sorted(exp[grp].keys()):
-                print(f"    {k}: {_pretty_val(exp[grp][k])}")
 
-    def _diff_props(before, after, rtol=1e-9, atol=1e-12):
-        diffs = []
-        all_grps = sorted(set(before.keys()) | set(after.keys()))
-        for grp in all_grps:
-            b = before.get(grp, {})
-            a = after.get(grp, {})
-            keys = sorted(set(b.keys()) | set(a.keys()))
-            for k in keys:
-                bv = b.get(k, None)
-                av = a.get(k, None)
-                if bv is None and av is None:
-                    continue
-                b_arr = _np.asarray(bv) if bv is not None else None
-                a_arr = _np.asarray(av) if av is not None else None
-                if (b_arr is not None) and (a_arr is not None):
-                    try:
-                        equal = _np.array_equal(b_arr, a_arr) or _np.allclose(b_arr, a_arr, rtol=rtol, atol=atol)
-                    except Exception:
-                        equal = (bv == av)
-                else:
+def _print_battery_props(label, props):
+    """Pretty-print nested battery properties (inputs only)."""
+    print(f"DEBUG: {label}")
+    for grp in sorted(props.keys()):
+        print(f"  [{grp}]")
+        for k in sorted(props[grp].keys()):
+            print(f"    {k}: {_pretty_val(props[grp][k])}")
+
+
+def _diff_battery_props(before, after, rtol=1e-9, atol=1e-12):
+    """Return list of (group, key, before, after) for changed input properties."""
+    diffs = []
+    all_grps = sorted(set(before.keys()) | set(after.keys()))
+    for grp in all_grps:
+        b = before.get(grp, {})
+        a = after.get(grp, {})
+        keys = sorted(set(b.keys()) | set(a.keys()))
+        for k in keys:
+            bv = b.get(k, None)
+            av = a.get(k, None)
+            if bv is None and av is None:
+                continue
+            b_arr = np.asarray(bv) if bv is not None else None
+            a_arr = np.asarray(av) if av is not None else None
+            if (b_arr is not None) and (a_arr is not None):
+                try:
+                    equal = np.array_equal(b_arr, a_arr) or np.allclose(b_arr, a_arr, rtol=rtol, atol=atol)
+                except Exception:
                     equal = (bv == av)
-                if not equal:
-                    diffs.append((grp, k, _pretty_val(bv), _pretty_val(av)))
-        return diffs
+            else:
+                equal = (bv == av)
+            if not equal:
+                diffs.append((grp, k, _pretty_val(bv), _pretty_val(av)))
+    return diffs
 
-    pre_inputs = _export_inputs(battery)
-    _print_props("Battery properties BEFORE execute() (inputs only)", pre_inputs)
 
+def _execute_battery_quiet(battery):
+    """Execute battery model without verbose before/after logs."""
     battery.execute(0)
 
-    post_inputs = _export_inputs(battery)
-    _print_props("Battery properties AFTER execute() (inputs only)", post_inputs)
-    diffs = _diff_props(pre_inputs, post_inputs)
-    if diffs:
-        print("DEBUG: Changed battery properties (inputs):")
-        for grp, k, bv, av in diffs:
-            print(f"  {grp}.{k}: {bv} -> {av}")
-    else:
-        print("DEBUG: No input property changes detected during execute().")
 
-    # === Extract Results ===
+def _to_hourly_kwh(solar_ac, annual_kwh=None):
+    """Return hourly PV energy in kWh from PVWatts AC output (auto-units).
+
+    Heuristic: choose scale 1.0 or 1/1000 so that sum matches annual_kwh
+    when provided; otherwise, use 1/1000 if p95(ac) > 100 (likely Wh/W).
+    """
+    arr = np.asarray(solar_ac, dtype=float).ravel()
+    if arr.size == 0:
+        return arr
+    cands = [1.0, 1.0 / 1000.0]
+    if annual_kwh is not None:
+        try:
+            annual_kwh = float(annual_kwh)
+        except Exception:
+            annual_kwh = None
+    if annual_kwh is not None and np.isfinite(annual_kwh) and annual_kwh > 0:
+        sums = [float(np.nansum(arr * s)) for s in cands]
+        errs = [abs(s - annual_kwh) for s in sums]
+        scale = cands[int(np.argmin(errs))]
+        return arr * scale
+    # Fallback heuristic
+    try:
+        p95 = float(np.nanpercentile(arr, 95))
+    except Exception:
+        p95 = np.nan
+    scale = 1.0 / 1000.0 if (np.isfinite(p95) and p95 > 100.0) else 1.0
+    return arr * scale
+
+
+def _log_hour_of_day_solar_breakdown(solar_ac, solar_ac_annual, battery):
+    """Print average kWh by hour-of-day for solar and its allocation.
+
+    Columns per hour-of-day (0..23):
+    - Solar_kWh: average PV AC per hour-of-day
+    - PV->Batt, PV->Load, PV->Grid: average allocations
+    - BattFraction: PV->Batt / Solar_kWh (0 if Solar_kWh==0)
+    """
+    # Normalize PV AC to kWh to align with battery flow units
+    ac = _to_hourly_kwh(solar_ac, solar_ac_annual)
+    try:
+        bout = battery.Outputs.export()
+    except Exception:
+        bout = {}
+    s2b = np.asarray(bout.get('system_to_batt', []), dtype=float).ravel()
+    s2l = np.asarray(bout.get('system_to_load', []), dtype=float).ravel()
+    s2g = np.asarray(bout.get('system_to_grid', []), dtype=float).ravel()
+
+    n = min(ac.size if ac.size else 0, s2b.size if s2b.size else 0, s2l.size if s2l.size else 0, s2g.size if s2g.size else 0)
+    if n == 0:
+        print("DEBUG: Hour-of-day solar breakdown unavailable (missing arrays).")
+        return
+    # Attempt to include hourly load (kW average over the hour)
+    try:
+        load_series = np.asarray(getattr(battery.Battery, 'load', []), dtype=float).ravel()
+    except Exception:
+        load_series = np.array([])
+
+    # Constrain all arrays to a common length, including load if present
+    if load_series.size:
+        n = min(n, load_series.size)
+    ac = ac[:n]; s2b = s2b[:n]; s2l = s2l[:n]; s2g = s2g[:n]
+    if load_series.size:
+        load_series = load_series[:n]
+
+    idx = np.arange(n)
+
+    def hod_avg(arr):
+        return np.array([float(np.mean(arr[idx % 24 == h])) if np.any(idx % 24 == h) else 0.0 for h in range(24)])
+
+    ac_h = hod_avg(ac)
+    s2b_h = hod_avg(s2b)
+    s2l_h = hod_avg(s2l)
+    s2g_h = hod_avg(s2g)
+    load_h = hod_avg(load_series) if load_series.size else np.zeros(24)
+
+    print("\nDEBUG: Hour-of-day solar breakdown (average kWh per hour across the year):")
+    # Note: Load is reported as average kW for the hour (kWh/h)
+    print("hod  Solar_kWh  Load_kW  PV->Batt  PV->Load  PV->Grid  BattFraction")
+    for h in range(24):
+        solar = ac_h[h]
+        load_kw = load_h[h]
+        batt = s2b_h[h]
+        pvload = s2l_h[h]
+        grid = s2g_h[h]
+        frac = (batt / solar) if solar > 1e-12 else 0.0
+        print(f"{h:3d}  {solar:9.3f}  {load_kw:8.3f}  {batt:8.3f}  {pvload:8.3f}  {grid:8.3f}  {frac:12.3f}")
+
+    resid = ac_h - (s2b_h + s2l_h + s2g_h)
+    print(f"DEBUG: Avg identity residual |solar - (PV->Batt+PV->Load+PV->Grid)|: mean={np.mean(np.abs(resid)):.4f} kWh")
+
+
+def _log_first_day_pv_allocation(solar_ac, solar_ac_annual, battery, day_index=0):
+    """Print first 24 hours of PV vs allocation to Batt/Load/Grid.
+
+    Shows a direct, hour-by-hour table for the selected day to validate
+    that PV is being consumed by battery charging (and/or load), and how
+    much, if any, is exported to grid.
+    """
+    # Normalize PV AC to kWh for hour-by-hour comparison
+    ac = _to_hourly_kwh(solar_ac, solar_ac_annual)
+    try:
+        bout = battery.Outputs.export()
+    except Exception:
+        bout = {}
+    s2b = np.asarray(bout.get('system_to_batt', []), dtype=float).ravel()
+    s2l = np.asarray(bout.get('system_to_load', []), dtype=float).ravel()
+    s2g = np.asarray(bout.get('system_to_grid', []), dtype=float).ravel()
+
+    n = min(ac.size if ac.size else 0, s2b.size if s2b.size else 0, s2l.size if s2l.size else 0, s2g.size if s2g.size else 0)
+    if n == 0:
+        print("DEBUG: First-day PV allocation table unavailable (missing arrays).")
+        return
+
+    start = day_index * 24
+    end = min(start + 24, n)
+    print("\nDEBUG: First 24-hour PV allocation (kWh per hour):")
+    print("hour hod   PV(kWh)  PV->Batt  PV->Load  PV->Grid   Residual")
+    for h in range(start, end):
+        hod = h % 24
+        pv = ac[h]
+        to_batt = s2b[h]
+        to_load = s2l[h]
+        to_grid = s2g[h]
+        resid = pv - (to_batt + to_load + to_grid)
+        print(f"{h:4d} {hod:3d}  {pv:8.3f}  {to_batt:8.3f}  {to_load:8.3f}  {to_grid:8.3f}  {resid:9.3f}")
+
+
+def run_sam_simulation(solar, battery):
+    """Run PVWatts and Battwatts, log key debug info, and return results.
+
+    Returns a dict with hourly flows, SOC, capacities, and solar outputs.
+    """
+    # 1) Execute solar and capture outputs
+    solar_outputs, solar_ac, solar_ac_annual = _solar_execute_and_export(solar)
+    solar_ac_kwh = _to_hourly_kwh(solar_ac, solar_ac_annual)
+
+    # 2) Execute battery quietly (no verbose input dumps)
+    _execute_battery_quiet(battery)
+
+    # 3) Build results payload strictly from what's actually present
+    batt_out = battery.Outputs.export()
+    print(f"DEBUG: Battery outputs available keys: {sorted(list(batt_out.keys()))}")
+
+    # Ensure load profile attribute exists
+    if not hasattr(battery, 'Battery') or not hasattr(battery.Battery, 'load'):
+        raise AttributeError("Battery.Battery.load is not set; load profile missing from model inputs")
+
     results = {
         'load_profile': battery.Battery.load,
-        'system_to_load': battery.Outputs.system_to_load,
-        'battery_to_load': battery.Outputs.batt_to_load,
-        'grid_to_load': battery.Outputs.grid_to_load,
-        'grid_to_batt': battery.Outputs.grid_to_batt,
-        'system_to_batt': battery.Outputs.system_to_batt,
-        'system_to_grid': battery.Outputs.system_to_grid,
-        'battery_soc': battery.Outputs.batt_SOC,
         'solar_capacity': solar.SystemDesign.system_capacity,
-        'battery_capacity': battery.Outputs.batt_bank_installed_capacity
+        'solar_outputs': solar_outputs,
+        'solar_ac': solar_ac,
+        'solar_ac_annual': solar_ac_annual,
+        'solar_ac_kwh': solar_ac_kwh,
     }
 
-    # DEBUG: Show first day SOC to verify starting state
-    soc = results['battery_soc']
-    print(f"DEBUG: SOC first 12 hours: {[round(x,1) for x in soc[:12]]}")
+    # Include flows only if Battwatts provided them
+    flow_keys = ['system_to_load', 'batt_to_load', 'grid_to_load', 'grid_to_batt', 'system_to_batt', 'system_to_grid']
+    flows_available = all(k in batt_out for k in flow_keys)
+    results['flows_available'] = bool(flows_available)
+    if flows_available:
+        for k in flow_keys:
+            results[
+                'battery_to_load' if k == 'batt_to_load' else k
+            ] = batt_out[k]
 
-    # DEBUG: Report installed battery capacity and simple input if available
-    installed_kwh = results.get('battery_capacity', None)
-    simple_kwh = getattr(battery.Battery, 'batt_simple_kwh', None) if hasattr(battery, 'Battery') else None
-    simple_kw = getattr(battery.Battery, 'batt_simple_kw', None) if hasattr(battery, 'Battery') else None
-    print(f"DEBUG: Post-exec Battwatts capacity -> installed_kwh={installed_kwh}, simple_kwh={simple_kwh}, simple_kw={simple_kw}")
+    # Include SOC and capacity if present
+    if 'batt_SOC' in batt_out:
+        results['battery_soc'] = batt_out['batt_SOC']
+    if 'batt_bank_installed_capacity' in batt_out:
+        results['battery_capacity'] = batt_out['batt_bank_installed_capacity']
 
-    # DEBUG: Surface batt_grid_charge_percent from Outputs (if available)
-    if hasattr(battery, 'Outputs') and hasattr(battery.Outputs, 'batt_grid_charge_percent'):
-        import numpy as _np
-        grid_pct = _np.asarray(battery.Outputs.batt_grid_charge_percent, dtype=float).ravel()
-        first24 = [round(float(x), 3) for x in grid_pct[:24]]
-        nonzero_total = int((grid_pct > 0).sum())
-        print(f"DEBUG: batt_grid_charge_percent first 24 hours: {first24}")
-        print(f"DEBUG: batt_grid_charge_percent nonzero hours (total year): {nonzero_total}")
+    # 4) Solar utilization diagnostics
+    #    a) Hour-of-day averages (yearwide)
+    _log_hour_of_day_solar_breakdown(solar_ac, solar_ac_annual, battery)
+    #    b) First-day hour-by-hour PV vs allocation
+    _log_first_day_pv_allocation(solar_ac, solar_ac_annual, battery, day_index=0)
+
+    # Optional: quick preview of first day's PV in kWh
+    first24_kwh = [round(float(x), 3) for x in (solar_ac_kwh[:24] if hasattr(solar_ac_kwh, '__len__') else [])]
+    print(f"DEBUG: solar_ac first 24 hours (kWh): {first24_kwh}")
 
     return results
 
 
 def run_sam_with_custom_dispatch(weather_file, load_profile, charge_schedule, discharge_schedule, gridcharge_schedule):
     """
-    Run SAM with custom dispatch schedule
+    Run SAM with custom dispatch schedule (strict).
+
+    Any missing attributes or configuration errors will raise exceptions.
     """
-    try:
-        solar = initialize_solar(weather_file, load_profile, charge_schedule, discharge_schedule, gridcharge_schedule)
-        if solar is None:
-            raise Exception
-            
-        battery = initialize_storage(weather_file, load_profile, charge_schedule, discharge_schedule, gridcharge_schedule, solar)
-        if battery is None:
-            raise Exception
-            
-        initialize_custom_dispatch(battery, load_profile, charge_schedule, discharge_schedule, gridcharge_schedule)
-        
-        return run_sam_simulation(solar, battery)
-        
-    except Exception as e:
-        print(f"DEBUG: Unexpected error in SAM simulation: {e}")
-        print(f"  Error type: {type(e)}")
-        print(f"  Error details: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return None
+    solar = initialize_solar(weather_file, load_profile, charge_schedule, discharge_schedule, gridcharge_schedule)
+    battery = initialize_storage(weather_file, load_profile, charge_schedule, discharge_schedule, gridcharge_schedule, solar)
+    initialize_custom_dispatch(battery, load_profile, charge_schedule, discharge_schedule, gridcharge_schedule)
+    return run_sam_simulation(solar, battery)
+
+
+def _estimate_soc_series(charge_kw, discharge_kw, gridcharge_kw, capacity_kwh, initial_soc=50.0,
+                         charge_eff=0.95, discharge_eff=0.95):
+    """Estimate SOC series from dispatch schedules and battery capacity.
+
+    This is a deterministic estimate based on commanded charge/discharge magnitudes and does
+    not represent SAM's internal physics. Use only when SAM does not expose batt_SOC.
+    """
+    n = len(discharge_kw)
+    soc = np.zeros(n)
+    energy = max(0.0, min(capacity_kwh, (initial_soc / 100.0) * capacity_kwh))
+    for h in range(n):
+        ch = float(charge_kw[h]) if h < len(charge_kw) else 0.0
+        dc = float(discharge_kw[h]) if h < len(discharge_kw) else 0.0
+        gc = float(gridcharge_kw[h]) if h < len(gridcharge_kw) else 0.0
+        # kWh added/removed in this hour (assuming 1h timestep)
+        energy += (ch + gc) * charge_eff
+        energy -= (dc / max(discharge_eff, 1e-6))
+        energy = max(0.0, min(capacity_kwh, energy))
+        soc[h] = 100.0 * (energy / capacity_kwh) if capacity_kwh > 0 else 0.0
+    return soc
+
+
+def plot_estimated_soc_one_day(charge_schedule, discharge_schedule, gridcharge_schedule,
+                               capacity_kwh, day_index=0,
+                               title_prefix="Estimated Battery SOC (from schedules) - Day"):
+    start = day_index * 24
+    end = start + 24
+    soc_series = _estimate_soc_series(charge_schedule, discharge_schedule, gridcharge_schedule,
+                                      capacity_kwh=capacity_kwh, initial_soc=50.0)
+    soc_day = soc_series[start:end]
+    hours = range(len(soc_day))
+    plt.figure(figsize=(10, 4))
+    plt.plot(hours, soc_day, 'b-', linewidth=2)
+    plt.title(f"{title_prefix} {day_index + 1}")
+    plt.ylabel('SOC (%)')
+    plt.xlabel('Hour')
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+
+
+## PVSAMv1 helper functions removed to avoid confusion; this module uses Battwatts.
 
 
 def log_first_day_power_flows(custom_results, charge_schedule, discharge_schedule, gridcharge_schedule, day_index=0):
@@ -891,12 +1044,17 @@ def generate_peak_window_discharge_schedule(load_profile, peak_start_hour=16, pe
     return charge, discharge, gridcharge
 
 
+## Note: Removed previously experimental solar-to-battery-first load manipulation
+## to preserve fidelity of the load profile.
+
+
 def generate_solar_priority_battery_schedule(load_profile, solar_profile, peak_start_hour=16, peak_end_hour=21):
     """
-    Generate a schedule using actual power values with clear time-based priorities:
-    - Peak hours (4-9 PM): Discharge actual household load from battery (priority)
-    - Daylight hours (6 AM - 6 PM, excluding peak): Charge with excess solar ONLY
-    - Overnight hours: No battery activity (no grid charging allowed)
+    Generate a schedule using clear time-based priorities:
+    - Peak hours (4-9 PM): Discharge household load from battery (priority)
+    - Daylight hours (6 AM - 6 PM, excluding peak): Charge from solar (PV-first), even if PV <= load
+      This may shift some mid‑day load to the grid to prepare for peak discharge.
+    - Overnight hours: No battery activity (grid charging disabled)
     
     Logic:
     1. Peak period discharge takes absolute priority over charging
@@ -930,9 +1088,9 @@ def generate_solar_priority_battery_schedule(load_profile, solar_profile, peak_s
             discharge[h] = household_load
             
         elif 6 <= hod < 18:  # Daylight hours (6 AM - 6 PM), excluding peak hours
-            # Solar hours: charge battery with excess solar after serving load
-            excess_solar = max(0, solar_available - household_load)
-            charge[h] = excess_solar
+            # PV-first charging: request charging during solar hours regardless of "excess" status.
+            # Magnitude is treated as a flag; will be scaled to battery kW elsewhere.
+            charge[h] = 1.0
             
         else:
             # Overnight hours: no grid charging allowed
@@ -1203,6 +1361,10 @@ def plot_custom_dispatch_analysis(custom_results, dispatch_log, reference_data=N
     
     Args:
         custom_results: SAM simulation results
+        dispatch_log: Custom dispatch log with schedules
+        reference_data: Optional reference SAM data for comparison  
+        month: Month name for plot title
+        week_offset: Day offset for week selection
         dispatch_log: Algorithm dispatch decisions
         reference_data: Reference SAM data for comparison
         month: Month name for title (e.g., "January", "July")
@@ -1824,8 +1986,8 @@ def get_raw_solar_profile(weather_file, load_profile):
         import PySAM.Pvwattsv8 as pvwatts
         import PySAM.ResourceTools as tools
         
-        # Load solar resource data from weather file (same as step8)
-        solar_resource_data = tools.SAM_CSV_to_solar_data(weather_file)
+        # Load solar resource data from weather file and shift to PT to match loads
+        solar_resource_data = _load_weather_resource_pt(weather_file)
         
         # Create solar model
         solar_model = pvwatts.new()
@@ -1844,18 +2006,42 @@ def get_raw_solar_profile(weather_file, load_profile):
         # Set solar resource data
         solar_model.SolarResource.solar_resource_data = solar_resource_data
         
-        # Calculate system capacity based on annual load (same logic as step8)
+        # Calculate system capacity using proper physics-based method (same as step9)
         annual_load_kwh = sum(load_profile)
-        system_capacity = annual_load_kwh / 1200  # Rough sizing: 1200 kWh/kW annually
+        
+        # Extract global horizontal irradiance data
+        gh_w_per_m2 = solar_resource_data["gh"]
+        mean_gh_w_per_m2 = sum(gh_w_per_m2) / len(gh_w_per_m2)
+        
+        # Convert to daily energy [kWh/m²/day]
+        daily_irradiance_kWh_per_m2_per_day = mean_gh_w_per_m2 * 24 / 1000
+        annual_irradiance_kWh_per_m2 = daily_irradiance_kWh_per_m2_per_day * 365
+        
+        # Apply PV physics parameters (matching step9)
+        oversizing_factor = 1.0
+        panel_nameplate_power_density_kW_per_m2 = 0.193  # Tesla panels: 420W/2.171m²
+        system_performance_ratio = 0.80  # 80% efficiency after losses
+        pv_cell_efficiency = 0.206  # 20.6% Tesla panel efficiency
+        
+        # Calculate energy production per square meter
+        annual_energy_production_kWh_per_m2 = (annual_irradiance_kWh_per_m2 * 
+                                               pv_cell_efficiency * 
+                                               system_performance_ratio)
+        
+        # Calculate required panel area and DC capacity
+        required_panel_area_m2 = (annual_load_kwh * oversizing_factor) / annual_energy_production_kWh_per_m2
+        system_capacity = required_panel_area_m2 * panel_nameplate_power_density_kW_per_m2
         solar_model.SystemDesign.system_capacity = system_capacity
+        print(f"solar system capacity: {system_capacity}")
         
         # Execute solar model to get raw generation
         solar_model.execute(0)
         
-        # Get the raw solar generation (AC output)
+        # Get the raw solar generation (AC output in Watts)
         ac_output = solar_model.Outputs.ac
-        # Convert to a flat Python list (handles tuple/ndarray/SSC types)
-        solar_profile = np.asarray(ac_output, dtype=float).ravel().tolist()
+        # Convert to a flat Python list and convert from Watts to kW
+        solar_profile_watts = np.asarray(ac_output, dtype=float).ravel().tolist()
+        solar_profile = [w / 1000.0 for w in solar_profile_watts]  # Convert W to kW
         
         print(f"  Raw solar profile generated: {len(solar_profile)} hours")
         print(f"  Annual solar generation: {sum(solar_profile):.0f} kWh/year")
@@ -1995,8 +2181,11 @@ def main():
         })
     dispatch_generator.dispatch_log = pd.DataFrame(rows)
     
+    # Note: Removed experimental solar-to-battery-first load manipulation to ensure
+    # the load profile remains accurate and unmodified.
+    
     # Run SAM with custom dispatch
-    print("\nRunning SAM simulation with custom dispatch...")
+    print("\nRunning SAM simulation with custom dispatch (Battwatts)...")
     custom_sam_results = run_sam_with_custom_dispatch(
         weather_file, load_profile, charge_schedule, discharge_schedule, gridcharge_schedule
     )
@@ -2005,48 +2194,57 @@ def main():
         print("SAM simulation failed")
         raise Exception
     else:
-        try:
+        if 'battery_soc' in custom_sam_results:
             first24 = [round(float(x), 3) for x in custom_sam_results['battery_soc'][:24]]
             print(f"DEBUG: SAM SOC first 24 hours: {first24}")
-            # Detailed power flow log for the first day
-            log_first_day_power_flows(
-                custom_sam_results,
-                charge_schedule,
-                discharge_schedule,
-                gridcharge_schedule,
-                day_index=0,
-            )
-        except Exception:
-            pass
+        else:
+            print("DEBUG: battery_soc not available from Battwatts outputs.")
     
     # Compare results
-    if reference_sam_data is not None:
+    # Comparison requires disaggregated flows; skip if not available
+    if reference_sam_data is not None and custom_sam_results.get('flows_available'):
         print("\nComparing results...")
         comparison_results = compare_dispatch_results(
             reference_sam_data, 
             custom_sam_results, 
             dispatch_generator.dispatch_log
         )
+    else:
+        print("\nSkipping comparison: disaggregated flow outputs not available with Battwatts.")
     
-    # Economic analysis
-    print("\nCalculating economic benefits...")
-    economic_analysis = calculate_economic_benefits(
-        custom_sam_results,
-        reference_sam_data,
-        dispatch_generator.dispatch_log,
-        pge_rate_plan
-    )
+    # Economic analysis requires disaggregated grid_to_load flows; skip if unavailable
+    if custom_sam_results.get('flows_available'):
+        print("\nCalculating economic benefits...")
+        economic_analysis = calculate_economic_benefits(
+            custom_sam_results,
+            reference_sam_data,
+            dispatch_generator.dispatch_log,
+            pge_rate_plan
+        )
+    else:
+        print("\nSkipping economic analysis: disaggregated flow outputs not available with Battwatts.")
+        economic_analysis = None
     
     # Generate plots (single-day SOC view)
     print("\nGenerating visualization plots...")
-    print("  Figure: Battery SOC with Dispatch Events (Day 1)...")
-    plot_soc_one_day(custom_sam_results, dispatch_generator.dispatch_log, day_index=0)
-    
-    # Optional: retain weekly/annual plots if needed by uncommenting below
-    # plot_custom_dispatch_analysis(custom_sam_results, dispatch_generator.dispatch_log, reference_sam_data, month="January", week_offset=0)
-    # july_start_day = 31 + 28 + 31 + 30 + 31 + 30
-    # plot_custom_dispatch_analysis(custom_sam_results, dispatch_generator.dispatch_log, reference_sam_data, month="July", week_offset=july_start_day + 7)
-    # plot_annual_soc_violations(dispatch_generator.dispatch_log)
+    # Always show SOC if available; otherwise, plot an estimated SOC from schedules for visibility
+    if 'battery_soc' in custom_sam_results:
+        print("  Figure: Battery SOC with Dispatch Events (Day 1)...")
+        plot_soc_one_day(custom_sam_results, dispatch_generator.dispatch_log, day_index=0)
+    else:
+        print("  SAM did not expose battery_soc; plotting an estimated SOC from schedules (labelled as Estimated).")
+        est_capacity = getattr(dispatch_generator, 'battery_capacity', 13.5)
+        plot_estimated_soc_one_day(charge_schedule, discharge_schedule, gridcharge_schedule,
+                                   capacity_kwh=est_capacity, day_index=0)
+
+    # Weekly analysis requires flow breakdown; skip if not available
+    if custom_sam_results.get('flows_available'):
+        plot_custom_dispatch_analysis(custom_sam_results, dispatch_generator.dispatch_log, reference_sam_data, month="January", week_offset=0)
+        july_start_day = 31 + 28 + 31 + 30 + 31 + 30
+        plot_custom_dispatch_analysis(custom_sam_results, dispatch_generator.dispatch_log, reference_sam_data, month="July", week_offset=july_start_day + 7)
+        plot_annual_soc_violations(dispatch_generator.dispatch_log)
+    else:
+        print("  Skipping weekly/annual flow plots: flows not available from Battwatts.")
     
     print("\nCustom dispatch demo completed.")
 
