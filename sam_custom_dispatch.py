@@ -80,206 +80,6 @@ class CustomDispatchScheduleGenerator:
         else:
             return rates['offPeak']
     
-    # def generate_custom_dispatch_schedule(self, load_profile, solar_profile):
-    #     """
-    #     Generate SAM custom dispatch schedule arrays using peak-hour optimization logic
-        
-    #     Strategy:
-    #     1) Look ahead to calculate daily peak load (4-9pm)
-    #     2) Prioritize solar for charging battery up to peak load requirement
-    #     3) Use remaining solar for household load, then top up battery
-    #     4) Discharge battery during 4-9pm peak hours (80% max, 20% min SOC)
-        
-    #     Returns: (charge_schedule, discharge_schedule, gridcharge_schedule)
-    #     """
-    #     print("generate_custom_dispatch_schedule")
-    #     hours = len(load_profile)
-    #     hourly_rates = self.get_hourly_rates()
-        
-    #     # Initialize dispatch arrays (0 = no action, values 0-1 represent fraction of max power)
-    #     charge_schedule = np.zeros(hours)      # Battery charging from excess solar
-    #     discharge_schedule = np.zeros(hours)   # Battery discharging to load
-    #     gridcharge_schedule = np.zeros(hours)  # Battery charging from grid
-        
-    #     # Battery simulation parameters (align with Battwatts default ~50% so plots match SAM)
-    #     current_soc = 50.0
-    #     battery_kwh = current_soc / 100 * self.battery_capacity
-    #     max_charge_power = 5.0  # kW
-    #     max_discharge_power = 5.0  # kW
-        
-    #     # Operating SOC limits for peak hour strategy
-    #     peak_max_soc = 90.0  # Don't discharge below this during peak
-    #     peak_min_soc = 20.0  # Don't charge above this for peak preparation
-        
-    #     # Track hourly decisions for analysis
-    #     dispatch_log = []
-        
-    #     # Track daily predictions for logging
-    #     daily_predictions = {}
-        
-    #     # Process each hour
-    #     for h in range(hours):
-    #         load = load_profile[h]
-    #         solar = solar_profile[h] if solar_profile else 0
-    #         rate = hourly_rates[h]
-    #         hour_of_day = h % 24
-            
-    #         # Determine if we're in peak hours (4 PM - 9 PM)
-    #         is_peak_hour = 16 <= hour_of_day <= 20  # 4 PM to 8 PM (inclusive)
-            
-    #         # Look ahead to calculate today's peak load requirement
-    #         day_start = (h // 24) * 24
-    #         day_end = min(day_start + 24, hours)
-    #         peak_start_today = day_start + 16  # 4 PM
-    #         peak_end_today = min(day_start + 21, hours)  # 9 PM
-    #         current_day = h // 24
-            
-    #         # Calculate total peak load for today
-    #         if peak_end_today > peak_start_today:
-    #             today_peak_load = sum(load_profile[peak_start_today:peak_end_today])
-    #         else:
-    #             today_peak_load = 0
-            
-    #         # Calculate energy needed from battery for today's peak
-    #         # (This is the target we want to have stored)
-    #         peak_battery_target_kwh = min(today_peak_load, 
-    #                                     (peak_max_soc - peak_min_soc) / 100 * self.battery_capacity)
-            
-    #         # Log daily predictions (only once per day at 6 AM)
-    #         if hour_of_day == 6 and current_day not in daily_predictions:
-    #             battery_available_for_peak = max(0, battery_kwh - (peak_min_soc / 100 * self.battery_capacity))
-    #             daily_predictions[current_day] = {
-    #                 'day': current_day,
-    #                 'peak_load_kwh': today_peak_load,
-    #                 'peak_target_kwh': peak_battery_target_kwh,
-    #                 'battery_ready_kwh': battery_available_for_peak,
-    #                 'current_soc': current_soc,
-    #                 'battery_total_kwh': battery_kwh
-    #             }
-            
-    #         # Additional logging when entering peak hours (reduced)
-    #         if hour_of_day == 16 and h > 0:
-    #             pass
-            
-    #         # Decision variables
-    #         charge_action = 0.0
-    #         discharge_action = 0.0
-    #         gridcharge_action = 0.0
-            
-    #         if is_peak_hour:
-    #             # PEAK HOURS (4-9 PM): Discharge battery to meet load
-    #             if current_soc > peak_min_soc and load > 0:
-    #                 battery_available = battery_kwh - (peak_min_soc / 100 * self.battery_capacity)
-                    
-    #                 if battery_available > 0:
-    #                     # Discharge to meet as much load as possible
-    #                     discharge_amount = min(load, battery_available, max_discharge_power)
-    #                     discharge_action = discharge_amount / max_discharge_power
-                        
-    #                     # Predict new SOC after discharge
-    #                     new_battery_kwh = battery_kwh - discharge_amount
-    #                     new_soc = (new_battery_kwh / self.battery_capacity) * 100
-                        
-    #                     if new_soc < peak_min_soc:
-    #                         # Adjust discharge to respect SOC limit
-    #                         safe_discharge = battery_kwh - (peak_min_soc / 100 * self.battery_capacity)
-    #                         discharge_amount = max(0, safe_discharge)
-    #                         discharge_action = discharge_amount / max_discharge_power if max_discharge_power > 0 else 0
-                        
-    #                     battery_kwh -= discharge_amount
-    #                     current_soc = (battery_kwh / self.battery_capacity) * 100
-                        
-    #                     # Final SOC check (reduced verbosity)
-    #                     if current_soc < peak_min_soc - 0.1:
-    #                         pass
-            
-    #         else:
-    #             # NON-PEAK HOURS: Implement solar prioritization strategy
-    #             if solar > 0:
-    #                 # Calculate how much battery capacity we need for peak preparation
-    #                 current_battery_energy = battery_kwh
-    #                 peak_prep_target = peak_battery_target_kwh + (peak_min_soc / 100 * self.battery_capacity)
-    #                 peak_prep_needed = max(0, peak_prep_target - current_battery_energy)
-                    
-    #                 # 1. First Priority: Charge battery for peak hours
-    #                 if peak_prep_needed > 0 and current_soc < peak_max_soc:
-    #                     battery_capacity_available = min(
-    #                         (peak_max_soc - current_soc) / 100 * self.battery_capacity,
-    #                         peak_prep_needed
-    #                     )
-                        
-    #                     if battery_capacity_available > 0:
-    #                         charge_amount = min(solar, battery_capacity_available, max_charge_power)
-    #                         charge_action = charge_amount / max_charge_power
-                            
-    #                         old_soc = current_soc
-    #                         battery_kwh += charge_amount
-    #                         current_soc = (battery_kwh / self.battery_capacity) * 100
-    #                         solar -= charge_amount  # Reduce available solar
-                            
-    #                     else:
-    #                         pass
-                    
-    #                 # 2. Second Priority: Meet household load with remaining solar
-    #                 if solar > 0 and load > 0:
-    #                     load_met_by_solar = min(solar, load)
-    #                     solar -= load_met_by_solar  # Reduce available solar
-    #                     # Note: This doesn't require a dispatch action in SAM as it's automatic
-                    
-    #                 # 3. Third Priority: Top up battery with any remaining solar
-    #                 if solar > 0 and current_soc < self.max_soc:
-    #                     battery_capacity_available = (self.max_soc - current_soc) / 100 * self.battery_capacity
-                        
-    #                     if battery_capacity_available > 0:
-    #                         additional_charge = min(solar, battery_capacity_available, max_charge_power - charge_action * max_charge_power)
-    #                         if additional_charge > 0:
-    #                             # Add to existing charge action
-    #                             old_soc = current_soc
-    #                             total_charge = charge_action * max_charge_power + additional_charge
-    #                             charge_action = min(total_charge / max_charge_power, 1.0)
-    #                             battery_kwh += additional_charge
-    #                             current_soc = (battery_kwh / self.battery_capacity) * 100
-    #                         else:
-    #                             pass
-    #                     else:
-    #                         pass
-    #                 else:
-    #                     pass
-                
-    #             # Handle any remaining load not met by solar (use grid)
-    #             # This is automatic in SAM, no dispatch action needed
-            
-    #         # Store dispatch decisions
-    #         charge_schedule[h] = charge_action
-    #         discharge_schedule[h] = discharge_action
-    #         gridcharge_schedule[h] = gridcharge_action
-
-    #         print(f"discharge action: {discharge_action}")
-            
-    #         # Reduced per-hour warnings
-    #         if current_soc < 10.0:
-    #             pass
-            
-    #         # Log for analysis
-    #         dispatch_log.append({
-    #             'hour': h,
-    #             'hour_of_day': hour_of_day,
-    #             'rate': rate,
-    #             'soc': current_soc,
-    #             'load': load,
-    #             'solar': solar_profile[h] if solar_profile else 0,
-    #             'is_peak': is_peak_hour,
-    #             'peak_load_target': today_peak_load,
-    #             'charge': charge_action,
-    #             'discharge': discharge_action,
-    #             'gridcharge': gridcharge_action
-    #         })
-        
-    #     self.dispatch_log = pd.DataFrame(dispatch_log)
-        
-    #     # Reduced end-of-run diagnostics omitted to reduce verbosity
-
-    #     return charge_schedule, discharge_schedule, gridcharge_schedule
 
 
 def _load_weather_resource_pt(weather_file: str, shift_hours: int = 8):
@@ -547,6 +347,15 @@ def initialize_custom_dispatch(battery, load_profile, charge_schedule, discharge
           f"discharge_only_if_load_exceeds_system={_get('batt_dispatch_discharge_only_load_exceeds_system')}, "
           f"system_charge_first={_get('dispatch_manual_system_charge_first')}, "
           f"simple_dispatch_mode={_get('batt_simple_dispatch')}")
+
+    # Enforce zero-export to grid using Battwatts interconnection settings (fail loudly on error)
+    battery.value('enable_interconnection_limit', 1)
+    battery.value('grid_interconnection_limit_kwac', 0.0)
+    print("DEBUG: Interconnection limit enabled (0 kW): PV export disabled")
+
+    # Also apply hourly export curtailment cap of 0 kW for all hours (must match load length)
+    battery.value('grid_curtailment', [0.0] * len(load_profile))
+    print("DEBUG: grid_curtailment set to 0 kW for all hours")
     
     # done
 
