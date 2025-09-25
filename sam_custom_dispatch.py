@@ -282,6 +282,21 @@ class CustomDispatchScheduleGenerator:
     #     return charge_schedule, discharge_schedule, gridcharge_schedule
 
 
+def _load_weather_resource_pt(weather_file: str, shift_hours: int = 8):
+    """Load SAM weather resource and shift hourly arrays from UTC to PT.
+
+    Mirrors the approach in step9_run_sam_model_for_solar_storage.py by rolling
+    key hourly arrays by +8 hours (UTC -> Pacific Time) to align with local-time loads.
+    """
+    srd = tools.SAM_CSV_to_solar_data(weather_file)
+    weather_arrays = ['dn', 'df', 'gh', 'tdry', 'tdew', 'rhum', 'wdir', 'wspd']
+    for key in weather_arrays:
+        if key in srd and isinstance(srd[key], (list, tuple)) and len(srd[key]) == 8760:
+            arr = list(srd[key])
+            srd[key] = [arr[(i + shift_hours) % 8760] for i in range(8760)]
+    return srd
+
+
 def initialize_solar(weather_file, load_profile, charge_schedule, discharge_schedule, gridcharge_schedule):
     """Initialize SAM solar model with configuration.
 
@@ -289,8 +304,8 @@ def initialize_solar(weather_file, load_profile, charge_schedule, discharge_sche
     will raise an error rather than being silently ignored.
     """
 
-    # Load solar resource data
-    solar_resource_data = tools.SAM_CSV_to_solar_data(weather_file)
+    # Load solar resource data and shift from UTC to PT to align with local loads
+    solar_resource_data = _load_weather_resource_pt(weather_file)
 
     # Calculate system capacity (simplified sizing heuristic)
     annual_load_kwh = sum(load_profile)
@@ -1918,8 +1933,8 @@ def get_raw_solar_profile(weather_file, load_profile):
         import PySAM.Pvwattsv8 as pvwatts
         import PySAM.ResourceTools as tools
         
-        # Load solar resource data from weather file (same as step8)
-        solar_resource_data = tools.SAM_CSV_to_solar_data(weather_file)
+        # Load solar resource data from weather file and shift to PT to match loads
+        solar_resource_data = _load_weather_resource_pt(weather_file)
         
         # Create solar model
         solar_model = pvwatts.new()
