@@ -38,6 +38,7 @@ from typing import Any, Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 
 import PySAM.Pvsamv1 as Pvsamv1
 import PySAM.Battery as Battery
@@ -181,6 +182,77 @@ def print_first_day_soc_summary(pv: Pvsamv1.Pvsamv1, day_index: int = 0) -> None
     print(f"Day {day_index + 1}: start_SOC={start_soc:.2f}%  end_SOC={end_soc:.2f}%")
 
 
+def _pv_ac_from_flows(pv: Pvsamv1.Pvsamv1) -> np.ndarray:
+    out = pv.Outputs.export()
+    def arr(k: str) -> np.ndarray:
+        return np.asarray(out.get(k, []), dtype=float).ravel()
+    return arr("system_to_batt") + arr("system_to_load") + arr("system_to_grid")
+
+
+def _load_series(pv: Pvsamv1.Pvsamv1) -> np.ndarray:
+    try:
+        return np.asarray(pv.value("load"), dtype=float).ravel()
+    except Exception:
+        return np.array([], dtype=float)
+
+
+def _soc_series(pv: Pvsamv1.Pvsamv1) -> np.ndarray:
+    try:
+        return np.asarray(pv.Outputs.batt_SOC, dtype=float).ravel()
+    except Exception:
+        return np.array([], dtype=float)
+
+def _plot_six_panel_weeks(load_ser: np.ndarray, soc_ser: np.ndarray, pv_ser: np.ndarray) -> None:
+    """Create a single figure with 6 panels:
+    Rows: Load, Battery SOC, Solar AC (PV). Col 1: First week. Col 2: First week of July.
+    """
+    week_len = 24 * 7
+    first_week_start = 0
+    july_start = 181 * 24  # Jan–Jun days = 181 (non-leap)
+
+    def _slice(s: np.ndarray, start: int) -> tuple[np.ndarray, np.ndarray]:
+        if s.size == 0:
+            return np.array([]), np.array([])
+        end = min(start + week_len, s.size)
+        if start >= end:
+            return np.array([]), np.array([])
+        x = np.arange(end - start)
+        y = s[start:end]
+        return x, y
+
+    fig, axes = plt.subplots(3, 2, figsize=(14, 9), sharex="col")
+
+    # Panels: (row, col) = (metric, week)
+    panels = [
+        (0, 0, load_ser, first_week_start, "Load - First Week", "kW", "#222222"),
+        (1, 0, soc_ser, first_week_start, "Battery SOC - First Week", "%", "#1f77b4"),
+        (2, 0, pv_ser, first_week_start, "Solar AC (PV) - First Week", "kW", "#ff7f0e"),
+        (0, 1, load_ser, july_start, "Load - First Week of July", "kW", "#222222"),
+        (1, 1, soc_ser, july_start, "Battery SOC - First Week of July", "%", "#1f77b4"),
+        (2, 1, pv_ser, july_start, "Solar AC (PV) - First Week of July", "kW", "#ff7f0e"),
+    ]
+
+    for r, c, series, start, title, ylabel, color in panels:
+        ax = axes[r, c]
+        x, y = _slice(series, start)
+        if y.size == 0:
+            ax.text(0.5, 0.5, "No data", transform=ax.transAxes, ha="center", va="center")
+            ax.set_title(title)
+            ax.set_ylabel(ylabel)
+            ax.grid(True, alpha=0.3)
+            continue
+        ax.plot(x, y, color=color, lw=1.8)
+        ax.set_title(title)
+        ax.set_ylabel(ylabel)
+        ax.grid(True, alpha=0.3)
+        if ylabel == "%":
+            ax.set_ylim(0, 100)
+    axes[2, 0].set_xlabel("Hour")
+    axes[2, 1].set_xlabel("Hour")
+    fig.tight_layout()
+    plt.show()
+
+
 def attach_weather(pv: Pvsamv1.Pvsamv1, county_slug: str) -> bool:
     weather_file = os.environ.get(
         "WEATHER_FILE",
@@ -193,7 +265,7 @@ def attach_weather(pv: Pvsamv1.Pvsamv1, county_slug: str) -> bool:
     srd = ResourceTools.SAM_CSV_to_solar_data(weather_file)
 
     # Align weather from eastern time (ET) to local time (PT) to match typical load profiles
-    shift_hours = 0
+    shift_hours = 8
     hourly_keys = ["dn", "df", "gh", "tdry", "tdew", "rhum", "wdir", "wspd"]
     for key in hourly_keys:
         if key in srd and isinstance(srd[key], (list, tuple)) and len(srd[key]) == 8760:
@@ -231,11 +303,6 @@ def attach_load_from_csv(pv: Pvsamv1.Pvsamv1, county_slug: str) -> bool:
         f"Attached load from CSV: {load_file} (len={len(load)}, sum={sum(load):.1f} kWh)"
     )
     return True
-
-
-# ------------------------------
-# Main demo
-# ------------------------------
 
 def main() -> None:
     county_slug = os.environ.get("COUNTY_NAME", "alameda").lower().replace(" ", "-")
@@ -435,6 +502,12 @@ def main() -> None:
     if pv_executed:
         print_first_day_flow_table(pv, day_index=0)
         print_first_day_soc_summary(pv, day_index=0)
+
+        # Week plots in a single 6-panel figure: first week and first week of July
+        load_ser = _load_series(pv)
+        soc_ser = _soc_series(pv)
+        pv_ser = _pv_ac_from_flows(pv)
+        _plot_six_panel_weeks(load_ser, soc_ser, pv_ser)
 
 
 if __name__ == "__main__":
