@@ -202,9 +202,25 @@ def _soc_series(pv: Pvsamv1.Pvsamv1) -> np.ndarray:
     except Exception:
         return np.array([], dtype=float)
 
-def _plot_six_panel_weeks(load_ser: np.ndarray, soc_ser: np.ndarray, pv_ser: np.ndarray) -> None:
+def _flow_series(pv: Pvsamv1.Pvsamv1) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    out = pv.Outputs.export()
+    def arr(k: str) -> np.ndarray:
+        return np.asarray(out.get(k, []), dtype=float).ravel()
+    return arr("system_to_load"), arr("batt_to_load"), arr("grid_to_load")
+
+
+def _plot_six_panel_weeks(
+    load_ser: np.ndarray,
+    soc_ser: np.ndarray,
+    pv_ser: np.ndarray,
+    pv_to_load: np.ndarray,
+    batt_to_load: np.ndarray,
+    grid_to_load: np.ndarray,
+    min_soc_line: float | None,
+    max_soc_line: float | None,
+) -> None:
     """Create a single figure with 6 panels:
-    Rows: Load, Battery SOC, Solar AC (PV). Col 1: First week. Col 2: First week of July.
+    Rows: Load, Battery SOC, Solar AC (PV). Col 1: First week of January. Col 2: First week of July.
     """
     week_len = 24 * 7
     first_week_start = 0
@@ -222,31 +238,78 @@ def _plot_six_panel_weeks(load_ser: np.ndarray, soc_ser: np.ndarray, pv_ser: np.
 
     fig, axes = plt.subplots(3, 2, figsize=(14, 9), sharex="col")
 
-    # Panels: (row, col) = (metric, week)
-    panels = [
-        (0, 0, load_ser, first_week_start, "Load - First Week", "kW", "#222222"),
-        (1, 0, soc_ser, first_week_start, "Battery SOC - First Week", "%", "#1f77b4"),
-        (2, 0, pv_ser, first_week_start, "Solar AC (PV) - First Week", "kW", "#ff7f0e"),
-        (0, 1, load_ser, july_start, "Load - First Week of July", "kW", "#222222"),
-        (1, 1, soc_ser, july_start, "Battery SOC - First Week of July", "%", "#1f77b4"),
-        (2, 1, pv_ser, july_start, "Solar AC (PV) - First Week of July", "kW", "#ff7f0e"),
-    ]
+    # Top row: load breakdown by source (stacked area)
+    for c, start, title in [
+        (0, first_week_start, "Load Served by Source - First Week January"),
+        (1, july_start, "Load Served by Source - First Week July"),
+    ]:
+        ax = axes[0, c]
+        xL, L = _slice(load_ser, start)
+        xPV, PVL = _slice(pv_to_load, start)
+        xBL, BL = _slice(batt_to_load, start)
+        xGL, GL = _slice(grid_to_load, start)
+        if L.size == 0 or PVL.size == 0 or BL.size == 0 or GL.size == 0:
+            ax.text(0.5, 0.5, "No data", transform=ax.transAxes, ha="center", va="center")
+            ax.set_title(title)
+            ax.set_ylabel("kW")
+            ax.grid(True, alpha=0.3)
+            continue
+        PVL = np.clip(PVL, 0.0, None)
+        BL = np.clip(BL, 0.0, None)
+        GL = np.clip(GL, 0.0, None)
+        ax.stackplot(xL, PVL, BL, GL,
+                     labels=["Solar→Load", "Battery→Load", "Grid→Load"],
+                     colors=["#ff7f0e", "#2ca02c", "#7f7f7f"], alpha=0.8)
+        ax.plot(xL, L, color="#000000", lw=1.2, label="Total Load")
+        ax.set_title(title)
+        ax.set_ylabel("kW")
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc="upper right", fontsize=8, framealpha=0.8)
 
-    for r, c, series, start, title, ylabel, color in panels:
-        ax = axes[r, c]
-        x, y = _slice(series, start)
+    # Middle row: SOC lines (with dashed min/max SOC)
+    for c, start, title in [
+        (0, first_week_start, "Battery SOC - First Week January"),
+        (1, july_start, "Battery SOC - First Week July"),
+    ]:
+        ax = axes[1, c]
+        x, y = _slice(soc_ser, start)
         if y.size == 0:
             ax.text(0.5, 0.5, "No data", transform=ax.transAxes, ha="center", va="center")
             ax.set_title(title)
-            ax.set_ylabel(ylabel)
+            ax.set_ylabel("%")
             ax.grid(True, alpha=0.3)
             continue
-        ax.plot(x, y, color=color, lw=1.8)
+        ax.plot(x, y, color="#1f77b4", lw=1.8)
         ax.set_title(title)
-        ax.set_ylabel(ylabel)
+        ax.set_ylabel("%")
+        ax.set_ylim(0, 100)
         ax.grid(True, alpha=0.3)
-        if ylabel == "%":
-            ax.set_ylim(0, 100)
+        # Add dashed min/max SOC lines if available
+        if isinstance(min_soc_line, (int, float)):
+            ax.axhline(float(min_soc_line), color="#d62728", ls="--", lw=1.2, alpha=0.9, label=f"Min SOC ({min_soc_line:g}%)")
+        if isinstance(max_soc_line, (int, float)):
+            ax.axhline(float(max_soc_line), color="#ff7f0e", ls="--", lw=1.2, alpha=0.9, label=f"Max SOC ({max_soc_line:g}%)")
+        h, lab = ax.get_legend_handles_labels()
+        if lab:
+            ax.legend(loc="upper right", fontsize=8, framealpha=0.8)
+
+    # Bottom row: PV AC lines
+    for c, start, title in [
+        (0, first_week_start, "Solar AC (PV) - First Week January"),
+        (1, july_start, "Solar AC (PV) - First Week July"),
+    ]:
+        ax = axes[2, c]
+        x, y = _slice(pv_ser, start)
+        if y.size == 0:
+            ax.text(0.5, 0.5, "No data", transform=ax.transAxes, ha="center", va="center")
+            ax.set_title(title)
+            ax.set_ylabel("kW")
+            ax.grid(True, alpha=0.3)
+            continue
+        ax.plot(x, y, color="#ff7f0e", lw=1.8)
+        ax.set_title(title)
+        ax.set_ylabel("kW")
+        ax.grid(True, alpha=0.3)
     axes[2, 0].set_xlabel("Hour")
     axes[2, 1].set_xlabel("Hour")
     fig.tight_layout()
@@ -507,7 +570,17 @@ def main() -> None:
         load_ser = _load_series(pv)
         soc_ser = _soc_series(pv)
         pv_ser = _pv_ac_from_flows(pv)
-        _plot_six_panel_weeks(load_ser, soc_ser, pv_ser)
+        sL, bL, gL = _flow_series(pv)
+        # Pass min/max SOC to draw dashed reference lines
+        try:
+            min_soc_val = float(pv.value("batt_minimum_SOC"))
+        except Exception:
+            min_soc_val = None
+        try:
+            max_soc_val = float(pv.value("batt_maximum_SOC"))
+        except Exception:
+            max_soc_val = None
+        _plot_six_panel_weeks(load_ser, soc_ser, pv_ser, sL, bL, gL, min_soc_val, max_soc_val)
 
 
 if __name__ == "__main__":
