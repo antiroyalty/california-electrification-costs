@@ -32,7 +32,8 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict, List, Tuple
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -40,6 +41,71 @@ import matplotlib.pyplot as plt
 
 import PySAM.Pvsamv1 as Pvsamv1
 import PySAM.ResourceTools as ResourceTools
+
+
+# ==========================
+# Data models and structures
+# ==========================
+
+
+@dataclass
+class SimulationConfiguration:
+    county_slug: str
+    sam_preset_dir: str
+    pvsamv1_json_name: str
+    weather_file: str
+    load_file: str
+    load_col: str
+    show_plots: bool = True
+    weather_shift_hours: int = 8
+
+
+@dataclass
+class SamPresetFiles:
+    photovoltaic_preset_values: Dict[str, Any]
+    battery_preset_values: Optional[Dict[str, Any]] = None
+
+
+@dataclass
+class SamModules:
+    photovoltaic_model: Pvsamv1.Pvsamv1
+    battery_model: Optional[Any] = None
+
+
+@dataclass
+class SimulationSeries:
+    load_series_kw: List[float]
+    state_of_charge_series_percent: List[float]
+    solar_ac_power_series_kw: List[float]
+    solar_to_load_series_kw: List[float]
+    battery_to_load_series_kw: List[float]
+    grid_to_load_series_kw: List[float]
+
+
+@dataclass
+class ApplyReport:
+    pv_applied_count: int
+    pv_failed_keys: List[str]
+    batt_applied_count: int
+    batt_failed_keys: List[str]
+    warnings: List[str]
+
+
+@dataclass
+class SocBounds:
+    min_soc: Optional[float]
+    max_soc: Optional[float]
+    initial_soc: Optional[float]
+
+
+@dataclass
+class RuntimeOverrides:
+    min_soc: Optional[float] = None
+    max_soc: Optional[float] = None
+    initial_soc: Optional[float] = None
+    dispatch_mode: Optional[int] = None
+    grid_interconnection_limit_kwac: Optional[float] = None
+    can_export_to_grid: Optional[bool] = None
 
 
 # ------------------------------
@@ -313,31 +379,19 @@ def _plot_six_panel_weeks(
     plt.show()
 
 
-def attach_weather(pv: Pvsamv1.Pvsamv1, county_slug: str) -> bool:
+# =====================
+# Configuration helpers
+# =====================
+
+
+def build_configuration_from_environment() -> SimulationConfiguration:
+    county_slug = os.environ.get("COUNTY_NAME", "alameda").lower().replace(" ", "-")
+    preset_dir = os.environ.get("SAM_PRESET_DIR", "SAM_Detailed_PV_Battery")
+    pvsam_json_name = os.environ.get("PVSAMV1_JSON", "untitled_pvsamv1.json")
     weather_file = os.environ.get(
         "WEATHER_FILE",
         f"data/loadprofiles/baseline/single-family-detached/{county_slug}/weather_TMY_{county_slug}.csv",
     )
-    if not os.path.exists(weather_file):
-        print(f"ERROR: Required weather file not found: {weather_file}")
-        raise FileNotFoundError(weather_file)
-
-    srd = ResourceTools.SAM_CSV_to_solar_data(weather_file)
-
-    # Align weather from eastern time (ET) to local time (PT) to match typical load profiles
-    shift_hours = 8
-    hourly_keys = ["dn", "df", "gh", "tdry", "tdew", "rhum", "wdir", "wspd"]
-    for key in hourly_keys:
-        if key in srd and isinstance(srd[key], (list, tuple)) and len(srd[key]) == 8760:
-            arr = list(srd[key])
-            srd[key] = [arr[(i + shift_hours) % 8760] for i in range(8760)]
-
-    pv.SolarResource.solar_resource_data = srd
-    print(f"Attached weather from: {weather_file} (shifted +{shift_hours}h for PT)")
-    return True
-
-
-def attach_load_from_csv(pv: Pvsamv1.Pvsamv1, county_slug: str) -> bool:
     load_file = os.environ.get(
         "LOAD_FILE",
         f"data/loadprofiles/baseline/single-family-detached/{county_slug}/combined_profiles_baseline_{county_slug}.csv",
@@ -346,68 +400,159 @@ def attach_load_from_csv(pv: Pvsamv1.Pvsamv1, county_slug: str) -> bool:
         "LOAD_COL",
         "electricity.real_and_simulated.for_typical_county_home.kwh",
     )
-    if not os.path.exists(load_file):
-        print(
-            "ERROR: Required research load CSV not found: "
-            f"{load_file} (no JSON fallback is allowed)"
-        )
-        raise FileNotFoundError(load_file)
-
-    df = pd.read_csv(load_file)
-    load = df[load_col].astype(float).tolist()
-    if len(load) != 8760:
-        raise ValueError(
-            f"Research load series must be 8760 hours; got len={len(load)} at {load_file}"
-        )
-
-    pv.value("load", load)
-    # Provide auxiliary arrays commonly required
-    pv.value("crit_load", [0.0] * len(load))
-    pv.value("batt_load_ac_forecast", load)
-    print(
-        f"Attached load from CSV: {load_file} (len={len(load)}, sum={sum(load):.1f} kWh)"
+    show_plots = os.environ.get("SHOW_PLOTS", "1").strip() not in {"0", "false", "False"}
+    try:
+        weather_shift_hours = int(os.environ.get("WEATHER_SHIFT_HOURS", "8"))
+    except Exception:
+        weather_shift_hours = 8
+    return SimulationConfiguration(
+        county_slug=county_slug,
+        sam_preset_dir=preset_dir,
+        pvsamv1_json_name=pvsam_json_name,
+        weather_file=weather_file,
+        load_file=load_file,
+        load_col=load_col,
+        show_plots=show_plots,
+        weather_shift_hours=weather_shift_hours,
     )
-    return True
 
-def main() -> None:
-    county_slug = os.environ.get("COUNTY_NAME", "alameda").lower().replace(" ", "-")
-    preset_dir = os.environ.get("SAM_PRESET_DIR", "SAM_Detailed_PV_Battery")
-    pvsam_json_name = os.environ.get("PVSAMV1_JSON", "untitled_pvsamv1.json")
-    # Battery presets file is intentionally unused in this script (no separate Battery module)
 
-    pvsam_json_path = os.path.join(preset_dir, pvsam_json_name)
-    # Load JSON presets
-    pvsam_data = load_json(pvsam_json_path)
+def validate_configuration(cfg: SimulationConfiguration) -> None:
+    pvsam_json_path = os.path.join(cfg.sam_preset_dir, cfg.pvsamv1_json_name)
+    if not os.path.exists(pvsam_json_path):
+        raise FileNotFoundError(f"Pvsamv1 JSON not found: {pvsam_json_path}")
+    if not os.path.exists(cfg.weather_file):
+        raise FileNotFoundError(f"Weather file not found: {cfg.weather_file}")
+    if not os.path.exists(cfg.load_file):
+        raise FileNotFoundError(f"Research load CSV not found: {cfg.load_file}")
 
+
+def configure() -> SimulationConfiguration:
+    cfg = build_configuration_from_environment()
+    validate_configuration(cfg)
+    log_section("Effective Configuration")
+    print(f"county_slug={cfg.county_slug}")
+    print(f"preset_dir={cfg.sam_preset_dir}")
+    print(f"pvsamv1_json_name={cfg.pvsamv1_json_name}")
+    print(f"weather_file={cfg.weather_file}")
+    print(f"load_file={cfg.load_file}")
+    print(f"load_col={cfg.load_col}")
+    print(f"weather_shift_hours={cfg.weather_shift_hours}")
+    print(f"show_plots={cfg.show_plots}")
+    return cfg
+
+
+# ==============
+# Preset loading
+# ==============
+
+
+def load_sam_presets_from_disk(cfg: SimulationConfiguration) -> SamPresetFiles:
+    pvsam_json_path = os.path.join(cfg.sam_preset_dir, cfg.pvsamv1_json_name)
+    return SamPresetFiles(photovoltaic_preset_values=load_json(pvsam_json_path))
+
+
+def load_presets(cfg: SimulationConfiguration) -> SamPresetFiles:
+    presets = load_sam_presets_from_disk(cfg)
     log_section("Preset Files Loaded")
-    print(f"Pvsamv1 preset: {pvsam_json_path}  (keys={len(pvsam_data)})")
+    print(
+        f"Pvsamv1 preset: {os.path.join(cfg.sam_preset_dir, cfg.pvsamv1_json_name)}  "
+        f"(keys={len(presets.photovoltaic_preset_values)})"
+    )
+    return presets
 
-    # Build modules
+
+def build_runtime_overrides(cfg: SimulationConfiguration) -> RuntimeOverrides:
+    def parse_float(env_key: str) -> Optional[float]:
+        v = os.environ.get(env_key)
+        if v is None or v == "":
+            return None
+        try:
+            return float(v)
+        except Exception:
+            return None
+
+    def parse_int(env_key: str) -> Optional[int]:
+        v = os.environ.get(env_key)
+        if v is None or v == "":
+            return None
+        try:
+            return int(v)
+        except Exception:
+            return None
+
+    def parse_bool(env_key: str) -> Optional[bool]:
+        v = os.environ.get(env_key)
+        if v is None or v == "":
+            return None
+        return v.lower() in {"1", "true", "yes", "y"}
+
+    return RuntimeOverrides(
+        min_soc=parse_float("MIN_SOC"),
+        max_soc=parse_float("MAX_SOC"),
+        initial_soc=parse_float("INITIAL_SOC"),
+        dispatch_mode=parse_int("DISPATCH_MODE"),
+        grid_interconnection_limit_kwac=parse_float("GRID_INTERCONNECTION_LIMIT_KWAC"),
+        can_export_to_grid=parse_bool("CAN_EXPORT_TO_GRID"),
+    )
+
+
+# =================
+# Module management
+# =================
+
+
+def create_sam_compute_modules(with_standalone_battery: bool = False) -> SamModules:
     pv = Pvsamv1.new()
+    # Intentionally avoid creating a standalone Battery module in this path
+    return SamModules(photovoltaic_model=pv, battery_model=None)
 
-    # Apply presets
-    ap_pv, failed_pv = apply_json(pv, pvsam_data)
 
-    print(f"Applied {ap_pv} parameters to Pvsamv1 ({len(failed_pv)} failed)")
+def initialize_modules() -> SamModules:
+    return create_sam_compute_modules(with_standalone_battery=False)
 
-    # Battery SOC settings (pre-execute)
-    log_section("Battery SOC Settings (Pre-Execute)")
-    try:
-        min_soc = pv.value("batt_minimum_SOC")
-    except Exception:
-        min_soc = None
-    try:
-        max_soc = pv.value("batt_maximum_SOC")
-    except Exception:
-        max_soc = None
-    try:
-        init_soc = pv.value("batt_initial_SOC")
-    except Exception:
-        init_soc = None
-    print(f"min_SOC={min_soc}  max_SOC={max_soc}  initial_SOC={init_soc}")
 
-    # Manual Dispatch confirmation (imported from JSON)
-    dispatch_from_json = pvsam_data.get("batt_dispatch_choice", None)
+def apply_preset_values_to_modules(modules: SamModules, presets: SamPresetFiles) -> ApplyReport:
+    pv = modules.photovoltaic_model
+    ap_pv, failed_pv = apply_json(pv, presets.photovoltaic_preset_values)
+    # No standalone battery in this workflow
+    return ApplyReport(
+        pv_applied_count=ap_pv,
+        pv_failed_keys=failed_pv,
+        batt_applied_count=0,
+        batt_failed_keys=[],
+        warnings=[],
+    )
+
+
+def apply_runtime_overrides(pv: Pvsamv1.Pvsamv1, overrides: RuntimeOverrides) -> None:
+    def set_if_present(key: str, value: Optional[Any]) -> None:
+        if value is None:
+            return
+        try:
+            pv.value(key, value)
+        except Exception:
+            pass
+
+    set_if_present("batt_minimum_SOC", overrides.min_soc)
+    set_if_present("batt_maximum_SOC", overrides.max_soc)
+    set_if_present("batt_initial_SOC", overrides.initial_soc)
+    set_if_present("batt_dispatch_choice", overrides.dispatch_mode)
+    set_if_present("grid_interconnection_limit_kwac", overrides.grid_interconnection_limit_kwac)
+    set_if_present("batt_dispatch_auto_btm_can_discharge_to_grid", overrides.can_export_to_grid)
+
+
+def report_apply_results(report: ApplyReport) -> None:
+    print(
+        f"Applied {report.pv_applied_count} parameters to Pvsamv1 "
+        f"({len(report.pv_failed_keys)} failed)"
+    )
+    if report.pv_failed_keys:
+        print(f"WARN: Pvsamv1 keys failed to apply: {sorted(report.pv_failed_keys)[:10]}" + (" ..." if len(report.pv_failed_keys) > 10 else ""))
+
+
+def ensure_manual_dispatch_if_configured(pv: Pvsamv1.Pvsamv1, presets: SamPresetFiles) -> None:
+    dispatch_from_json = presets.photovoltaic_preset_values.get("batt_dispatch_choice", None)
     log_section("Dispatch Mode (Imported From JSON)")
     print(
         "batt_dispatch_choice (Pvsamv1 JSON) = ",
@@ -419,48 +564,201 @@ def main() -> None:
         print(f"Pvsamv1 module batt_dispatch_choice = {current_dispatch}")
     except Exception:
         pass
-    # No separate Battery module is created in this script to avoid divergent state
 
-    # Grid export settings (from JSON)
+
+def read_soc_bounds(pv: Pvsamv1.Pvsamv1) -> SocBounds:
+    def get_or_none(k: str) -> Optional[float]:
+        try:
+            return float(pv.value(k))
+        except Exception:
+            return None
+    return SocBounds(
+        min_soc=get_or_none("batt_minimum_SOC"),
+        max_soc=get_or_none("batt_maximum_SOC"),
+        initial_soc=get_or_none("batt_initial_SOC"),
+    )
+
+
+def report_soc_bounds(bounds: SocBounds) -> None:
+    log_section("Battery SOC Settings (Pre-Execute)")
+    print(
+        f"min_SOC={bounds.min_soc}  max_SOC={bounds.max_soc}  initial_SOC={bounds.initial_soc}"
+    )
+
+
+def report_grid_export_settings(presets: SamPresetFiles) -> None:
     log_section("Grid Export Settings (from JSON)")
-    grid_can_export = pvsam_data.get(
-        "batt_dispatch_auto_btm_can_discharge_to_grid", None
+    pvj = presets.photovoltaic_preset_values
+    print(
+        f"batt_dispatch_auto_btm_can_discharge_to_grid = "
+        f"{pvj.get('batt_dispatch_auto_btm_can_discharge_to_grid', None)}"
     )
-    manual_export_periods = pvsam_data.get(
-        "dispatch_manual_btm_discharge_to_grid", None
+    print(
+        f"dispatch_manual_btm_discharge_to_grid        = "
+        f"{pvj.get('dispatch_manual_btm_discharge_to_grid', None)}"
     )
-    interconnection_kwac = pvsam_data.get("grid_interconnection_limit_kwac", None)
-    print(f"batt_dispatch_auto_btm_can_discharge_to_grid = {grid_can_export}")
-    print(f"dispatch_manual_btm_discharge_to_grid        = {manual_export_periods}")
-    print(f"grid_interconnection_limit_kwac              = {interconnection_kwac}")
+    print(
+        f"grid_interconnection_limit_kwac              = "
+        f"{pvj.get('grid_interconnection_limit_kwac', None)}"
+    )
 
-    # Attach weather + required research load (no JSON fallback allowed)
-    try:
-        attach_weather(pv, county_slug)
-    except Exception as e:
-        log_section("Setup Error: Weather")
-        print(f"Unable to attach required weather. Details: {e}")
-        return
-    try:
-        attach_load_from_csv(pv, county_slug)
-    except Exception as e:
-        log_section("Setup Error: Research Load")
-        print(f"Unable to attach required research load. Details: {e}")
-        return
 
-    # (2) Load profile (kW)
+def configure_modules(modules: SamModules, presets: SamPresetFiles, overrides: RuntimeOverrides) -> ApplyReport:
+    report = apply_preset_values_to_modules(modules, presets)
+    report_apply_results(report)
+    apply_runtime_overrides(modules.photovoltaic_model, overrides)
+    ensure_manual_dispatch_if_configured(modules.photovoltaic_model, presets)
+    report_soc_bounds(read_soc_bounds(modules.photovoltaic_model))
+    report_grid_export_settings(presets)
+    return report
+
+
+def attach_weather_resource_to_pvsam(pv: Pvsamv1.Pvsamv1, cfg: SimulationConfiguration) -> bool:
+    if not os.path.exists(cfg.weather_file):
+        print(f"ERROR: Required weather file not found: {cfg.weather_file}")
+        raise FileNotFoundError(cfg.weather_file)
+
+    srd = ResourceTools.SAM_CSV_to_solar_data(cfg.weather_file)
+
+    # Align weather from eastern time (ET) to local time (PT) to match typical load profiles
+    shift_hours = cfg.weather_shift_hours
+    hourly_keys = ["dn", "df", "gh", "tdry", "tdew", "rhum", "wdir", "wspd"]
+    for key in hourly_keys:
+        if key in srd and isinstance(srd[key], (list, tuple)) and len(srd[key]) == 8760:
+            arr = list(srd[key])
+            srd[key] = [arr[(i + shift_hours) % 8760] for i in range(8760)]
+
+    pv.SolarResource.solar_resource_data = srd
+    print(f"Attached weather from: {cfg.weather_file} (shifted +{shift_hours}h for PT)")
+    return True
+
+
+def attach_load_profile_to_pvsam(pv: Pvsamv1.Pvsamv1, cfg: SimulationConfiguration) -> bool:
+    if not os.path.exists(cfg.load_file):
+        print(
+            "ERROR: Required research load CSV not found: "
+            f"{cfg.load_file} (no JSON fallback is allowed)"
+        )
+        raise FileNotFoundError(cfg.load_file)
+
+    df = pd.read_csv(cfg.load_file)
+    if cfg.load_col not in df.columns:
+        raise KeyError(
+            f"Column '{cfg.load_col}' not found in {cfg.load_file}. Available columns: {list(df.columns)}"
+        )
+    load = df[cfg.load_col].astype(float).tolist()
+    if len(load) != 8760:
+        raise ValueError(
+            f"Research load series must be 8760 hours; got len={len(load)} at {cfg.load_file}"
+        )
+
+    pv.value("load", load)
+    # Provide auxiliary arrays commonly required
+    pv.value("crit_load", [0.0] * len(load))
+    pv.value("batt_load_ac_forecast", load)
+    print(
+        f"Attached load from CSV: {cfg.load_file} (len={len(load)}, sum={sum(load):.1f} kWh)"
+    )
+    return True
+
+
+def attach_json_load_if_present(pv: Pvsamv1.Pvsamv1, presets: SamPresetFiles) -> bool:
+    # For research reproducibility, we intentionally do not use the JSON 'load' in this workflow.
+    if isinstance(presets.photovoltaic_preset_values.get("load"), list):
+        print("INFO: JSON contains 'load', but research pipeline requires CSV load. Ignoring JSON 'load'.")
+    return False
+
+
+def attach_resources(pv: Pvsamv1.Pvsamv1, cfg: SimulationConfiguration, presets: SamPresetFiles) -> None:
+    ok_weather = attach_weather_resource_to_pvsam(pv, cfg)
+    ok_load = attach_load_profile_to_pvsam(pv, cfg)
+    if not (ok_weather and ok_load):
+        raise RuntimeError("Failed to attach required weather and research load resources.")
+
+
+# ==========
+# Execution
+# ==========
+
+
+def execute_pvsam(pv: Pvsamv1.Pvsamv1) -> bool:
+    try:
+        pv.execute(0)
+        print("\nExecuted Pvsamv1 successfully.")
+        return True
+    except Exception as e:
+        raise RuntimeError(f"Pvsamv1 execution failed: {e}")
+
+
+def execute(pv: Pvsamv1.Pvsamv1) -> None:
+    execute_pvsam(pv)
+
+
+# ============
+# Extraction
+# ============
+
+
+def solar_ac_power_series_from_flows(pv: Pvsamv1.Pvsamv1) -> List[float]:
+    return _pv_ac_from_flows(pv).astype(float).ravel().tolist()
+
+
+def load_series_kw_from_model(pv: Pvsamv1.Pvsamv1) -> List[float]:
+    return _load_series(pv).astype(float).ravel().tolist()
+
+
+def state_of_charge_series_percent_from_model(pv: Pvsamv1.Pvsamv1) -> List[float]:
+    return _soc_series(pv).astype(float).ravel().tolist()
+
+
+def per_source_load_series_kw_from_model(pv: Pvsamv1.Pvsamv1) -> Tuple[List[float], List[float], List[float]]:
+    sL, bL, gL = _flow_series(pv)
+    return sL.astype(float).ravel().tolist(), bL.astype(float).ravel().tolist(), gL.astype(float).ravel().tolist()
+
+
+def collect_outputs(pv: Pvsamv1.Pvsamv1) -> SimulationSeries:
+    return SimulationSeries(
+        load_series_kw=load_series_kw_from_model(pv),
+        state_of_charge_series_percent=state_of_charge_series_percent_from_model(pv),
+        solar_ac_power_series_kw=solar_ac_power_series_from_flows(pv),
+        solar_to_load_series_kw=per_source_load_series_kw_from_model(pv)[0],
+        battery_to_load_series_kw=per_source_load_series_kw_from_model(pv)[1],
+        grid_to_load_series_kw=per_source_load_series_kw_from_model(pv)[2],
+    )
+
+
+def extract(pv: Pvsamv1.Pvsamv1) -> SimulationSeries:
+    return collect_outputs(pv)
+
+
+# =========
+# Reporting
+# =========
+
+
+def report_manual_dispatch_schedules(presets: SamPresetFiles) -> None:
+    log_section("Manual Dispatch Schedules (from JSON)")
+    pvsam = presets.photovoltaic_preset_values
+    for key in (
+        "dispatch_manual_sched",
+        "dispatch_manual_sched_weekend",
+        "dispatch_manual_percent_discharge",
+        "dispatch_manual_percent_gridcharge",
+        "dispatch_manual_btm_discharge_to_grid",
+    ):
+        val = pvsam.get(key)
+        if isinstance(val, list) and len(val) > 24:
+            print(f"{key}: len={len(val)} head={val[:5]} ... tail={val[-5:]}")
+        else:
+            print(f"{key}: {val}")
+
+
+def report(cfg: SimulationConfiguration, presets: SamPresetFiles, outputs: SimulationSeries, pv: Pvsamv1.Pvsamv1) -> None:
+    # Load profile summary
     log_section("Load Profile (kW)")
-    try:
-        load = list(pv.value("load"))
-    except Exception:
-        load = []
-    if isinstance(load, list) and load:
-        if len(load) != 8760:
-            print(
-                f"ERROR: Attached load must be 8760 hours; got len={len(load)}. Aborting."
-            )
-            return
-        head, tail = safe_head_tail([float(x) for x in load], n=24)
+    load = outputs.load_series_kw
+    if load and len(load) == 8760:
+        head, tail = safe_head_tail(load, n=24)
         print(
             f"len={len(load)}  sum={sum(load):.1f} kWh  min={min(load):.3f}  "
             f"max={max(load):.3f}  mean={np.mean(load):.3f}"
@@ -469,31 +767,13 @@ def main() -> None:
         if tail:
             print(f"last 24 hours : {tail}")
     else:
-        print("ERROR: No load profile available after attachment. Aborting.")
-        return
+        print("No load profile available.")
 
-    # Execute PV since required weather and 8760 research load are attached
-    pv_executed = False
-    try:
-        pv.execute(0)
-        pv_executed = True
-        print("\nExecuted Pvsamv1 successfully.")
-    except Exception as e:
-        print(f"WARN: Pvsamv1 execution failed: {e}")
-
-    # (4) Solar generation profile (kW AC)
+    # PV generation summary (from flows)
     log_section("Solar Generation Profile (kW AC)")
-    gen = []
-    if pv_executed:
-        try:
-            gen = list(getattr(pv.Outputs, "gen", []))
-        except Exception:
-            try:
-                gen = list(getattr(pv.Outputs, "ac", []))
-            except Exception:
-                gen = []
+    gen = outputs.solar_ac_power_series_kw
     if gen:
-        head, tail = safe_head_tail([float(x) for x in gen], n=24)
+        head, tail = safe_head_tail(gen, n=24)
         print(
             f"len={len(gen)}  sum={sum(gen):.1f} kWh  max={max(gen):.3f} kW  "
             f"mean={np.mean(gen):.3f} kW"
@@ -502,76 +782,55 @@ def main() -> None:
         if tail:
             print(f"last 24 hours : {tail}")
     else:
-        print("No PV generation available (missing weather or execution failed).")
+        print("No PV generation available.")
 
-    # (3) Battery level (kW)
-    # Report nameplate charging/discharging caps from JSON, and per-hour power if available
+    # Battery caps and power series
     log_section("Battery Power (kW)")
+    pvsam = presets.photovoltaic_preset_values
     caps = {
-        "batt_power_charge_max_kwac": pvsam_data.get("batt_power_charge_max_kwac"),
-        "batt_power_discharge_max_kwac": pvsam_data.get("batt_power_discharge_max_kwac"),
-        "batt_power_charge_max_kwdc": pvsam_data.get("batt_power_charge_max_kwdc"),
-        "batt_power_discharge_max_kwdc": pvsam_data.get("batt_power_discharge_max_kwdc"),
+        "batt_power_charge_max_kwac": pvsam.get("batt_power_charge_max_kwac"),
+        "batt_power_discharge_max_kwac": pvsam.get("batt_power_discharge_max_kwac"),
+        "batt_power_charge_max_kwdc": pvsam.get("batt_power_charge_max_kwdc"),
+        "batt_power_discharge_max_kwdc": pvsam.get("batt_power_discharge_max_kwdc"),
     }
     for k, v in caps.items():
         print(f"{k} = {v}")
 
-    batt_power_series: List[float] = []
-    if pv_executed:
-        # Prefer Pvsamv1 battery power output if available
-        try:
-            batt_power_series = list(getattr(pv.Outputs, "batt_power", []))
-        except Exception:
-            batt_power_series = []
+    # First‑day tables and plots
+    print_first_day_flow_table(pv, day_index=0)
+    print_first_day_soc_summary(pv, day_index=0)
 
-    if batt_power_series:
-        head, tail = safe_head_tail([float(x) for x in batt_power_series], n=24)
-        print(
-            f"batt_power series present: len={len(batt_power_series)}  "
-            f"min={min(batt_power_series):.3f}  max={max(batt_power_series):.3f}  "
-            f"mean={np.mean(batt_power_series):.3f}"
+    if cfg.show_plots:
+        # Build series for stacked source load and SOC/PV panels
+        sL = outputs.solar_to_load_series_kw
+        bL = outputs.battery_to_load_series_kw
+        gL = outputs.grid_to_load_series_kw
+        min_soc = read_soc_bounds(pv).min_soc
+        max_soc = read_soc_bounds(pv).max_soc
+        _plot_six_panel_weeks(
+            np.array(outputs.load_series_kw, dtype=float),
+            np.array(outputs.state_of_charge_series_percent, dtype=float),
+            np.array(outputs.solar_ac_power_series_kw, dtype=float),
+            np.array(sL, dtype=float),
+            np.array(bL, dtype=float),
+            np.array(gL, dtype=float),
+            min_soc,
+            max_soc,
         )
-        print(f"first 24 hours: {head}")
-        if tail:
-            print(f"last 24 hours : {tail}")
-    else:
-        print("No per‑hour battery power available (PV not executed or output absent).")
 
-    # Final echo of manual schedules from JSON for auditability
-    log_section("Manual Dispatch Schedules (from JSON)")
-    for key in (
-        "dispatch_manual_sched",
-        "dispatch_manual_sched_weekend",
-        "dispatch_manual_percent_discharge",
-        "dispatch_manual_percent_gridcharge",
-        "dispatch_manual_btm_discharge_to_grid",
-    ):
-        val = pvsam_data.get(key)
-        if isinstance(val, list) and len(val) > 24:
-            print(f"{key}: len={len(val)} head={val[:5]} ... tail={val[-5:]}")
-        else:
-            print(f"{key}: {val}")
+    report_manual_dispatch_schedules(presets)
 
-    # Build a first‑day flow table once execution succeeds
-    if pv_executed:
-        print_first_day_flow_table(pv, day_index=0)
-        print_first_day_soc_summary(pv, day_index=0)
-
-        # Week plots in a single 6-panel figure: first week and first week of July
-        load_ser = _load_series(pv)
-        soc_ser = _soc_series(pv)
-        pv_ser = _pv_ac_from_flows(pv)
-        sL, bL, gL = _flow_series(pv)
-        # Pass min/max SOC to draw dashed reference lines
-        try:
-            min_soc_val = float(pv.value("batt_minimum_SOC"))
-        except Exception:
-            min_soc_val = None
-        try:
-            max_soc_val = float(pv.value("batt_maximum_SOC"))
-        except Exception:
-            max_soc_val = None
-        _plot_six_panel_weeks(load_ser, soc_ser, pv_ser, sL, bL, gL, min_soc_val, max_soc_val)
+def main() -> None:
+    cfg = configure()                                 # Configuration phase
+    presets = load_presets(cfg)                       # Presets phase
+    overrides = build_runtime_overrides(cfg)          # Runtime overrides
+    modules = initialize_modules()                    # Module lifecycle: create
+    configure_modules(modules, presets, overrides)    # Apply + checks
+    pv = modules.photovoltaic_model
+    attach_resources(pv, cfg, presets)                # Weather + research load
+    execute(pv)                                       # Execute model or raise
+    outputs = extract(pv)                             # Collect outputs
+    report(cfg, presets, outputs, pv)                 # Reporting/visualization
 
 
 if __name__ == "__main__":
