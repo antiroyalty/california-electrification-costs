@@ -176,6 +176,12 @@ class RuntimeOverrides:
     dispatch_mode: Optional[int] = None
     grid_interconnection_limit_kwac: Optional[float] = None
     can_export_to_grid: Optional[bool] = None
+    # Predictive dispatch parameters
+    enable_predictive_dispatch: Optional[bool] = None
+    battery_efficiency: Optional[float] = None
+    peak_start_hour: Optional[int] = None
+    peak_end_hour: Optional[int] = None
+    battery_capacity_kwh: Optional[float] = None
 
 
 # ------------------------------
@@ -564,6 +570,12 @@ def build_runtime_overrides(cfg: SimulationConfiguration) -> RuntimeOverrides:
         dispatch_mode=parse_int("DISPATCH_MODE"),
         grid_interconnection_limit_kwac=parse_float("GRID_INTERCONNECTION_LIMIT_KWAC"),
         can_export_to_grid=parse_bool("CAN_EXPORT_TO_GRID"),
+        # Predictive dispatch parameters
+        enable_predictive_dispatch=parse_bool("ENABLE_PREDICTIVE_DISPATCH"),
+        battery_efficiency=parse_float("BATTERY_EFFICIENCY"),
+        peak_start_hour=parse_int("PEAK_START_HOUR"),
+        peak_end_hour=parse_int("PEAK_END_HOUR"),
+        battery_capacity_kwh=parse_float("BATTERY_CAPACITY_KWH"),
     )
 
 
@@ -822,6 +834,12 @@ def report_manual_dispatch_schedules(presets: SamPresetFiles) -> None:
         else:
             print(f"{key}: {val}")
 
+def compose_battery_charge_schedule():
+    # Initialize a charge schedule
+    # Charge schedule is dictated by predicting how much load will need to be served in the 4-9pm block, and using all available solar to obtain that energy in the battery
+    # Discharge schedule is dictated by the load profile of the home in the 4-9pm period
+    # Returns charge and discharge schedules
+    # What is the right format to specify as part of the Pvsamv1 battery inputs? Which field would need to be updated with this information?
 
 def report(cfg: SimulationConfiguration, presets: SamPresetFiles, outputs: SimulationSeries, pv: Pvsamv1.Pvsamv1) -> None:
     # Load profile summary
@@ -898,8 +916,11 @@ def main() -> None:
     configure_modules(modules, presets, overrides)    # Apply + checks
     pv = modules.photovoltaic_model
     attach_resources(pv, cfg, presets)                # Weather + research load
+    compose_battery_charge_schedule()
     execute(pv)                                       # Execute model or raise
     outputs = extract(pv)                             # Collect outputs
+    
+    
     report(cfg, presets, outputs, pv)                 # Reporting/visualization
 
 
