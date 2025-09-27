@@ -1,4 +1,4 @@
-"""
+git """
 Simple Pvsamv1 demo using presets from SAM_Detailed_PV_Battery.
 
 What this script does
@@ -834,12 +834,262 @@ def report_manual_dispatch_schedules(presets: SamPresetFiles) -> None:
         else:
             print(f"{key}: {val}")
 
-def compose_battery_charge_schedule():
-    # Initialize a charge schedule
-    # Charge schedule is dictated by predicting how much load will need to be served in the 4-9pm block, and using all available solar to obtain that energy in the battery
-    # Discharge schedule is dictated by the load profile of the home in the 4-9pm period
-    # Returns charge and discharge schedules
-    # What is the right format to specify as part of the Pvsamv1 battery inputs? Which field would need to be updated with this information?
+def calculate_daily_charging_schedule(day_start: int, target_energy_needed: float, load_forecast: List[float], 
+                                    solar_forecast: Optional[List[float]], battery_capacity_kwh: float) -> Dict[str, float]:
+    """
+    Phase 1: Calculate charging schedule for 6am-4pm period (solar priority + grid backup).
+    
+    Args:
+        day_start: Starting hour index for the day (day * 24)
+        target_energy_needed: kWh needed to be stored (from calculate_peak_energy_requirements)
+        load_forecast: 8760-hour load profile (kW)
+        solar_forecast: 8760-hour solar generation forecast (kW), optional
+        battery_capacity_kwh: Battery capacity
+        
+    Returns:
+        Dictionary with cumulative_stored_kwh, grid_charging_kwh, grid_charge_hours
+    """
+    cumulative_stored_kwh = 0.0
+    total_grid_charging_kwh = 0.0
+    grid_charge_hours = []
+    
+    for hour in range(6, 16):  # 6am to 4pm
+        hour_index = day_start + hour
+        
+        # Solar charging priority
+        if solar_forecast and hour_index < len(solar_forecast):
+            solar_gen = solar_forecast[hour_index]
+            load = load_forecast[hour_index] if hour_index < len(load_forecast) else 0.0
+            excess_solar = max(0.0, solar_gen - load)
+            
+            # Use available solar first
+            energy_still_needed = target_energy_needed - cumulative_stored_kwh
+            if energy_still_needed > 0 and excess_solar > 0:
+                solar_charge_kwh = min(excess_solar, energy_still_needed)
+                cumulative_stored_kwh += solar_charge_kwh
+        
+        # Grid backup charging if solar insufficient (after 10am)
+        if hour >= 10:
+            energy_still_needed = target_energy_needed - cumulative_stored_kwh
+            if energy_still_needed > 0:
+                max_hourly_charge = min(5.0, energy_still_needed)  # 5kW charge rate limit
+                grid_charge_percent = min(100.0, (max_hourly_charge / battery_capacity_kwh) * 100.0)
+                cumulative_stored_kwh += max_hourly_charge
+                total_grid_charging_kwh += max_hourly_charge
+                grid_charge_hours.append((hour_index, grid_charge_percent))
+    
+    return {
+        'cumulative_stored_kwh': cumulative_stored_kwh,
+        'grid_charging_kwh': total_grid_charging_kwh,
+        'grid_charge_hours': grid_charge_hours
+    }
+
+
+def get_peak_period_loads(day_start: int, load_forecast: List[float], peak_start: int = 16, peak_end: int = 21) -> Dict[str, Any]:
+    """
+    Extract peak period load profile for proportional discharge calculation.
+    
+    Args:
+        day_start: Starting hour index for the day (day * 24)
+        load_forecast: 8760-hour load profile (kW)
+        peak_start: Peak period start hour (default 16 = 4pm)
+        peak_end: Peak period end hour (default 21 = 9pm)
+        
+    Returns:
+        Dictionary with peak_loads, total_peak_load, peak_hour_indices
+    """
+    peak_loads = []
+    peak_hour_indices = []
+    total_peak_load = 0.0
+    
+    for hour in range(peak_start, peak_end):
+        hour_index = day_start + hour
+        load = load_forecast[hour_index] if hour_index < len(load_forecast) else 0.0
+        peak_loads.append(load)
+        peak_hour_indices.append(hour_index)
+        total_peak_load += load
+    
+    return {
+        'peak_loads': peak_loads,
+        'total_peak_load': total_peak_load,
+        'peak_hour_indices': peak_hour_indices
+    }
+
+
+def distribute_discharge_proportionally(peak_loads: List[float], total_peak_load: float, 
+                                      available_discharge_energy: float, battery_capacity_kwh: float) -> List[Tuple[float, float]]:
+    """
+    Calculate proportional discharge percentages for peak period hours.
+    
+    Args:
+        peak_loads: Load for each peak period hour (kW)
+        total_peak_load: Sum of all peak period loads (kW)
+        available_discharge_energy: Energy available for discharge (kWh)
+        battery_capacity_kwh: Battery capacity for percentage calculation
+        
+    Returns:
+        List of (desired_discharge_kwh, discharge_percent) tuples for each peak hour
+    """
+    discharge_schedule = []
+    
+    if total_peak_load > 0:
+        for load in peak_loads:
+            # Proportional discharge based on load profile
+            load_fraction = load / total_peak_load
+            desired_discharge_kwh = min(available_discharge_energy * load_fraction, load)
+            
+            # Convert to discharge percentage for SAM
+            if desired_discharge_kwh > 0:
+                discharge_percent = min(100.0, (desired_discharge_kwh / battery_capacity_kwh) * 100.0)
+            else:
+                discharge_percent = 0.0
+                
+            discharge_schedule.append((desired_discharge_kwh, discharge_percent))
+    else:
+        # No load during peak period
+        discharge_schedule = [(0.0, 0.0)] * len(peak_loads)
+    
+    return discharge_schedule
+
+
+def calculate_peak_discharge_schedule(day_start: int, target_soc: float, min_soc: float, 
+                                    battery_capacity_kwh: float, load_forecast: List[float], 
+                                    peak_start: int = 16, peak_end: int = 21) -> Dict[str, Any]:
+    """
+    Phase 2: Calculate discharge schedule for 4pm-9pm peak period.
+    
+    Args:
+        day_start: Starting hour index for the day (day * 24)
+        target_soc: Target SOC by 4pm (from calculate_precharge_target_soc)
+        min_soc: Minimum SOC percentage
+        battery_capacity_kwh: Battery capacity
+        load_forecast: 8760-hour load profile (kW)
+        peak_start: Peak period start hour (default 16 = 4pm)
+        peak_end: Peak period end hour (default 21 = 9pm)
+        
+    Returns:
+        Dictionary with discharge_hours, peak_coverage, total_discharge_kwh
+    """
+    # Available energy for discharge (from target SOC down to min SOC)
+    available_discharge_energy = ((target_soc - min_soc) / 100.0) * battery_capacity_kwh
+    
+    # Get peak period loads
+    peak_info = get_peak_period_loads(day_start, load_forecast, peak_start, peak_end)
+    peak_loads = peak_info['peak_loads']
+    total_peak_load = peak_info['total_peak_load']
+    peak_hour_indices = peak_info['peak_hour_indices']
+    
+    # Calculate proportional discharge
+    discharge_schedule = distribute_discharge_proportionally(
+        peak_loads, total_peak_load, available_discharge_energy, battery_capacity_kwh
+    )
+    
+    # Build output with hour indices and discharge percentages
+    discharge_hours = []
+    peak_coverage = 0.0
+    total_discharge_kwh = 0.0
+    
+    for i, (discharge_kwh, discharge_percent) in enumerate(discharge_schedule):
+        hour_index = peak_hour_indices[i]
+        if discharge_percent > 0:
+            discharge_hours.append((hour_index, discharge_percent))
+        peak_coverage += min(discharge_kwh, peak_loads[i])
+        total_discharge_kwh += discharge_kwh
+    
+    return {
+        'discharge_hours': discharge_hours,
+        'peak_coverage': peak_coverage,
+        'total_discharge_kwh': total_discharge_kwh,
+        'total_peak_load': total_peak_load
+    }
+
+
+def compose_battery_charge_schedule(load_forecast: List[float], solar_forecast: Optional[List[float]] = None, 
+                                  battery_capacity_kwh: float = 13.5, battery_efficiency: float = 0.90,
+                                  min_soc: float = 20.0, max_soc: float = 90.0) -> Dict[str, Any]:
+    """
+    Create predictive battery dispatch schedules optimized for California TOU rates.
+    
+    Uses existing helper functions:
+    - calculate_peak_energy_requirements(): Predicts 4-9pm energy needs with efficiency losses
+    - calculate_precharge_target_soc(): Calculates target SOC needed by 4pm
+    
+    And new modular helper functions:
+    - calculate_daily_charging_schedule(): Phase 1 charging logic
+    - calculate_peak_discharge_schedule(): Phase 2 discharge logic
+    
+    Args:
+        load_forecast: 8760-hour load profile (kW)
+        solar_forecast: 8760-hour solar generation forecast (kW), optional
+        battery_capacity_kwh: Battery capacity (default 13.5 kWh)
+        battery_efficiency: Round-trip efficiency (default 0.90)
+        min_soc: Minimum SOC percentage (default 20.0)
+        max_soc: Maximum SOC percentage (default 90.0)
+        
+    Returns:
+        Dictionary with SAM-compatible schedules and validation metrics
+    """
+    if len(load_forecast) != 8760:
+        raise ValueError(f"Load forecast must be 8760 hours, got {len(load_forecast)}")
+    
+    # Initialize annual schedules for SAM
+    grid_charge_percent = [0.0] * 8760  # Grid charging percentages (0-100)
+    discharge_percent = [0.0] * 8760    # Discharge percentages (0-100)
+    
+    # Validation tracking
+    peak_coverage_days = 0
+    total_grid_charging_kwh = 0.0
+    total_efficiency_losses_kwh = 0.0
+    
+    for day in range(365):
+        day_start = day * 24
+        
+        # Use existing helper: Calculate peak energy requirements
+        peak_req = calculate_peak_energy_requirements(load_forecast, day, battery_efficiency)
+        
+        # Use existing helper: Calculate target SOC needed by 4pm
+        target_info = calculate_precharge_target_soc(peak_req, battery_capacity_kwh, min_soc, max_soc)
+        
+        # Track efficiency losses
+        total_efficiency_losses_kwh += peak_req['efficiency_loss_kwh']
+        
+        # Phase 1: Calculate charging schedule using helper function
+        charging_result = calculate_daily_charging_schedule(
+            day_start, peak_req['energy_to_store_kwh'], load_forecast, solar_forecast, battery_capacity_kwh
+        )
+        
+        # Apply grid charging schedule
+        for hour_index, charge_percent in charging_result['grid_charge_hours']:
+            grid_charge_percent[hour_index] = charge_percent
+        
+        total_grid_charging_kwh += charging_result['grid_charging_kwh']
+        
+        # Phase 2: Calculate discharge schedule using helper function
+        discharge_result = calculate_peak_discharge_schedule(
+            day_start, target_info['target_soc'], min_soc, battery_capacity_kwh, load_forecast
+        )
+        
+        # Apply discharge schedule
+        for hour_index, discharge_pct in discharge_result['discharge_hours']:
+            discharge_percent[hour_index] = discharge_pct
+        
+        # Track performance (80% coverage threshold)
+        if discharge_result['peak_coverage'] >= discharge_result['total_peak_load'] * 0.8:
+            peak_coverage_days += 1
+    
+    # Validation metrics
+    validation_metrics = {
+        'peak_coverage_percentage': (peak_coverage_days / 365) * 100,
+        'annual_grid_charging_kwh': total_grid_charging_kwh,
+        'annual_efficiency_losses_kwh': total_efficiency_losses_kwh,
+        'days_processed': 365
+    }
+    
+    return {
+        'dispatch_manual_percent_gridcharge': grid_charge_percent,
+        'dispatch_manual_percent_discharge': discharge_percent,
+        'validation_metrics': validation_metrics
+    }
 
 def report(cfg: SimulationConfiguration, presets: SamPresetFiles, outputs: SimulationSeries, pv: Pvsamv1.Pvsamv1) -> None:
     # Load profile summary
