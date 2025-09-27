@@ -48,6 +48,76 @@ import PySAM.ResourceTools as ResourceTools
 # ==========================
 
 
+# ==========================
+# Predictive dispatch functions
+# ==========================
+
+def calculate_peak_energy_requirements(load_forecast: List[float], day_index: int, battery_efficiency: float = 0.90) -> Dict[str, float]:
+    """
+    Calculate energy needed for 4-9pm peak period including efficiency losses.
+    
+    Args:
+        load_forecast: 8760-hour load profile (kW)
+        day_index: Day of year (0-364)
+        battery_efficiency: Round-trip efficiency (default 0.90)
+        
+    Returns:
+        Dictionary with peak_load_kwh, energy_to_store_kwh, efficiency_loss_kwh
+    """
+    # Peak period hours (4-9pm = hours 16-20)
+    peak_start = 16
+    peak_end = 21
+    
+    # Get load forecast for peak period
+    peak_load_kwh = 0.0
+    day_start_hour = day_index * 24
+    
+    for hour in range(peak_start, peak_end):
+        hour_index = day_start_hour + hour
+        if hour_index < len(load_forecast):
+            peak_load_kwh += load_forecast[hour_index]
+    
+    # Account for round-trip efficiency losses
+    # Energy needed to store = peak_load / efficiency
+    energy_to_store_kwh = peak_load_kwh / battery_efficiency
+    efficiency_loss_kwh = energy_to_store_kwh - peak_load_kwh
+    
+    return {
+        'peak_load_kwh': peak_load_kwh,
+        'energy_to_store_kwh': energy_to_store_kwh,
+        'efficiency_loss_kwh': efficiency_loss_kwh
+    }
+
+
+def calculate_precharge_target_soc(peak_energy_req: Dict[str, float], battery_capacity_kwh: float = 13.5, min_soc: float = 20.0, max_soc: float = 90.0) -> Dict[str, float]:
+    """
+    Calculate target SOC needed by 4pm to serve peak load.
+    
+    Args:
+        peak_energy_req: Result from calculate_peak_energy_requirements
+        battery_capacity_kwh: Battery capacity (default 13.5 kWh for Tesla Powerwall)
+        min_soc: Minimum SOC percentage (default 20.0)
+        max_soc: Maximum SOC percentage (default 90.0)
+        
+    Returns:
+        Dictionary with target_soc, target_energy_kwh, precharge_energy_kwh
+    """
+    # Energy available at minimum SOC
+    min_energy_kwh = (min_soc / 100.0) * battery_capacity_kwh
+    
+    # Total energy needed = minimum energy + peak energy requirement
+    target_energy_kwh = min_energy_kwh + peak_energy_req['energy_to_store_kwh']
+    
+    # Convert to SOC percentage, clamped to maximum
+    target_soc = min(max_soc, (target_energy_kwh / battery_capacity_kwh) * 100.0)
+    
+    return {
+        'target_soc': target_soc,
+        'target_energy_kwh': target_energy_kwh,
+        'precharge_energy_kwh': peak_energy_req['energy_to_store_kwh']
+    }
+
+
 @dataclass
 class SimulationConfiguration:
     county_slug: str
