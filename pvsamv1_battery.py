@@ -1,21 +1,20 @@
 """
-Simple Pvsamv1 + Battery demo using presets from SAM_Detailed_PV_Battery.
+Simple Pvsamv1 demo using presets from SAM_Detailed_PV_Battery.
 
 What this script does
-- Loads presets from JSON into PySAM.Pvsamv1 and PySAM.Battery.
+- Loads presets from JSON into PySAM.Pvsamv1.
 - Ensures Manual Dispatch mode (and logs that it came from JSON).
-- Attaches a local weather CSV if found and executes Pvsamv1.
+- Requires and attaches a local weather CSV and the research load CSV, then executes.
 - Logs, clearly:
   (1) Grid export settings (from JSON)
   (2) The load profile (kW)
-  (3) Battery level (kW caps; and first‑day power if available)
+  (3) Battery power caps and first‑day summaries
   (4) Solar generation profile (kW AC)
 
 Notes
 - Presets directory: SAM_Detailed_PV_Battery
 - Default PV config file: untitled_pvsamv1.json
-- Default Battery config file: untitled.json (contains batt_* keys)
-- Weather + load fallbacks use Alameda example files under data/loadprofiles/...
+- Weather and the research load CSV are required; no JSON load fallback is used.
 
 Run
   python3 pvsamv1_battery.py
@@ -27,7 +26,6 @@ Env overrides (optional)
 - LOAD_COL: column name in LOAD_FILE
 - SAM_PRESET_DIR: default "SAM_Detailed_PV_Battery"
 - PVSAMV1_JSON: default "untitled_pvsamv1.json"
-- BATTERY_JSON: default "untitled.json"
 """
 
 from __future__ import annotations
@@ -41,7 +39,6 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 import PySAM.Pvsamv1 as Pvsamv1
-import PySAM.Battery as Battery
 import PySAM.ResourceTools as ResourceTools
 
 
@@ -322,8 +319,8 @@ def attach_weather(pv: Pvsamv1.Pvsamv1, county_slug: str) -> bool:
         f"data/loadprofiles/baseline/single-family-detached/{county_slug}/weather_TMY_{county_slug}.csv",
     )
     if not os.path.exists(weather_file):
-        print(f"WARN: Weather file not found: {weather_file} (PV run will be skipped)")
-        raise Exception
+        print(f"ERROR: Required weather file not found: {weather_file}")
+        raise FileNotFoundError(weather_file)
 
     srd = ResourceTools.SAM_CSV_to_solar_data(weather_file)
 
@@ -350,13 +347,18 @@ def attach_load_from_csv(pv: Pvsamv1.Pvsamv1, county_slug: str) -> bool:
         "electricity.real_and_simulated.for_typical_county_home.kwh",
     )
     if not os.path.exists(load_file):
-        print(f"INFO: Load CSV not found: {load_file} (will use JSON 'load' if present)")
-        raise Exception
+        print(
+            "ERROR: Required research load CSV not found: "
+            f"{load_file} (no JSON fallback is allowed)"
+        )
+        raise FileNotFoundError(load_file)
 
     df = pd.read_csv(load_file)
     load = df[load_col].astype(float).tolist()
     if len(load) != 8760:
-        print(f"WARN: CSV load length {len(load)} != 8760; continuing anyway")
+        raise ValueError(
+            f"Research load series must be 8760 hours; got len={len(load)} at {load_file}"
+        )
 
     pv.value("load", load)
     # Provide auxiliary arrays commonly required
@@ -371,31 +373,22 @@ def main() -> None:
     county_slug = os.environ.get("COUNTY_NAME", "alameda").lower().replace(" ", "-")
     preset_dir = os.environ.get("SAM_PRESET_DIR", "SAM_Detailed_PV_Battery")
     pvsam_json_name = os.environ.get("PVSAMV1_JSON", "untitled_pvsamv1.json")
-    batt_json_name = os.environ.get("BATTERY_JSON", "untitled.json")
+    # Battery presets file is intentionally unused in this script (no separate Battery module)
 
     pvsam_json_path = os.path.join(preset_dir, pvsam_json_name)
-    batt_json_path = os.path.join(preset_dir, batt_json_name)
-
     # Load JSON presets
     pvsam_data = load_json(pvsam_json_path)
-    batt_data = load_json(batt_json_path)
 
     log_section("Preset Files Loaded")
     print(f"Pvsamv1 preset: {pvsam_json_path}  (keys={len(pvsam_data)})")
-    print(f"Battery preset: {batt_json_path}   (keys={len(batt_data)})")
 
     # Build modules
     pv = Pvsamv1.new()
-    batt = Battery.new()
 
     # Apply presets
     ap_pv, failed_pv = apply_json(pv, pvsam_data)
-    ap_bt, failed_bt = apply_json(batt, batt_data)
 
-    print(
-        f"Applied {ap_pv} parameters to Pvsamv1 ({len(failed_pv)} failed); "
-        f"Applied {ap_bt} to Battery ({len(failed_bt)} failed)"
-    )
+    print(f"Applied {ap_pv} parameters to Pvsamv1 ({len(failed_pv)} failed)")
 
     # Battery SOC settings (pre-execute)
     log_section("Battery SOC Settings (Pre-Execute)")
@@ -426,11 +419,7 @@ def main() -> None:
         print(f"Pvsamv1 module batt_dispatch_choice = {current_dispatch}")
     except Exception:
         pass
-    try:
-        current_dispatch_batt = batt.value("batt_dispatch_choice")
-        print(f"Battery module batt_dispatch_choice   = {current_dispatch_batt}")
-    except Exception:
-        pass
+    # No separate Battery module is created in this script to avoid divergent state
 
     # Grid export settings (from JSON)
     log_section("Grid Export Settings (from JSON)")
@@ -445,30 +434,32 @@ def main() -> None:
     print(f"dispatch_manual_btm_discharge_to_grid        = {manual_export_periods}")
     print(f"grid_interconnection_limit_kwac              = {interconnection_kwac}")
 
-    # Attach weather + load (prefer CSV load to reflect this repo's data)
-    attached_weather = attach_weather(pv, county_slug)
-    used_csv_load = attach_load_from_csv(pv, county_slug)
-
-    # Fallback to JSON load if CSV not available and JSON contains 'load'
-    if not used_csv_load and isinstance(pvsam_data.get("load"), list):
-        try:
-            pv.value("load", pvsam_data["load"])  # kW
-            pv.value("crit_load", [0.0] * len(pvsam_data["load"]))
-            pv.value("batt_load_ac_forecast", pvsam_data["load"])  # kW forecast for batt
-            print(
-                "Attached load from JSON 'load' "
-                f"(len={len(pvsam_data['load'])}, sum={sum(pvsam_data['load']):.1f} kWh)"
-            )
-        except Exception as e:
-            print(f"WARN: Failed to apply JSON 'load' into Pvsamv1: {e}")
+    # Attach weather + required research load (no JSON fallback allowed)
+    try:
+        attach_weather(pv, county_slug)
+    except Exception as e:
+        log_section("Setup Error: Weather")
+        print(f"Unable to attach required weather. Details: {e}")
+        return
+    try:
+        attach_load_from_csv(pv, county_slug)
+    except Exception as e:
+        log_section("Setup Error: Research Load")
+        print(f"Unable to attach required research load. Details: {e}")
+        return
 
     # (2) Load profile (kW)
     log_section("Load Profile (kW)")
     try:
         load = list(pv.value("load"))
     except Exception:
-        load = pvsam_data.get("load", [])
+        load = []
     if isinstance(load, list) and load:
+        if len(load) != 8760:
+            print(
+                f"ERROR: Attached load must be 8760 hours; got len={len(load)}. Aborting."
+            )
+            return
         head, tail = safe_head_tail([float(x) for x in load], n=24)
         print(
             f"len={len(load)}  sum={sum(load):.1f} kWh  min={min(load):.3f}  "
@@ -478,15 +469,15 @@ def main() -> None:
         if tail:
             print(f"last 24 hours : {tail}")
     else:
-        print("No load profile available.")
+        print("ERROR: No load profile available after attachment. Aborting.")
+        return
 
-    # Execute PV if we have weather and a load profile
+    # Execute PV since required weather and 8760 research load are attached
     pv_executed = False
     try:
-        if attached_weather:
-            pv.execute(0)
-            pv_executed = True
-            print("\nExecuted Pvsamv1 successfully.")
+        pv.execute(0)
+        pv_executed = True
+        print("\nExecuted Pvsamv1 successfully.")
     except Exception as e:
         print(f"WARN: Pvsamv1 execution failed: {e}")
 
@@ -515,7 +506,7 @@ def main() -> None:
 
     # (3) Battery level (kW)
     # Report nameplate charging/discharging caps from JSON, and per-hour power if available
-    log_section("Battery Level (kW)")
+    log_section("Battery Power (kW)")
     caps = {
         "batt_power_charge_max_kwac": pvsam_data.get("batt_power_charge_max_kwac"),
         "batt_power_discharge_max_kwac": pvsam_data.get("batt_power_discharge_max_kwac"),
