@@ -1166,7 +1166,27 @@ def main() -> None:
     configure_modules(modules, presets, overrides)    # Apply + checks
     pv = modules.photovoltaic_model
     attach_resources(pv, cfg, presets)                # Weather + research load
-    compose_battery_charge_schedule()
+    
+    # Get load forecast from attached load profile
+    load_forecast = load_series_kw_from_model(pv)
+    
+    # Generate predictive battery dispatch schedule
+    dispatch_schedule = compose_battery_charge_schedule(
+        load_forecast=load_forecast,
+        solar_forecast=None,  # Will be calculated after execution
+        battery_capacity_kwh=overrides.battery_capacity_kwh or 13.5,
+        battery_efficiency=overrides.battery_efficiency or 0.90,
+        min_soc=overrides.min_soc or 20.0,
+        max_soc=overrides.max_soc or 90.0
+    )
+    
+    # Log dispatch schedule validation metrics
+    log_section("Predictive Dispatch Schedule Results")
+    metrics = dispatch_schedule['validation_metrics']
+    print(f"Peak coverage: {metrics['peak_coverage_percentage']:.1f}% of days")
+    print(f"Annual grid charging: {metrics['annual_grid_charging_kwh']:.1f} kWh")
+    print(f"Annual efficiency losses: {metrics['annual_efficiency_losses_kwh']:.1f} kWh")
+    
     execute(pv)                                       # Execute model or raise
     outputs = extract(pv)                             # Collect outputs
     
