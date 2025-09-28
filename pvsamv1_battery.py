@@ -136,12 +136,12 @@ class RuntimeOverrides:
     peak_end_hour: Optional[int] = None
     battery_capacity_kwh: Optional[float] = None
     
-    # Solar charging control flags (static configuration)
-    solar_charging_priority: Optional[bool] = None              # dispatch_manual_system_charge_first
-    enable_pv_charging: Optional[bool] = None                   # batt_dispatch_auto_can_charge
-    smart_solar_charging: Optional[bool] = None                 # batt_dispatch_charge_only_system_exceeds_load
-    smart_discharge: Optional[bool] = None                      # batt_dispatch_discharge_only_load_exceeds_system
-    enable_grid_charging: Optional[bool] = None                 # batt_dispatch_auto_can_gridcharge
+    # Solar charging control flags (exact SAM parameter values: 0 or 1)
+    solar_charging_priority: Optional[int] = None               # dispatch_manual_system_charge_first
+    enable_pv_charging: Optional[int] = None                    # batt_dispatch_auto_can_charge
+    smart_solar_charging: Optional[int] = None                  # batt_dispatch_charge_only_system_exceeds_load
+    smart_discharge: Optional[int] = None                       # batt_dispatch_discharge_only_load_exceeds_system
+    enable_grid_charging: Optional[int] = None                  # batt_dispatch_auto_can_gridcharge
     
     # Efficiency parameters (hardware characteristics)
     dc_dc_efficiency: Optional[float] = None                    # batt_dc_dc_efficiency
