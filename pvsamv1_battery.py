@@ -1,4 +1,4 @@
-git """
+"""
 Simple Pvsamv1 demo using presets from SAM_Detailed_PV_Battery.
 
 What this script does
@@ -42,15 +42,121 @@ import matplotlib.pyplot as plt
 import PySAM.Pvsamv1 as Pvsamv1
 import PySAM.ResourceTools as ResourceTools
 
+MIN_SOC = 20
+MAX_SOC = 80
+INITIAL_SOC = 50
+DISPATCH_MODE = 3 # Manual dispatch https://nrel-pysam.readthedocs.io/en/v7.1.0/modules/Pvsamv1.html#PySAM.Pvsamv1.Pvsamv1.BatteryDispatch.batt_dispatch_choice
+GRID_INTERCONNECTION_LIMIT_KWAC = 0
+CAN_EXPORT_TO_GRID = False
+ENABLE_PREDICTIVE_DISPATCH = True
+BATTERY_EFFICIENCY = 5
+PEAK_START_HOUR = 16
+PEAK_END_HOUR = 21
+BATTERY_CAPACITY_KWH = 13.5
 
-# ==========================
-# Data models and structures
-# ==========================
+# Solar charging control defaults
+SOLAR_CHARGING_PRIORITY = True      # dispatch_manual_system_charge_first
+ENABLE_PV_CHARGING = True           # batt_dispatch_auto_can_charge
+SMART_SOLAR_CHARGING = True         # batt_dispatch_charge_only_system_exceeds_load
+SMART_DISCHARGE = True              # batt_dispatch_discharge_only_load_exceeds_system
+ENABLE_GRID_CHARGING = True         # batt_dispatch_auto_can_gridcharge (dynamic based on schedule)
+
+# Efficiency defaults
+DC_DC_EFFICIENCY = 96.0             # batt_dc_dc_efficiency
+INVERTER_EFFICIENCY = 96.0          # inverter_efficiency
+
+# Time window defaults (hours 0-23)
+SOLAR_CHARGING_START_HOUR = 6       # Start of solar charging window
+SOLAR_CHARGING_END_HOUR = 17        # End of solar charging window  
+PEAK_DISCHARGE_START_HOUR = 18      # Start of peak discharge window
+PEAK_DISCHARGE_END_HOUR = 23        # End of peak discharge window
+
+@dataclass
+class SimulationConfiguration:
+    county_slug: str
+    sam_preset_dir: str
+    pvsamv1_json_name: str
+    weather_file: str
+    load_file: str
+    load_col: str
+    show_plots: bool = True
+    weather_shift_hours: int = 8
 
 
-# ==========================
-# Predictive dispatch functions
-# ==========================
+@dataclass
+class SamPresetFiles:
+    photovoltaic_preset_values: Dict[str, Any]
+    battery_preset_values: Optional[Dict[str, Any]] = None
+
+
+@dataclass
+class SamModules:
+    photovoltaic_model: Pvsamv1.Pvsamv1
+    battery_model: Optional[Any] = None
+
+
+@dataclass
+class SimulationSeries:
+    load_series_kw: List[float]
+    state_of_charge_series_percent: List[float]
+    solar_ac_power_series_kw: List[float]
+    solar_to_load_series_kw: List[float]
+    battery_to_load_series_kw: List[float]
+    grid_to_load_series_kw: List[float]
+
+
+@dataclass
+class ApplyReport:
+    pv_applied_count: int
+    pv_failed_keys: List[str]
+    batt_applied_count: int
+    batt_failed_keys: List[str]
+    warnings: List[str]
+
+
+@dataclass
+class SocBounds:
+    min_soc: Optional[float]
+    max_soc: Optional[float]
+    initial_soc: Optional[float]
+
+
+@dataclass
+class RuntimeOverrides:
+    min_soc: Optional[float] = None
+    max_soc: Optional[float] = None
+    initial_soc: Optional[float] = None
+    dispatch_mode: Optional[int] = None
+    grid_interconnection_limit_kwac: Optional[float] = None
+    can_export_to_grid: Optional[bool] = None
+    # Predictive dispatch parameters
+    enable_predictive_dispatch: Optional[bool] = None
+    battery_efficiency: Optional[float] = None
+    peak_start_hour: Optional[int] = None
+    peak_end_hour: Optional[int] = None
+    battery_capacity_kwh: Optional[float] = None
+    
+    # Solar charging control flags (static configuration)
+    solar_charging_priority: Optional[bool] = None              # dispatch_manual_system_charge_first
+    enable_pv_charging: Optional[bool] = None                   # batt_dispatch_auto_can_charge
+    smart_solar_charging: Optional[bool] = None                 # batt_dispatch_charge_only_system_exceeds_load
+    smart_discharge: Optional[bool] = None                      # batt_dispatch_discharge_only_load_exceeds_system
+    enable_grid_charging: Optional[bool] = None                 # batt_dispatch_auto_can_gridcharge
+    
+    # Efficiency parameters (hardware characteristics)
+    dc_dc_efficiency: Optional[float] = None                    # batt_dc_dc_efficiency
+    inverter_efficiency: Optional[float] = None                 # inverter_efficiency
+    
+    # Time window configuration (static schedule parameters)
+    solar_charging_start_hour: Optional[int] = None             # Start of solar charging window
+    solar_charging_end_hour: Optional[int] = None               # End of solar charging window
+    peak_discharge_start_hour: Optional[int] = None             # Start of peak discharge window
+    peak_discharge_end_hour: Optional[int] = None               # End of peak discharge window
+
+
+# ------------------------------
+# Helpers: JSON, logging, loading
+# ------------------------------
 
 def calculate_peak_energy_requirements(load_forecast: List[float], day_index: int, battery_efficiency: float = 0.90) -> Dict[str, float]:
     """
@@ -117,76 +223,6 @@ def calculate_precharge_target_soc(peak_energy_req: Dict[str, float], battery_ca
         'precharge_energy_kwh': peak_energy_req['energy_to_store_kwh']
     }
 
-
-@dataclass
-class SimulationConfiguration:
-    county_slug: str
-    sam_preset_dir: str
-    pvsamv1_json_name: str
-    weather_file: str
-    load_file: str
-    load_col: str
-    show_plots: bool = True
-    weather_shift_hours: int = 8
-
-
-@dataclass
-class SamPresetFiles:
-    photovoltaic_preset_values: Dict[str, Any]
-    battery_preset_values: Optional[Dict[str, Any]] = None
-
-
-@dataclass
-class SamModules:
-    photovoltaic_model: Pvsamv1.Pvsamv1
-    battery_model: Optional[Any] = None
-
-
-@dataclass
-class SimulationSeries:
-    load_series_kw: List[float]
-    state_of_charge_series_percent: List[float]
-    solar_ac_power_series_kw: List[float]
-    solar_to_load_series_kw: List[float]
-    battery_to_load_series_kw: List[float]
-    grid_to_load_series_kw: List[float]
-
-
-@dataclass
-class ApplyReport:
-    pv_applied_count: int
-    pv_failed_keys: List[str]
-    batt_applied_count: int
-    batt_failed_keys: List[str]
-    warnings: List[str]
-
-
-@dataclass
-class SocBounds:
-    min_soc: Optional[float]
-    max_soc: Optional[float]
-    initial_soc: Optional[float]
-
-
-@dataclass
-class RuntimeOverrides:
-    min_soc: Optional[float] = None
-    max_soc: Optional[float] = None
-    initial_soc: Optional[float] = None
-    dispatch_mode: Optional[int] = None
-    grid_interconnection_limit_kwac: Optional[float] = None
-    can_export_to_grid: Optional[bool] = None
-    # Predictive dispatch parameters
-    enable_predictive_dispatch: Optional[bool] = None
-    battery_efficiency: Optional[float] = None
-    peak_start_hour: Optional[int] = None
-    peak_end_hour: Optional[int] = None
-    battery_capacity_kwh: Optional[float] = None
-
-
-# ------------------------------
-# Helpers: JSON, logging, loading
-# ------------------------------
 
 def load_json(path: str) -> Dict[str, Any]:
     if not os.path.exists(path):
@@ -539,43 +575,36 @@ def load_presets(cfg: SimulationConfiguration) -> SamPresetFiles:
 
 
 def build_runtime_overrides(cfg: SimulationConfiguration) -> RuntimeOverrides:
-    def parse_float(env_key: str) -> Optional[float]:
-        v = os.environ.get(env_key)
-        if v is None or v == "":
-            return None
-        try:
-            return float(v)
-        except Exception:
-            return None
-
-    def parse_int(env_key: str) -> Optional[int]:
-        v = os.environ.get(env_key)
-        if v is None or v == "":
-            return None
-        try:
-            return int(v)
-        except Exception:
-            return None
-
-    def parse_bool(env_key: str) -> Optional[bool]:
-        v = os.environ.get(env_key)
-        if v is None or v == "":
-            return None
-        return v.lower() in {"1", "true", "yes", "y"}
-
     return RuntimeOverrides(
-        min_soc=parse_float("MIN_SOC"),
-        max_soc=parse_float("MAX_SOC"),
-        initial_soc=parse_float("INITIAL_SOC"),
-        dispatch_mode=parse_int("DISPATCH_MODE"),
-        grid_interconnection_limit_kwac=parse_float("GRID_INTERCONNECTION_LIMIT_KWAC"),
-        can_export_to_grid=parse_bool("CAN_EXPORT_TO_GRID"),
+        min_soc=MIN_SOC,
+        max_soc=MAX_SOC,
+        initial_soc=INITIAL_SOC,
+        dispatch_mode=DISPATCH_MODE,
+        grid_interconnection_limit_kwac=GRID_INTERCONNECTION_LIMIT_KWAC,
+        can_export_to_grid=CAN_EXPORT_TO_GRID,
         # Predictive dispatch parameters
-        enable_predictive_dispatch=parse_bool("ENABLE_PREDICTIVE_DISPATCH"),
-        battery_efficiency=parse_float("BATTERY_EFFICIENCY"),
-        peak_start_hour=parse_int("PEAK_START_HOUR"),
-        peak_end_hour=parse_int("PEAK_END_HOUR"),
-        battery_capacity_kwh=parse_float("BATTERY_CAPACITY_KWH"),
+        enable_predictive_dispatch=ENABLE_PREDICTIVE_DISPATCH,
+        battery_efficiency=BATTERY_EFFICIENCY,
+        peak_start_hour=PEAK_START_HOUR,
+        peak_end_hour=PEAK_END_HOUR,
+        battery_capacity_kwh=BATTERY_CAPACITY_KWH,
+        
+        # Solar charging control flags
+        solar_charging_priority=SOLAR_CHARGING_PRIORITY,
+        enable_pv_charging=ENABLE_PV_CHARGING,
+        smart_solar_charging=SMART_SOLAR_CHARGING,
+        smart_discharge=SMART_DISCHARGE,
+        enable_grid_charging=ENABLE_GRID_CHARGING,
+        
+        # Efficiency parameters
+        dc_dc_efficiency=DC_DC_EFFICIENCY,
+        inverter_efficiency=INVERTER_EFFICIENCY,
+        
+        # Time window configuration
+        solar_charging_start_hour=SOLAR_CHARGING_START_HOUR,
+        solar_charging_end_hour=SOLAR_CHARGING_END_HOUR,
+        peak_discharge_start_hour=PEAK_DISCHARGE_START_HOUR,
+        peak_discharge_end_hour=PEAK_DISCHARGE_END_HOUR,
     )
 
 
@@ -616,12 +645,164 @@ def apply_runtime_overrides(pv: Pvsamv1.Pvsamv1, overrides: RuntimeOverrides) ->
         except Exception:
             pass
 
+    # Basic battery configuration
     set_if_present("batt_minimum_SOC", overrides.min_soc)
     set_if_present("batt_maximum_SOC", overrides.max_soc)
     set_if_present("batt_initial_SOC", overrides.initial_soc)
     set_if_present("batt_dispatch_choice", overrides.dispatch_mode)
     set_if_present("grid_interconnection_limit_kwac", overrides.grid_interconnection_limit_kwac)
     set_if_present("batt_dispatch_auto_btm_can_discharge_to_grid", overrides.can_export_to_grid)
+    
+    # Solar charging control flags
+    set_if_present("dispatch_manual_system_charge_first", 1 if overrides.solar_charging_priority else 0)
+    set_if_present("batt_dispatch_auto_can_charge", 1 if overrides.enable_pv_charging else 0)
+    set_if_present("batt_dispatch_charge_only_system_exceeds_load", 1 if overrides.smart_solar_charging else 0)
+    set_if_present("batt_dispatch_discharge_only_load_exceeds_system", 1 if overrides.smart_discharge else 0)
+    set_if_present("batt_dispatch_auto_can_gridcharge", 1 if overrides.enable_grid_charging else 0)
+    
+    # Efficiency parameters
+    set_if_present("batt_dc_dc_efficiency", overrides.dc_dc_efficiency)
+    set_if_present("inverter_efficiency", overrides.inverter_efficiency)
+
+
+def apply_dispatch_schedule(pv: Pvsamv1.Pvsamv1, dispatch_schedule: Dict[str, Any], 
+                          overrides: RuntimeOverrides) -> None:
+    """Apply the predictive dispatch schedule to the SAM model with comprehensive solar charging configuration."""
+    
+    log_section("Applying Dispatch Schedule Configuration")
+    
+    # Set manual dispatch mode (Mode 3: Manual Dispatch with period-based scheduling)
+    pv.value('batt_dispatch_choice', 3)
+    print(f"Set dispatch mode: 3 (Manual Dispatch)")
+    
+    # =======================
+    # PERIOD-BASED SCHEDULING CONFIGURATION
+    # =======================
+    
+    # Define daily time periods based on configured windows
+    solar_start = overrides.solar_charging_start_hour or 6
+    solar_end = overrides.solar_charging_end_hour or 17
+    peak_start = overrides.peak_discharge_start_hour or 18
+    peak_end = overrides.peak_discharge_end_hour or 23
+    
+    # Build dynamic schedule based on time windows:
+    # Period 1: Night/off-peak hours - No action, preserve battery
+    # Period 2: Solar charging window - Solar charging enabled
+    # Period 3: Peak discharge window - Discharge to reduce grid usage
+    daily_schedule = []
+    for hour in range(24):
+        if solar_start <= hour <= solar_end:
+            daily_schedule.append(2)  # Solar charging period
+        elif peak_start <= hour <= peak_end:
+            daily_schedule.append(3)  # Peak discharge period
+        else:
+            daily_schedule.append(1)  # Off-peak period
+    
+    print(f"Time windows: Solar({solar_start}-{solar_end}), Peak({peak_start}-{peak_end})")
+    schedule_matrix = [daily_schedule] * 12  # Same pattern for all 12 months
+    
+    pv.value('dispatch_manual_sched', schedule_matrix)
+    pv.value('dispatch_manual_sched_weekend', schedule_matrix)
+    print(f"Applied period schedule: Night(1), Solar(2), Peak(3)")
+    
+    # Configure period actions based on generated dispatch schedule
+    grid_charge_max = max(dispatch_schedule.get('dispatch_manual_percent_gridcharge', [0]))
+    discharge_max = max(dispatch_schedule.get('dispatch_manual_percent_discharge', [0]))
+    
+    # Period action configuration:
+    # [Period1, Period2, Period3, Period4, Period5, Period6]
+    pv.value('dispatch_manual_percent_discharge', [0, 0, discharge_max, 0, 0, 0])
+    pv.value('dispatch_manual_percent_gridcharge', [0, grid_charge_max, 0, 0, 0, 0])
+    pv.value('dispatch_manual_btm_discharge_to_grid', [0, 0, 0, 0, 0, 0])  # No grid export
+    
+    print(f"Period actions: Grid charge (Period 2): {grid_charge_max}%, Discharge (Period 3): {discharge_max}%")
+    
+    # =======================
+    # SOLAR CHARGING PRIORITY AND CONTROL FLAGS
+    # =======================
+    
+    # Solar charging priority - critical for solar-first operation
+    pv.value('dispatch_manual_system_charge_first', 1)
+    print("✓ Solar charging priority over grid charging enabled")
+    
+    # Master PV charging enable
+    pv.value('batt_dispatch_auto_can_charge', 1)
+    print("✓ PV charging capability enabled")
+    
+    # Smart solar charging - only charge when solar exceeds load
+    pv.value('batt_dispatch_charge_only_system_exceeds_load', 1)
+    print("✓ Smart solar charging: only when production > load")
+    
+    # Smart discharge - only discharge when load exceeds solar
+    pv.value('batt_dispatch_discharge_only_load_exceeds_system', 1)
+    print("✓ Smart discharge: only when load > production")
+    
+    # Grid charging control - allow limited grid charging for predictive dispatch
+    grid_charging_enabled = grid_charge_max > 0
+    pv.value('batt_dispatch_auto_can_gridcharge', 1 if grid_charging_enabled else 0)
+    print(f"✓ Grid charging: {'enabled' if grid_charging_enabled else 'disabled'}")
+    
+    # Grid export control - prevent battery discharge to grid
+    pv.value('batt_dispatch_auto_btm_can_discharge_to_grid', 0)
+    print("✓ Battery-to-grid export disabled")
+    
+    # =======================
+    # EFFICIENCY AND CONVERSION PARAMETERS
+    # =======================
+    
+    # DC-DC converter efficiency for solar-to-battery charging
+    pv.value('batt_dc_dc_efficiency', 96.0)
+    print("✓ DC-DC converter efficiency: 96%")
+    
+    # Inverter efficiency for AC power flows
+    pv.value('inverter_efficiency', 96.0)
+    print("✓ Inverter efficiency: 96%")
+    
+    # =======================
+    # CAPACITY AND RATE LIMITS
+    # =======================
+    
+    # Battery capacity configuration
+    if overrides.battery_capacity_kwh:
+        # Note: Battery capacity is typically set in the JSON preset files
+        # These parameters may be read-only depending on the SAM configuration
+        try:
+            pv.value('batt_capacity', overrides.battery_capacity_kwh)
+            print(f"✓ Battery capacity: {overrides.battery_capacity_kwh} kWh")
+        except Exception:
+            print(f"⚠ Battery capacity setting failed (may be preset-controlled)")
+    
+    # Grid interconnection limit
+    if overrides.grid_interconnection_limit_kwac:
+        pv.value('grid_interconnection_limit_kwac', overrides.grid_interconnection_limit_kwac)
+        print(f"✓ Grid interconnection limit: {overrides.grid_interconnection_limit_kwac} kW")
+    
+    # =======================
+    # VALIDATION AND REPORTING
+    # =======================
+    
+    # Report dispatch schedule metrics
+    metrics = dispatch_schedule.get('validation_metrics', {})
+    if metrics:
+        print(f"Schedule validation:")
+        print(f"  Peak coverage: {metrics.get('peak_coverage_percentage', 0):.1f}%")
+        print(f"  Annual grid charging: {metrics.get('annual_grid_charging_kwh', 0):.1f} kWh")
+        print(f"  Annual efficiency losses: {metrics.get('annual_efficiency_losses_kwh', 0):.1f} kWh")
+    
+    # Verify critical settings were applied
+    try:
+        current_dispatch_mode = pv.value('batt_dispatch_choice')
+        current_solar_priority = pv.value('dispatch_manual_system_charge_first')
+        current_pv_charge = pv.value('batt_dispatch_auto_can_charge')
+        
+        print(f"Verification: dispatch_mode={current_dispatch_mode}, "
+              f"solar_priority={current_solar_priority}, pv_charge={current_pv_charge}")
+        
+        if current_dispatch_mode != 3:
+            print(f"⚠ WARNING: Dispatch mode is {current_dispatch_mode}, expected 3 (Manual)")
+        
+    except Exception as e:
+        print(f"⚠ WARNING: Could not verify dispatch settings: {e}")
 
 
 def report_apply_results(report: ApplyReport) -> None:
@@ -1158,6 +1339,35 @@ def report(cfg: SimulationConfiguration, presets: SamPresetFiles, outputs: Simul
 
     report_manual_dispatch_schedules(presets)
 
+
+def print_first_24h_dispatch_table(dispatch_schedule: Dict[str, Any]) -> None:
+    """Print the first 24 hours of the predictive dispatch schedule as a table.
+
+    Columns:
+      hour, hod, GridCharge(%) and Discharge(%).
+    """
+    log_section("Predictive Dispatch Schedule - First 24 Hours")
+    grid = dispatch_schedule.get("dispatch_manual_percent_gridcharge", []) or []
+    discharge = dispatch_schedule.get("dispatch_manual_percent_discharge", []) or []
+    n = max(len(grid), len(discharge))
+    if n == 0:
+        print("No dispatch schedule data available.")
+        return
+    print("hour hod  GridCharge(%)  Discharge(%)")
+    for h in range(0, min(24, n)):
+        hod = h % 24
+        g = grid[h] if h < len(grid) else 0
+        d = discharge[h] if h < len(discharge) else 0
+        try:
+            g = float(g)
+        except Exception:
+            pass
+        try:
+            d = float(d)
+        except Exception:
+            pass
+        print(f"{h:4d} {hod:3d}        {g:6.1f}         {d:6.1f}")
+
 def main() -> None:
     cfg = configure()                                 # Configuration phase
     presets = load_presets(cfg)                       # Presets phase
@@ -1165,7 +1375,7 @@ def main() -> None:
     modules = initialize_modules()                    # Module lifecycle: create
     configure_modules(modules, presets, overrides)    # Apply + checks
     pv = modules.photovoltaic_model
-    attach_resources(pv, cfg, presets)                # Weather + research load
+    attach_resources(pv, cfg, presets)                # Weather + household load
     
     # Get load forecast from attached load profile
     load_forecast = load_series_kw_from_model(pv)
@@ -1183,9 +1393,13 @@ def main() -> None:
     # Log dispatch schedule validation metrics
     log_section("Predictive Dispatch Schedule Results")
     metrics = dispatch_schedule['validation_metrics']
+    print_first_24h_dispatch_table(dispatch_schedule)
     print(f"Peak coverage: {metrics['peak_coverage_percentage']:.1f}% of days")
     print(f"Annual grid charging: {metrics['annual_grid_charging_kwh']:.1f} kWh")
     print(f"Annual efficiency losses: {metrics['annual_efficiency_losses_kwh']:.1f} kWh")
+    
+    # Apply the dispatch schedule configuration to SAM model
+    apply_dispatch_schedule(pv, dispatch_schedule, overrides)
     
     execute(pv)                                       # Execute model or raise
     outputs = extract(pv)                             # Collect outputs
