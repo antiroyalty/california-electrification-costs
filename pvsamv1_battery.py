@@ -653,12 +653,12 @@ def apply_runtime_overrides(pv: Pvsamv1.Pvsamv1, overrides: RuntimeOverrides) ->
     set_if_present("grid_interconnection_limit_kwac", overrides.grid_interconnection_limit_kwac)
     set_if_present("batt_dispatch_auto_btm_can_discharge_to_grid", overrides.can_export_to_grid)
     
-    # Solar charging control flags
-    set_if_present("dispatch_manual_system_charge_first", 1 if overrides.solar_charging_priority else 0)
-    set_if_present("batt_dispatch_auto_can_charge", 1 if overrides.enable_pv_charging else 0)
-    set_if_present("batt_dispatch_charge_only_system_exceeds_load", 1 if overrides.smart_solar_charging else 0)
-    set_if_present("batt_dispatch_discharge_only_load_exceeds_system", 1 if overrides.smart_discharge else 0)
-    set_if_present("batt_dispatch_auto_can_gridcharge", 1 if overrides.enable_grid_charging else 0)
+    # Solar charging control flags (direct SAM parameter values)
+    set_if_present("dispatch_manual_system_charge_first", overrides.solar_charging_priority)
+    set_if_present("batt_dispatch_auto_can_charge", overrides.enable_pv_charging)
+    set_if_present("batt_dispatch_charge_only_system_exceeds_load", overrides.smart_solar_charging)
+    set_if_present("batt_dispatch_discharge_only_load_exceeds_system", overrides.smart_discharge)
+    set_if_present("batt_dispatch_auto_can_gridcharge", overrides.enable_grid_charging)
     
     # Efficiency parameters
     set_if_present("batt_dc_dc_efficiency", overrides.dc_dc_efficiency)
@@ -722,41 +722,41 @@ def apply_dispatch_schedule(pv: Pvsamv1.Pvsamv1, dispatch_schedule: Dict[str, An
     # =======================
     
     # Solar charging priority - critical for solar-first operation
-    pv.value('dispatch_manual_system_charge_first', 1)
-    print("✓ Solar charging priority over grid charging enabled")
+    pv.value('dispatch_manual_system_charge_first', overrides.solar_charging_priority)
+    print(f"✓ Solar charging priority: {overrides.solar_charging_priority}")
     
     # Master PV charging enable
-    pv.value('batt_dispatch_auto_can_charge', 1)
-    print("✓ PV charging capability enabled")
+    pv.value('batt_dispatch_auto_can_charge', overrides.enable_pv_charging)
+    print(f"✓ PV charging capability: {overrides.enable_pv_charging}")
     
     # Smart solar charging - only charge when solar exceeds load
-    pv.value('batt_dispatch_charge_only_system_exceeds_load', 1)
-    print("✓ Smart solar charging: only when production > load")
+    pv.value('batt_dispatch_charge_only_system_exceeds_load', overrides.smart_solar_charging)
+    print(f"✓ Smart solar charging: {overrides.smart_solar_charging}")
     
     # Smart discharge - only discharge when load exceeds solar
-    pv.value('batt_dispatch_discharge_only_load_exceeds_system', 1)
-    print("✓ Smart discharge: only when load > production")
+    pv.value('batt_dispatch_discharge_only_load_exceeds_system', overrides.smart_discharge)
+    print(f"✓ Smart discharge: {overrides.smart_discharge}")
     
-    # Grid charging control - allow limited grid charging for predictive dispatch
-    grid_charging_enabled = grid_charge_max > 0
-    pv.value('batt_dispatch_auto_can_gridcharge', 1 if grid_charging_enabled else 0)
-    print(f"✓ Grid charging: {'enabled' if grid_charging_enabled else 'disabled'}")
+    # Grid charging control - allow schedule to dynamically override this setting
+    grid_charging_enabled = 1 if (grid_charge_max > 0 and overrides.enable_grid_charging == 1) else 0
+    pv.value('batt_dispatch_auto_can_gridcharge', grid_charging_enabled)
+    print(f"✓ Grid charging: {grid_charging_enabled} (schedule-driven)")
     
-    # Grid export control - prevent battery discharge to grid
-    pv.value('batt_dispatch_auto_btm_can_discharge_to_grid', 0)
-    print("✓ Battery-to-grid export disabled")
+    # Grid export control
+    pv.value('batt_dispatch_auto_btm_can_discharge_to_grid', overrides.can_export_to_grid)
+    print(f"✓ Battery-to-grid export: {overrides.can_export_to_grid}")
     
     # =======================
     # EFFICIENCY AND CONVERSION PARAMETERS
     # =======================
     
     # DC-DC converter efficiency for solar-to-battery charging
-    pv.value('batt_dc_dc_efficiency', 96.0)
-    print("✓ DC-DC converter efficiency: 96%")
+    pv.value('batt_dc_dc_efficiency', overrides.dc_dc_efficiency)
+    print(f"✓ DC-DC converter efficiency: {overrides.dc_dc_efficiency}%")
     
     # Inverter efficiency for AC power flows
-    pv.value('inverter_efficiency', 96.0)
-    print("✓ Inverter efficiency: 96%")
+    pv.value('inverter_efficiency', overrides.inverter_efficiency)
+    print(f"✓ Inverter efficiency: {overrides.inverter_efficiency}%")
     
     # =======================
     # CAPACITY AND RATE LIMITS
@@ -790,19 +790,15 @@ def apply_dispatch_schedule(pv: Pvsamv1.Pvsamv1, dispatch_schedule: Dict[str, An
         print(f"  Annual efficiency losses: {metrics.get('annual_efficiency_losses_kwh', 0):.1f} kWh")
     
     # Verify critical settings were applied
-    try:
-        current_dispatch_mode = pv.value('batt_dispatch_choice')
-        current_solar_priority = pv.value('dispatch_manual_system_charge_first')
-        current_pv_charge = pv.value('batt_dispatch_auto_can_charge')
-        
-        print(f"Verification: dispatch_mode={current_dispatch_mode}, "
-              f"solar_priority={current_solar_priority}, pv_charge={current_pv_charge}")
-        
-        if current_dispatch_mode != 3:
-            print(f"⚠ WARNING: Dispatch mode is {current_dispatch_mode}, expected 3 (Manual)")
-        
-    except Exception as e:
-        print(f"⚠ WARNING: Could not verify dispatch settings: {e}")
+    current_dispatch_mode = pv.value('batt_dispatch_choice')
+    current_solar_priority = pv.value('dispatch_manual_system_charge_first')
+    current_pv_charge = pv.value('batt_dispatch_auto_can_charge')
+    
+    print(f"Verification: dispatch_mode={current_dispatch_mode}, "
+          f"solar_priority={current_solar_priority}, pv_charge={current_pv_charge}")
+    
+    if current_dispatch_mode != 3:
+        print(f"⚠ WARNING: Dispatch mode is {current_dispatch_mode}, expected 3 (Manual)")
 
 
 def report_apply_results(report: ApplyReport) -> None:
