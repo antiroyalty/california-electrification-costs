@@ -662,7 +662,6 @@ def apply_runtime_overrides(pv: Pvsamv1.Pvsamv1, overrides: RuntimeOverrides) ->
     
     # Efficiency parameters
     set_if_present("batt_dc_dc_efficiency", overrides.dc_dc_efficiency)
-    set_if_present("inverter_efficiency", overrides.inverter_efficiency)
 
 
 def apply_dispatch_schedule(pv: Pvsamv1.Pvsamv1, dispatch_schedule: Dict[str, Any], 
