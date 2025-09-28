@@ -55,14 +55,14 @@ PEAK_END_HOUR = 21
 BATTERY_CAPACITY_KWH = 13.5
 
 # Solar charging control defaults (exact SAM parameter values)
-SOLAR_CHARGING_PRIORITY = 1         # dispatch_manual_system_charge_first
-ENABLE_PV_CHARGING = 1              # batt_dispatch_auto_can_charge
-SMART_SOLAR_CHARGING = 1            # batt_dispatch_charge_only_system_exceeds_load
-SMART_DISCHARGE = 1                 # batt_dispatch_discharge_only_load_exceeds_system
-ENABLE_GRID_CHARGING = 1            # batt_dispatch_auto_can_gridcharge
+DISPATCH_MANUAL_SYSTEM_CHARGE_FIRST = 1         # dispatch_manual_system_charge_first
+BATT_DISPATCH_AUTO_CAN_CHARGE = 1              # batt_dispatch_auto_can_charge
+BATT_DISPATCH_CHARGE_ONLY_SYSTEM_EXCEEDS_LOAD = 0            # batt_dispatch_charge_only_system_exceeds_load
+BATT_DISPATCH_DISCHARGE_ONLY_LOAD_EXCEEDS_SYSTEM = 1                 # batt_dispatch_discharge_only_load_exceeds_system
+BATT_DISPATCH_AUTO_CAN_GRIDCHARGE = 1            # batt_dispatch_auto_can_gridcharge
 
 # Efficiency defaults
-DC_DC_EFFICIENCY = 96.0             # batt_dc_dc_efficiency
+BATT_DC_DC_EFFICIENCY = 96.0             # batt_dc_dc_efficiency
 
 # Time window defaults (hours 0-23)
 SOLAR_CHARGING_START_HOUR = 6       # Start of solar charging window
@@ -136,14 +136,14 @@ class RuntimeOverrides:
     battery_capacity_kwh: Optional[float] = None
     
     # Solar charging control flags (exact SAM parameter values: 0 or 1)
-    solar_charging_priority: Optional[int] = None               # dispatch_manual_system_charge_first
-    enable_pv_charging: Optional[int] = None                    # batt_dispatch_auto_can_charge
-    smart_solar_charging: Optional[int] = None                  # batt_dispatch_charge_only_system_exceeds_load
-    smart_discharge: Optional[int] = None                       # batt_dispatch_discharge_only_load_exceeds_system
-    enable_grid_charging: Optional[int] = None                  # batt_dispatch_auto_can_gridcharge
+    dispatch_manual_system_charge_first: Optional[int] = None               # dispatch_manual_system_charge_first
+    batt_dispatch_auto_can_charge: Optional[int] = None                    # batt_dispatch_auto_can_charge
+    batt_dispatch_charge_only_system_exceeds_load: Optional[int] = None                  # batt_dispatch_charge_only_system_exceeds_load
+    batt_dispatch_discharge_only_load_exceeds_system: Optional[int] = None                       # batt_dispatch_discharge_only_load_exceeds_system
+    batt_dispatch_auto_can_gridcharge: Optional[int] = None                  # batt_dispatch_auto_can_gridcharge
     
     # Efficiency parameters (hardware characteristics)
-    dc_dc_efficiency: Optional[float] = None                    # batt_dc_dc_efficiency
+    batt_dc_dc_efficiency: Optional[float] = None                    # batt_dc_dc_efficiency
     
     # Time window configuration (static schedule parameters)
     solar_charging_start_hour: Optional[int] = None             # Start of solar charging window
@@ -588,14 +588,14 @@ def build_runtime_overrides(cfg: SimulationConfiguration) -> RuntimeOverrides:
         battery_capacity_kwh=BATTERY_CAPACITY_KWH,
         
         # Solar charging control flags
-        solar_charging_priority=SOLAR_CHARGING_PRIORITY,
-        enable_pv_charging=ENABLE_PV_CHARGING,
-        smart_solar_charging=SMART_SOLAR_CHARGING,
-        smart_discharge=SMART_DISCHARGE,
-        enable_grid_charging=ENABLE_GRID_CHARGING,
+        dispatch_manual_system_charge_first=DISPATCH_MANUAL_SYSTEM_CHARGE_FIRST,
+        batt_dispatch_auto_can_charge=BATT_DISPATCH_AUTO_CAN_CHARGE,
+        batt_dispatch_charge_only_system_exceeds_load=BATT_DISPATCH_CHARGE_ONLY_SYSTEM_EXCEEDS_LOAD,
+        batt_dispatch_discharge_only_load_exceeds_system=BATT_DISPATCH_DISCHARGE_ONLY_LOAD_EXCEEDS_SYSTEM,
+        batt_dispatch_auto_can_gridcharge=BATT_DISPATCH_AUTO_CAN_GRIDCHARGE,
         
         # Efficiency parameters
-        dc_dc_efficiency=DC_DC_EFFICIENCY,
+        batt_dc_dc_efficiency=BATT_DC_DC_EFFICIENCY,
         
         # Time window configuration
         solar_charging_start_hour=SOLAR_CHARGING_START_HOUR,
@@ -651,14 +651,14 @@ def apply_runtime_overrides(pv: Pvsamv1.Pvsamv1, overrides: RuntimeOverrides) ->
     set_if_present("batt_dispatch_auto_btm_can_discharge_to_grid", overrides.can_export_to_grid)
     
     # Solar charging control flags (direct SAM parameter values)
-    set_if_present("dispatch_manual_system_charge_first", overrides.solar_charging_priority)
-    set_if_present("batt_dispatch_auto_can_charge", overrides.enable_pv_charging)
-    set_if_present("batt_dispatch_charge_only_system_exceeds_load", overrides.smart_solar_charging)
-    set_if_present("batt_dispatch_discharge_only_load_exceeds_system", overrides.smart_discharge)
-    set_if_present("batt_dispatch_auto_can_gridcharge", overrides.enable_grid_charging)
+    set_if_present("dispatch_manual_system_charge_first", overrides.dispatch_manual_system_charge_first)
+    set_if_present("batt_dispatch_auto_can_charge", overrides.batt_dispatch_auto_can_charge)
+    set_if_present("batt_dispatch_charge_only_system_exceeds_load", overrides.batt_dispatch_charge_only_system_exceeds_load)
+    set_if_present("batt_dispatch_discharge_only_load_exceeds_system", overrides.batt_dispatch_discharge_only_load_exceeds_system)
+    set_if_present("batt_dispatch_auto_can_gridcharge", overrides.batt_dispatch_auto_can_gridcharge)
     
     # Efficiency parameters
-    set_if_present("batt_dc_dc_efficiency", overrides.dc_dc_efficiency)
+    set_if_present("batt_dc_dc_efficiency", overrides.batt_dc_dc_efficiency)
 
 
 def apply_dispatch_schedule(pv: Pvsamv1.Pvsamv1, dispatch_schedule: Dict[str, Any], 
@@ -718,23 +718,23 @@ def apply_dispatch_schedule(pv: Pvsamv1.Pvsamv1, dispatch_schedule: Dict[str, An
     # =======================
     
     # Solar charging priority - critical for solar-first operation
-    pv.value('dispatch_manual_system_charge_first', overrides.solar_charging_priority)
-    print(f"✓ Solar charging priority: {overrides.solar_charging_priority}")
+    pv.value('dispatch_manual_system_charge_first', overrides.dispatch_manual_system_charge_first)
+    print(f"✓ Solar charging priority: {overrides.dispatch_manual_system_charge_first}")
     
     # Master PV charging enable
-    pv.value('batt_dispatch_auto_can_charge', overrides.enable_pv_charging)
-    print(f"✓ PV charging capability: {overrides.enable_pv_charging}")
+    pv.value('batt_dispatch_auto_can_charge', overrides.batt_dispatch_auto_can_charge)
+    print(f"✓ PV charging capability: {overrides.batt_dispatch_auto_can_charge}")
     
     # Smart solar charging - only charge when solar exceeds load
-    pv.value('batt_dispatch_charge_only_system_exceeds_load', overrides.smart_solar_charging)
-    print(f"✓ Smart solar charging: {overrides.smart_solar_charging}")
+    pv.value('batt_dispatch_charge_only_system_exceeds_load', overrides.batt_dispatch_charge_only_system_exceeds_load)
+    print(f"✓ Smart solar charging: {overrides.batt_dispatch_charge_only_system_exceeds_load}")
     
     # Smart discharge - only discharge when load exceeds solar
-    pv.value('batt_dispatch_discharge_only_load_exceeds_system', overrides.smart_discharge)
-    print(f"✓ Smart discharge: {overrides.smart_discharge}")
+    pv.value('batt_dispatch_discharge_only_load_exceeds_system', overrides.batt_dispatch_discharge_only_load_exceeds_system)
+    print(f"✓ Smart discharge: {overrides.batt_dispatch_discharge_only_load_exceeds_system}")
     
     # Grid charging control - allow schedule to dynamically override this setting
-    grid_charging_enabled = 1 if (grid_charge_max > 0 and overrides.enable_grid_charging == 1) else 0
+    grid_charging_enabled = 1 if (grid_charge_max > 0 and overrides.batt_dispatch_auto_can_gridcharge == 1) else 0
     pv.value('batt_dispatch_auto_can_gridcharge', grid_charging_enabled)
     print(f"✓ Grid charging: {grid_charging_enabled} (schedule-driven)")
     
@@ -747,8 +747,8 @@ def apply_dispatch_schedule(pv: Pvsamv1.Pvsamv1, dispatch_schedule: Dict[str, An
     # =======================
     
     # DC-DC converter efficiency for solar-to-battery charging
-    pv.value('batt_dc_dc_efficiency', overrides.dc_dc_efficiency)
-    print(f"✓ DC-DC converter efficiency: {overrides.dc_dc_efficiency}%")
+    pv.value('batt_dc_dc_efficiency', overrides.batt_dc_dc_efficiency)
+    print(f"✓ DC-DC converter efficiency: {overrides.batt_dc_dc_efficiency}%")
     
     # =======================
     # CAPACITY AND RATE LIMITS
