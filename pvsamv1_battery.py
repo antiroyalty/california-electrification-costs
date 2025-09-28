@@ -63,7 +63,6 @@ ENABLE_GRID_CHARGING = 1            # batt_dispatch_auto_can_gridcharge
 
 # Efficiency defaults
 DC_DC_EFFICIENCY = 96.0             # batt_dc_dc_efficiency
-INVERTER_EFFICIENCY = 96.0          # inverter_efficiency
 
 # Time window defaults (hours 0-23)
 SOLAR_CHARGING_START_HOUR = 6       # Start of solar charging window
@@ -145,7 +144,6 @@ class RuntimeOverrides:
     
     # Efficiency parameters (hardware characteristics)
     dc_dc_efficiency: Optional[float] = None                    # batt_dc_dc_efficiency
-    inverter_efficiency: Optional[float] = None                 # inverter_efficiency
     
     # Time window configuration (static schedule parameters)
     solar_charging_start_hour: Optional[int] = None             # Start of solar charging window
@@ -598,7 +596,6 @@ def build_runtime_overrides(cfg: SimulationConfiguration) -> RuntimeOverrides:
         
         # Efficiency parameters
         dc_dc_efficiency=DC_DC_EFFICIENCY,
-        inverter_efficiency=INVERTER_EFFICIENCY,
         
         # Time window configuration
         solar_charging_start_hour=SOLAR_CHARGING_START_HOUR,
@@ -752,10 +749,6 @@ def apply_dispatch_schedule(pv: Pvsamv1.Pvsamv1, dispatch_schedule: Dict[str, An
     # DC-DC converter efficiency for solar-to-battery charging
     pv.value('batt_dc_dc_efficiency', overrides.dc_dc_efficiency)
     print(f"✓ DC-DC converter efficiency: {overrides.dc_dc_efficiency}%")
-    
-    # Inverter efficiency for AC power flows
-    pv.value('inverter_efficiency', overrides.inverter_efficiency)
-    print(f"✓ Inverter efficiency: {overrides.inverter_efficiency}%")
     
     # =======================
     # CAPACITY AND RATE LIMITS
