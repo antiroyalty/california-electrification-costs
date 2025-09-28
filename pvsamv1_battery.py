@@ -54,12 +54,12 @@ PEAK_START_HOUR = 16
 PEAK_END_HOUR = 21
 BATTERY_CAPACITY_KWH = 13.5
 
-# Solar charging control defaults
-SOLAR_CHARGING_PRIORITY = True      # dispatch_manual_system_charge_first
-ENABLE_PV_CHARGING = True           # batt_dispatch_auto_can_charge
-SMART_SOLAR_CHARGING = True         # batt_dispatch_charge_only_system_exceeds_load
-SMART_DISCHARGE = True              # batt_dispatch_discharge_only_load_exceeds_system
-ENABLE_GRID_CHARGING = True         # batt_dispatch_auto_can_gridcharge (dynamic based on schedule)
+# Solar charging control defaults (exact SAM parameter values)
+SOLAR_CHARGING_PRIORITY = 1         # dispatch_manual_system_charge_first
+ENABLE_PV_CHARGING = 1              # batt_dispatch_auto_can_charge
+SMART_SOLAR_CHARGING = 1            # batt_dispatch_charge_only_system_exceeds_load
+SMART_DISCHARGE = 1                 # batt_dispatch_discharge_only_load_exceeds_system
+ENABLE_GRID_CHARGING = 1            # batt_dispatch_auto_can_gridcharge
 
 # Efficiency defaults
 DC_DC_EFFICIENCY = 96.0             # batt_dc_dc_efficiency
