@@ -58,7 +58,7 @@ BATTERY_CAPACITY_KWH = 13.5
 DISPATCH_MANUAL_SYSTEM_CHARGE_FIRST = 1         # dispatch_manual_system_charge_first
 BATT_DISPATCH_AUTO_CAN_CHARGE = 1              # batt_dispatch_auto_can_charge
 BATT_DISPATCH_CHARGE_ONLY_SYSTEM_EXCEEDS_LOAD = 0            # batt_dispatch_charge_only_system_exceeds_load
-BATT_DISPATCH_DISCHARGE_ONLY_LOAD_EXCEEDS_SYSTEM = 1                 # batt_dispatch_discharge_only_load_exceeds_system
+BATT_DISPATCH_DISCHARGE_ONLY_LOAD_EXCEEDS_SYSTEM = 0                 # batt_dispatch_discharge_only_load_exceeds_system
 BATT_DISPATCH_AUTO_CAN_GRIDCHARGE = 1            # batt_dispatch_auto_can_gridcharge
 
 # Efficiency defaults
@@ -66,9 +66,9 @@ BATT_DC_DC_EFFICIENCY = 96.0             # batt_dc_dc_efficiency
 
 # Time window defaults (hours 0-23)
 SOLAR_CHARGING_START_HOUR = 6       # Start of solar charging window
-SOLAR_CHARGING_END_HOUR = 17        # End of solar charging window  
-PEAK_DISCHARGE_START_HOUR = 18      # Start of peak discharge window
-PEAK_DISCHARGE_END_HOUR = 23        # End of peak discharge window
+SOLAR_CHARGING_END_HOUR = 15        # End of solar charging window  
+PEAK_DISCHARGE_START_HOUR = 16      # Start of peak discharge window
+PEAK_DISCHARGE_END_HOUR = 21        # End of peak discharge window
 
 @dataclass
 class SimulationConfiguration:
@@ -696,22 +696,47 @@ def apply_dispatch_schedule(pv: Pvsamv1.Pvsamv1, dispatch_schedule: Dict[str, An
     
     print(f"Time windows: Solar({solar_start}-{solar_end}), Peak({peak_start}-{peak_end})")
     schedule_matrix = [daily_schedule] * 12  # Same pattern for all 12 months
+    # 1 means: off-peak / night hours
+    # 2 means: solar charging window
+    # 3 means: peak discharge window
+    # 4 means: summer peak discharge
+
+    monthly_schedule_matrix_from_json = [ [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  2,  2,  2,  2,  2,  3,  3,  3,  3,  3,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  2,  2,  2,  2,  2,  3,  3,  3,  3,  3,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  2,  2,  2,  2,  2,  3,  3,  3,  3,  3,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  2,  2,  2,  2,  2,  3,  3,  3,  3,  3,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  4,  4,  4,  4,  4,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  4,  4,  4,  4,  4,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  4,  4,  4,  4,  4,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  4,  4,  4,  4,  4,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  4,  4,  4,  4,  4,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  4,  4,  4,  4,  4,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  2,  2,  2,  2,  2,  3,  3,  3,  3,  3,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  2,  2,  2,  2,  2,  3,  3,  3,  3,  3,  1,  1,  1,  1 ] ]
+    my_schedule_matrix = [ [ 2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  3,  3,  3,  3,  3,  2,  2,  2,  2 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  2,  2,  2,  2,  2,  3,  3,  3,  3,  3,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  2,  2,  2,  2,  2,  3,  3,  3,  3,  3,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  2,  2,  2,  2,  2,  3,  3,  3,  3,  3,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  4,  4,  4,  4,  4,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  4,  4,  4,  4,  4,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  4,  4,  4,  4,  4,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  4,  4,  4,  4,  4,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  4,  4,  4,  4,  4,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  4,  4,  4,  4,  4,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  2,  2,  2,  2,  2,  3,  3,  3,  3,  3,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  2,  2,  2,  2,  2,  3,  3,  3,  3,  3,  1,  1,  1,  1 ] ]
+
+    print("schedule_matrix:")
+    print(schedule_matrix[1])
+    print("monthly_schedule_matrix_from_json")
+    print(monthly_schedule_matrix_from_json[1])
+    print("my_schedule_matrix")
+    print(my_schedule_matrix[1])
     
     pv.value('dispatch_manual_sched', schedule_matrix)
     pv.value('dispatch_manual_sched_weekend', schedule_matrix)
     print(f"Applied period schedule: Night(1), Solar(2), Peak(3)")
-    
+    # print(schedule_matrix)
+
+
     # Configure period actions based on generated dispatch schedule
     grid_charge_max = max(dispatch_schedule.get('dispatch_manual_percent_gridcharge', [0]))
     discharge_max = max(dispatch_schedule.get('dispatch_manual_percent_discharge', [0]))
     
     # Period action configuration:
     # [Period1, Period2, Period3, Period4, Period5, Period6]
-    pv.value('dispatch_manual_percent_discharge', [0, 0, discharge_max, 0, 0, 0])
-    pv.value('dispatch_manual_percent_gridcharge', [0, grid_charge_max, 0, 0, 0, 0])
-    pv.value('dispatch_manual_btm_discharge_to_grid', [0, 0, 0, 0, 0, 0])  # No grid export
+    pv.value('dispatch_manual_charge', [1, 1, 0, 0, 0, 0]) # Charge during periods 1 and 2
+    pv.value("dispatch_manual_discharge", [ 1, 1, 1, 1, 1, 0 ]) # Dispatch during periods 3 and 4
+    pv.value("dispatch_manual_btm_discharge_to_grid", [ 0, 0, 0, 0, 0, 0 ]) # No grid discharge ever
+    pv.value("dispatch_manual_gridcharge", [ 0, 0, 0, 0, 0, 0 ]) # No grid charge ever
+
+    pv.value('dispatch_manual_percent_discharge', [ 0, 0, 100, 100, 0, 0 ]) # Dispatch manually in periods 3 and 4 to the max (3 and 4 overlap in the summer)
     
-    print(f"Period actions: Grid charge (Period 2): {grid_charge_max}%, Discharge (Period 3): {discharge_max}%")
+
+
+    # pv.value('dispatch_manual_percent_discharge', [0, 0, discharge_max, 0, 0, 0])
+    # pv.value('dispatch_manual_percent_gridcharge', [0, grid_charge_max, 0, 0, 0, 0])
+    # pv.value('dispatch_manual_btm_discharge_to_grid', [0, 0, 0, 0, 0, 0])  # No grid export
+    
+    # print(f"Period actions: Grid charge (Period 2): {grid_charge_max}%, Discharge (Period 3): {discharge_max}%")
     
     # =======================
     # SOLAR CHARGING PRIORITY AND CONTROL FLAGS
