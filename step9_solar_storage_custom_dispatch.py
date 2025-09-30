@@ -50,6 +50,7 @@ from main_helpers import (
     socal_counties,
 )
 from helpers import log_profiles
+from step9_plotting_helper import plot_first_weeks
 
 
 # Input/output constants (kept consistent with other step9 files)
@@ -191,7 +192,15 @@ def _pv_generation_kwh(pv: Pvsamv1.Pvsamv1) -> List[float]:
 
 
 def _prepare_weather_and_load(weather_file: str, load_file: str) -> Tuple[Dict, List[float]]:
-    """Load weather (shift to PT) and household load profile (8760)."""
+    """Load weather (shift to PT) and household load profile (8760) with timezone alignment.
+
+    Weather arrays are shifted from UTC to PT by +8 hours, as elsewhere in the
+    pipeline. The load CSV may include a 'timestamp' column; if present, we detect
+    the first Jan 1 00:00 occurrence and rotate the series so that hour becomes index 0.
+    This corrects cases where the series starts at, e.g., 2017-12-31 22:00 (off by 2–3 hours).
+    If no timestamp is present, an optional env var 'LOAD_TZ_SHIFT_HOURS' can be used
+    to force a fixed left-rotation of the load series.
+    """
     # Weather: SAM CSV -> dict, shift UTC->PT by 8h
     solar_resource_data = ResourceTools.SAM_CSV_to_solar_data(weather_file)
     weather_arrays = ["dn", "df", "gh", "tdry", "tdew", "rhum", "wdir", "wspd"]
@@ -202,9 +211,48 @@ def _prepare_weather_and_load(weather_file: str, load_file: str) -> Tuple[Dict, 
             if len(a) >= 8760:
                 solar_resource_data[name] = [a[(i + shift) % 8760] for i in range(8760)]
 
-    # Load profile
+    # Load profile (rotate to align with Jan 1 00:00 if timestamp exists)
     load_df = pd.read_csv(load_file)
-    load_profile = load_df[TOTAL_LOAD_COLUMN_NAME].tolist()
+
+    def _roll_left(vals: List[float], n: int) -> List[float]:
+        if not vals:
+            return vals
+        n = n % len(vals)
+        return vals[n:] + vals[:n]
+
+    vals = load_df[TOTAL_LOAD_COLUMN_NAME].astype(float).tolist()
+
+    ts_col_candidates = ["timestamp", "Timestamp", "datetime", "date", "time"]
+    ts_col = next((c for c in ts_col_candidates if c in load_df.columns), None)
+    env_shift = os.getenv("LOAD_TZ_SHIFT_HOURS")
+
+    shifted = False
+    if ts_col is not None:
+        try:
+            ts = pd.to_datetime(load_df[ts_col], errors="coerce")
+            midnight_idx = ts[(ts.dt.month == 1) & (ts.dt.day == 1) & (ts.dt.hour == 0)].index
+            if len(midnight_idx) > 0:
+                i0 = int(midnight_idx[0])
+                if i0 != 0:
+                    vals = _roll_left(vals, i0)
+                    shifted = True
+                    log(load_timezone_shift_hours=i0,
+                        load_timezone_shift_method="timestamp_detected_midnight")
+        except Exception:
+            pass
+
+    if not shifted and env_shift is not None:
+        try:
+            shift_h = int(env_shift)
+            if shift_h != 0:
+                vals = _roll_left(vals, shift_h)
+                shifted = True
+                log(load_timezone_shift_hours=shift_h,
+                    load_timezone_shift_method="env_LOAD_TZ_SHIFT_HOURS")
+        except Exception:
+            pass
+
+    load_profile = vals
     if len(load_profile) != 8760:
         load_profile = _aggregate_to_hourly(load_profile, 8760)
 
@@ -218,7 +266,7 @@ def _prepare_weather_and_load(weather_file: str, load_file: str) -> Tuple[Dict, 
 def _simple_battery_dispatch(
     load_kwh: List[float],
     solar_kwh: List[float],
-) -> Tuple[List[float], List[float], List[float], List[float], List[float]]:
+) -> Tuple[List[float], List[float], List[float], List[float], List[float], List[float]]:
     """
     Compute hourly flows for a 13.5 kWh battery with specified constraints.
 
@@ -228,6 +276,7 @@ def _simple_battery_dispatch(
     - batt_discharge_kwh: energy delivered from battery to load per hour
     - grid_to_load_kwh: grid energy directly serving the household load per hour
     - grid_to_batt_kwh: grid energy used to charge the battery per hour
+    - soc_percent: state of charge percentage at each hour end
     """
     assert len(load_kwh) == 8760 and len(solar_kwh) == 8760
 
@@ -240,6 +289,7 @@ def _simple_battery_dispatch(
     grid_to_load = [0.0] * 8760
     grid_to_batt = [0.0] * 8760
 
+    soc_percent = [0.0] * 8760
     for h in range(8760):
         hod = h % 24
 
@@ -275,8 +325,9 @@ def _simple_battery_dispatch(
         # Whatever remains of household net load is served by grid
         grid_to_load[h] = max(net_after_solar, 0.0)
         grid_demand[h] = grid_to_load[h] + grid_to_batt[h]
+        soc_percent[h] = (soc_kwh / BATTERY_CAPACITY_KWH) * 100.0
 
-    return grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt
+    return grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt, soc_percent
 
 
 def _validate_lengths(*series_lists: List[List[float]]) -> None:
@@ -338,15 +389,16 @@ def process(
             solar_gen = _pv_generation_kwh(pv)
 
             # Custom battery dispatch (grid-only charging, solar immediate offset)
-            grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt = _simple_battery_dispatch(
+            grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt, soc_percent = _simple_battery_dispatch(
                 load_profile, solar_gen
             )
 
-            _validate_lengths([solar_gen, grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt])
+            _validate_lengths([solar_gen, grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt, soc_percent])
 
             # Human-readable summaries for verification
             log_profiles(
                 {
+                    "Household Load (kWh)": load_profile,
                     "Solar Generation (kWh)": solar_gen,
                     "Battery Charge (kWh)": batt_charge,
                     "Battery Discharge (kWh)": batt_discharge,
@@ -356,6 +408,28 @@ def process(
                 },
                 title=f"Custom Dispatch Profiles — {county}",
             )
+
+            # Create and save Jan/Jul first-week plots (non-interactive)
+            plots_path = os.path.join(
+                base_output_dir, scenario, housing_type, county, f"custom_dispatch_plots_{county}.png"
+            )
+            try:
+                os.makedirs(os.path.dirname(plots_path), exist_ok=True)
+                plot_first_weeks(
+                    load_kwh=load_profile,
+                    pv_ac_kwh=solar_gen,
+                    batt_to_load_kwh=batt_discharge,
+                    grid_to_load_kwh=grid_to_load,
+                    grid_to_batt_kwh=grid_to_batt,
+                    pv_to_batt_kwh=None,
+                    soc_percent=soc_percent,
+                    title=f"Custom Dispatch — {county}",
+                    show=False,
+                    save_path=plots_path,
+                )
+                print(f"Saved custom dispatch plots to: {plots_path}")
+            except Exception as plot_err:
+                print(f"Plotting failed for {county}: {plot_err}")
 
             # Save per-county outputs
             os.makedirs(os.path.dirname(output_file), exist_ok=True)
@@ -402,7 +476,7 @@ def process(
 
 
 # Example usage (aligns with other steps)
-scenario = "heat_pump"
+scenario = "baseline"
 housing_type = "single-family-detached"
 
 if __name__ == "__main__":
@@ -415,4 +489,3 @@ if __name__ == "__main__":
         ["Alameda County"],
         force_recompute=True,
     )
-
