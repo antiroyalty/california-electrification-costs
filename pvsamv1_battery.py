@@ -43,7 +43,7 @@ import PySAM.Pvsamv1 as Pvsamv1
 import PySAM.ResourceTools as ResourceTools
 
 MIN_SOC = 20
-MAX_SOC = 80
+MAX_SOC = 90
 INITIAL_SOC = 50
 DISPATCH_MODE = 3 # Manual dispatch https://nrel-pysam.readthedocs.io/en/v7.1.0/modules/Pvsamv1.html#PySAM.Pvsamv1.Pvsamv1.BatteryDispatch.batt_dispatch_choice
 GRID_INTERCONNECTION_LIMIT_KWAC = 0
@@ -775,13 +775,13 @@ def apply_dispatch_schedule(pv: Pvsamv1.Pvsamv1, dispatch_schedule: Dict[str, An
     pv.value('dispatch_manual_charge', [1, 1, 0, 0, 0, 0]) # Solar charge during all periods
 
     pv.value("dispatch_manual_discharge", [ 1, 1, 1, 1, 0, 0 ]) # Dispatch during periods 1, 2, 3 and 4
+    pv.value('dispatch_manual_percent_discharge', [ 0, 0, 10, 10, 0, 0 ]) # Dispatch manually in periods 3 and 4 at a rate of 10%
 
     pv.value("dispatch_manual_btm_discharge_to_grid", [ 0, 0, 0, 0, 0, 0 ]) # No grid discharge ever
-    pv.value("dispatch_manual_gridcharge", [ 1, 0, 0, 0, 0, 0 ]) # Grid charge during period 1
 
-    pv.value("dispatch_manual_percent_gridcharge", [100, 0, 0, 0, 0, 0])
-    pv.value('dispatch_manual_percent_discharge', [ 0, 0, 10, 10, 0, 0 ]) # Dispatch manually in periods 3 and 4 at a rate of 10%
-    
+    pv.value("dispatch_manual_gridcharge", [ 1, 1, 0, 0, 0, 0 ]) # Grid charge during period 1
+    pv.value("dispatch_manual_percent_gridcharge", [100, 100, 0, 0, 0, 0])
+
     
     # =======================
     # SOLAR CHARGING PRIORITY AND CONTROL FLAGS
