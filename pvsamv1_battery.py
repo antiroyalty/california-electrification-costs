@@ -42,7 +42,7 @@ import matplotlib.pyplot as plt
 import PySAM.Pvsamv1 as Pvsamv1
 import PySAM.ResourceTools as ResourceTools
 
-MIN_SOC = 20
+MIN_SOC = 25
 MAX_SOC = 90
 INITIAL_SOC = 50
 DISPATCH_MODE = 3 # Manual dispatch https://nrel-pysam.readthedocs.io/en/v7.1.0/modules/Pvsamv1.html#PySAM.Pvsamv1.Pvsamv1.BatteryDispatch.batt_dispatch_choice
