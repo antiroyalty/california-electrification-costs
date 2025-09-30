@@ -1046,17 +1046,23 @@ def create_sam_weekly_chart(
         import matplotlib.dates as mdates
         from datetime import datetime
         
-        # Define the SAM metrics we want to analyze
+        # Define the SAM metrics we want to analyze for load profile charts
         sam_metrics = [
             'Load Profile',
             'System to Load', 
             'Battery to Load',
-            'Grid to Load',
-            'Solar + Battery to Load'
+            'Grid to Load'
         ]
         
-        # Load SAM weekly data
-        sam_df = load_sam_weekly_data(base_input_dir, scenario, housing_type, county_slug, sam_metrics)
+        # Define solar power metrics for solar generation charts
+        solar_metrics = [
+            'System to Load',      # Solar power directly to load
+            'System to Battery'    # Solar power charging battery
+        ]
+        
+        # Load SAM weekly data for load profiles and solar generation
+        all_metrics = sam_metrics + [metric for metric in solar_metrics if metric not in sam_metrics]
+        sam_df = load_sam_weekly_data(base_input_dir, scenario, housing_type, county_slug, all_metrics)
         
         if sam_df is None:
             return f"""
@@ -1066,9 +1072,9 @@ def create_sam_weekly_chart(
             </div>
             """
         
-        # Create figure with subplots - 2 time periods (Jan/July)
-        fig, axes = plt.subplots(2, 1, figsize=(16, 12))
-        fig.suptitle(f'SAM Load Profile Metrics - Weekly Analysis\n{county_slug.replace("-", " ").title()} County - {scenario.replace("_", " ").title()} Scenario', 
+        # Create figure with subplots - 4 charts (2 load profile charts + 2 solar power charts)
+        fig, axes = plt.subplots(4, 1, figsize=(16, 20))
+        fig.suptitle(f'SAM Load Profile and Solar Power Analysis - Weekly Comparison\n{county_slug.replace("-", " ").title()} County - {scenario.replace("_", " ").title()} Scenario', 
                      fontsize=16, fontweight='bold')
         
         # Define time periods
@@ -1083,62 +1089,117 @@ def create_sam_weekly_chart(
             'System to Load': '#F24236',       # Red - solar direct
             'Battery to Load': '#F6AE2D',      # Yellow/Orange - battery discharge
             'Grid to Load': '#2F9599',         # Teal - grid supply
-            'Solar + Battery to Load': '#F26419'  # Orange - combined renewable
+            'Solar + Battery to Load': '#F26419',  # Orange - combined renewable
+            'System to Battery': '#8B5A2B'     # Brown - solar charging battery
         }
         
-        # Create plots for each period
+        # Create plots for each period - both load profile and solar power charts
         for period_idx, (period_name, (start_date, end_date)) in enumerate(periods.items()):
-            ax = axes[period_idx]
+            # Load profile chart (axes 0 and 1)
+            ax_load = axes[period_idx]
+            # Solar power chart (axes 2 and 3)
+            ax_solar = axes[period_idx + 2]
             
             try:
                 # Extract the week's data
                 week_data = sam_df.loc[start_date:end_date]
                 
                 if not week_data.empty:
-                    # Plot each metric
+                    # Add peak TOU rate shading (4pm-9pm) for each day of the week
+                    for day in range(7):
+                        day_start = pd.Timestamp(start_date) + pd.Timedelta(days=day)
+                        peak_start = day_start + pd.Timedelta(hours=16)  # 4pm
+                        peak_end = day_start + pd.Timedelta(hours=21)    # 9pm
+                        
+                        # Only shade if both peak times are within our data range
+                        if peak_start >= week_data.index.min() and peak_end <= week_data.index.max():
+                            # Add shading to both load and solar charts
+                            ax_load.axvspan(peak_start, peak_end, color='#d62728', alpha=0.15, zorder=0, 
+                                          label='Peak TOU (4-9pm)' if day == 0 and period_idx == 0 else "")
+                            ax_solar.axvspan(peak_start, peak_end, color='#d62728', alpha=0.15, zorder=0, 
+                                           label='Peak TOU (4-9pm)' if day == 0 and period_idx == 0 else "")
+                    
+                    # Plot load profile metrics
                     for metric in sam_metrics:
                         color = metric_colors.get(metric, '#333333')
-                        ax.plot(week_data.index, week_data[metric], 
-                               linewidth=2, label=metric, color=color, alpha=0.8)
+                        ax_load.plot(week_data.index, week_data[metric], 
+                                   linewidth=2, label=metric, color=color, alpha=0.8)
                     
-                    # Customize the plot
-                    ax.set_ylabel('Power (kW)', fontsize=12)
-                    ax.set_title(f'{period_name}', fontsize=14, fontweight='bold')
-                    ax.grid(True, alpha=0.3)
-                    ax.legend(loc='upper right', fontsize=10)
+                    # Plot solar power metrics
+                    for metric in solar_metrics:
+                        color = metric_colors.get(metric, '#333333')
+                        ax_solar.plot(week_data.index, week_data[metric], 
+                                    linewidth=2, label=metric, color=color, alpha=0.8)
                     
-                    # Format x-axis
-                    ax.xaxis.set_major_locator(mdates.DayLocator())
-                    ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
-                    ax.xaxis.set_minor_locator(mdates.HourLocator(interval=6))
+                    # Calculate total solar generation (direct to load + charging battery)
+                    total_solar = week_data['System to Load'] + week_data['System to Battery']
+                    ax_solar.plot(week_data.index, total_solar, 
+                                linewidth=2, label='Total Solar Generation', color='#FF6B35', alpha=0.8, linestyle='--')
                     
-                    # Rotate x-axis labels
-                    plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
+                    # Customize the load profile chart
+                    ax_load.set_ylabel('Power (kW)', fontsize=12)
+                    ax_load.set_title(f'{period_name} - Load Profile Breakdown', fontsize=14, fontweight='bold')
+                    ax_load.grid(True, alpha=0.3)
+                    ax_load.legend(loc='upper right', fontsize=10)
                     
-                    # Add summary statistics
+                    # Customize the solar power chart
+                    ax_solar.set_ylabel('Solar Power (kW)', fontsize=12)
+                    ax_solar.set_title(f'{period_name} - Solar Power Profile', fontsize=14, fontweight='bold')
+                    ax_solar.grid(True, alpha=0.3)
+                    ax_solar.legend(loc='upper right', fontsize=10)
+                    
+                    # Format x-axis for both charts
+                    for ax in [ax_load, ax_solar]:
+                        ax.xaxis.set_major_locator(mdates.DayLocator())
+                        ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
+                        ax.xaxis.set_minor_locator(mdates.HourLocator(interval=6))
+                        plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
+                    
+                    # Add summary statistics for load profile chart
                     load_max = week_data['Load Profile'].max()
                     solar_avg = week_data['System to Load'].mean()
                     battery_total = week_data['Battery to Load'].sum()
                     
-                    # Add text annotation with weekly stats
-                    ax.text(0.02, 0.98, f'Week Summary:\nPeak Load: {load_max:.2f} kW\nAvg Solar: {solar_avg:.2f} kW\nBattery Discharge: {battery_total:.1f} kWh', 
-                           transform=ax.transAxes, fontsize=9, verticalalignment='top',
-                           bbox=dict(boxstyle='round', facecolor='white', alpha=0.9))
+                    ax_load.text(0.02, 0.98, f'Week Summary:\nPeak Load: {load_max:.2f} kW\nAvg Solar to Load: {solar_avg:.2f} kW\nBattery Discharge: {battery_total:.1f} kWh', 
+                               transform=ax_load.transAxes, fontsize=9, verticalalignment='top',
+                               bbox=dict(boxstyle='round', facecolor='white', alpha=0.9))
+                    
+                    # Add summary statistics for solar power chart
+                    solar_to_load_avg = week_data['System to Load'].mean()
+                    solar_to_battery_avg = week_data['System to Battery'].mean()
+                    total_solar_avg = total_solar.mean()
+                    solar_peak = total_solar.max()
+                    
+                    ax_solar.text(0.02, 0.98, f'Solar Summary:\nPeak Generation: {solar_peak:.2f} kW\nAvg Total Solar: {total_solar_avg:.2f} kW\nAvg to Load: {solar_to_load_avg:.2f} kW\nAvg to Battery: {solar_to_battery_avg:.2f} kW', 
+                                transform=ax_solar.transAxes, fontsize=9, verticalalignment='top',
+                                bbox=dict(boxstyle='round', facecolor='white', alpha=0.9))
                 else:
-                    ax.text(0.5, 0.5, f'No data available\nfor {period_name}', 
-                           ha='center', va='center', transform=ax.transAxes,
-                           fontsize=12, color='red')
-                    ax.set_title(f'{period_name}', fontsize=14, fontweight='bold')
+                    # Handle no data case for both charts
+                    ax_load.text(0.5, 0.5, f'No data available\nfor {period_name}', 
+                               ha='center', va='center', transform=ax_load.transAxes,
+                               fontsize=12, color='red')
+                    ax_load.set_title(f'{period_name} - Load Profile Breakdown', fontsize=14, fontweight='bold')
+                    
+                    ax_solar.text(0.5, 0.5, f'No data available\nfor {period_name}', 
+                                ha='center', va='center', transform=ax_solar.transAxes,
+                                fontsize=12, color='red')
+                    ax_solar.set_title(f'{period_name} - Solar Power Profile', fontsize=14, fontweight='bold')
             
             except Exception as e:
                 print(f"Error plotting {period_name}: {e}")
-                ax.text(0.5, 0.5, f'Error loading\n{period_name} data', 
-                       ha='center', va='center', transform=ax.transAxes,
-                       fontsize=12, color='red')
-                ax.set_title(f'{period_name}', fontsize=14, fontweight='bold')
+                # Handle error case for both charts
+                ax_load.text(0.5, 0.5, f'Error loading\n{period_name} data', 
+                           ha='center', va='center', transform=ax_load.transAxes,
+                           fontsize=12, color='red')
+                ax_load.set_title(f'{period_name} - Load Profile Breakdown', fontsize=14, fontweight='bold')
+                
+                ax_solar.text(0.5, 0.5, f'Error loading\n{period_name} data', 
+                            ha='center', va='center', transform=ax_solar.transAxes,
+                            fontsize=12, color='red')
+                ax_solar.set_title(f'{period_name} - Solar Power Profile', fontsize=14, fontweight='bold')
         
         # Add overall notes
-        fig.text(0.5, 0.02, 'Load Profile = total demand | System to Load = solar direct to load | Battery to Load = battery discharge | Grid to Load = grid supply', 
+        fig.text(0.5, 0.02, 'Top: Load Profile Breakdown (total demand vs. sources) | Bottom: Solar Power Profile (generation breakdown by usage)', 
                 ha='center', fontsize=10, style='italic')
         
         # Convert to base64

@@ -285,12 +285,22 @@ def _prepare_weather_and_load(weather_file: str, load_file: str) -> Tuple[Dict, 
     # Weather: SAM CSV -> dict, shift UTC->PT by 8h
     solar_resource_data = ResourceTools.SAM_CSV_to_solar_data(weather_file)
     weather_arrays = ["dn", "df", "gh", "tdry", "tdew", "rhum", "wdir", "wspd"]
-    shift = 8
+    # Allow overriding weather shift via env; default to 5h (UTC->PT minus extra 3h)
+    try:
+        shift = int(os.getenv("WEATHER_SHIFT_HOURS", "5"))
+    except Exception:
+        shift = 5
     for name in weather_arrays:
         if name in solar_resource_data:
             a = solar_resource_data[name]
             if len(a) >= 8760:
                 solar_resource_data[name] = [a[(i + shift) % 8760] for i in range(8760)]
+    # Set timezone to PT (UTC-8 standard) to align solar position calculations
+    try:
+        solar_resource_data["tz"] = -8
+    except Exception:
+        pass
+    print(f"[Weather] Applied shift={shift}h; tz=-8 (PT) for {os.path.basename(weather_file)}")
 
     # Load profile (rotate to align with Jan 1 00:00 if timestamp exists)
     load_df = pd.read_csv(load_file)
