@@ -392,12 +392,15 @@ def _plot_six_panel_weeks(
     min_soc_line: float | None,
     max_soc_line: float | None,
 ) -> None:
-    """Create a single figure with 6 panels:
+    """Create a single figure with 6 panels and highlight 4–9pm peak windows daily.
     Rows: Load, Battery SOC, Solar AC (PV). Col 1: First week of January. Col 2: First week of July.
+    Adds light red shading for each day's 4–9pm (16–21) peak period across all panels.
     """
     week_len = 24 * 7
     first_week_start = 0
     july_start = 181 * 24  # Jan–Jun days = 181 (non-leap)
+    peak_start_hour = 16
+    peak_end_hour = 21
 
     def _slice(s: np.ndarray, start: int) -> tuple[np.ndarray, np.ndarray]:
         if s.size == 0:
@@ -417,6 +420,9 @@ def _plot_six_panel_weeks(
         (1, july_start, "Load Served by Source - First Week July"),
     ]:
         ax = axes[0, c]
+        # Shade daily 4–9pm windows in the background
+        for d in range(7):
+            ax.axvspan(d * 24 + peak_start_hour, d * 24 + peak_end_hour, color="#d62728", alpha=0.10, zorder=0)
         xL, L = _slice(load_ser, start)
         xPV, PVL = _slice(pv_to_load, start)
         xBL, BL = _slice(batt_to_load, start)
@@ -439,12 +445,15 @@ def _plot_six_panel_weeks(
         ax.grid(True, alpha=0.3)
         ax.legend(loc="upper right", fontsize=8, framealpha=0.8)
 
-    # Middle row: SOC lines (with dashed min/max SOC)
+    # Middle row: SOC lines (with dashed min/max SOC) and peak shading
     for c, start, title in [
         (0, first_week_start, "Battery SOC - First Week January"),
         (1, july_start, "Battery SOC - First Week July"),
     ]:
         ax = axes[1, c]
+        # Shade daily 4–9pm windows in the background
+        for d in range(7):
+            ax.axvspan(d * 24 + peak_start_hour, d * 24 + peak_end_hour, color="#d62728", alpha=0.10, zorder=0)
         x, y = _slice(soc_ser, start)
         if y.size == 0:
             ax.text(0.5, 0.5, "No data", transform=ax.transAxes, ha="center", va="center")
@@ -466,12 +475,15 @@ def _plot_six_panel_weeks(
         if lab:
             ax.legend(loc="upper right", fontsize=8, framealpha=0.8)
 
-    # Bottom row: PV AC lines
+    # Bottom row: PV AC lines with peak shading
     for c, start, title in [
         (0, first_week_start, "Solar AC (PV) - First Week January"),
         (1, july_start, "Solar AC (PV) - First Week July"),
     ]:
         ax = axes[2, c]
+        # Shade daily 4–9pm windows in the background
+        for d in range(7):
+            ax.axvspan(d * 24 + peak_start_hour, d * 24 + peak_end_hour, color="#d62728", alpha=0.10, zorder=0)
         x, y = _slice(pv_ser, start)
         if y.size == 0:
             ax.text(0.5, 0.5, "No data", transform=ax.transAxes, ha="center", va="center")
@@ -700,10 +712,11 @@ def apply_dispatch_schedule(pv: Pvsamv1.Pvsamv1, dispatch_schedule: Dict[str, An
     # 2 means: solar charging window
     # 3 means: peak discharge window
     # 4 means: summer peak discharge
-
-    monthly_schedule_matrix_from_json = [ [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  2,  2,  2,  2,  2,  3,  3,  3,  3,  3,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  2,  2,  2,  2,  2,  3,  3,  3,  3,  3,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  2,  2,  2,  2,  2,  3,  3,  3,  3,  3,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  2,  2,  2,  2,  2,  3,  3,  3,  3,  3,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  4,  4,  4,  4,  4,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  4,  4,  4,  4,  4,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  4,  4,  4,  4,  4,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  4,  4,  4,  4,  4,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  4,  4,  4,  4,  4,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  4,  4,  4,  4,  4,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  2,  2,  2,  2,  2,  3,  3,  3,  3,  3,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  2,  2,  2,  2,  2,  3,  3,  3,  3,  3,  1,  1,  1,  1 ] ]
-    my_schedule_matrix = [ [ 2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  3,  3,  3,  3,  3,  2,  2,  2,  2 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  2,  2,  2,  2,  2,  3,  3,  3,  3,  3,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  2,  2,  2,  2,  2,  3,  3,  3,  3,  3,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  2,  2,  2,  2,  2,  3,  3,  3,  3,  3,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  4,  4,  4,  4,  4,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  4,  4,  4,  4,  4,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  4,  4,  4,  4,  4,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  4,  4,  4,  4,  4,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  4,  4,  4,  4,  4,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  4,  4,  4,  4,  4,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  2,  2,  2,  2,  2,  3,  3,  3,  3,  3,  1,  1,  1,  1 ], [ 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  2,  2,  2,  2,  2,  3,  3,  3,  3,  3,  1,  1,  1,  1 ] ]
-
+    print(schedule_matrix)
+    
+    schedule_matrix = [[1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1]]
+    schedule_matrix_weekend = [[ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ]]
+    
     print("schedule_matrix:")
     print(schedule_matrix[1])
     print("monthly_schedule_matrix_from_json")
@@ -712,10 +725,9 @@ def apply_dispatch_schedule(pv: Pvsamv1.Pvsamv1, dispatch_schedule: Dict[str, An
     print(my_schedule_matrix[1])
     
     pv.value('dispatch_manual_sched', schedule_matrix)
-    pv.value('dispatch_manual_sched_weekend', schedule_matrix)
+    pv.value('dispatch_manual_sched_weekend', schedule_matrix_weekend)
     print(f"Applied period schedule: Night(1), Solar(2), Peak(3)")
     # print(schedule_matrix)
-
 
     # Configure period actions based on generated dispatch schedule
     grid_charge_max = max(dispatch_schedule.get('dispatch_manual_percent_gridcharge', [0]))
@@ -726,8 +738,9 @@ def apply_dispatch_schedule(pv: Pvsamv1.Pvsamv1, dispatch_schedule: Dict[str, An
     pv.value('dispatch_manual_charge', [1, 1, 0, 0, 0, 0]) # Charge during periods 1 and 2
     pv.value("dispatch_manual_discharge", [ 1, 1, 1, 1, 1, 0 ]) # Dispatch during periods 3 and 4
     pv.value("dispatch_manual_btm_discharge_to_grid", [ 0, 0, 0, 0, 0, 0 ]) # No grid discharge ever
-    pv.value("dispatch_manual_gridcharge", [ 0, 0, 0, 0, 0, 0 ]) # No grid charge ever
+    pv.value("dispatch_manual_gridcharge", [ 1, 0, 0, 0, 0, 0 ]) # Grid charge during period 1
 
+    pv.value("dispatch_manual_percent_gridcharge", [100, 0, 0, 0, 0, 0])
     pv.value('dispatch_manual_percent_discharge', [ 0, 0, 100, 100, 0, 0 ]) # Dispatch manually in periods 3 and 4 to the max (3 and 4 overlap in the summer)
     
 
