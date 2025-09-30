@@ -35,6 +35,7 @@ from math import sqrt
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
+import numpy as np
 
 import PySAM.Pvsamv1 as Pvsamv1
 import PySAM.ResourceTools as ResourceTools
@@ -56,7 +57,7 @@ from step9_plotting_helper import plot_first_weeks
 # Input/output constants (kept consistent with other step9 files)
 LOADPROFILE_FILE_PREFIX = "combined_profiles"
 TOTAL_LOAD_COLUMN_NAME = "electricity.real_and_simulated.for_typical_county_home.kwh"
-OUTPUT_LOADPROFILE_FILE_PREFIX = "custom_dispatch_load_profiles"
+OUTPUT_LOADPROFILE_FILE_PREFIX = "sam_optimized_load_profiles"
 SOLAR_STORAGE_CAPACITY_PREFIX = "electrified_assets"
 CAPITAL_COSTS_FOLDER_NAME = "CAPITAL_COSTS"
 
@@ -154,6 +155,41 @@ def _create_pvsamv1_model_for_pv(
     except Exception:
         pass
 
+    # Explicitly disable integrated battery and replacements from preset
+    for key, val in (
+        ("en_batt", 0),
+        ("batt_replacement_option", 0),  # 0 = no replacements
+    ):
+        try:
+            pv.value(key, val)
+        except Exception:
+            pass
+
+    # Prefer single-year outputs for simplicity and performance
+    for key, val in (
+        ("system_use_lifetime_output", 0),  # single-year outputs
+        ("analysis_period", 1),
+    ):
+        try:
+            pv.value(key, val)
+        except Exception:
+            pass
+    try:
+        pv.Lifetime.dc_degradation = [0.5] * 1
+    except Exception:
+        pass
+
+    # Log relevant runtime flags for diagnostics
+    def _v(k):
+        try:
+            return pv.value(k)
+        except Exception:
+            return None
+    print(
+        f"[PV] flags: system_use_lifetime_output={_v('system_use_lifetime_output')} "
+        f"analysis_period={_v('analysis_period')} en_batt={_v('en_batt')} batt_replacement_option={_v('batt_replacement_option')}"
+    )
+
     # For PV-only energy, clear any load context to avoid flow-based mixing
     try:
         pv.value("load", [0.0] * 8760)
@@ -167,28 +203,73 @@ def _create_pvsamv1_model_for_pv(
 def _pv_generation_kwh(pv: Pvsamv1.Pvsamv1) -> List[float]:
     """Return hourly PV AC generation (kWh) from Pvsamv1 outputs.
 
-    Prefer flow-based reconstruction when available, else fall back to "gen" or "ac".
+    Robustly handles lifetime or nested outputs by flattening and normalizing to 8760.
+    Preference order: 'gen' → sum(system_to_*) → 'ac'.
     """
     out = pv.Outputs.export()
-    def arr(key: str) -> List[float]:
-        return list(out.get(key, []))
 
-    # Try to reconstruct AC from system flows if present
-    pv_ac = None
-    keys = ("system_to_batt", "system_to_load", "system_to_grid")
-    if all(k in out for k in keys):
-        pv_ac = [a + b + c for a, b, c in zip(arr(keys[0]), arr(keys[1]), arr(keys[2]))]
+    def flat_array(value) -> np.ndarray:
+        arr = np.asarray(value, dtype=float).ravel()
+        return arr
 
-    # Fallbacks
-    if pv_ac is None or len(pv_ac) == 0:
-        if "gen" in out:  # Common energy output
-            pv_ac = arr("gen")
-        elif "ac" in out:
-            pv_ac = arr("ac")
-        else:
-            pv_ac = [0.0] * 8760
+    def ensure_8760(a: np.ndarray, label: str) -> List[float]:
+        if a.size == 8760:
+            return a.tolist()
+        if a.size > 8760:
+            if a.size % 8760 == 0:
+                years = a.size // 8760
+                print(f"[PV] {label}: lifetime series detected ({years} years). Using first year.")
+                return a[:8760].tolist()
+            else:
+                print(f"[PV] {label}: unexpected length {a.size}; truncating to 8760.")
+                return a[:8760].tolist()
+        # a.size < 8760
+        if 8760 % a.size == 0 and a.size > 0:
+            reps = 8760 // a.size
+            print(f"[PV] {label}: short series {a.size}; tiling x{reps} to 8760.")
+            return np.tile(a, reps)[:8760].tolist()
+        print(f"[PV] {label}: short series {a.size}; padding zeros to 8760.")
+        out = np.zeros(8760)
+        out[: a.size] = a
+        return out.tolist()
 
-    return _aggregate_to_hourly(pv_ac, 8760)
+    # Gather available keys for debugging
+    present = {k for k, v in out.items() if isinstance(v, (list, tuple)) and len(v) > 0}
+    print(f"[PV] Output keys present (sample): {sorted(list(present))[:10]} ... total={len(present)}")
+
+    # 1) Prefer 'gen' (hourly AC energy)
+    gen = out.get("gen", None)
+    if gen is not None:
+        arr = flat_array(gen)
+        print(f"[PV] gen length: {arr.size}, min={arr.min() if arr.size else 0}, max={arr.max() if arr.size else 0}")
+        return ensure_8760(arr, "gen")
+
+    # 2) Try flow reconstruction sum(system_to_batt + system_to_load + system_to_grid)
+    stl = out.get("system_to_load", None)
+    stb = out.get("system_to_batt", None)
+    stg = out.get("system_to_grid", None)
+    if stl is not None or stb is not None or stg is not None:
+        a = flat_array(stl if stl is not None else [])
+        b = flat_array(stb if stb is not None else [])
+        c = flat_array(stg if stg is not None else [])
+        # Align sizes by padding with zeros
+        m = max(a.size, b.size, c.size)
+        a = np.pad(a, (0, max(0, m - a.size)))
+        b = np.pad(b, (0, max(0, m - b.size)))
+        c = np.pad(c, (0, max(0, m - c.size)))
+        s = a + b + c
+        print(f"[PV] flows length: {s.size}, nonzero={int(np.count_nonzero(s))}")
+        return ensure_8760(s, "flows")
+
+    # 3) Fallback to 'ac' if present
+    ac = out.get("ac", None)
+    if ac is not None:
+        arr = flat_array(ac)
+        print(f"[PV] ac length: {arr.size}, min={arr.min() if arr.size else 0}, max={arr.max() if arr.size else 0}")
+        return ensure_8760(arr, "ac")
+
+    print("[PV] No suitable PV series found; returning zeros.")
+    return [0.0] * 8760
 
 
 def _prepare_weather_and_load(weather_file: str, load_file: str) -> Tuple[Dict, List[float]]:
@@ -431,20 +512,24 @@ def process(
             except Exception as plot_err:
                 print(f"Plotting failed for {county}: {plot_err}")
 
-            # Save per-county outputs
+            # Save per-county outputs (schema compatible with downstream step10)
             os.makedirs(os.path.dirname(output_file), exist_ok=True)
             date_range = pd.date_range(start="2018-01-01", periods=8760, freq="H")
-            df = pd.DataFrame(
-                {
-                    "Solar Generation (kWh)": solar_gen,
-                    "Grid to Household Load (kWh)": grid_to_load,
-                    "Grid to Battery (kWh)": grid_to_batt,
-                    "Battery Charge (kWh)": batt_charge,
-                    "Battery Discharge (kWh)": batt_discharge,
-                    "Grid Demand (kWh)": grid_demand,
-                },
-                index=date_range,
-            )
+            # Compose standard columns
+            system_to_load = [min(s, l) for s, l in zip(solar_gen, load_profile)]
+            batt_to_load = batt_discharge
+            df = pd.DataFrame({
+                "Load Profile": load_profile,
+                "System to Load": system_to_load,
+                "Battery to Load": batt_to_load,
+                "Grid to Load": grid_to_load,
+                "Solar + Battery to Load": [a + b for a, b in zip(system_to_load, batt_to_load)],
+                "Total Supply": [a + b + c for a, b, c in zip(system_to_load, batt_to_load, grid_to_load)],
+                "Difference": [l - (a + b + c) for l, a, b, c in zip(load_profile, system_to_load, batt_to_load, grid_to_load)],
+                "System to Battery": [0.0] * 8760,
+                "Grid to Battery": grid_to_batt,
+                "Battery SOC": soc_percent,
+            }, index=date_range)
             df.to_csv(output_file)
 
             # Save capacity summary for capital costs linkage
