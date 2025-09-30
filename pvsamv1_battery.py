@@ -42,12 +42,12 @@ import matplotlib.pyplot as plt
 import PySAM.Pvsamv1 as Pvsamv1
 import PySAM.ResourceTools as ResourceTools
 
-MIN_SOC = 20
-MAX_SOC = 80
+MIN_SOC = 25
+MAX_SOC = 90
 INITIAL_SOC = 50
 DISPATCH_MODE = 3 # Manual dispatch https://nrel-pysam.readthedocs.io/en/v7.1.0/modules/Pvsamv1.html#PySAM.Pvsamv1.Pvsamv1.BatteryDispatch.batt_dispatch_choice
 GRID_INTERCONNECTION_LIMIT_KWAC = 0
-CAN_EXPORT_TO_GRID = False
+CAN_EXPORT_TO_GRID = 0
 ENABLE_PREDICTIVE_DISPATCH = True
 BATTERY_EFFICIENCY = 5
 PEAK_START_HOUR = 16
@@ -58,7 +58,7 @@ BATTERY_CAPACITY_KWH = 13.5
 DISPATCH_MANUAL_SYSTEM_CHARGE_FIRST = 1         # dispatch_manual_system_charge_first
 BATT_DISPATCH_AUTO_CAN_CHARGE = 1              # batt_dispatch_auto_can_charge
 BATT_DISPATCH_CHARGE_ONLY_SYSTEM_EXCEEDS_LOAD = 0            # batt_dispatch_charge_only_system_exceeds_load
-BATT_DISPATCH_DISCHARGE_ONLY_LOAD_EXCEEDS_SYSTEM = 1                 # batt_dispatch_discharge_only_load_exceeds_system
+BATT_DISPATCH_DISCHARGE_ONLY_LOAD_EXCEEDS_SYSTEM = 0                 # batt_dispatch_discharge_only_load_exceeds_system
 BATT_DISPATCH_AUTO_CAN_GRIDCHARGE = 1            # batt_dispatch_auto_can_gridcharge
 
 # Efficiency defaults
@@ -66,9 +66,9 @@ BATT_DC_DC_EFFICIENCY = 96.0             # batt_dc_dc_efficiency
 
 # Time window defaults (hours 0-23)
 SOLAR_CHARGING_START_HOUR = 6       # Start of solar charging window
-SOLAR_CHARGING_END_HOUR = 17        # End of solar charging window  
-PEAK_DISCHARGE_START_HOUR = 18      # Start of peak discharge window
-PEAK_DISCHARGE_END_HOUR = 23        # End of peak discharge window
+SOLAR_CHARGING_END_HOUR = 15        # End of solar charging window  
+PEAK_DISCHARGE_START_HOUR = 16      # Start of peak discharge window
+PEAK_DISCHARGE_END_HOUR = 21        # End of peak discharge window
 
 @dataclass
 class SimulationConfiguration:
@@ -264,7 +264,7 @@ def print_first_day_flow_table(pv: Pvsamv1.Pvsamv1, day_index: int = 0) -> None:
     """Print a first-day hourly allocation table with PV and battery flows.
 
     Columns:
-      hour, hod, PV(kWh), PV->Batt, PV->Load, PV->Grid, Batt->Load, Batt(kWh), Residual
+      hour, hod, Load(kWh), PV(kWh), PV->Batt, PV->Load, PV->Grid, Batt->Load, Batt(kWh), Residual
     Residual = PV(kWh) - (PV->Batt + PV->Load + PV->Grid)
     """
     log_section("First-Day Power Allocation Table")
@@ -278,6 +278,8 @@ def print_first_day_flow_table(pv: Pvsamv1.Pvsamv1, day_index: int = 0) -> None:
     sG = arr("system_to_grid")
     bL = arr("batt_to_load")
     soc = arr("batt_SOC")
+    # Get total load profile from the model
+    load_profile = _load_series(pv)
     # Define PV(kWh) as the sum of PV flows to avoid negative night values
     gen_flows = sB + sL + sG
 
@@ -313,14 +315,15 @@ def print_first_day_flow_table(pv: Pvsamv1.Pvsamv1, day_index: int = 0) -> None:
     start = day_index * 24
     end = start + 24
 
-    nmax = max(gen_flows.size, sB.size, sL.size, sG.size, bL.size, batt_kwh.size)
+    nmax = max(gen_flows.size, sB.size, sL.size, sG.size, bL.size, batt_kwh.size, load_profile.size)
     if nmax == 0:
         print("No outputs available to build table.")
         return
 
-    print("hour hod   PV(kWh)  PV->Batt  PV->Load  PV->Grid   Batt->Load  Batt(kWh)   Residual")
+    print("hour hod  Load(kWh)   PV(kWh)  PV->Batt  PV->Load  PV->Grid   Batt->Load  Batt(kWh)   Residual")
     for h in range(start, min(end, nmax)):
         hod = h % 24
+        load = load_profile[h] if h < load_profile.size else 0.0
         g = gen_flows[h] if h < gen_flows.size else 0.0
         sb = sB[h] if h < sB.size else 0.0
         sl = sL[h] if h < sL.size else 0.0
@@ -331,7 +334,7 @@ def print_first_day_flow_table(pv: Pvsamv1.Pvsamv1, day_index: int = 0) -> None:
         residual = g - (sb + sl + sg)
         print(
             f"{h:4d} {hod:3d}  "
-            f"{g:8.3f}  {sb:8.3f}  {sl:8.3f}  {sg:8.3f}   {bl:11.3f}  {bk:10.3f}  {residual:9.3f}"
+            f"{load:9.3f}  {g:8.3f}  {sb:8.3f}  {sl:8.3f}  {sg:8.3f}   {bl:11.3f}  {bk:10.3f}  {residual:9.3f}"
         )
 
 
@@ -381,23 +384,34 @@ def _flow_series(pv: Pvsamv1.Pvsamv1) -> Tuple[np.ndarray, np.ndarray, np.ndarra
         return np.asarray(out.get(k, []), dtype=float).ravel()
     return arr("system_to_load"), arr("batt_to_load"), arr("grid_to_load")
 
+def _battery_charging_series(pv: Pvsamv1.Pvsamv1) -> Tuple[np.ndarray, np.ndarray]:
+    out = pv.Outputs.export()
+    def arr(k: str) -> np.ndarray:
+        return np.asarray(out.get(k, []), dtype=float).ravel()
+    return arr("system_to_batt"), arr("grid_to_batt")
 
-def _plot_six_panel_weeks(
+
+def _plot_eight_panel_weeks(
     load_ser: np.ndarray,
     soc_ser: np.ndarray,
     pv_ser: np.ndarray,
     pv_to_load: np.ndarray,
     batt_to_load: np.ndarray,
     grid_to_load: np.ndarray,
+    pv_to_batt: np.ndarray,
+    grid_to_batt: np.ndarray,
     min_soc_line: float | None,
     max_soc_line: float | None,
 ) -> None:
-    """Create a single figure with 6 panels:
-    Rows: Load, Battery SOC, Solar AC (PV). Col 1: First week of January. Col 2: First week of July.
+    """Create a single figure with 8 panels and highlight 4–9pm peak windows daily.
+    Rows: Load, Battery SOC, Solar AC (PV), Battery Charging Sources. Col 1: First week of January. Col 2: First week of July.
+    Adds light red shading for each day's 4–9pm (16–21) peak period across all panels.
     """
     week_len = 24 * 7
     first_week_start = 0
     july_start = 181 * 24  # Jan–Jun days = 181 (non-leap)
+    peak_start_hour = 16
+    peak_end_hour = 21
 
     def _slice(s: np.ndarray, start: int) -> tuple[np.ndarray, np.ndarray]:
         if s.size == 0:
@@ -409,7 +423,7 @@ def _plot_six_panel_weeks(
         y = s[start:end]
         return x, y
 
-    fig, axes = plt.subplots(3, 2, figsize=(14, 9), sharex="col")
+    fig, axes = plt.subplots(4, 2, figsize=(14, 12), sharex="col")
 
     # Top row: load breakdown by source (stacked area)
     for c, start, title in [
@@ -417,6 +431,9 @@ def _plot_six_panel_weeks(
         (1, july_start, "Load Served by Source - First Week July"),
     ]:
         ax = axes[0, c]
+        # Shade daily 4–9pm windows in the background
+        for d in range(7):
+            ax.axvspan(d * 24 + peak_start_hour, d * 24 + peak_end_hour, color="#d62728", alpha=0.10, zorder=0)
         xL, L = _slice(load_ser, start)
         xPV, PVL = _slice(pv_to_load, start)
         xBL, BL = _slice(batt_to_load, start)
@@ -439,12 +456,15 @@ def _plot_six_panel_weeks(
         ax.grid(True, alpha=0.3)
         ax.legend(loc="upper right", fontsize=8, framealpha=0.8)
 
-    # Middle row: SOC lines (with dashed min/max SOC)
+    # Middle row: SOC lines (with dashed min/max SOC) and peak shading
     for c, start, title in [
         (0, first_week_start, "Battery SOC - First Week January"),
         (1, july_start, "Battery SOC - First Week July"),
     ]:
         ax = axes[1, c]
+        # Shade daily 4–9pm windows in the background
+        for d in range(7):
+            ax.axvspan(d * 24 + peak_start_hour, d * 24 + peak_end_hour, color="#d62728", alpha=0.10, zorder=0)
         x, y = _slice(soc_ser, start)
         if y.size == 0:
             ax.text(0.5, 0.5, "No data", transform=ax.transAxes, ha="center", va="center")
@@ -466,12 +486,15 @@ def _plot_six_panel_weeks(
         if lab:
             ax.legend(loc="upper right", fontsize=8, framealpha=0.8)
 
-    # Bottom row: PV AC lines
+    # Third row: PV AC lines with peak shading
     for c, start, title in [
         (0, first_week_start, "Solar AC (PV) - First Week January"),
         (1, july_start, "Solar AC (PV) - First Week July"),
     ]:
         ax = axes[2, c]
+        # Shade daily 4–9pm windows in the background
+        for d in range(7):
+            ax.axvspan(d * 24 + peak_start_hour, d * 24 + peak_end_hour, color="#d62728", alpha=0.10, zorder=0)
         x, y = _slice(pv_ser, start)
         if y.size == 0:
             ax.text(0.5, 0.5, "No data", transform=ax.transAxes, ha="center", va="center")
@@ -483,8 +506,41 @@ def _plot_six_panel_weeks(
         ax.set_title(title)
         ax.set_ylabel("kW")
         ax.grid(True, alpha=0.3)
-    axes[2, 0].set_xlabel("Hour")
-    axes[2, 1].set_xlabel("Hour")
+
+    # Bottom row: Battery charging sources (stacked area)
+    for c, start, title in [
+        (0, first_week_start, "Battery Charging Sources - First Week January"),
+        (1, july_start, "Battery Charging Sources - First Week July"),
+    ]:
+        ax = axes[3, c]
+        # Shade daily 4–9pm windows in the background
+        for d in range(7):
+            ax.axvspan(d * 24 + peak_start_hour, d * 24 + peak_end_hour, color="#d62728", alpha=0.10, zorder=0)
+        xPVB, PVB = _slice(pv_to_batt, start)
+        xGB, GB = _slice(grid_to_batt, start)
+        if PVB.size == 0 or GB.size == 0:
+            ax.text(0.5, 0.5, "No data", transform=ax.transAxes, ha="center", va="center")
+            ax.set_title(title)
+            ax.set_ylabel("kW")
+            ax.grid(True, alpha=0.3)
+            continue
+        # Clip negative values to zero for stacked plot
+        PVB = np.clip(PVB, 0.0, None)
+        GB = np.clip(GB, 0.0, None)
+        # Stack solar and grid charging
+        ax.stackplot(xPVB, PVB, GB,
+                     labels=["Solar→Battery", "Grid→Battery"],
+                     colors=["#ff7f0e", "#1f77b4"], alpha=0.8)
+        # Plot total charging as a line
+        total_charging = PVB + GB
+        ax.plot(xPVB, total_charging, color="#000000", lw=1.2, label="Total Charging")
+        ax.set_title(title)
+        ax.set_ylabel("kW")
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc="upper right", fontsize=8, framealpha=0.8)
+
+    axes[3, 0].set_xlabel("Hour")
+    axes[3, 1].set_xlabel("Hour")
     fig.tight_layout()
     plt.show()
 
@@ -651,9 +707,11 @@ def apply_runtime_overrides(pv: Pvsamv1.Pvsamv1, overrides: RuntimeOverrides) ->
     set_if_present("batt_dispatch_auto_btm_can_discharge_to_grid", overrides.can_export_to_grid)
     
     # Solar charging control flags (direct SAM parameter values)
-    set_if_present("dispatch_manual_system_charge_first", overrides.dispatch_manual_system_charge_first)
-    set_if_present("batt_dispatch_auto_can_charge", overrides.batt_dispatch_auto_can_charge)
-    set_if_present("batt_dispatch_charge_only_system_exceeds_load", overrides.batt_dispatch_charge_only_system_exceeds_load)
+    set_if_present("en_standalone_batt", 0)
+    set_if_present("dispatch_manual_system_charge_first", 1) # overrides.dispatch_manual_system_charge_first)
+    set_if_present("batt_dispatch_auto_can_charge", 1) # overrides.batt_dispatch_auto_can_charge)
+    set_if_present("batt_dispatch_auto_can_clipcharge", 1)
+    set_if_present("batt_dispatch_charge_only_system_exceeds_load", 1) # overrides.batt_dispatch_charge_only_system_exceeds_load)
     set_if_present("batt_dispatch_discharge_only_load_exceeds_system", overrides.batt_dispatch_discharge_only_load_exceeds_system)
     set_if_present("batt_dispatch_auto_can_gridcharge", overrides.batt_dispatch_auto_can_gridcharge)
     
@@ -696,22 +754,34 @@ def apply_dispatch_schedule(pv: Pvsamv1.Pvsamv1, dispatch_schedule: Dict[str, An
     
     print(f"Time windows: Solar({solar_start}-{solar_end}), Peak({peak_start}-{peak_end})")
     schedule_matrix = [daily_schedule] * 12  # Same pattern for all 12 months
+    # 1 means: off-peak / night hours
+    # 2 means: solar charging window
+    # 3 means: peak discharge window
+    # 4 means: summer peak discharge
+    
+    schedule_matrix = [[1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1]]
+    schedule_matrix_weekend = [[ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ]]
     
     pv.value('dispatch_manual_sched', schedule_matrix)
-    pv.value('dispatch_manual_sched_weekend', schedule_matrix)
+    pv.value('dispatch_manual_sched_weekend', schedule_matrix_weekend)
     print(f"Applied period schedule: Night(1), Solar(2), Peak(3)")
-    
+
     # Configure period actions based on generated dispatch schedule
     grid_charge_max = max(dispatch_schedule.get('dispatch_manual_percent_gridcharge', [0]))
     discharge_max = max(dispatch_schedule.get('dispatch_manual_percent_discharge', [0]))
     
     # Period action configuration:
     # [Period1, Period2, Period3, Period4, Period5, Period6]
-    pv.value('dispatch_manual_percent_discharge', [0, 0, discharge_max, 0, 0, 0])
-    pv.value('dispatch_manual_percent_gridcharge', [0, grid_charge_max, 0, 0, 0, 0])
-    pv.value('dispatch_manual_btm_discharge_to_grid', [0, 0, 0, 0, 0, 0])  # No grid export
-    
-    print(f"Period actions: Grid charge (Period 2): {grid_charge_max}%, Discharge (Period 3): {discharge_max}%")
+    pv.value('dispatch_manual_charge', [1, 1, 0, 0, 0, 0]) # Solar charge during all periods
+
+    pv.value("dispatch_manual_discharge", [ 1, 1, 1, 1, 0, 0 ]) # Dispatch during periods 1, 2, 3 and 4
+    pv.value('dispatch_manual_percent_discharge', [ 0, 0, 10, 10, 0, 0 ]) # Dispatch manually in periods 3 and 4 at a rate of 10%
+
+    pv.value("dispatch_manual_btm_discharge_to_grid", [ 0, 0, 0, 0, 0, 0 ]) # No grid discharge ever
+
+    pv.value("dispatch_manual_gridcharge", [ 1, 1, 0, 0, 0, 0 ]) # Grid charge during period 1
+    pv.value("dispatch_manual_percent_gridcharge", [100, 100, 0, 0, 0, 0])
+
     
     # =======================
     # SOLAR CHARGING PRIORITY AND CONTROL FLAGS
@@ -726,7 +796,7 @@ def apply_dispatch_schedule(pv: Pvsamv1.Pvsamv1, dispatch_schedule: Dict[str, An
     print(f"✓ PV charging capability: {overrides.batt_dispatch_auto_can_charge}")
     
     # Smart solar charging - only charge when solar exceeds load
-    pv.value('batt_dispatch_charge_only_system_exceeds_load', overrides.batt_dispatch_charge_only_system_exceeds_load)
+    pv.value('batt_dispatch_charge_only_system_exceeds_load', 0) # overrides.batt_dispatch_charge_only_system_exceeds_load)
     print(f"✓ Smart solar charging: {overrides.batt_dispatch_charge_only_system_exceeds_load}")
     
     # Smart discharge - only discharge when load exceeds solar
@@ -734,7 +804,7 @@ def apply_dispatch_schedule(pv: Pvsamv1.Pvsamv1, dispatch_schedule: Dict[str, An
     print(f"✓ Smart discharge: {overrides.batt_dispatch_discharge_only_load_exceeds_system}")
     
     # Grid charging control - allow schedule to dynamically override this setting
-    grid_charging_enabled = 1 if (grid_charge_max > 0 and overrides.batt_dispatch_auto_can_gridcharge == 1) else 0
+    grid_charging_enabled = 1 # if (grid_charge_max > 0 and overrides.batt_dispatch_auto_can_gridcharge == 1) else 0
     pv.value('batt_dispatch_auto_can_gridcharge', grid_charging_enabled)
     print(f"✓ Grid charging: {grid_charging_enabled} (schedule-driven)")
     
@@ -759,7 +829,7 @@ def apply_dispatch_schedule(pv: Pvsamv1.Pvsamv1, dispatch_schedule: Dict[str, An
         # Note: Battery capacity is typically set in the JSON preset files
         # These parameters may be read-only depending on the SAM configuration
         try:
-            pv.value('batt_capacity', overrides.battery_capacity_kwh)
+            pv.value('batt_computed_bank_capacity', overrides.battery_capacity_kwh)
             print(f"✓ Battery capacity: {overrides.battery_capacity_kwh} kWh")
         except Exception:
             print(f"⚠ Battery capacity setting failed (may be preset-controlled)")
@@ -1312,15 +1382,19 @@ def report(cfg: SimulationConfiguration, presets: SamPresetFiles, outputs: Simul
         sL = outputs.solar_to_load_series_kw
         bL = outputs.battery_to_load_series_kw
         gL = outputs.grid_to_load_series_kw
+        # Get battery charging flows
+        pv_to_batt, grid_to_batt = _battery_charging_series(pv)
         min_soc = read_soc_bounds(pv).min_soc
         max_soc = read_soc_bounds(pv).max_soc
-        _plot_six_panel_weeks(
+        _plot_eight_panel_weeks(
             np.array(outputs.load_series_kw, dtype=float),
             np.array(outputs.state_of_charge_series_percent, dtype=float),
             np.array(outputs.solar_ac_power_series_kw, dtype=float),
             np.array(sL, dtype=float),
             np.array(bL, dtype=float),
             np.array(gL, dtype=float),
+            pv_to_batt,
+            grid_to_batt,
             min_soc,
             max_soc,
         )
