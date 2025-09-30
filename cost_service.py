@@ -9,7 +9,8 @@ import step5_convert_gas_appliances_to_electrical_appliances as ConvertGasToElec
 import step6_build_electric_vehicle_load_profiles as BuildElectricVehicleLoadProfiles
 import step7_combine_real_and_simulated_electricity_loads as CombineRealAndSimulatedProfiles
 import step8_get_weather_files as WeatherFiles
-import step9_run_sam_model_for_solar_storage as RunSamModelForSolarStorage
+# import step9_run_sam_model_for_solar_storage as RunSamModelForSolarStorage
+import step9_pvsamv1_battery as RunSamModelForSolarStorage
 import step10_get_loads_for_rates as GetLoadsForRates
 import step11_evaluate_gas_rates as EvaluateGasRates
 import step12_evaluate_electricity_rates as EvaluateElectricityRates
@@ -145,7 +146,7 @@ if __name__ == '__main__':
     print(f"Counties: {len(norcal_counties + central_counties + socal_counties)} total counties")
     print("-" * 60)
     
-    cost_service = CostService(scenario, housing_type, counties=norcal_counties + central_counties + socal_counties, rate_plans=rate_plans, input_dir=input_dir, output_dir=output_dir)
+    cost_service = CostService(scenario, housing_type, counties=norcal_counties, rate_plans=rate_plans, input_dir=input_dir, output_dir=output_dir)
     cost_service.run()
     
     print("\nCost analysis completed successfully!")
