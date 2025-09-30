@@ -1,38 +1,51 @@
 """
-Step 9: Run SAM Model for Solar Storage using Pvsamv1 battery implementation
+Simple Pvsamv1 demo using presets from SAM_Detailed_PV_Battery.
 
-This is a drop-in replacement for step9_run_sam_model_for_solar_storage.py that uses
-the pvsamv1_battery implementation instead of the legacy PvWatts + BattWatts approach.
+What this script does
+- Loads presets from JSON into PySAM.Pvsamv1.
+- Ensures Manual Dispatch mode (and logs that it came from JSON).
+- Requires and attaches a local weather CSV and the research load CSV, then executes.
+- Logs, clearly:
+  (1) Grid export settings (from JSON)
+  (2) The load profile (kW)
+  (3) Battery power caps and first‑day summaries
+  (4) Solar generation profile (kW AC)
 
-Key differences:
-- Uses PySAM.Pvsamv1 with integrated battery modeling
-- Implements manual dispatch with predictive scheduling
-- Uses exact parameters from pvsamv1_battery.py demonstration script
+Notes
+- Presets directory: SAM_Detailed_PV_Battery
+- Default PV config file: untitled_pvsamv1.json
+- Weather and the research load CSV are required; no JSON load fallback is used.
+
+Run
+  python3 pvsamv1_battery.py
+
+Env overrides (optional)
+- COUNTY_NAME: default "alameda"
+- WEATHER_FILE: path to SAM CSV weather file
+- LOAD_FILE: path to CSV with hourly load column
+- LOAD_COL: column name in LOAD_FILE
+- SAM_PRESET_DIR: default "SAM_Detailed_PV_Battery"
+- PVSAMV1_JSON: default "untitled_pvsamv1.json"
 """
 
-import os
+from __future__ import annotations
+
 import json
+import os
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
 import pandas as pd
-import statistics
-from typing import List, Dict, Any, Optional, Tuple
+import matplotlib.pyplot as plt
 
 import PySAM.Pvsamv1 as Pvsamv1
 import PySAM.ResourceTools as ResourceTools
 
-from main_helpers import get_counties, get_scenario_path, log, format_load_profile, to_decimal_number, norcal_counties, central_counties, socal_counties
-
-# Constants from original step9
-LOADPROFILE_FILE_PREFIX = "combined_profiles"
-TOTAL_LOAD_COLUMN_NAME = "electricity.real_and_simulated.for_typical_county_home.kwh"
-OUTPUT_LOADPROFILE_FILE_PREFIX = "sam_optimized_load_profiles"
-SOLAR_STORAGE_CAPACITY_PREFIX = "electrified_assets"
-CAPITAL_COSTS_FOLDER_NAME = "CAPITAL_COSTS"
-
-# Constants from pvsamv1_battery.py
 MIN_SOC = 25
 MAX_SOC = 90
 INITIAL_SOC = 50
-DISPATCH_MODE = 3  # Manual dispatch
+DISPATCH_MODE = 3 # Manual dispatch https://nrel-pysam.readthedocs.io/en/v7.1.0/modules/Pvsamv1.html#PySAM.Pvsamv1.Pvsamv1.BatteryDispatch.batt_dispatch_choice
 GRID_INTERCONNECTION_LIMIT_KWAC = 0
 CAN_EXPORT_TO_GRID = 0
 ENABLE_PREDICTIVE_DISPATCH = True
@@ -42,27 +55,124 @@ PEAK_END_HOUR = 21
 BATTERY_CAPACITY_KWH = 13.5
 
 # Solar charging control defaults (exact SAM parameter values)
-DISPATCH_MANUAL_SYSTEM_CHARGE_FIRST = 1
-BATT_DISPATCH_AUTO_CAN_CHARGE = 1
-BATT_DISPATCH_CHARGE_ONLY_SYSTEM_EXCEEDS_LOAD = 0
-BATT_DISPATCH_DISCHARGE_ONLY_LOAD_EXCEEDS_SYSTEM = 0
-BATT_DISPATCH_AUTO_CAN_GRIDCHARGE = 1
+DISPATCH_MANUAL_SYSTEM_CHARGE_FIRST = 1         # dispatch_manual_system_charge_first
+BATT_DISPATCH_AUTO_CAN_CHARGE = 1              # batt_dispatch_auto_can_charge
+BATT_DISPATCH_CHARGE_ONLY_SYSTEM_EXCEEDS_LOAD = 0            # batt_dispatch_charge_only_system_exceeds_load
+BATT_DISPATCH_DISCHARGE_ONLY_LOAD_EXCEEDS_SYSTEM = 0                 # batt_dispatch_discharge_only_load_exceeds_system
+BATT_DISPATCH_AUTO_CAN_GRIDCHARGE = 1            # batt_dispatch_auto_can_gridcharge
 
 # Efficiency defaults
-BATT_DC_DC_EFFICIENCY = 96.0
+BATT_DC_DC_EFFICIENCY = 96.0             # batt_dc_dc_efficiency
 
 # Time window defaults (hours 0-23)
-SOLAR_CHARGING_START_HOUR = 6
-SOLAR_CHARGING_END_HOUR = 15
-PEAK_DISCHARGE_START_HOUR = 16
-PEAK_DISCHARGE_END_HOUR = 21
+SOLAR_CHARGING_START_HOUR = 6       # Start of solar charging window
+SOLAR_CHARGING_END_HOUR = 15        # End of solar charging window  
+PEAK_DISCHARGE_START_HOUR = 16      # Start of peak discharge window
+PEAK_DISCHARGE_END_HOUR = 21        # End of peak discharge window
 
+@dataclass
+class SimulationConfiguration:
+    county_slug: str
+    sam_preset_dir: str
+    pvsamv1_json_name: str
+    weather_file: str
+    load_file: str
+    load_col: str
+    show_plots: bool = True
+    weather_shift_hours: int = 8
+
+
+@dataclass
+class SamPresetFiles:
+    photovoltaic_preset_values: Dict[str, Any]
+    battery_preset_values: Optional[Dict[str, Any]] = None
+
+
+@dataclass
+class SamModules:
+    photovoltaic_model: Pvsamv1.Pvsamv1
+    battery_model: Optional[Any] = None
+
+
+@dataclass
+class SimulationSeries:
+    load_series_kw: List[float]
+    state_of_charge_series_percent: List[float]
+    solar_ac_power_series_kw: List[float]
+    solar_to_load_series_kw: List[float]
+    battery_to_load_series_kw: List[float]
+    grid_to_load_series_kw: List[float]
+
+
+@dataclass
+class ApplyReport:
+    pv_applied_count: int
+    pv_failed_keys: List[str]
+    batt_applied_count: int
+    batt_failed_keys: List[str]
+    warnings: List[str]
+
+
+@dataclass
+class SocBounds:
+    min_soc: Optional[float]
+    max_soc: Optional[float]
+    initial_soc: Optional[float]
+
+
+@dataclass
+class RuntimeOverrides:
+    min_soc: Optional[float] = None
+    max_soc: Optional[float] = None
+    initial_soc: Optional[float] = None
+    dispatch_mode: Optional[int] = None
+    grid_interconnection_limit_kwac: Optional[float] = None
+    can_export_to_grid: Optional[bool] = None
+    # Predictive dispatch parameters
+    enable_predictive_dispatch: Optional[bool] = None
+    battery_efficiency: Optional[float] = None
+    peak_start_hour: Optional[int] = None
+    peak_end_hour: Optional[int] = None
+    battery_capacity_kwh: Optional[float] = None
+    
+    # Solar charging control flags (exact SAM parameter values: 0 or 1)
+    dispatch_manual_system_charge_first: Optional[int] = None               # dispatch_manual_system_charge_first
+    batt_dispatch_auto_can_charge: Optional[int] = None                    # batt_dispatch_auto_can_charge
+    batt_dispatch_charge_only_system_exceeds_load: Optional[int] = None                  # batt_dispatch_charge_only_system_exceeds_load
+    batt_dispatch_discharge_only_load_exceeds_system: Optional[int] = None                       # batt_dispatch_discharge_only_load_exceeds_system
+    batt_dispatch_auto_can_gridcharge: Optional[int] = None                  # batt_dispatch_auto_can_gridcharge
+    
+    # Efficiency parameters (hardware characteristics)
+    batt_dc_dc_efficiency: Optional[float] = None                    # batt_dc_dc_efficiency
+    
+    # Time window configuration (static schedule parameters)
+    solar_charging_start_hour: Optional[int] = None             # Start of solar charging window
+    solar_charging_end_hour: Optional[int] = None               # End of solar charging window
+    peak_discharge_start_hour: Optional[int] = None             # Start of peak discharge window
+    peak_discharge_end_hour: Optional[int] = None               # End of peak discharge window
+
+
+# ------------------------------
+# Helpers: JSON, logging, loading
+# ------------------------------
 
 def calculate_peak_energy_requirements(load_forecast: List[float], day_index: int, battery_efficiency: float = 0.90) -> Dict[str, float]:
-    """Calculate energy needed for 4-9pm peak period including efficiency losses."""
+    """
+    Calculate energy needed for 4-9pm peak period including efficiency losses.
+    
+    Args:
+        load_forecast: 8760-hour load profile (kW)
+        day_index: Day of year (0-364)
+        battery_efficiency: Round-trip efficiency (default 0.90)
+        
+    Returns:
+        Dictionary with peak_load_kwh, energy_to_store_kwh, efficiency_loss_kwh
+    """
+    # Peak period hours (4-9pm = hours 16-20)
     peak_start = 16
     peak_end = 21
     
+    # Get load forecast for peak period
     peak_load_kwh = 0.0
     day_start_hour = day_index * 24
     
@@ -71,6 +181,8 @@ def calculate_peak_energy_requirements(load_forecast: List[float], day_index: in
         if hour_index < len(load_forecast):
             peak_load_kwh += load_forecast[hour_index]
     
+    # Account for round-trip efficiency losses
+    # Energy needed to store = peak_load / efficiency
     energy_to_store_kwh = peak_load_kwh / battery_efficiency
     efficiency_loss_kwh = energy_to_store_kwh - peak_load_kwh
     
@@ -82,9 +194,25 @@ def calculate_peak_energy_requirements(load_forecast: List[float], day_index: in
 
 
 def calculate_precharge_target_soc(peak_energy_req: Dict[str, float], battery_capacity_kwh: float = 13.5, min_soc: float = 20.0, max_soc: float = 90.0) -> Dict[str, float]:
-    """Calculate target SOC needed by 4pm to serve peak load."""
+    """
+    Calculate target SOC needed by 4pm to serve peak load.
+    
+    Args:
+        peak_energy_req: Result from calculate_peak_energy_requirements
+        battery_capacity_kwh: Battery capacity (default 13.5 kWh for Tesla Powerwall)
+        min_soc: Minimum SOC percentage (default 20.0)
+        max_soc: Maximum SOC percentage (default 90.0)
+        
+    Returns:
+        Dictionary with target_soc, target_energy_kwh, precharge_energy_kwh
+    """
+    # Energy available at minimum SOC
     min_energy_kwh = (min_soc / 100.0) * battery_capacity_kwh
+    
+    # Total energy needed = minimum energy + peak energy requirement
     target_energy_kwh = min_energy_kwh + peak_energy_req['energy_to_store_kwh']
+    
+    # Convert to SOC percentage, clamped to maximum
     target_soc = min(max_soc, (target_energy_kwh / battery_capacity_kwh) * 100.0)
     
     return {
@@ -94,16 +222,1112 @@ def calculate_precharge_target_soc(peak_energy_req: Dict[str, float], battery_ca
     }
 
 
+def load_json(path: str) -> Dict[str, Any]:
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"JSON not found: {path}")
+    with open(path, "r") as f:
+        return json.load(f)
+
+
+def apply_json(module: Any, data: Dict[str, Any]) -> Tuple[int, List[str]]:
+    """Attempt to set all keys from JSON into a PySAM module via .value().
+    Returns (count_applied, failed_keys).
+    """
+    applied = 0
+    failed: List[str] = []
+    for k, v in data.items():
+        if k == "number_inputs":
+            continue
+        try:
+            module.value(k, v)
+            applied += 1
+        except Exception:
+            failed.append(k)
+    return applied, failed
+
+
+def log_section(title: str) -> None:
+    print("\n" + "=" * 80)
+    print(title)
+    print("=" * 80)
+
+
+def safe_head_tail(arr: List[float], n: int = 12) -> Tuple[List[float], List[float]]:
+    if arr is None:
+        return [], []
+    if len(arr) <= n:
+        return arr, []
+    return arr[:n], arr[-n:]
+
+
+def print_first_day_flow_table(pv: Pvsamv1.Pvsamv1, day_index: int = 0) -> None:
+    """Print a first-day hourly allocation table with PV and battery flows.
+
+    Columns:
+      hour, hod, Load(kWh), PV(kWh), PV->Batt, PV->Load, PV->Grid, Batt->Load, Batt(kWh), Residual
+    Residual = PV(kWh) - (PV->Batt + PV->Load + PV->Grid)
+    """
+    log_section("First-Day Power Allocation Table")
+    out = pv.Outputs.export()
+
+    def arr(key: str) -> np.ndarray:
+        return np.asarray(out.get(key, []), dtype=float).ravel()
+
+    sL = arr("system_to_load")
+    sB = arr("system_to_batt")
+    sG = arr("system_to_grid")
+    bL = arr("batt_to_load")
+    soc = arr("batt_SOC")
+    # Get total load profile from the model
+    load_profile = _load_series(pv)
+    # Define PV(kWh) as the sum of PV flows to avoid negative night values
+    gen_flows = sB + sL + sG
+
+    # Battery capacity (kWh) for converting SOC -> kWh — do not assume defaults.
+    batt_cap = None
+    # Prefer installed capacity
+    try:
+        batt_cap = float(pv.value("batt_bank_installed_capacity"))
+        source = "batt_bank_installed_capacity (module)"
+    except Exception:
+        # Try from outputs
+        val = out.get("batt_bank_installed_capacity", None)
+        if val is not None:
+            batt_cap = float(val)
+            source = "batt_bank_installed_capacity (outputs)"
+    # Accept computed bank capacity as a strict fallback if present
+    if batt_cap is None:
+        try:
+            batt_cap = float(pv.value("batt_computed_bank_capacity"))
+            source = "batt_computed_bank_capacity (module)"
+        except Exception:
+            val = out.get("batt_computed_bank_capacity", None)
+            if val is not None:
+                batt_cap = float(val)
+                source = "batt_computed_bank_capacity (outputs)"
+    if batt_cap is None:
+        raise RuntimeError(
+            "Battery capacity not found (missing batt_bank_installed_capacity and batt_computed_bank_capacity)."
+        )
+    # Compute battery energy from SOC
+    batt_kwh = (soc / 100.0) * batt_cap if soc.size > 0 else np.zeros_like(gen_flows)
+
+    start = day_index * 24
+    end = start + 24
+
+    nmax = max(gen_flows.size, sB.size, sL.size, sG.size, bL.size, batt_kwh.size, load_profile.size)
+    if nmax == 0:
+        print("No outputs available to build table.")
+        return
+
+    print("hour hod  Load(kWh)   PV(kWh)  PV->Batt  PV->Load  PV->Grid   Batt->Load  Batt(kWh)   Residual")
+    for h in range(start, min(end, nmax)):
+        hod = h % 24
+        load = load_profile[h] if h < load_profile.size else 0.0
+        g = gen_flows[h] if h < gen_flows.size else 0.0
+        sb = sB[h] if h < sB.size else 0.0
+        sl = sL[h] if h < sL.size else 0.0
+        sg = sG[h] if h < sG.size else 0.0
+        bl = bL[h] if h < bL.size else 0.0
+        bk = batt_kwh[h] if h < batt_kwh.size else 0.0
+        # Residual built from flows should be identically zero
+        residual = g - (sb + sl + sg)
+        print(
+            f"{h:4d} {hod:3d}  "
+            f"{load:9.3f}  {g:8.3f}  {sb:8.3f}  {sl:8.3f}  {sg:8.3f}   {bl:11.3f}  {bk:10.3f}  {residual:9.3f}"
+        )
+
+
+def print_first_day_soc_summary(pv: Pvsamv1.Pvsamv1, day_index: int = 0) -> None:
+    """Print starting and ending SOC for the specified day (0-indexed)."""
+    log_section("First-Day SOC Summary")
+    try:
+        soc = np.asarray(pv.Outputs.batt_SOC, dtype=float).ravel()
+    except Exception:
+        soc = np.asarray([], dtype=float)
+    if soc.size == 0:
+        print("No SOC series available.")
+        return
+    start = day_index * 24
+    end = min(start + 24, soc.size)
+    if start >= soc.size:
+        print(f"SOC series too short for day_index={day_index}")
+        return
+    start_soc = float(soc[start])
+    end_soc = float(soc[end - 1])
+    print(f"Day {day_index + 1}: start_SOC={start_soc:.2f}%  end_SOC={end_soc:.2f}%")
+
+
+def _pv_ac_from_flows(pv: Pvsamv1.Pvsamv1) -> np.ndarray:
+    out = pv.Outputs.export()
+    def arr(k: str) -> np.ndarray:
+        return np.asarray(out.get(k, []), dtype=float).ravel()
+    return arr("system_to_batt") + arr("system_to_load") + arr("system_to_grid")
+
+
+def _load_series(pv: Pvsamv1.Pvsamv1) -> np.ndarray:
+    try:
+        return np.asarray(pv.value("load"), dtype=float).ravel()
+    except Exception:
+        return np.array([], dtype=float)
+
+
+def _soc_series(pv: Pvsamv1.Pvsamv1) -> np.ndarray:
+    try:
+        return np.asarray(pv.Outputs.batt_SOC, dtype=float).ravel()
+    except Exception:
+        return np.array([], dtype=float)
+
+def _flow_series(pv: Pvsamv1.Pvsamv1) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    out = pv.Outputs.export()
+    def arr(k: str) -> np.ndarray:
+        return np.asarray(out.get(k, []), dtype=float).ravel()
+    return arr("system_to_load"), arr("batt_to_load"), arr("grid_to_load")
+
+def _battery_charging_series(pv: Pvsamv1.Pvsamv1) -> Tuple[np.ndarray, np.ndarray]:
+    out = pv.Outputs.export()
+    def arr(k: str) -> np.ndarray:
+        return np.asarray(out.get(k, []), dtype=float).ravel()
+    return arr("system_to_batt"), arr("grid_to_batt")
+
+
+def _plot_eight_panel_weeks(
+    load_ser: np.ndarray,
+    soc_ser: np.ndarray,
+    pv_ser: np.ndarray,
+    pv_to_load: np.ndarray,
+    batt_to_load: np.ndarray,
+    grid_to_load: np.ndarray,
+    pv_to_batt: np.ndarray,
+    grid_to_batt: np.ndarray,
+    min_soc_line: float | None,
+    max_soc_line: float | None,
+) -> None:
+    """Create a single figure with 8 panels and highlight 4–9pm peak windows daily.
+    Rows: Load, Battery SOC, Solar AC (PV), Battery Charging Sources. Col 1: First week of January. Col 2: First week of July.
+    Adds light red shading for each day's 4–9pm (16–21) peak period across all panels.
+    """
+    week_len = 24 * 7
+    first_week_start = 0
+    july_start = 181 * 24  # Jan–Jun days = 181 (non-leap)
+    peak_start_hour = 16
+    peak_end_hour = 21
+
+    def _slice(s: np.ndarray, start: int) -> tuple[np.ndarray, np.ndarray]:
+        if s.size == 0:
+            return np.array([]), np.array([])
+        end = min(start + week_len, s.size)
+        if start >= end:
+            return np.array([]), np.array([])
+        x = np.arange(end - start)
+        y = s[start:end]
+        return x, y
+
+    fig, axes = plt.subplots(4, 2, figsize=(14, 12), sharex="col")
+
+    # Top row: load breakdown by source (stacked area)
+    for c, start, title in [
+        (0, first_week_start, "Load Served by Source - First Week January"),
+        (1, july_start, "Load Served by Source - First Week July"),
+    ]:
+        ax = axes[0, c]
+        # Shade daily 4–9pm windows in the background
+        for d in range(7):
+            ax.axvspan(d * 24 + peak_start_hour, d * 24 + peak_end_hour, color="#d62728", alpha=0.10, zorder=0)
+        xL, L = _slice(load_ser, start)
+        xPV, PVL = _slice(pv_to_load, start)
+        xBL, BL = _slice(batt_to_load, start)
+        xGL, GL = _slice(grid_to_load, start)
+        if L.size == 0 or PVL.size == 0 or BL.size == 0 or GL.size == 0:
+            ax.text(0.5, 0.5, "No data", transform=ax.transAxes, ha="center", va="center")
+            ax.set_title(title)
+            ax.set_ylabel("kW")
+            ax.grid(True, alpha=0.3)
+            continue
+        PVL = np.clip(PVL, 0.0, None)
+        BL = np.clip(BL, 0.0, None)
+        GL = np.clip(GL, 0.0, None)
+        ax.stackplot(xL, PVL, BL, GL,
+                     labels=["Solar→Load", "Battery→Load", "Grid→Load"],
+                     colors=["#ff7f0e", "#2ca02c", "#7f7f7f"], alpha=0.8)
+        ax.plot(xL, L, color="#000000", lw=1.2, label="Total Load")
+        ax.set_title(title)
+        ax.set_ylabel("kW")
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc="upper right", fontsize=8, framealpha=0.8)
+
+    # Middle row: SOC lines (with dashed min/max SOC) and peak shading
+    for c, start, title in [
+        (0, first_week_start, "Battery SOC - First Week January"),
+        (1, july_start, "Battery SOC - First Week July"),
+    ]:
+        ax = axes[1, c]
+        # Shade daily 4–9pm windows in the background
+        for d in range(7):
+            ax.axvspan(d * 24 + peak_start_hour, d * 24 + peak_end_hour, color="#d62728", alpha=0.10, zorder=0)
+        x, y = _slice(soc_ser, start)
+        if y.size == 0:
+            ax.text(0.5, 0.5, "No data", transform=ax.transAxes, ha="center", va="center")
+            ax.set_title(title)
+            ax.set_ylabel("%")
+            ax.grid(True, alpha=0.3)
+            continue
+        ax.plot(x, y, color="#1f77b4", lw=1.8)
+        ax.set_title(title)
+        ax.set_ylabel("%")
+        ax.set_ylim(0, 100)
+        ax.grid(True, alpha=0.3)
+        # Add dashed min/max SOC lines if available
+        if isinstance(min_soc_line, (int, float)):
+            ax.axhline(float(min_soc_line), color="#d62728", ls="--", lw=1.2, alpha=0.9, label=f"Min SOC ({min_soc_line:g}%)")
+        if isinstance(max_soc_line, (int, float)):
+            ax.axhline(float(max_soc_line), color="#ff7f0e", ls="--", lw=1.2, alpha=0.9, label=f"Max SOC ({max_soc_line:g}%)")
+        h, lab = ax.get_legend_handles_labels()
+        if lab:
+            ax.legend(loc="upper right", fontsize=8, framealpha=0.8)
+
+    # Third row: PV AC lines with peak shading
+    for c, start, title in [
+        (0, first_week_start, "Solar AC (PV) - First Week January"),
+        (1, july_start, "Solar AC (PV) - First Week July"),
+    ]:
+        ax = axes[2, c]
+        # Shade daily 4–9pm windows in the background
+        for d in range(7):
+            ax.axvspan(d * 24 + peak_start_hour, d * 24 + peak_end_hour, color="#d62728", alpha=0.10, zorder=0)
+        x, y = _slice(pv_ser, start)
+        if y.size == 0:
+            ax.text(0.5, 0.5, "No data", transform=ax.transAxes, ha="center", va="center")
+            ax.set_title(title)
+            ax.set_ylabel("kW")
+            ax.grid(True, alpha=0.3)
+            continue
+        ax.plot(x, y, color="#ff7f0e", lw=1.8)
+        ax.set_title(title)
+        ax.set_ylabel("kW")
+        ax.grid(True, alpha=0.3)
+
+    # Bottom row: Battery charging sources (stacked area)
+    for c, start, title in [
+        (0, first_week_start, "Battery Charging Sources - First Week January"),
+        (1, july_start, "Battery Charging Sources - First Week July"),
+    ]:
+        ax = axes[3, c]
+        # Shade daily 4–9pm windows in the background
+        for d in range(7):
+            ax.axvspan(d * 24 + peak_start_hour, d * 24 + peak_end_hour, color="#d62728", alpha=0.10, zorder=0)
+        xPVB, PVB = _slice(pv_to_batt, start)
+        xGB, GB = _slice(grid_to_batt, start)
+        if PVB.size == 0 or GB.size == 0:
+            ax.text(0.5, 0.5, "No data", transform=ax.transAxes, ha="center", va="center")
+            ax.set_title(title)
+            ax.set_ylabel("kW")
+            ax.grid(True, alpha=0.3)
+            continue
+        # Clip negative values to zero for stacked plot
+        PVB = np.clip(PVB, 0.0, None)
+        GB = np.clip(GB, 0.0, None)
+        # Stack solar and grid charging
+        ax.stackplot(xPVB, PVB, GB,
+                     labels=["Solar→Battery", "Grid→Battery"],
+                     colors=["#ff7f0e", "#1f77b4"], alpha=0.8)
+        # Plot total charging as a line
+        total_charging = PVB + GB
+        ax.plot(xPVB, total_charging, color="#000000", lw=1.2, label="Total Charging")
+        ax.set_title(title)
+        ax.set_ylabel("kW")
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc="upper right", fontsize=8, framealpha=0.8)
+
+    axes[3, 0].set_xlabel("Hour")
+    axes[3, 1].set_xlabel("Hour")
+    fig.tight_layout()
+    plt.show()
+
+
+# =====================
+# Configuration helpers
+# =====================
+
+
+def build_configuration_from_environment(scenario, county) -> SimulationConfiguration:
+    county_slug = os.environ.get("COUNTY_NAME", "alameda").lower().replace(" ", "-")
+    preset_dir = os.environ.get("SAM_PRESET_DIR", "SAM_Detailed_PV_Battery")
+    pvsam_json_name = os.environ.get("PVSAMV1_JSON", "untitled_pvsamv1.json")
+    weather_file = os.environ.get(
+        "WEATHER_FILE",
+        f"data/loadprofiles/{scenario}/single-family-detached/{county_slug}/weather_TMY_{county_slug}.csv",
+    )
+    load_file = os.environ.get(
+        "LOAD_FILE",
+        f"data/loadprofiles/{scenario}/single-family-detached/{county_slug}/combined_profiles_baseline_{county_slug}.csv",
+    )
+    load_col = os.environ.get(
+        "LOAD_COL",
+        "electricity.real_and_simulated.for_typical_county_home.kwh",
+    )
+    show_plots = os.environ.get("SHOW_PLOTS", "1").strip() not in {"0", "false", "False"}
+    try:
+        weather_shift_hours = int(os.environ.get("WEATHER_SHIFT_HOURS", "8"))
+    except Exception:
+        weather_shift_hours = 8
+    return SimulationConfiguration(
+        county_slug=county_slug,
+        sam_preset_dir=preset_dir,
+        pvsamv1_json_name=pvsam_json_name,
+        weather_file=weather_file,
+        load_file=load_file,
+        load_col=load_col,
+        show_plots=show_plots,
+        weather_shift_hours=weather_shift_hours,
+    )
+
+
+def validate_configuration(cfg: SimulationConfiguration) -> None:
+    pvsam_json_path = os.path.join(cfg.sam_preset_dir, cfg.pvsamv1_json_name)
+    if not os.path.exists(pvsam_json_path):
+        raise FileNotFoundError(f"Pvsamv1 JSON not found: {pvsam_json_path}")
+    if not os.path.exists(cfg.weather_file):
+        raise FileNotFoundError(f"Weather file not found: {cfg.weather_file}")
+    if not os.path.exists(cfg.load_file):
+        raise FileNotFoundError(f"Research load CSV not found: {cfg.load_file}")
+
+
+def configure(scenario: str = "baseline", county: str = "alameda") -> SimulationConfiguration:
+    cfg = build_configuration_from_environment(scenario, county)
+    validate_configuration(cfg)
+    log_section("Effective Configuration")
+    print(f"county_slug={cfg.county_slug}")
+    print(f"preset_dir={cfg.sam_preset_dir}")
+    print(f"pvsamv1_json_name={cfg.pvsamv1_json_name}")
+    print(f"weather_file={cfg.weather_file}")
+    print(f"load_file={cfg.load_file}")
+    print(f"load_col={cfg.load_col}")
+    print(f"weather_shift_hours={cfg.weather_shift_hours}")
+    print(f"show_plots={cfg.show_plots}")
+    return cfg
+
+
+# ==============
+# Preset loading
+# ==============
+
+
+def load_sam_presets_from_disk(cfg: SimulationConfiguration) -> SamPresetFiles:
+    pvsam_json_path = os.path.join(cfg.sam_preset_dir, cfg.pvsamv1_json_name)
+    return SamPresetFiles(photovoltaic_preset_values=load_json(pvsam_json_path))
+
+
+def load_presets(cfg: SimulationConfiguration) -> SamPresetFiles:
+    presets = load_sam_presets_from_disk(cfg)
+    log_section("Preset Files Loaded")
+    print(
+        f"Pvsamv1 preset: {os.path.join(cfg.sam_preset_dir, cfg.pvsamv1_json_name)}  "
+        f"(keys={len(presets.photovoltaic_preset_values)})"
+    )
+    return presets
+
+
+def build_runtime_overrides(cfg: SimulationConfiguration) -> RuntimeOverrides:
+    return RuntimeOverrides(
+        min_soc=MIN_SOC,
+        max_soc=MAX_SOC,
+        initial_soc=INITIAL_SOC,
+        dispatch_mode=DISPATCH_MODE,
+        grid_interconnection_limit_kwac=GRID_INTERCONNECTION_LIMIT_KWAC,
+        can_export_to_grid=CAN_EXPORT_TO_GRID,
+        # Predictive dispatch parameters
+        enable_predictive_dispatch=ENABLE_PREDICTIVE_DISPATCH,
+        battery_efficiency=BATTERY_EFFICIENCY,
+        peak_start_hour=PEAK_START_HOUR,
+        peak_end_hour=PEAK_END_HOUR,
+        battery_capacity_kwh=BATTERY_CAPACITY_KWH,
+        
+        # Solar charging control flags
+        dispatch_manual_system_charge_first=DISPATCH_MANUAL_SYSTEM_CHARGE_FIRST,
+        batt_dispatch_auto_can_charge=BATT_DISPATCH_AUTO_CAN_CHARGE,
+        batt_dispatch_charge_only_system_exceeds_load=BATT_DISPATCH_CHARGE_ONLY_SYSTEM_EXCEEDS_LOAD,
+        batt_dispatch_discharge_only_load_exceeds_system=BATT_DISPATCH_DISCHARGE_ONLY_LOAD_EXCEEDS_SYSTEM,
+        batt_dispatch_auto_can_gridcharge=BATT_DISPATCH_AUTO_CAN_GRIDCHARGE,
+        
+        # Efficiency parameters
+        batt_dc_dc_efficiency=BATT_DC_DC_EFFICIENCY,
+        
+        # Time window configuration
+        solar_charging_start_hour=SOLAR_CHARGING_START_HOUR,
+        solar_charging_end_hour=SOLAR_CHARGING_END_HOUR,
+        peak_discharge_start_hour=PEAK_DISCHARGE_START_HOUR,
+        peak_discharge_end_hour=PEAK_DISCHARGE_END_HOUR,
+    )
+
+
+# =================
+# Module management
+# =================
+
+
+def create_sam_compute_modules(with_standalone_battery: bool = False) -> SamModules:
+    pv = Pvsamv1.new()
+    # Intentionally avoid creating a standalone Battery module in this path
+    return SamModules(photovoltaic_model=pv, battery_model=None)
+
+
+def initialize_modules() -> SamModules:
+    return create_sam_compute_modules(with_standalone_battery=False)
+
+
+def apply_preset_values_to_modules(modules: SamModules, presets: SamPresetFiles) -> ApplyReport:
+    pv = modules.photovoltaic_model
+    ap_pv, failed_pv = apply_json(pv, presets.photovoltaic_preset_values)
+    # No standalone battery in this workflow
+    return ApplyReport(
+        pv_applied_count=ap_pv,
+        pv_failed_keys=failed_pv,
+        batt_applied_count=0,
+        batt_failed_keys=[],
+        warnings=[],
+    )
+
+
+def apply_runtime_overrides(pv: Pvsamv1.Pvsamv1, overrides: RuntimeOverrides) -> None:
+    def set_if_present(key: str, value: Optional[Any]) -> None:
+        if value is None:
+            return
+        try:
+            pv.value(key, value)
+        except Exception:
+            pass
+
+    # Basic battery configuration
+    set_if_present("batt_minimum_SOC", overrides.min_soc)
+    set_if_present("batt_maximum_SOC", overrides.max_soc)
+    set_if_present("batt_initial_SOC", overrides.initial_soc)
+    set_if_present("batt_dispatch_choice", overrides.dispatch_mode)
+    set_if_present("grid_interconnection_limit_kwac", overrides.grid_interconnection_limit_kwac)
+    set_if_present("batt_dispatch_auto_btm_can_discharge_to_grid", overrides.can_export_to_grid)
+    
+    # Solar charging control flags (direct SAM parameter values)
+    set_if_present("en_standalone_batt", 0)
+    set_if_present("dispatch_manual_system_charge_first", 1) # overrides.dispatch_manual_system_charge_first)
+    set_if_present("batt_dispatch_auto_can_charge", 1) # overrides.batt_dispatch_auto_can_charge)
+    set_if_present("batt_dispatch_auto_can_clipcharge", 1)
+    set_if_present("batt_dispatch_charge_only_system_exceeds_load", 1) # overrides.batt_dispatch_charge_only_system_exceeds_load)
+    set_if_present("batt_dispatch_discharge_only_load_exceeds_system", overrides.batt_dispatch_discharge_only_load_exceeds_system)
+    set_if_present("batt_dispatch_auto_can_gridcharge", overrides.batt_dispatch_auto_can_gridcharge)
+    
+    # Efficiency parameters
+    set_if_present("batt_dc_dc_efficiency", overrides.batt_dc_dc_efficiency)
+
+
+def apply_dispatch_schedule(pv: Pvsamv1.Pvsamv1, dispatch_schedule: Dict[str, Any], 
+                          overrides: RuntimeOverrides) -> None:
+    """Apply the predictive dispatch schedule to the SAM model with comprehensive solar charging configuration."""
+    
+    log_section("Applying Dispatch Schedule Configuration")
+    
+    # Set manual dispatch mode (Mode 3: Manual Dispatch with period-based scheduling)
+    pv.value('batt_dispatch_choice', 3)
+    print(f"Set dispatch mode: 3 (Manual Dispatch)")
+    
+    # =======================
+    # PERIOD-BASED SCHEDULING CONFIGURATION
+    # =======================
+    
+    # Define daily time periods based on configured windows
+    solar_start = overrides.solar_charging_start_hour or 6
+    solar_end = overrides.solar_charging_end_hour or 17
+    peak_start = overrides.peak_discharge_start_hour or 18
+    peak_end = overrides.peak_discharge_end_hour or 23
+    
+    # Build dynamic schedule based on time windows:
+    # Period 1: Night/off-peak hours - No action, preserve battery
+    # Period 2: Solar charging window - Solar charging enabled
+    # Period 3: Peak discharge window - Discharge to reduce grid usage
+    daily_schedule = []
+    for hour in range(24):
+        if solar_start <= hour <= solar_end:
+            daily_schedule.append(2)  # Solar charging period
+        elif peak_start <= hour <= peak_end:
+            daily_schedule.append(3)  # Peak discharge period
+        else:
+            daily_schedule.append(1)  # Off-peak period
+    
+    print(f"Time windows: Solar({solar_start}-{solar_end}), Peak({peak_start}-{peak_end})")
+    schedule_matrix = [daily_schedule] * 12  # Same pattern for all 12 months
+    # 1 means: off-peak / night hours
+    # 2 means: solar charging window
+    # 3 means: peak discharge window
+    # 4 means: summer peak discharge
+    
+    schedule_matrix = [[1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1]]
+    schedule_matrix_weekend = [[ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ]]
+    
+    pv.value('dispatch_manual_sched', schedule_matrix)
+    pv.value('dispatch_manual_sched_weekend', schedule_matrix_weekend)
+    print(f"Applied period schedule: Night(1), Solar(2), Peak(3)")
+
+    # Configure period actions based on generated dispatch schedule
+    grid_charge_max = max(dispatch_schedule.get('dispatch_manual_percent_gridcharge', [0]))
+    discharge_max = max(dispatch_schedule.get('dispatch_manual_percent_discharge', [0]))
+    
+    # Period action configuration:
+    # [Period1, Period2, Period3, Period4, Period5, Period6]
+    pv.value('dispatch_manual_charge', [1, 1, 0, 0, 0, 0]) # Solar charge during all periods
+
+    pv.value("dispatch_manual_discharge", [ 1, 1, 1, 1, 0, 0 ]) # Dispatch during periods 1, 2, 3 and 4
+    pv.value('dispatch_manual_percent_discharge', [ 0, 0, 10, 10, 0, 0 ]) # Dispatch manually in periods 3 and 4 at a rate of 10%
+
+    pv.value("dispatch_manual_btm_discharge_to_grid", [ 0, 0, 0, 0, 0, 0 ]) # No grid discharge ever
+
+    pv.value("dispatch_manual_gridcharge", [ 1, 1, 0, 0, 0, 0 ]) # Grid charge during period 1
+    pv.value("dispatch_manual_percent_gridcharge", [50, 50, 0, 0, 0, 0])
+
+    
+    # =======================
+    # SOLAR CHARGING PRIORITY AND CONTROL FLAGS
+    # =======================
+    
+    # Solar charging priority - critical for solar-first operation
+    pv.value('dispatch_manual_system_charge_first', overrides.dispatch_manual_system_charge_first)
+    print(f"✓ Solar charging priority: {overrides.dispatch_manual_system_charge_first}")
+    
+    # Master PV charging enable
+    pv.value('batt_dispatch_auto_can_charge', overrides.batt_dispatch_auto_can_charge)
+    print(f"✓ PV charging capability: {overrides.batt_dispatch_auto_can_charge}")
+    
+    # Smart solar charging - only charge when solar exceeds load
+    pv.value('batt_dispatch_charge_only_system_exceeds_load', 0) # overrides.batt_dispatch_charge_only_system_exceeds_load)
+    print(f"✓ Smart solar charging: {overrides.batt_dispatch_charge_only_system_exceeds_load}")
+    
+    # Smart discharge - only discharge when load exceeds solar
+    pv.value('batt_dispatch_discharge_only_load_exceeds_system', overrides.batt_dispatch_discharge_only_load_exceeds_system)
+    print(f"✓ Smart discharge: {overrides.batt_dispatch_discharge_only_load_exceeds_system}")
+    
+    # Grid charging control - allow schedule to dynamically override this setting
+    grid_charging_enabled = 1 # if (grid_charge_max > 0 and overrides.batt_dispatch_auto_can_gridcharge == 1) else 0
+    pv.value('batt_dispatch_auto_can_gridcharge', grid_charging_enabled)
+    print(f"✓ Grid charging: {grid_charging_enabled} (schedule-driven)")
+    
+    # Grid export control
+    pv.value('batt_dispatch_auto_btm_can_discharge_to_grid', overrides.can_export_to_grid)
+    print(f"✓ Battery-to-grid export: {overrides.can_export_to_grid}")
+    
+    # =======================
+    # EFFICIENCY AND CONVERSION PARAMETERS
+    # =======================
+    
+    # DC-DC converter efficiency for solar-to-battery charging
+    pv.value('batt_dc_dc_efficiency', overrides.batt_dc_dc_efficiency)
+    print(f"✓ DC-DC converter efficiency: {overrides.batt_dc_dc_efficiency}%")
+    
+    # =======================
+    # CAPACITY AND RATE LIMITS
+    # =======================
+    
+    # Battery capacity configuration
+    if overrides.battery_capacity_kwh:
+        # Note: Battery capacity is typically set in the JSON preset files
+        # These parameters may be read-only depending on the SAM configuration
+        try:
+            pv.value('batt_computed_bank_capacity', overrides.battery_capacity_kwh)
+            print(f"✓ Battery capacity: {overrides.battery_capacity_kwh} kWh")
+        except Exception:
+            print(f"⚠ Battery capacity setting failed (may be preset-controlled)")
+    
+    # Grid interconnection limit
+    if overrides.grid_interconnection_limit_kwac:
+        pv.value('grid_interconnection_limit_kwac', overrides.grid_interconnection_limit_kwac)
+        print(f"✓ Grid interconnection limit: {overrides.grid_interconnection_limit_kwac} kW")
+    
+    # =======================
+    # VALIDATION AND REPORTING
+    # =======================
+    
+    # Report dispatch schedule metrics
+    metrics = dispatch_schedule.get('validation_metrics', {})
+    if metrics:
+        print(f"Schedule validation:")
+        print(f"  Peak coverage: {metrics.get('peak_coverage_percentage', 0):.1f}%")
+        print(f"  Annual grid charging: {metrics.get('annual_grid_charging_kwh', 0):.1f} kWh")
+        print(f"  Annual efficiency losses: {metrics.get('annual_efficiency_losses_kwh', 0):.1f} kWh")
+    
+    # Verify critical settings were applied
+    current_dispatch_mode = pv.value('batt_dispatch_choice')
+    current_solar_priority = pv.value('dispatch_manual_system_charge_first')
+    current_pv_charge = pv.value('batt_dispatch_auto_can_charge')
+    
+    print(f"Verification: dispatch_mode={current_dispatch_mode}, "
+          f"solar_priority={current_solar_priority}, pv_charge={current_pv_charge}")
+    
+    if current_dispatch_mode != 3:
+        print(f"⚠ WARNING: Dispatch mode is {current_dispatch_mode}, expected 3 (Manual)")
+
+
+def report_apply_results(report: ApplyReport) -> None:
+    print(
+        f"Applied {report.pv_applied_count} parameters to Pvsamv1 "
+        f"({len(report.pv_failed_keys)} failed)"
+    )
+    if report.pv_failed_keys:
+        print(f"WARN: Pvsamv1 keys failed to apply: {sorted(report.pv_failed_keys)[:10]}" + (" ..." if len(report.pv_failed_keys) > 10 else ""))
+
+
+def ensure_manual_dispatch_if_configured(pv: Pvsamv1.Pvsamv1, presets: SamPresetFiles) -> None:
+    dispatch_from_json = presets.photovoltaic_preset_values.get("batt_dispatch_choice", None)
+    log_section("Dispatch Mode (Imported From JSON)")
+    print(
+        "batt_dispatch_choice (Pvsamv1 JSON) = ",
+        dispatch_from_json,
+        "=> Manual" if dispatch_from_json == 3 else "",
+    )
+    try:
+        current_dispatch = pv.value("batt_dispatch_choice")
+        print(f"Pvsamv1 module batt_dispatch_choice = {current_dispatch}")
+    except Exception:
+        pass
+
+
+def read_soc_bounds(pv: Pvsamv1.Pvsamv1) -> SocBounds:
+    def get_or_none(k: str) -> Optional[float]:
+        try:
+            return float(pv.value(k))
+        except Exception:
+            return None
+    return SocBounds(
+        min_soc=get_or_none("batt_minimum_SOC"),
+        max_soc=get_or_none("batt_maximum_SOC"),
+        initial_soc=get_or_none("batt_initial_SOC"),
+    )
+
+
+def report_soc_bounds(bounds: SocBounds) -> None:
+    log_section("Battery SOC Settings (Pre-Execute)")
+    print(
+        f"min_SOC={bounds.min_soc}  max_SOC={bounds.max_soc}  initial_SOC={bounds.initial_soc}"
+    )
+
+
+def report_grid_export_settings(presets: SamPresetFiles) -> None:
+    log_section("Grid Export Settings (from JSON)")
+    pvj = presets.photovoltaic_preset_values
+    print(
+        f"batt_dispatch_auto_btm_can_discharge_to_grid = "
+        f"{pvj.get('batt_dispatch_auto_btm_can_discharge_to_grid', None)}"
+    )
+    print(
+        f"dispatch_manual_btm_discharge_to_grid        = "
+        f"{pvj.get('dispatch_manual_btm_discharge_to_grid', None)}"
+    )
+    print(
+        f"grid_interconnection_limit_kwac              = "
+        f"{pvj.get('grid_interconnection_limit_kwac', None)}"
+    )
+
+
+def configure_modules(modules: SamModules, presets: SamPresetFiles, overrides: RuntimeOverrides) -> ApplyReport:
+    report = apply_preset_values_to_modules(modules, presets)
+    report_apply_results(report)
+    apply_runtime_overrides(modules.photovoltaic_model, overrides)
+    ensure_manual_dispatch_if_configured(modules.photovoltaic_model, presets)
+    report_soc_bounds(read_soc_bounds(modules.photovoltaic_model))
+    report_grid_export_settings(presets)
+    return report
+
+
+def attach_weather_resource_to_pvsam(pv: Pvsamv1.Pvsamv1, cfg: SimulationConfiguration) -> bool:
+    if not os.path.exists(cfg.weather_file):
+        print(f"ERROR: Required weather file not found: {cfg.weather_file}")
+        raise FileNotFoundError(cfg.weather_file)
+
+    srd = ResourceTools.SAM_CSV_to_solar_data(cfg.weather_file)
+
+    # Align weather from eastern time (ET) to local time (PT) to match typical load profiles
+    shift_hours = cfg.weather_shift_hours
+    hourly_keys = ["dn", "df", "gh", "tdry", "tdew", "rhum", "wdir", "wspd"]
+    for key in hourly_keys:
+        if key in srd and isinstance(srd[key], (list, tuple)) and len(srd[key]) == 8760:
+            arr = list(srd[key])
+            srd[key] = [arr[(i + shift_hours) % 8760] for i in range(8760)]
+
+    pv.SolarResource.solar_resource_data = srd
+    print(f"Attached weather from: {cfg.weather_file} (shifted +{shift_hours}h for PT)")
+    return True
+
+
+def align_load_profile_to_midnight(df: pd.DataFrame, load_col: str) -> List[float]:
+    """
+    Align the load profile to start at midnight (00:00:00) of January 1st.
+    
+    Args:
+        df: DataFrame with timestamp and load columns
+        load_col: Name of the load column
+        
+    Returns:
+        List of load values aligned to start at midnight, maintaining 8760 hours
+    """
+    if 'timestamp' not in df.columns:
+        print("WARNING: No timestamp column found, assuming data already starts at midnight")
+        return df[load_col].astype(float).tolist()
+    
+    # Parse timestamps
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    
+    # Find midnight of January 1st
+    # Look for the first occurrence of hour 0 on January 1st
+    january_first_mask = (df['timestamp'].dt.month == 1) & (df['timestamp'].dt.day == 1)
+    midnight_mask = df['timestamp'].dt.hour == 0
+    target_mask = january_first_mask & midnight_mask
+    
+    if not target_mask.any():
+        print("WARNING: Could not find January 1st midnight, assuming data already starts at midnight")
+        return df[load_col].astype(float).tolist()
+    
+    # Get the index of midnight January 1st
+    midnight_index = df[target_mask].index[0]
+    original_start_time = df['timestamp'].iloc[0]
+    midnight_time = df['timestamp'].iloc[midnight_index]
+    
+    print(f"Original start time: {original_start_time}")
+    print(f"Aligning to midnight: {midnight_time}")
+    print(f"Shifting by {midnight_index} hours")
+    
+    # Extract load values and rotate to start at midnight
+    load_values = df[load_col].astype(float).tolist()
+    
+    # Rotate the array: take from midnight_index to end, then from start to midnight_index
+    aligned_load = load_values[midnight_index:] + load_values[:midnight_index]
+    
+    if len(aligned_load) != 8760:
+        raise ValueError(f"Aligned load profile has {len(aligned_load)} hours, expected 8760")
+    
+    return aligned_load
+
+
+def attach_load_profile_to_pvsam(pv: Pvsamv1.Pvsamv1, cfg: SimulationConfiguration) -> bool:
+    if not os.path.exists(cfg.load_file):
+        print(
+            "ERROR: Required research load CSV not found: "
+            f"{cfg.load_file} (no JSON fallback is allowed)"
+        )
+        raise FileNotFoundError(cfg.load_file)
+
+    df = pd.read_csv(cfg.load_file)
+    if cfg.load_col not in df.columns:
+        raise KeyError(
+            f"Column '{cfg.load_col}' not found in {cfg.load_file}. Available columns: {list(df.columns)}"
+        )
+    
+    # Align load profile to start at midnight and get the aligned load values
+    load = align_load_profile_to_midnight(df, cfg.load_col)
+    
+    if len(load) != 8760:
+        raise ValueError(
+            f"Research load series must be 8760 hours; got len={len(load)} at {cfg.load_file}"
+        )
+
+    pv.value("load", load)
+    # Provide auxiliary arrays commonly required
+    pv.value("crit_load", [0.0] * len(load))
+    pv.value("batt_load_ac_forecast", load)
+    print(
+        f"Attached aligned load from CSV: {cfg.load_file} (len={len(load)}, sum={sum(load):.1f} kWh)"
+    )
+    return True
+
+
+def attach_json_load_if_present(pv: Pvsamv1.Pvsamv1, presets: SamPresetFiles) -> bool:
+    # For research reproducibility, we intentionally do not use the JSON 'load' in this workflow.
+    if isinstance(presets.photovoltaic_preset_values.get("load"), list):
+        print("INFO: JSON contains 'load', but research pipeline requires CSV load. Ignoring JSON 'load'.")
+    return False
+
+
+def attach_resources(pv: Pvsamv1.Pvsamv1, cfg: SimulationConfiguration, presets: SamPresetFiles) -> None:
+    ok_weather = attach_weather_resource_to_pvsam(pv, cfg)
+    ok_load = attach_load_profile_to_pvsam(pv, cfg)
+    if not (ok_weather and ok_load):
+        raise RuntimeError("Failed to attach required weather and research load resources.")
+
+
+# ==========
+# Execution
+# ==========
+
+
+def execute_pvsam(pv: Pvsamv1.Pvsamv1) -> bool:
+    try:
+        pv.execute(0)
+        print("\nExecuted Pvsamv1 successfully.")
+        return True
+    except Exception as e:
+        raise RuntimeError(f"Pvsamv1 execution failed: {e}")
+
+
+def execute(pv: Pvsamv1.Pvsamv1) -> None:
+    execute_pvsam(pv)
+
+
+# ============
+# Extraction
+# ============
+
+
+def solar_ac_power_series_from_flows(pv: Pvsamv1.Pvsamv1) -> List[float]:
+    return _pv_ac_from_flows(pv).astype(float).ravel().tolist()
+
+
+def load_series_kw_from_model(pv: Pvsamv1.Pvsamv1) -> List[float]:
+    return _load_series(pv).astype(float).ravel().tolist()
+
+
+def state_of_charge_series_percent_from_model(pv: Pvsamv1.Pvsamv1) -> List[float]:
+    return _soc_series(pv).astype(float).ravel().tolist()
+
+
+def per_source_load_series_kw_from_model(pv: Pvsamv1.Pvsamv1) -> Tuple[List[float], List[float], List[float]]:
+    sL, bL, gL = _flow_series(pv)
+    return sL.astype(float).ravel().tolist(), bL.astype(float).ravel().tolist(), gL.astype(float).ravel().tolist()
+
+
+def collect_outputs(pv: Pvsamv1.Pvsamv1) -> SimulationSeries:
+    return SimulationSeries(
+        load_series_kw=load_series_kw_from_model(pv),
+        state_of_charge_series_percent=state_of_charge_series_percent_from_model(pv),
+        solar_ac_power_series_kw=solar_ac_power_series_from_flows(pv),
+        solar_to_load_series_kw=per_source_load_series_kw_from_model(pv)[0],
+        battery_to_load_series_kw=per_source_load_series_kw_from_model(pv)[1],
+        grid_to_load_series_kw=per_source_load_series_kw_from_model(pv)[2],
+    )
+
+
+def extract(pv: Pvsamv1.Pvsamv1) -> SimulationSeries:
+    return collect_outputs(pv)
+
+
+# =========
+# Reporting
+# =========
+
+
+def report_manual_dispatch_schedules(presets: SamPresetFiles) -> None:
+    log_section("Manual Dispatch Schedules (from JSON)")
+    pvsam = presets.photovoltaic_preset_values
+    for key in (
+        "dispatch_manual_sched",
+        "dispatch_manual_sched_weekend",
+        "dispatch_manual_percent_discharge",
+        "dispatch_manual_percent_gridcharge",
+        "dispatch_manual_btm_discharge_to_grid",
+    ):
+        val = pvsam.get(key)
+        if isinstance(val, list) and len(val) > 24:
+            print(f"{key}: len={len(val)} head={val[:5]} ... tail={val[-5:]}")
+        else:
+            print(f"{key}: {val}")
+
+def calculate_daily_charging_schedule(day_start: int, target_energy_needed: float, load_forecast: List[float], 
+                                    solar_forecast: Optional[List[float]], battery_capacity_kwh: float) -> Dict[str, float]:
+    """
+    Phase 1: Calculate charging schedule for 6am-4pm period (solar priority + grid backup).
+    
+    Args:
+        day_start: Starting hour index for the day (day * 24)
+        target_energy_needed: kWh needed to be stored (from calculate_peak_energy_requirements)
+        load_forecast: 8760-hour load profile (kW)
+        solar_forecast: 8760-hour solar generation forecast (kW), optional
+        battery_capacity_kwh: Battery capacity
+        
+    Returns:
+        Dictionary with cumulative_stored_kwh, grid_charging_kwh, grid_charge_hours
+    """
+    cumulative_stored_kwh = 0.0
+    total_grid_charging_kwh = 0.0
+    grid_charge_hours = []
+    
+    for hour in range(6, 16):  # 6am to 4pm
+        hour_index = day_start + hour
+        
+        # Solar charging priority
+        if solar_forecast and hour_index < len(solar_forecast):
+            solar_gen = solar_forecast[hour_index]
+            load = load_forecast[hour_index] if hour_index < len(load_forecast) else 0.0
+            excess_solar = max(0.0, solar_gen - load)
+            
+            # Use available solar first
+            energy_still_needed = target_energy_needed - cumulative_stored_kwh
+            if energy_still_needed > 0 and excess_solar > 0:
+                solar_charge_kwh = min(excess_solar, energy_still_needed)
+                cumulative_stored_kwh += solar_charge_kwh
+        
+        # Grid backup charging if solar insufficient (after 10am)
+        if hour >= 10:
+            energy_still_needed = target_energy_needed - cumulative_stored_kwh
+            if energy_still_needed > 0:
+                max_hourly_charge = min(5.0, energy_still_needed)  # 5kW charge rate limit
+                grid_charge_percent = min(100.0, (max_hourly_charge / battery_capacity_kwh) * 100.0)
+                cumulative_stored_kwh += max_hourly_charge
+                total_grid_charging_kwh += max_hourly_charge
+                grid_charge_hours.append((hour_index, grid_charge_percent))
+    
+    return {
+        'cumulative_stored_kwh': cumulative_stored_kwh,
+        'grid_charging_kwh': total_grid_charging_kwh,
+        'grid_charge_hours': grid_charge_hours
+    }
+
+
+def get_peak_period_loads(day_start: int, load_forecast: List[float], peak_start: int = 16, peak_end: int = 21) -> Dict[str, Any]:
+    """
+    Extract peak period load profile for proportional discharge calculation.
+    
+    Args:
+        day_start: Starting hour index for the day (day * 24)
+        load_forecast: 8760-hour load profile (kW)
+        peak_start: Peak period start hour (default 16 = 4pm)
+        peak_end: Peak period end hour (default 21 = 9pm)
+        
+    Returns:
+        Dictionary with peak_loads, total_peak_load, peak_hour_indices
+    """
+    peak_loads = []
+    peak_hour_indices = []
+    total_peak_load = 0.0
+    
+    for hour in range(peak_start, peak_end):
+        hour_index = day_start + hour
+        load = load_forecast[hour_index] if hour_index < len(load_forecast) else 0.0
+        peak_loads.append(load)
+        peak_hour_indices.append(hour_index)
+        total_peak_load += load
+    
+    return {
+        'peak_loads': peak_loads,
+        'total_peak_load': total_peak_load,
+        'peak_hour_indices': peak_hour_indices
+    }
+
+
+def distribute_discharge_proportionally(peak_loads: List[float], total_peak_load: float, 
+                                      available_discharge_energy: float, battery_capacity_kwh: float) -> List[Tuple[float, float]]:
+    """
+    Calculate proportional discharge percentages for peak period hours.
+    
+    Args:
+        peak_loads: Load for each peak period hour (kW)
+        total_peak_load: Sum of all peak period loads (kW)
+        available_discharge_energy: Energy available for discharge (kWh)
+        battery_capacity_kwh: Battery capacity for percentage calculation
+        
+    Returns:
+        List of (desired_discharge_kwh, discharge_percent) tuples for each peak hour
+    """
+    discharge_schedule = []
+    
+    if total_peak_load > 0:
+        for load in peak_loads:
+            # Proportional discharge based on load profile
+            load_fraction = load / total_peak_load
+            desired_discharge_kwh = min(available_discharge_energy * load_fraction, load)
+            
+            # Convert to discharge percentage for SAM
+            if desired_discharge_kwh > 0:
+                discharge_percent = min(100.0, (desired_discharge_kwh / battery_capacity_kwh) * 100.0)
+            else:
+                discharge_percent = 0.0
+                
+            discharge_schedule.append((desired_discharge_kwh, discharge_percent))
+    else:
+        # No load during peak period
+        discharge_schedule = [(0.0, 0.0)] * len(peak_loads)
+    
+    return discharge_schedule
+
+
+def calculate_peak_discharge_schedule(day_start: int, target_soc: float, min_soc: float, 
+                                    battery_capacity_kwh: float, load_forecast: List[float], 
+                                    peak_start: int = 16, peak_end: int = 21) -> Dict[str, Any]:
+    """
+    Phase 2: Calculate discharge schedule for 4pm-9pm peak period.
+    
+    Args:
+        day_start: Starting hour index for the day (day * 24)
+        target_soc: Target SOC by 4pm (from calculate_precharge_target_soc)
+        min_soc: Minimum SOC percentage
+        battery_capacity_kwh: Battery capacity
+        load_forecast: 8760-hour load profile (kW)
+        peak_start: Peak period start hour (default 16 = 4pm)
+        peak_end: Peak period end hour (default 21 = 9pm)
+        
+    Returns:
+        Dictionary with discharge_hours, peak_coverage, total_discharge_kwh
+    """
+    # Available energy for discharge (from target SOC down to min SOC)
+    available_discharge_energy = ((target_soc - min_soc) / 100.0) * battery_capacity_kwh
+    
+    # Get peak period loads
+    peak_info = get_peak_period_loads(day_start, load_forecast, peak_start, peak_end)
+    peak_loads = peak_info['peak_loads']
+    total_peak_load = peak_info['total_peak_load']
+    peak_hour_indices = peak_info['peak_hour_indices']
+    
+    # Calculate proportional discharge
+    discharge_schedule = distribute_discharge_proportionally(
+        peak_loads, total_peak_load, available_discharge_energy, battery_capacity_kwh
+    )
+    
+    # Build output with hour indices and discharge percentages
+    discharge_hours = []
+    peak_coverage = 0.0
+    total_discharge_kwh = 0.0
+    
+    for i, (discharge_kwh, discharge_percent) in enumerate(discharge_schedule):
+        hour_index = peak_hour_indices[i]
+        if discharge_percent > 0:
+            discharge_hours.append((hour_index, discharge_percent))
+        peak_coverage += min(discharge_kwh, peak_loads[i])
+        total_discharge_kwh += discharge_kwh
+    
+    return {
+        'discharge_hours': discharge_hours,
+        'peak_coverage': peak_coverage,
+        'total_discharge_kwh': total_discharge_kwh,
+        'total_peak_load': total_peak_load
+    }
+
+
 def compose_battery_charge_schedule(load_forecast: List[float], solar_forecast: Optional[List[float]] = None, 
                                   battery_capacity_kwh: float = 13.5, battery_efficiency: float = 0.90,
                                   min_soc: float = 20.0, max_soc: float = 90.0) -> Dict[str, Any]:
-    """Create predictive battery dispatch schedules optimized for California TOU rates."""
+    """
+    Create predictive battery dispatch schedules optimized for California TOU rates.
+    
+    Uses existing helper functions:
+    - calculate_peak_energy_requirements(): Predicts 4-9pm energy needs with efficiency losses
+    - calculate_precharge_target_soc(): Calculates target SOC needed by 4pm
+    
+    And new modular helper functions:
+    - calculate_daily_charging_schedule(): Phase 1 charging logic
+    - calculate_peak_discharge_schedule(): Phase 2 discharge logic
+    
+    Args:
+        load_forecast: 8760-hour load profile (kW)
+        solar_forecast: 8760-hour solar generation forecast (kW), optional
+        battery_capacity_kwh: Battery capacity (default 13.5 kWh)
+        battery_efficiency: Round-trip efficiency (default 0.90)
+        min_soc: Minimum SOC percentage (default 20.0)
+        max_soc: Maximum SOC percentage (default 90.0)
+        
+    Returns:
+        Dictionary with SAM-compatible schedules and validation metrics
+    """
     if len(load_forecast) != 8760:
         raise ValueError(f"Load forecast must be 8760 hours, got {len(load_forecast)}")
     
-    grid_charge_percent = [0.0] * 8760
-    discharge_percent = [0.0] * 8760
+    # Initialize annual schedules for SAM
+    grid_charge_percent = [0.0] * 8760  # Grid charging percentages (0-100)
+    discharge_percent = [0.0] * 8760    # Discharge percentages (0-100)
     
+    # Validation tracking
     peak_coverage_days = 0
     total_grid_charging_kwh = 0.0
     total_efficiency_losses_kwh = 0.0
@@ -111,60 +1335,40 @@ def compose_battery_charge_schedule(load_forecast: List[float], solar_forecast: 
     for day in range(365):
         day_start = day * 24
         
+        # Use existing helper: Calculate peak energy requirements
         peak_req = calculate_peak_energy_requirements(load_forecast, day, battery_efficiency)
+        
+        # Use existing helper: Calculate target SOC needed by 4pm
         target_info = calculate_precharge_target_soc(peak_req, battery_capacity_kwh, min_soc, max_soc)
         
+        # Track efficiency losses
         total_efficiency_losses_kwh += peak_req['efficiency_loss_kwh']
         
-        # Charging schedule (6am-4pm)
-        cumulative_stored_kwh = 0.0
-        for hour in range(6, 16):
-            hour_index = day_start + hour
-            
-            # Solar charging priority
-            if solar_forecast and hour_index < len(solar_forecast):
-                solar_gen = solar_forecast[hour_index]
-                load = load_forecast[hour_index] if hour_index < len(load_forecast) else 0.0
-                excess_solar = max(0.0, solar_gen - load)
-                
-                energy_still_needed = peak_req['energy_to_store_kwh'] - cumulative_stored_kwh
-                if energy_still_needed > 0 and excess_solar > 0:
-                    solar_charge_kwh = min(excess_solar, energy_still_needed)
-                    cumulative_stored_kwh += solar_charge_kwh
-            
-            # Grid backup charging if solar insufficient (after 10am)
-            if hour >= 10:
-                energy_still_needed = peak_req['energy_to_store_kwh'] - cumulative_stored_kwh
-                if energy_still_needed > 0:
-                    max_hourly_charge = min(5.0, energy_still_needed)
-                    grid_charge_percent[hour_index] = min(100.0, (max_hourly_charge / battery_capacity_kwh) * 100.0)
-                    cumulative_stored_kwh += max_hourly_charge
-                    total_grid_charging_kwh += max_hourly_charge
+        # Phase 1: Calculate charging schedule using helper function
+        charging_result = calculate_daily_charging_schedule(
+            day_start, peak_req['energy_to_store_kwh'], load_forecast, solar_forecast, battery_capacity_kwh
+        )
         
-        # Discharge schedule (4pm-9pm)
-        available_discharge_energy = ((target_info['target_soc'] - min_soc) / 100.0) * battery_capacity_kwh
-        peak_loads = []
-        for hour in range(16, 21):
-            hour_index = day_start + hour
-            load = load_forecast[hour_index] if hour_index < len(load_forecast) else 0.0
-            peak_loads.append(load)
+        # Apply grid charging schedule
+        for hour_index, charge_percent in charging_result['grid_charge_hours']:
+            grid_charge_percent[hour_index] = charge_percent
         
-        total_peak_load = sum(peak_loads)
-        peak_coverage = 0.0
+        total_grid_charging_kwh += charging_result['grid_charging_kwh']
         
-        if total_peak_load > 0:
-            for i, load in enumerate(peak_loads):
-                hour_index = day_start + 16 + i
-                load_fraction = load / total_peak_load
-                desired_discharge_kwh = min(available_discharge_energy * load_fraction, load)
-                
-                if desired_discharge_kwh > 0:
-                    discharge_percent[hour_index] = min(100.0, (desired_discharge_kwh / battery_capacity_kwh) * 100.0)
-                    peak_coverage += min(desired_discharge_kwh, load)
+        # Phase 2: Calculate discharge schedule using helper function
+        discharge_result = calculate_peak_discharge_schedule(
+            day_start, target_info['target_soc'], min_soc, battery_capacity_kwh, load_forecast
+        )
         
-        if peak_coverage >= total_peak_load * 0.8:
+        # Apply discharge schedule
+        for hour_index, discharge_pct in discharge_result['discharge_hours']:
+            discharge_percent[hour_index] = discharge_pct
+        
+        # Track performance (80% coverage threshold)
+        if discharge_result['peak_coverage'] >= discharge_result['total_peak_load'] * 0.8:
             peak_coverage_days += 1
     
+    # Validation metrics
     validation_metrics = {
         'peak_coverage_percentage': (peak_coverage_days / 365) * 100,
         'annual_grid_charging_kwh': total_grid_charging_kwh,
@@ -178,411 +1382,158 @@ def compose_battery_charge_schedule(load_forecast: List[float], solar_forecast: 
         'validation_metrics': validation_metrics
     }
 
+def report(cfg: SimulationConfiguration, presets: SamPresetFiles, outputs: SimulationSeries, pv: Pvsamv1.Pvsamv1) -> None:
+    # Load profile summary
+    log_section("Load Profile (kW)")
+    load = outputs.load_series_kw
+    if load and len(load) == 8760:
+        head, tail = safe_head_tail(load, n=24)
+        print(
+            f"len={len(load)}  sum={sum(load):.1f} kWh  min={min(load):.3f}  "
+            f"max={max(load):.3f}  mean={np.mean(load):.3f}"
+        )
+        print(f"first 24 hours: {head}")
+        if tail:
+            print(f"last 24 hours : {tail}")
+    else:
+        print("No load profile available.")
 
-def prepare_data_and_compute_system_capacity(weather_file: str, load_file: str, years_of_analysis: int):
-    """Prepare weather and load data, compute system capacity using simplified approach."""
-    # Load weather data from NREL API
-    solar_resource_data = ResourceTools.SAM_CSV_to_solar_data(weather_file)
-    
-    # Convert weather data from UTC to Pacific Time (8-hour shift)
-    weather_arrays = ['dn', 'df', 'gh', 'tdry', 'tdew', 'rhum', 'wdir', 'wspd']
-    utc_to_pst_shift = 8
-    
-    for array_name in weather_arrays:
-        if array_name in solar_resource_data:
-            original_array = solar_resource_data[array_name]
-            solar_resource_data[array_name] = [original_array[(i + utc_to_pst_shift) % 8760] for i in range(8760)]
-    
-    # Load profile
-    load_data = pd.read_csv(load_file)
-    load_profile = load_data[TOTAL_LOAD_COLUMN_NAME].tolist()
-    annual_load_kWh = sum(load_profile)
-    
-    log(
-        debug_load_profile_sample=load_profile[:10],
-        debug_load_profile_min=min(load_profile),
-        debug_load_profile_max=max(load_profile),
-        debug_load_profile_mean=statistics.mean(load_profile),
-        debug_annual_load_kWh=annual_load_kWh,
-    )
-    
-    # Solar irradiance analysis
-    gh_w_per_m2 = solar_resource_data["gh"]
-    mean_gh_w_per_m2 = statistics.mean(gh_w_per_m2)
-    daily_irradiance_kWh_per_m2_per_day = mean_gh_w_per_m2 * 24 / 1000
-    
-    log(
-        debug_mean_irradiance_w_per_m2=mean_gh_w_per_m2,
-        debug_daily_irradiance_kWh_per_m2=daily_irradiance_kWh_per_m2_per_day,
-    )
-    
-    # Simplified system sizing based on annual load
-    # Use similar logic to original but simplified
-    annual_irradiance_kWh_per_m2 = daily_irradiance_kWh_per_m2_per_day * 365
-    pv_cell_efficiency = 0.206
-    system_performance_ratio = 0.80
-    annual_energy_production_kWh_per_m2 = (annual_irradiance_kWh_per_m2 * 
-                                          pv_cell_efficiency * 
-                                          system_performance_ratio)
-    
-    panel_nameplate_power_density_kW_per_m2 = 0.193
-    required_panel_area_m2 = annual_load_kWh / annual_energy_production_kWh_per_m2
-    required_dc_capacity_kW = required_panel_area_m2 * panel_nameplate_power_density_kW_per_m2
-    
-    log(
-        debug_required_panel_area_m2=required_panel_area_m2,
-        debug_required_dc_capacity_kW=required_dc_capacity_kW,
-    )
-    
-    return solar_resource_data, load_profile, required_dc_capacity_kW
+    # PV generation summary (from flows)
+    log_section("Solar Generation Profile (kW AC)")
+    gen = outputs.solar_ac_power_series_kw
+    if gen:
+        head, tail = safe_head_tail(gen, n=24)
+        print(
+            f"len={len(gen)}  sum={sum(gen):.1f} kWh  max={max(gen):.3f} kW  "
+            f"mean={np.mean(gen):.3f} kW"
+        )
+        print(f"first 24 hours: {head}")
+        if tail:
+            print(f"last 24 hours : {tail}")
+    else:
+        print("No PV generation available.")
 
+    # Battery caps and power series
+    log_section("Battery Power (kW)")
+    pvsam = presets.photovoltaic_preset_values
+    caps = {
+        "batt_power_charge_max_kwac": pvsam.get("batt_power_charge_max_kwac"),
+        "batt_power_discharge_max_kwac": pvsam.get("batt_power_discharge_max_kwac"),
+        "batt_power_charge_max_kwdc": pvsam.get("batt_power_charge_max_kwdc"),
+        "batt_power_discharge_max_kwdc": pvsam.get("batt_power_discharge_max_kwdc"),
+    }
+    for k, v in caps.items():
+        print(f"{k} = {v}")
 
-def create_pvsamv1_model(solar_resource_data: Dict, load_profile: List[float], system_capacity: float, years_of_analysis: int) -> Pvsamv1.Pvsamv1:
-    """Create and configure PySAM Pvsamv1 model with battery integration."""
-    pv = Pvsamv1.new()
-    
-    # Load configuration from SAM_Detailed_PV_Battery preset
-    dir_path = "./SAM_Detailed_PV_Battery/"
-    json_file = "untitled_pvsamv1.json"
-    
-    with open(os.path.join(dir_path, json_file), 'r') as file:
-        data = json.load(file)
-        for k, v in data.items():
-            if k != "number_inputs":
-                try:
-                    pv.value(k, v)
-                except Exception:
-                    pass  # Skip failed parameters
-    
-    # Override with specific configuration
-    pv.SolarResource.solar_resource_data = solar_resource_data
-    pv.value("load", load_profile)
-    pv.value("crit_load", [0.0] * len(load_profile))
-    pv.value("batt_load_ac_forecast", load_profile)
-    
-    # System sizing
-    pv.SystemDesign.system_capacity = system_capacity
-    pv.Lifetime.dc_degradation = [0.5] * years_of_analysis
-    
-    # Battery configuration from pvsamv1_battery constants
-    pv.value("batt_minimum_SOC", MIN_SOC)
-    pv.value("batt_maximum_SOC", MAX_SOC)
-    pv.value("batt_initial_SOC", INITIAL_SOC)
-    pv.value("batt_dispatch_choice", DISPATCH_MODE)
-    pv.value("grid_interconnection_limit_kwac", GRID_INTERCONNECTION_LIMIT_KWAC)
-    pv.value("batt_dispatch_auto_btm_can_discharge_to_grid", CAN_EXPORT_TO_GRID)
-    
-    # Solar charging control flags
-    pv.value("en_standalone_batt", 0)
-    pv.value("dispatch_manual_system_charge_first", DISPATCH_MANUAL_SYSTEM_CHARGE_FIRST)
-    pv.value("batt_dispatch_auto_can_charge", BATT_DISPATCH_AUTO_CAN_CHARGE)
-    pv.value("batt_dispatch_auto_can_clipcharge", 1)
-    pv.value("batt_dispatch_charge_only_system_exceeds_load", BATT_DISPATCH_CHARGE_ONLY_SYSTEM_EXCEEDS_LOAD)
-    pv.value("batt_dispatch_discharge_only_load_exceeds_system", BATT_DISPATCH_DISCHARGE_ONLY_LOAD_EXCEEDS_SYSTEM)
-    pv.value("batt_dispatch_auto_can_gridcharge", BATT_DISPATCH_AUTO_CAN_GRIDCHARGE)
-    
-    # Efficiency parameters
-    pv.value("batt_dc_dc_efficiency", BATT_DC_DC_EFFICIENCY)
-    
-    log(solar_system_capacity=system_capacity)
-    
-    return pv
+    # First‑day tables and plots
+    print_first_day_flow_table(pv, day_index=0)
+    print_first_day_soc_summary(pv, day_index=0)
+
+    if cfg.show_plots:
+        # Build series for stacked source load and SOC/PV panels
+        sL = outputs.solar_to_load_series_kw
+        bL = outputs.battery_to_load_series_kw
+        gL = outputs.grid_to_load_series_kw
+        # Get battery charging flows
+        pv_to_batt, grid_to_batt = _battery_charging_series(pv)
+        min_soc = read_soc_bounds(pv).min_soc
+        max_soc = read_soc_bounds(pv).max_soc
+        _plot_eight_panel_weeks(
+            np.array(outputs.load_series_kw, dtype=float),
+            np.array(outputs.state_of_charge_series_percent, dtype=float),
+            np.array(outputs.solar_ac_power_series_kw, dtype=float),
+            np.array(sL, dtype=float),
+            np.array(bL, dtype=float),
+            np.array(gL, dtype=float),
+            pv_to_batt,
+            grid_to_batt,
+            min_soc,
+            max_soc,
+        )
+
+    report_manual_dispatch_schedules(presets)
 
 
-def apply_dispatch_schedule(pv: Pvsamv1.Pvsamv1, dispatch_schedule: Dict[str, Any]) -> None:
-    """Apply the predictive dispatch schedule to the SAM model."""
-    log_section_title = "Applying Dispatch Schedule Configuration"
-    print(f"\n{'=' * 80}\n{log_section_title}\n{'=' * 80}")
-    
-    # Set manual dispatch mode
-    pv.value('batt_dispatch_choice', 3)
-    print(f"Set dispatch mode: 3 (Manual Dispatch)")
-    
-    # Define daily schedule matrix based on time windows
-    schedule_matrix = [
-        [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 1, 1]
-    ] * 12  # Same pattern for all 12 months
-    
-    schedule_matrix_weekend = [
-        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
-    ] * 12  # Off-peak for weekends
-    
-    pv.value('dispatch_manual_sched', schedule_matrix)
-    pv.value('dispatch_manual_sched_weekend', schedule_matrix_weekend)
-    print(f"Applied period schedule: Night(1), Solar(2), Peak(3)")
-    
-    # Period action configuration
-    pv.value('dispatch_manual_charge', [1, 1, 0, 0, 0, 0])
-    pv.value("dispatch_manual_discharge", [1, 1, 1, 1, 0, 0])
-    pv.value('dispatch_manual_percent_discharge', [0, 0, 10, 10, 0, 0])
-    pv.value("dispatch_manual_btm_discharge_to_grid", [0, 0, 0, 0, 0, 0])
-    pv.value("dispatch_manual_gridcharge", [1, 1, 0, 0, 0, 0])
-    pv.value("dispatch_manual_percent_gridcharge", [100, 100, 0, 0, 0, 0])
-    
-    # Apply the calculated dispatch schedules
-    grid_charge = dispatch_schedule.get('dispatch_manual_percent_gridcharge', [])
-    discharge = dispatch_schedule.get('dispatch_manual_percent_discharge', [])
-    
-    if grid_charge:
-        # Override with predictive schedule
-        pv.value("dispatch_manual_percent_gridcharge", grid_charge)
-    
-    if discharge:
-        # Override with predictive schedule  
-        pv.value("dispatch_manual_percent_discharge", discharge)
-    
-    # Report dispatch schedule metrics
-    metrics = dispatch_schedule.get('validation_metrics', {})
-    if metrics:
-        print(f"Schedule validation:")
-        print(f"  Peak coverage: {metrics.get('peak_coverage_percentage', 0):.1f}%")
-        print(f"  Annual grid charging: {metrics.get('annual_grid_charging_kwh', 0):.1f} kWh")
-        print(f"  Annual efficiency losses: {metrics.get('annual_efficiency_losses_kwh', 0):.1f} kWh")
+def print_first_24h_dispatch_table(dispatch_schedule: Dict[str, Any]) -> None:
+    """Print the first 24 hours of the predictive dispatch schedule as a table.
 
-
-def run_model_and_extract_outputs(pv: Pvsamv1.Pvsamv1, load_profile: List[float]) -> Tuple:
-    """Execute PvSamv1 model and extract outputs in format compatible with original step9."""
-    pv.execute(0)
-    
-    outputs = pv.Outputs.export()
-    
-    # Extract power flows
-    system_to_load = outputs.get('system_to_load', [])
-    batt_to_load = outputs.get('batt_to_load', [])
-    grid_to_load = outputs.get('grid_to_load', [])
-    grid_to_batt = outputs.get('grid_to_batt', [])
-    system_to_batt = outputs.get('system_to_batt', [])
-    system_to_batt_dc = outputs.get('system_to_batt_dc', [])
-    system_to_grid = outputs.get('system_to_grid', [])
-    battery_soc = outputs.get('batt_SOC', [])
-    
-    # Handle sub-hourly timesteps by aggregating to hourly
-    def aggregate_to_hourly(data, expected_length=8760, is_power_flow=True):
-        """Convert sub-hourly data to hourly by summing (for power flows) or averaging (for SOC)."""
-        if not data or len(data) == expected_length:
-            return list(data)
-        
-        if len(data) % expected_length != 0:
-            print(f"Warning: Data length {len(data)} not evenly divisible by {expected_length}")
-            # Truncate to nearest multiple
-            data = data[:len(data) - (len(data) % expected_length)]
-        
-        # Calculate aggregation factor
-        factor = len(data) // expected_length
-        print(f"Aggregating sub-hourly data: {len(data)} points -> {expected_length} hourly (factor: {factor})")
-        
-        # Sum sub-hourly values for power flows (to get total energy per hour)
-        # Average for state variables like SOC
-        hourly_data = []
-        for i in range(expected_length):
-            start_idx = i * factor
-            end_idx = start_idx + factor
-            if is_power_flow:
-                # Sum power flows to get total energy per hour
-                hourly_value = sum(data[start_idx:end_idx])
-            else:
-                # Average state variables like SOC
-                hourly_value = sum(data[start_idx:end_idx]) / factor
-            hourly_data.append(hourly_value)
-        
-        return hourly_data
-    
-    # Aggregate all power flow arrays to hourly (sum sub-hourly values)
-    system_to_load = aggregate_to_hourly(system_to_load, is_power_flow=True)
-    batt_to_load = aggregate_to_hourly(batt_to_load, is_power_flow=True)
-    grid_to_load = aggregate_to_hourly(grid_to_load, is_power_flow=True)
-    grid_to_batt = aggregate_to_hourly(grid_to_batt, is_power_flow=True)
-    system_to_batt = aggregate_to_hourly(system_to_batt, is_power_flow=True)
-    system_to_batt_dc = aggregate_to_hourly(system_to_batt_dc, is_power_flow=True)
-    system_to_grid = aggregate_to_hourly(system_to_grid, is_power_flow=True)
-    
-    # Average SOC values (state variable, not power flow)
-    battery_soc = aggregate_to_hourly(battery_soc, is_power_flow=False)
-    
-    # Calculate combined flows
-    solar_battery_to_load = [s + b for s, b in zip(system_to_load, batt_to_load)]
-    total_supply = [s + b + g for s, b, g in zip(system_to_load, batt_to_load, grid_to_load)]
-    difference = [l - t for l, t in zip(load_profile, total_supply)]
-    
-    # Get capacities
-    try:
-        solar_capacity = pv.value("system_capacity")
-    except:
-        solar_capacity = pv.SystemDesign.system_capacity
-    
-    try:
-        battery_capacity = outputs.get('batt_bank_installed_capacity', BATTERY_CAPACITY_KWH)
-    except:
-        battery_capacity = BATTERY_CAPACITY_KWH
-    
-    return (system_to_load, batt_to_load, grid_to_load, solar_battery_to_load, total_supply, difference,
-            grid_to_batt, system_to_batt, system_to_batt_dc, system_to_grid, load_profile, battery_soc,
-            solar_capacity, battery_capacity)
-
-
-def log_first_day_power_allocation(county: str, load_profile: List[float], system_to_load: List[float],
-                                  batt_to_load: List[float], system_to_batt: List[float], 
-                                  system_to_grid: List[float], battery_soc: List[float]) -> None:
-    """Log the first-day power allocation table showing hour-by-hour energy flows."""
-    print(f"\n{'=' * 80}")
-    print(f"First-Day Power Allocation Table - {county}")
-    print(f"{'=' * 80}")
-    print(f"{'hour':>4} {'hod':>3}  {'Load(kWh)':>9}   {'PV(kWh)':>8}  {'PV->Batt':>8}  {'PV->Load':>8}  {'PV->Grid':>8}   {'Batt->Load':>9}  {'Batt(kWh)':>9}   {'Residual':>8}")
-    
-    # Calculate derived values for first 24 hours
-    for hour in range(24):
-        if hour >= len(load_profile):
-            break
-            
-        load = load_profile[hour]
-        pv_total = system_to_load[hour] + system_to_batt[hour] + system_to_grid[hour]
-        pv_to_batt = system_to_batt[hour] 
-        pv_to_load = system_to_load[hour]
-        pv_to_grid = system_to_grid[hour]
-        batt_to_load_val = batt_to_load[hour]
-        batt_energy = battery_soc[hour] * BATTERY_CAPACITY_KWH / 100.0  # Convert SOC% to kWh
-        
-        # Calculate residual (unmet load from grid)
-        residual = max(0, load - pv_to_load - batt_to_load_val)
-        
-        # Hour of day (hod) is just the hour within the day
-        hod = hour
-        
-        print(f"{hour:4d} {hod:3d}      {load:5.3f}     {pv_total:5.3f}     {pv_to_batt:5.3f}     {pv_to_load:5.3f}     {pv_to_grid:5.3f}         {batt_to_load_val:5.3f}       {batt_energy:5.3f}      {residual:5.3f}")
-
-
-def validate_and_save_results(county: str, load_profile: List[float], system_to_load: List[float], 
-                            batt_to_load: List[float], grid_to_load: List[float], 
-                            solar_battery_to_load: List[float], total_supply: List[float], 
-                            difference: List[float], output_file: str, grid_to_batt: List[float], 
-                            system_to_batt: List[float], system_to_batt_dc: List[float], 
-                            system_to_grid: List[float], load: List[float], battery_soc: List[float]) -> None:
-    """Validate results and save to CSV file (same format as original step9)."""
-    max_difference = max(abs(d) for d in difference)
-    
-    if max_difference > 1e-6:
-        print(f"Warning: Discrepancy found in {county}. Max difference: {max_difference}")
-    
-    os.makedirs(os.path.dirname(output_file), exist_ok=True)
-    date_range = pd.date_range(start='2018-01-01', periods=8760, freq='H')
-    
-    df = pd.DataFrame({
-        'Load Profile': load_profile,
-        'System to Load': system_to_load,
-        'Battery to Load': batt_to_load,
-        'Grid to Load': grid_to_load,
-        'Solar + Battery to Load': solar_battery_to_load,
-        'Total Supply': total_supply,
-        'Difference': difference,
-        'System to Battery': system_to_batt,
-        'Grid to Battery': grid_to_batt,
-        'Battery SOC': battery_soc,
-    }, index=date_range)
-    
-    log(
-        at="step9_pvsamv1_battery",
-        load_profile=format_load_profile(load_profile),
-        solar_to_load=format_load_profile(system_to_load),
-        battery_to_load=format_load_profile(batt_to_load),
-        grid_to_load=format_load_profile(grid_to_load),
-        solar_battery_to_load=format_load_profile(solar_battery_to_load),
-        total_supply=format_load_profile(total_supply),
-        difference=format_load_profile(difference),
-        grid_to_batt=format_load_profile(grid_to_batt),
-        system_to_batt=format_load_profile(system_to_batt),
-        system_to_batt_dc=format_load_profile(system_to_batt_dc),
-        system_to_grid=format_load_profile(system_to_grid),
-        load=format_load_profile(load),
-        saved_to=output_file,
-    )
-    
-    df.to_csv(output_file)
-
-
-def process(base_input_dir: str, base_output_dir: str, scenario: str, housing_type: str, 
-           counties: Optional[List[str]] = None, years_of_analysis: int = 1, force_recompute: bool = False):
-    """Main processing function - drop-in replacement for original step9 process function."""
-    scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
-    counties_to_run = get_counties(scenario_path, counties)
-    capacity_dict = {}
-    
-    for county in counties_to_run:
+    Columns:
+      hour, hod, GridCharge(%) and Discharge(%).
+    """
+    log_section("Predictive Dispatch Schedule - First 24 Hours")
+    grid = dispatch_schedule.get("dispatch_manual_percent_gridcharge", []) or []
+    discharge = dispatch_schedule.get("dispatch_manual_percent_discharge", []) or []
+    n = max(len(grid), len(discharge))
+    if n == 0:
+        print("No dispatch schedule data available.")
+        return
+    print("hour hod  GridCharge(%)  Discharge(%)")
+    for h in range(0, min(24, n)):
+        hod = h % 24
+        g = grid[h] if h < len(grid) else 0
+        d = discharge[h] if h < len(discharge) else 0
         try:
-            log(county=county)
-            
-            weather_file = os.path.join(base_input_dir, scenario, housing_type, county, f"weather_TMY_{county}.csv")
-            load_file = os.path.join(scenario_path, county, f"{LOADPROFILE_FILE_PREFIX}_{scenario}_{county}.csv")
-            output_file = os.path.join(base_output_dir, scenario, housing_type, county, f"{OUTPUT_LOADPROFILE_FILE_PREFIX}_{county}.csv")
-            
-            # Skip if output file already exists and force_recompute is False
-            if not force_recompute and os.path.exists(output_file):
-                print(f"Output file already exists: {output_file}. Skipping... (use force_recompute=True to rebuild)")
-                continue
-            
-            if not os.path.exists(weather_file):
-                print(f"Weather file not found: {weather_file}. Skipping...")
-                continue
-            if not os.path.exists(load_file):
-                print(f"Load file not found: {load_file}. Skipping...")
-                continue
-            
-            # Prepare data and compute system capacity
-            solar_resource_data, load_profile, system_capacity = prepare_data_and_compute_system_capacity(
-                weather_file, load_file, years_of_analysis)
-            
-            # Create PvSamv1 model with battery
-            pv = create_pvsamv1_model(solar_resource_data, load_profile, system_capacity, years_of_analysis)
-            
-            # Generate predictive dispatch schedule
-            dispatch_schedule = compose_battery_charge_schedule(
-                load_forecast=load_profile,
-                solar_forecast=None,  # Will be calculated after execution
-                battery_capacity_kwh=BATTERY_CAPACITY_KWH,
-                battery_efficiency=0.90,
-                min_soc=MIN_SOC,
-                max_soc=MAX_SOC
-            )
-            
-            # Apply dispatch schedule
-            apply_dispatch_schedule(pv, dispatch_schedule)
-            
-            # Run model and extract outputs
-            (system_to_load, batt_to_load, grid_to_load, solar_battery_to_load, total_supply, difference,
-             grid_to_batt, system_to_batt, system_to_batt_dc, system_to_grid, load, battery_soc,
-             solar_capacity, battery_capacity) = run_model_and_extract_outputs(pv, load_profile)
-            
-            capacity_dict[county] = {
-                "Solar Capacity (kW)": to_decimal_number(solar_capacity),
-                "Battery Capacity (kWh)": to_decimal_number(battery_capacity)
-            }
-            
-            # Log first-day power allocation table
-            log_first_day_power_allocation(county, load_profile, system_to_load, batt_to_load, 
-                                         system_to_batt, system_to_grid, battery_soc)
-            
-            validate_and_save_results(county, load_profile, system_to_load, batt_to_load, grid_to_load,
-                                    solar_battery_to_load, total_supply, difference, output_file,
-                                    grid_to_batt, system_to_batt, system_to_batt_dc, system_to_grid,
-                                    load, battery_soc)
-                                    
-        except Exception as e:
-            print(f"Error processing {county}: {e}")
-            import traceback
-            traceback.print_exc()
+            g = float(g)
+        except Exception:
+            pass
+        try:
+            d = float(d)
+        except Exception:
+            pass
+        print(f"{h:4d} {hod:3d}        {g:6.1f}         {d:6.1f}")
+
+def process(scenario: str = "baseline", county: str = "alameda") -> None:
+    cfg = configure(scenario, county)                                 # Configuration phase
+    presets = load_presets(cfg)                       # Presets phase
+    overrides = build_runtime_overrides(cfg)          # Runtime overrides
+    modules = initialize_modules()                    # Module lifecycle: create
+    configure_modules(modules, presets, overrides)    # Apply + checks
+    pv = modules.photovoltaic_model
+    attach_resources(pv, cfg, presets)                # Weather + household load
     
-    # Save capacity data
-    capital_costs_folder = f"{base_input_dir}/{scenario}/{housing_type}/{CAPITAL_COSTS_FOLDER_NAME}"
-    os.makedirs(capital_costs_folder, exist_ok=True)
+    # Get load forecast from attached load profile
+    load_forecast = load_series_kw_from_model(pv)
     
-    capacity_df = pd.DataFrame.from_dict(capacity_dict, orient='index').rename_axis('County')
-    output_csv_path = f"{capital_costs_folder}/{SOLAR_STORAGE_CAPACITY_PREFIX}.csv"
-    capacity_df.to_csv(output_csv_path)
+    # Generate predictive battery dispatch schedule
+    dispatch_schedule = compose_battery_charge_schedule(
+        load_forecast=load_forecast,
+        solar_forecast=None,  # Will be calculated after execution
+        battery_capacity_kwh=overrides.battery_capacity_kwh or 13.5,
+        battery_efficiency=overrides.battery_efficiency or 0.90,
+        min_soc=overrides.min_soc or 20.0,
+        max_soc=overrides.max_soc or 90.0
+    )
+    
+    # Log dispatch schedule validation metrics
+    log_section("Predictive Dispatch Schedule Results")
+    metrics = dispatch_schedule['validation_metrics']
+    print_first_24h_dispatch_table(dispatch_schedule)
+    print(f"Peak coverage: {metrics['peak_coverage_percentage']:.1f}% of days")
+    print(f"Annual grid charging: {metrics['annual_grid_charging_kwh']:.1f} kWh")
+    print(f"Annual efficiency losses: {metrics['annual_efficiency_losses_kwh']:.1f} kWh")
+    
+    # Apply the dispatch schedule configuration to SAM model
+    apply_dispatch_schedule(pv, dispatch_schedule, overrides)
+    
+    execute(pv)                                       # Execute model or raise
+    outputs = extract(pv)                             # Collect outputs
+    
+    
+    report(cfg, presets, outputs, pv)                 # Reporting/visualization
 
 
-# Example usage
-scenario = "heat_pump"
+scenario = "baseline"
 housing_type = "single-family-detached"
 
 if __name__ == '__main__':
-    process("data/loadprofiles", "data/loadprofiles", scenario, housing_type, 
-           ["Alameda County"], force_recompute=True)
+    # Update configuration based on parameters for the specified scenario and county
+    scenario = "baseline"
+    county = "alameda"
+    
+    # Set environment variables if needed
+    os.environ.setdefault("COUNTY_NAME", county)
+    
+    print(f"Running PvSAMv1 battery simulation for {county} county, {scenario} scenario")
+    
+    # Run the main processing pipeline
+    process(scenario, county)
