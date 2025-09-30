@@ -47,7 +47,7 @@ MAX_SOC = 80
 INITIAL_SOC = 50
 DISPATCH_MODE = 3 # Manual dispatch https://nrel-pysam.readthedocs.io/en/v7.1.0/modules/Pvsamv1.html#PySAM.Pvsamv1.Pvsamv1.BatteryDispatch.batt_dispatch_choice
 GRID_INTERCONNECTION_LIMIT_KWAC = 0
-CAN_EXPORT_TO_GRID = False
+CAN_EXPORT_TO_GRID = 0
 ENABLE_PREDICTIVE_DISPATCH = True
 BATTERY_EFFICIENCY = 5
 PEAK_START_HOUR = 16
@@ -707,9 +707,11 @@ def apply_runtime_overrides(pv: Pvsamv1.Pvsamv1, overrides: RuntimeOverrides) ->
     set_if_present("batt_dispatch_auto_btm_can_discharge_to_grid", overrides.can_export_to_grid)
     
     # Solar charging control flags (direct SAM parameter values)
-    set_if_present("dispatch_manual_system_charge_first", overrides.dispatch_manual_system_charge_first)
-    set_if_present("batt_dispatch_auto_can_charge", overrides.batt_dispatch_auto_can_charge)
-    set_if_present("batt_dispatch_charge_only_system_exceeds_load", overrides.batt_dispatch_charge_only_system_exceeds_load)
+    set_if_present("en_standalone_batt", 0)
+    set_if_present("dispatch_manual_system_charge_first", 1) # overrides.dispatch_manual_system_charge_first)
+    set_if_present("batt_dispatch_auto_can_charge", 1) # overrides.batt_dispatch_auto_can_charge)
+    set_if_present("batt_dispatch_auto_can_clipcharge", 1)
+    set_if_present("batt_dispatch_charge_only_system_exceeds_load", 1) # overrides.batt_dispatch_charge_only_system_exceeds_load)
     set_if_present("batt_dispatch_discharge_only_load_exceeds_system", overrides.batt_dispatch_discharge_only_load_exceeds_system)
     set_if_present("batt_dispatch_auto_can_gridcharge", overrides.batt_dispatch_auto_can_gridcharge)
     
@@ -757,14 +759,12 @@ def apply_dispatch_schedule(pv: Pvsamv1.Pvsamv1, dispatch_schedule: Dict[str, An
     # 3 means: peak discharge window
     # 4 means: summer peak discharge
     
-    # schedule_matrix = [[1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1]]
-    schedule_matrix = [[1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1]]
+    schedule_matrix = [[1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1]]
     schedule_matrix_weekend = [[ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ]]
     
     pv.value('dispatch_manual_sched', schedule_matrix)
     pv.value('dispatch_manual_sched_weekend', schedule_matrix_weekend)
     print(f"Applied period schedule: Night(1), Solar(2), Peak(3)")
-    # print(schedule_matrix)
 
     # Configure period actions based on generated dispatch schedule
     grid_charge_max = max(dispatch_schedule.get('dispatch_manual_percent_gridcharge', [0]))
@@ -772,22 +772,16 @@ def apply_dispatch_schedule(pv: Pvsamv1.Pvsamv1, dispatch_schedule: Dict[str, An
     
     # Period action configuration:
     # [Period1, Period2, Period3, Period4, Period5, Period6]
-    pv.value('dispatch_manual_charge', [1, 1, 1, 1, 1, 1]) # Charge during periods 1 and 2 # [1, 1, 0, 0, 0, 0]
-    pv.value("dispatch_manual_discharge", [ 1, 1, 1, 1, 0, 0 ]) # Dispatch during periods 3 and 4
+    pv.value('dispatch_manual_charge', [1, 1, 0, 0, 0, 0]) # Solar charge during all periods
+
+    pv.value("dispatch_manual_discharge", [ 1, 1, 1, 1, 0, 0 ]) # Dispatch during periods 1, 2, 3 and 4
 
     pv.value("dispatch_manual_btm_discharge_to_grid", [ 0, 0, 0, 0, 0, 0 ]) # No grid discharge ever
     pv.value("dispatch_manual_gridcharge", [ 1, 0, 0, 0, 0, 0 ]) # Grid charge during period 1
 
-    pv.value("dispatch_manual_percent_gridcharge", [80, 0, 0, 0, 0, 0])
-    pv.value('dispatch_manual_percent_discharge', [ 0, 0, 100, 100, 0, 0 ]) # Dispatch manually in periods 3 and 4 to the max (3 and 4 overlap in the summer)
+    pv.value("dispatch_manual_percent_gridcharge", [100, 0, 0, 0, 0, 0])
+    pv.value('dispatch_manual_percent_discharge', [ 0, 0, 10, 10, 0, 0 ]) # Dispatch manually in periods 3 and 4 at a rate of 10%
     
-
-
-    # pv.value('dispatch_manual_percent_discharge', [0, 0, discharge_max, 0, 0, 0])
-    # pv.value('dispatch_manual_percent_gridcharge', [0, grid_charge_max, 0, 0, 0, 0])
-    # pv.value('dispatch_manual_btm_discharge_to_grid', [0, 0, 0, 0, 0, 0])  # No grid export
-    
-    # print(f"Period actions: Grid charge (Period 2): {grid_charge_max}%, Discharge (Period 3): {discharge_max}%")
     
     # =======================
     # SOLAR CHARGING PRIORITY AND CONTROL FLAGS
@@ -802,7 +796,7 @@ def apply_dispatch_schedule(pv: Pvsamv1.Pvsamv1, dispatch_schedule: Dict[str, An
     print(f"✓ PV charging capability: {overrides.batt_dispatch_auto_can_charge}")
     
     # Smart solar charging - only charge when solar exceeds load
-    pv.value('batt_dispatch_charge_only_system_exceeds_load', overrides.batt_dispatch_charge_only_system_exceeds_load)
+    pv.value('batt_dispatch_charge_only_system_exceeds_load', 0) # overrides.batt_dispatch_charge_only_system_exceeds_load)
     print(f"✓ Smart solar charging: {overrides.batt_dispatch_charge_only_system_exceeds_load}")
     
     # Smart discharge - only discharge when load exceeds solar
@@ -810,7 +804,7 @@ def apply_dispatch_schedule(pv: Pvsamv1.Pvsamv1, dispatch_schedule: Dict[str, An
     print(f"✓ Smart discharge: {overrides.batt_dispatch_discharge_only_load_exceeds_system}")
     
     # Grid charging control - allow schedule to dynamically override this setting
-    grid_charging_enabled = 1 if (grid_charge_max > 0 and overrides.batt_dispatch_auto_can_gridcharge == 1) else 0
+    grid_charging_enabled = 1 # if (grid_charge_max > 0 and overrides.batt_dispatch_auto_can_gridcharge == 1) else 0
     pv.value('batt_dispatch_auto_can_gridcharge', grid_charging_enabled)
     print(f"✓ Grid charging: {grid_charging_enabled} (schedule-driven)")
     
@@ -835,7 +829,7 @@ def apply_dispatch_schedule(pv: Pvsamv1.Pvsamv1, dispatch_schedule: Dict[str, An
         # Note: Battery capacity is typically set in the JSON preset files
         # These parameters may be read-only depending on the SAM configuration
         try:
-            pv.value('batt_capacity', overrides.battery_capacity_kwh)
+            pv.value('batt_computed_bank_capacity', overrides.battery_capacity_kwh)
             print(f"✓ Battery capacity: {overrides.battery_capacity_kwh} kWh")
         except Exception:
             print(f"⚠ Battery capacity setting failed (may be preset-controlled)")
