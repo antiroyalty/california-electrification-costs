@@ -264,7 +264,7 @@ def print_first_day_flow_table(pv: Pvsamv1.Pvsamv1, day_index: int = 0) -> None:
     """Print a first-day hourly allocation table with PV and battery flows.
 
     Columns:
-      hour, hod, PV(kWh), PV->Batt, PV->Load, PV->Grid, Batt->Load, Batt(kWh), Residual
+      hour, hod, Load(kWh), PV(kWh), PV->Batt, PV->Load, PV->Grid, Batt->Load, Batt(kWh), Residual
     Residual = PV(kWh) - (PV->Batt + PV->Load + PV->Grid)
     """
     log_section("First-Day Power Allocation Table")
@@ -278,6 +278,8 @@ def print_first_day_flow_table(pv: Pvsamv1.Pvsamv1, day_index: int = 0) -> None:
     sG = arr("system_to_grid")
     bL = arr("batt_to_load")
     soc = arr("batt_SOC")
+    # Get total load profile from the model
+    load_profile = _load_series(pv)
     # Define PV(kWh) as the sum of PV flows to avoid negative night values
     gen_flows = sB + sL + sG
 
@@ -313,14 +315,15 @@ def print_first_day_flow_table(pv: Pvsamv1.Pvsamv1, day_index: int = 0) -> None:
     start = day_index * 24
     end = start + 24
 
-    nmax = max(gen_flows.size, sB.size, sL.size, sG.size, bL.size, batt_kwh.size)
+    nmax = max(gen_flows.size, sB.size, sL.size, sG.size, bL.size, batt_kwh.size, load_profile.size)
     if nmax == 0:
         print("No outputs available to build table.")
         return
 
-    print("hour hod   PV(kWh)  PV->Batt  PV->Load  PV->Grid   Batt->Load  Batt(kWh)   Residual")
+    print("hour hod  Load(kWh)   PV(kWh)  PV->Batt  PV->Load  PV->Grid   Batt->Load  Batt(kWh)   Residual")
     for h in range(start, min(end, nmax)):
         hod = h % 24
+        load = load_profile[h] if h < load_profile.size else 0.0
         g = gen_flows[h] if h < gen_flows.size else 0.0
         sb = sB[h] if h < sB.size else 0.0
         sl = sL[h] if h < sL.size else 0.0
@@ -331,7 +334,7 @@ def print_first_day_flow_table(pv: Pvsamv1.Pvsamv1, day_index: int = 0) -> None:
         residual = g - (sb + sl + sg)
         print(
             f"{h:4d} {hod:3d}  "
-            f"{g:8.3f}  {sb:8.3f}  {sl:8.3f}  {sg:8.3f}   {bl:11.3f}  {bk:10.3f}  {residual:9.3f}"
+            f"{load:9.3f}  {g:8.3f}  {sb:8.3f}  {sl:8.3f}  {sg:8.3f}   {bl:11.3f}  {bk:10.3f}  {residual:9.3f}"
         )
 
 
@@ -381,19 +384,27 @@ def _flow_series(pv: Pvsamv1.Pvsamv1) -> Tuple[np.ndarray, np.ndarray, np.ndarra
         return np.asarray(out.get(k, []), dtype=float).ravel()
     return arr("system_to_load"), arr("batt_to_load"), arr("grid_to_load")
 
+def _battery_charging_series(pv: Pvsamv1.Pvsamv1) -> Tuple[np.ndarray, np.ndarray]:
+    out = pv.Outputs.export()
+    def arr(k: str) -> np.ndarray:
+        return np.asarray(out.get(k, []), dtype=float).ravel()
+    return arr("system_to_batt"), arr("grid_to_batt")
 
-def _plot_six_panel_weeks(
+
+def _plot_eight_panel_weeks(
     load_ser: np.ndarray,
     soc_ser: np.ndarray,
     pv_ser: np.ndarray,
     pv_to_load: np.ndarray,
     batt_to_load: np.ndarray,
     grid_to_load: np.ndarray,
+    pv_to_batt: np.ndarray,
+    grid_to_batt: np.ndarray,
     min_soc_line: float | None,
     max_soc_line: float | None,
 ) -> None:
-    """Create a single figure with 6 panels and highlight 4–9pm peak windows daily.
-    Rows: Load, Battery SOC, Solar AC (PV). Col 1: First week of January. Col 2: First week of July.
+    """Create a single figure with 8 panels and highlight 4–9pm peak windows daily.
+    Rows: Load, Battery SOC, Solar AC (PV), Battery Charging Sources. Col 1: First week of January. Col 2: First week of July.
     Adds light red shading for each day's 4–9pm (16–21) peak period across all panels.
     """
     week_len = 24 * 7
@@ -412,7 +423,7 @@ def _plot_six_panel_weeks(
         y = s[start:end]
         return x, y
 
-    fig, axes = plt.subplots(3, 2, figsize=(14, 9), sharex="col")
+    fig, axes = plt.subplots(4, 2, figsize=(14, 12), sharex="col")
 
     # Top row: load breakdown by source (stacked area)
     for c, start, title in [
@@ -475,7 +486,7 @@ def _plot_six_panel_weeks(
         if lab:
             ax.legend(loc="upper right", fontsize=8, framealpha=0.8)
 
-    # Bottom row: PV AC lines with peak shading
+    # Third row: PV AC lines with peak shading
     for c, start, title in [
         (0, first_week_start, "Solar AC (PV) - First Week January"),
         (1, july_start, "Solar AC (PV) - First Week July"),
@@ -495,8 +506,41 @@ def _plot_six_panel_weeks(
         ax.set_title(title)
         ax.set_ylabel("kW")
         ax.grid(True, alpha=0.3)
-    axes[2, 0].set_xlabel("Hour")
-    axes[2, 1].set_xlabel("Hour")
+
+    # Bottom row: Battery charging sources (stacked area)
+    for c, start, title in [
+        (0, first_week_start, "Battery Charging Sources - First Week January"),
+        (1, july_start, "Battery Charging Sources - First Week July"),
+    ]:
+        ax = axes[3, c]
+        # Shade daily 4–9pm windows in the background
+        for d in range(7):
+            ax.axvspan(d * 24 + peak_start_hour, d * 24 + peak_end_hour, color="#d62728", alpha=0.10, zorder=0)
+        xPVB, PVB = _slice(pv_to_batt, start)
+        xGB, GB = _slice(grid_to_batt, start)
+        if PVB.size == 0 or GB.size == 0:
+            ax.text(0.5, 0.5, "No data", transform=ax.transAxes, ha="center", va="center")
+            ax.set_title(title)
+            ax.set_ylabel("kW")
+            ax.grid(True, alpha=0.3)
+            continue
+        # Clip negative values to zero for stacked plot
+        PVB = np.clip(PVB, 0.0, None)
+        GB = np.clip(GB, 0.0, None)
+        # Stack solar and grid charging
+        ax.stackplot(xPVB, PVB, GB,
+                     labels=["Solar→Battery", "Grid→Battery"],
+                     colors=["#ff7f0e", "#1f77b4"], alpha=0.8)
+        # Plot total charging as a line
+        total_charging = PVB + GB
+        ax.plot(xPVB, total_charging, color="#000000", lw=1.2, label="Total Charging")
+        ax.set_title(title)
+        ax.set_ylabel("kW")
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc="upper right", fontsize=8, framealpha=0.8)
+
+    axes[3, 0].set_xlabel("Hour")
+    axes[3, 1].set_xlabel("Hour")
     fig.tight_layout()
     plt.show()
 
@@ -712,17 +756,10 @@ def apply_dispatch_schedule(pv: Pvsamv1.Pvsamv1, dispatch_schedule: Dict[str, An
     # 2 means: solar charging window
     # 3 means: peak discharge window
     # 4 means: summer peak discharge
-    print(schedule_matrix)
     
+    # schedule_matrix = [[1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1]]
     schedule_matrix = [[1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 1, 1]]
     schedule_matrix_weekend = [[ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ], [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ]]
-    
-    print("schedule_matrix:")
-    print(schedule_matrix[1])
-    print("monthly_schedule_matrix_from_json")
-    print(monthly_schedule_matrix_from_json[1])
-    print("my_schedule_matrix")
-    print(my_schedule_matrix[1])
     
     pv.value('dispatch_manual_sched', schedule_matrix)
     pv.value('dispatch_manual_sched_weekend', schedule_matrix_weekend)
@@ -735,12 +772,13 @@ def apply_dispatch_schedule(pv: Pvsamv1.Pvsamv1, dispatch_schedule: Dict[str, An
     
     # Period action configuration:
     # [Period1, Period2, Period3, Period4, Period5, Period6]
-    pv.value('dispatch_manual_charge', [1, 1, 0, 0, 0, 0]) # Charge during periods 1 and 2
-    pv.value("dispatch_manual_discharge", [ 1, 1, 1, 1, 1, 0 ]) # Dispatch during periods 3 and 4
+    pv.value('dispatch_manual_charge', [1, 1, 1, 1, 1, 1]) # Charge during periods 1 and 2 # [1, 1, 0, 0, 0, 0]
+    pv.value("dispatch_manual_discharge", [ 1, 1, 1, 1, 0, 0 ]) # Dispatch during periods 3 and 4
+
     pv.value("dispatch_manual_btm_discharge_to_grid", [ 0, 0, 0, 0, 0, 0 ]) # No grid discharge ever
     pv.value("dispatch_manual_gridcharge", [ 1, 0, 0, 0, 0, 0 ]) # Grid charge during period 1
 
-    pv.value("dispatch_manual_percent_gridcharge", [100, 0, 0, 0, 0, 0])
+    pv.value("dispatch_manual_percent_gridcharge", [80, 0, 0, 0, 0, 0])
     pv.value('dispatch_manual_percent_discharge', [ 0, 0, 100, 100, 0, 0 ]) # Dispatch manually in periods 3 and 4 to the max (3 and 4 overlap in the summer)
     
 
@@ -1350,15 +1388,19 @@ def report(cfg: SimulationConfiguration, presets: SamPresetFiles, outputs: Simul
         sL = outputs.solar_to_load_series_kw
         bL = outputs.battery_to_load_series_kw
         gL = outputs.grid_to_load_series_kw
+        # Get battery charging flows
+        pv_to_batt, grid_to_batt = _battery_charging_series(pv)
         min_soc = read_soc_bounds(pv).min_soc
         max_soc = read_soc_bounds(pv).max_soc
-        _plot_six_panel_weeks(
+        _plot_eight_panel_weeks(
             np.array(outputs.load_series_kw, dtype=float),
             np.array(outputs.state_of_charge_series_percent, dtype=float),
             np.array(outputs.solar_ac_power_series_kw, dtype=float),
             np.array(sL, dtype=float),
             np.array(bL, dtype=float),
             np.array(gL, dtype=float),
+            pv_to_batt,
+            grid_to_batt,
             min_soc,
             max_soc,
         )
