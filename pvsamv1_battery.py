@@ -780,7 +780,7 @@ def apply_dispatch_schedule(pv: Pvsamv1.Pvsamv1, dispatch_schedule: Dict[str, An
     pv.value("dispatch_manual_btm_discharge_to_grid", [ 0, 0, 0, 0, 0, 0 ]) # No grid discharge ever
 
     pv.value("dispatch_manual_gridcharge", [ 1, 1, 0, 0, 0, 0 ]) # Grid charge during period 1
-    pv.value("dispatch_manual_percent_gridcharge", [100, 100, 0, 0, 0, 0])
+    pv.value("dispatch_manual_percent_gridcharge", [50, 50, 0, 0, 0, 0])
 
     
     # =======================
