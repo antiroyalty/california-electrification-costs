@@ -11,4 +11,7 @@ Available modules:
 - maps_helpers: Geographic mapping and visualization utilities
 - capital_costs_helper: Capital cost calculations and incentive handling
 - payback_period_helper: Payback period analysis functions
+- custom_dispatch_logging: Logging helpers for custom battery dispatch
 """
+
+from .custom_dispatch_logging import log_profiles, summarize_series
