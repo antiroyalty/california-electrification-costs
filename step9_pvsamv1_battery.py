@@ -1003,13 +1003,41 @@ def attach_weather_resource_to_pvsam(pv: Pvsamv1.Pvsamv1, cfg: SimulationConfigu
     
     # CONFIGURABLE: Set timezone override or leave as-is
     # For testing, you can change this value or comment out the override
-    APPLY_TIMEZONE_OVERRIDE = True  # Set to True to enable timezone override for testing
-    TIMEZONE_VALUE = 8  # Try positive 8 instead of negative 8
+    # Try combining both timezone setting AND data shifting for UTC->Pacific Time conversion
+    APPLY_TIMEZONE_OVERRIDE = True  # Disable timezone override for now
+    APPLY_TIME_SHIFT = True  # Enable 8-hour time shift to convert UTC->Pacific
+    SHIFT_HOURS = 8  # UTC to Pacific Time shift
+    
+    if APPLY_TIME_SHIFT and SHIFT_HOURS != 0:
+        # Apply time shift to weather data arrays (UTC to Pacific Time)
+        hourly_keys = ["dn", "df", "gh", "tdry", "tdew", "rhum", "wdir", "wspd"]
+        for key in hourly_keys:
+            if key in srd and isinstance(srd[key], (list, tuple)) and len(srd[key]) == 8760:
+                arr = list(srd[key])
+                # Store original GHI for comparison if this is the GHI key
+                if key == "gh":
+                    original_gh = arr[:24]  # First 24 hours before shift
+                # Shift data: positive shift moves data earlier (UTC->PST needs +8 hour shift)
+                srd[key] = [arr[(i + SHIFT_HOURS) % 8760] for i in range(8760)]
+                # Print GHI comparison for specific counties
+                if key == "gh":
+                    shifted_gh = srd[key][:24]  # First 24 hours after shift
+                    county_name = cfg.county_slug.replace('-', ' ').title()
+                    if 'alameda' in cfg.county_slug.lower() or 'alpine' in cfg.county_slug.lower():
+                        print(f"\n=== GHI ANALYSIS FOR {county_name.upper()} ===")
+                        print(f"Original GHI (first 24h): {[round(x, 1) for x in original_gh]}")
+                        print(f"Shifted GHI (first 24h):  {[round(x, 1) for x in shifted_gh]}")
+                        max_orig = max(original_gh)
+                        max_shift = max(shifted_gh)
+                        max_orig_hour = original_gh.index(max_orig)
+                        max_shift_hour = shifted_gh.index(max_shift)
+                        print(f"Peak GHI: {max_orig:.1f} W/m² at hour {max_orig_hour} → {max_shift:.1f} W/m² at hour {max_shift_hour}")
+        print(f"Applied {SHIFT_HOURS}h time shift to weather data (UTC->Pacific)")
     
     if APPLY_TIMEZONE_OVERRIDE:
-        # Try different timezone values to find the correct one
-        srd["tz"] = TIMEZONE_VALUE
-        print(f"Weather timezone (override): {TIMEZONE_VALUE}")
+        # Set timezone field (currently disabled)
+        srd["tz"] = -8
+        print(f"Weather timezone (override): -8 (Pacific Time)")
     else:
         print(f"Weather timezone (no override): using original {current_tz}")
     
@@ -1117,12 +1145,13 @@ def attach_resources(pv: Pvsamv1.Pvsamv1, cfg: SimulationConfiguration, presets:
 # ==========
 
 
-def execute_pvsam(pv: Pvsamv1.Pvsamv1) -> bool:
+def execute_pvsam(pv: Pvsamv1.Pvsamv1, county_slug: str = "") -> bool:
     try:
         pv.execute(0)
         
         # ==== DIAGNOSTIC: Solar Generation Profile Analysis ====
-        print("\n=== SOLAR GENERATION DIAGNOSTIC LOGGING ===")
+        county_name = county_slug.replace('-', ' ').title() if county_slug else "Unknown"
+        print(f"\n=== SOLAR GENERATION DIAGNOSTIC LOGGING - {county_name.upper()} ===")
         
         try:
             out = pv.Outputs.export()
@@ -1137,11 +1166,29 @@ def execute_pvsam(pv: Pvsamv1.Pvsamv1) -> bool:
                 total_solar = [a + b + c for a, b, c in zip(system_to_load, system_to_batt, system_to_grid)]
                 
                 if len(total_solar) >= 24:
-                    print(f"Solar Generation Analysis:")
+                    print(f"Solar Generation Analysis for {county_name}:")
                     print(f"  Profile length: {len(total_solar)} hours")
                     print(f"  Annual total: {sum(total_solar):.2f} kWh")
                     print(f"  Peak generation: {max(total_solar):.3f} kW")
                     print(f"  Average generation: {sum(total_solar)/len(total_solar):.3f} kW")
+                    
+                    # Special detailed output for Alameda and Alpine
+                    if 'alameda' in county_slug.lower() or 'alpine' in county_slug.lower():
+                        print(f"\n  *** DETAILED {county_name.upper()} SOLAR ANALYSIS ***")
+                        print(f"  Annual solar kWh: {sum(total_solar):.1f}")
+                        print(f"  First 24h solar (kW): {[round(x, 3) for x in total_solar[:24]]}")
+                        print(f"  Midday hours 10-15 (kW): {[round(x, 3) for x in total_solar[10:16]]}")
+                        print(f"  Evening hours 16-21 (kW): {[round(x, 3) for x in total_solar[16:22]]}")
+                        
+                        # Find daily peak pattern for first week
+                        for day in range(7):
+                            day_start = day * 24
+                            day_end = day_start + 24
+                            daily_solar = total_solar[day_start:day_end]
+                            daily_peak = max(daily_solar)
+                            peak_hour = daily_solar.index(daily_peak)
+                            print(f"  Day {day+1} peak: {daily_peak:.3f} kW at hour {peak_hour}")
+                        print(f"  *** END {county_name.upper()} DETAILS ***")
                     
                     # Find peak generation time
                     max_gen = max(total_solar)
@@ -1186,8 +1233,8 @@ def execute_pvsam(pv: Pvsamv1.Pvsamv1) -> bool:
         raise RuntimeError(f"Pvsamv1 execution failed: {e}")
 
 
-def execute(pv: Pvsamv1.Pvsamv1) -> None:
-    execute_pvsam(pv)
+def execute(pv: Pvsamv1.Pvsamv1, county_slug: str = "") -> None:
+    execute_pvsam(pv, county_slug)
 
 
 # ============
@@ -1750,7 +1797,7 @@ def process_single_county(base_input_dir: str, base_output_dir: str, scenario: s
     # Apply the dispatch schedule configuration to SAM model
     apply_dispatch_schedule(pv, dispatch_schedule, overrides)
     
-    execute(pv)                                       # Execute model or raise
+    execute(pv, county_slug)                          # Execute model or raise
     outputs = extract(pv)                             # Collect outputs
     
     # Save results in format expected by step10
