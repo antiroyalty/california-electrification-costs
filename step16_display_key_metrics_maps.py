@@ -26,7 +26,8 @@ from helpers.maps_helpers import (
     add_centroid_labels, add_map_title, export_geojson_and_html,
     get_latest_csv_file
 )
-from main_helpers import log, slugify_county_name, to_decimal_number, norcal_counties, central_counties, socal_counties
+from main_helpers import log, slugify_county_name, to_decimal_number, get_scenario_path, norcal_counties, central_counties, socal_counties
+from helpers.utility_helpers import get_utility_for_county
 
 
 def format_currency_with_sign(value: float) -> str:
@@ -51,16 +52,16 @@ def format_payback_period(years: float) -> str:
 
 # Bin ranges for map visualizations
 SOLAR_SIZE_BINS = [0, 2, 4, 6, 8, 10, 12, 15, 20]
-ENERGY_CONSUMPTION_BINS = [0, 10000, 20000, 30000, 40000, 50000, 60000, 80000, 100000]
+ENERGY_CONSUMPTION_BINS = [0, 2500, 5000, 7500, 10000, 12500, 15000, 17500, 200000]
 ELECTRICITY_BILL_BINS = [0, 1000, 2000, 3000, 4000, 5000, 6000, 8000, 10000]
 GAS_BILL_BINS = [0, 500, 1000, 1500, 2000, 2500, 3000, 4000]
 SAVINGS_BINS = [-2000, -1000, -500, 0, 500, 1000, 1500, 2000, 3000]
 CAPITAL_COSTS_BINS = [-1000, 0, 5000, 10000, 15000, 20000, 25000, 30000, 40000, 50000, 100000]
 PAYBACK_PERIOD_BINS = [0, 5, 10, 15, 20, 25, 30, 50, 100]
-NET_GRID_CONSUMPTION_BINS = [0, 5000, 10000, 15000, 20000, 25000, 30000, 40000, 50000]
+NET_GRID_CONSUMPTION_BINS = [0, 2500, 5000, 7500, 10000, 12500, 15000,]
 TOTAL_ELECTRICITY_CONSUMPTION_BINS = [0, 2000, 4000, 6000, 8000, 10000, 12000, 14000, 16000]
-BATTERY_ENERGY_BINS = [0, 1000, 2000, 3000, 4000, 5000, 6000, 8000, 10000]
-SOLAR_ENERGY_BINS = [0, 5000, 10000, 15000, 20000, 25000, 30000, 40000, 50000]
+BATTERY_ENERGY_BINS = [0, 500, 1000, 1500, 2000, 2500, 3000]
+SOLAR_ENERGY_BINS = [0, 2500, 5000, 7500]
 
 
 def load_solar_data(base_input_dir: str, scenario: str, housing_type: str, county_slug: str) -> float:
@@ -176,7 +177,7 @@ def load_capital_costs_data(
 ) -> float:
     """
     Load capital costs for the scenario from step15 capital costs files.
-    Returns the total net cost for all appliances with full incentives.
+    Returns the net outlay with PV/Storage under full incentives (to match payback numerator).
     """
     # Capital costs files are in base_input_dir/capital_costs/
     capital_costs_dir = os.path.join(base_input_dir, "capital_costs")
@@ -184,42 +185,44 @@ def load_capital_costs_data(
         print(f"Warning: Capital costs directory not found: {capital_costs_dir}")
         return 0.0
     
-    # Look for the detailed file: capital_costs_{scenario}_{housing_type}.csv
     base_name = f"{scenario}_{housing_type.replace('-', '_')}"
-    capital_costs_file = f"capital_costs_{base_name}.csv"
-    file_path = os.path.join(capital_costs_dir, capital_costs_file)
-    
+    summary_with_pv = os.path.join(capital_costs_dir, f"capital_costs_summary_with_pv_{base_name}.csv")
+
+    # Preferred source: summary with PV, using net_outlay_full_with_pv
+    if os.path.exists(summary_with_pv):
+        try:
+            df = pd.read_csv(summary_with_pv, low_memory=False)
+            row = df[df['county_slug'] == county_slug]
+            if row.empty:
+                print(f"Warning: No capital summary with PV for {county_slug}")
+                return 0.0
+            if 'net_outlay_full_with_pv' in row.columns:
+                return float(row.iloc[0]['net_outlay_full_with_pv'])
+            elif 'net_outlay_full' in row.columns:
+                return float(row.iloc[0]['net_outlay_full'])
+            else:
+                print(f"Warning: net_outlay columns missing in {summary_with_pv}")
+                return 0.0
+        except Exception as exc:
+            print(f"Warning: could not parse {summary_with_pv}: {exc}")
+            return 0.0
+
+    # Fallback: legacy detailed ledger sum
+    file_path = os.path.join(capital_costs_dir, f"capital_costs_{base_name}.csv")
     if not os.path.exists(file_path):
         print(f"Warning: Capital costs file not found: {file_path}")
         return 0.0
-    
     try:
         df = pd.read_csv(file_path, low_memory=False)
-        
-        # Convert county_slug back to county name for matching
         county_name = county_slug.replace("-", " ").title()
         if not county_name.endswith(" County"):
             county_name += " County"
-        
-        # Filter for this county and full incentives scenario
-        county_data = df[
-            (df['county'].str.contains(county_name.replace(" County", ""), case=False, na=False)) &
-            (df['incentive_scenario'] == 'full_incentives')
-        ]
-        
+        county_data = df[(df['county'].str.contains(county_name.replace(" County", ""), case=False, na=False)) &
+                         (df['incentive_scenario'] == 'full_incentives')]
         if county_data.empty:
             print(f"Warning: No capital costs data found for {county_name} with full incentives")
             return 0.0
-        
-        # Check if net_cost column exists
-        if 'net_cost' not in df.columns:
-            print(f"Warning: net_cost column not found in {file_path}")
-            return 0.0
-        
-        # Sum up all net costs for this county with full incentives
-        total_net_cost = county_data['net_cost'].sum()
-        return float(total_net_cost)
-        
+        return float(county_data['net_cost'].sum())
     except Exception as exc:
         print(f"Warning: could not parse capital costs file {file_path}: {exc}")
         return 0.0
@@ -275,6 +278,204 @@ def load_payback_period_data(
         
     except Exception as exc:
         print(f"Warning: could not parse payback periods file {payback_file}: {exc}")
+        return 0.0
+
+
+def load_capital_component(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+    component: str
+) -> float:
+    """
+    Load a single PV/Storage component value from capital_costs_summary_with_pv file.
+    Component should be one of: pv_capex, storage_capex, pv_incentives_full,
+    storage_incentives_full, pv_storage_net_full.
+    """
+    capital_costs_dir = os.path.join(base_input_dir, "capital_costs")
+    base_name = f"{scenario}_{housing_type.replace('-', '_')}"
+    summary_with_pv = os.path.join(capital_costs_dir, f"capital_costs_summary_with_pv_{base_name}.csv")
+    if not os.path.exists(summary_with_pv):
+        print(f"Warning: capital costs summary with PV not found: {summary_with_pv}")
+        return 0.0
+    try:
+        df = pd.read_csv(summary_with_pv, low_memory=False)
+        row = df[df['county_slug'] == county_slug]
+        if row.empty or component not in row.columns:
+            print(f"Warning: {component} not available for {county_slug}")
+            return 0.0
+        return float(row.iloc[0][component])
+    except Exception as exc:
+        print(f"Warning: could not parse {summary_with_pv}: {exc}")
+        return 0.0
+
+
+def load_effective_electricity_price(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str
+) -> float:
+    """
+    Effective price ($/kWh) ≈ min annual_electricity_cost among utility tariffs / annual_kWh (default scenario).
+    Uses results/electricity CSV for costs and loadprofiles_for_rates for kWh.
+    """
+    try:
+        # Annual kWh from loadprofiles_for_rates
+        county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+        lfr_path = os.path.join(county_dir, f"loadprofiles_for_rates_{county_slug}.csv")
+        if not os.path.exists(lfr_path):
+            return 0.0
+        df_lfr = pd.read_csv(lfr_path, low_memory=False)
+        if 'default.electricity.kwh' not in df_lfr.columns:
+            return 0.0
+        annual_kwh = float(df_lfr['default.electricity.kwh'].sum())
+        if annual_kwh <= 0:
+            return 0.0
+
+        # Annual electricity cost from results/electricity for this county & scenario
+        scen_path = get_scenario_path(base_input_dir, scenario, housing_type)
+        elec_dir = os.path.join(scen_path, county_slug, 'results', 'electricity')
+        res_path = get_latest_csv_file(elec_dir, f"RESULTS_electricity_annual_costs_{county_slug}")
+        df = pd.read_csv(res_path, index_col='scenario')
+        # Select the scenario row (not .solarstorage)
+        if scenario in df.index:
+            row = df.loc[scenario]
+        else:
+            # Fallback to first row
+            row = df.iloc[0]
+        util = get_utility_for_county(county_slug)
+        # Filter columns for this utility
+        cols = [c for c in row.index if c.startswith(f"electricity.{util}.")]
+        if not cols:
+            cols = [c for c in row.index if c.startswith("electricity.")]
+        if not cols:
+            return 0.0
+        # Choose minimum annual cost among available tariffs for this utility
+        annual_cost = float(min(row[c] for c in cols if pd.notnull(row[c])))
+        return annual_cost / annual_kwh if annual_kwh > 0 else 0.0
+    except Exception as exc:
+        print(f"Warning: could not compute effective price for {county_slug}: {exc}")
+        return 0.0
+
+
+def load_total_solar_generation_kwh(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str
+) -> float:
+    """
+    Total PV generation ≈ (System to Load) + (System to Battery) [+ (System to Grid) if present].
+    """
+    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+    candidates = [
+        os.path.join(county_dir, f"sam_optimized_load_profiles_{county_slug}.csv"),
+        os.path.join(county_dir, f"sam_optimized_load_profiles_{scenario}_{county_slug}.csv"),
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            try:
+                df = pd.read_csv(path)
+                val = 0.0
+                if 'System to Load' in df.columns:
+                    val += float(df['System to Load'].sum())
+                if 'System to Battery' in df.columns:
+                    val += float(df['System to Battery'].sum())
+                if 'System to Grid' in df.columns:
+                    val += float(df['System to Grid'].sum())
+                return val
+            except Exception as exc:
+                print(f"Warning: could not parse PV generation from {path}: {exc}")
+    return 0.0
+
+
+def load_pv_capacity_factor(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str
+) -> float:
+    """
+    Capacity factor = total PV generation (kWh) / (solar_kw × 8760).
+    """
+    gen = load_total_solar_generation_kwh(base_input_dir, scenario, housing_type, county_slug)
+    # Get solar size
+    capital_costs_dir = os.path.join(base_input_dir, "capital_costs")
+    base_name = f"{scenario}_{housing_type.replace('-', '_')}"
+    summary_with_pv = os.path.join(capital_costs_dir, f"capital_costs_summary_with_pv_{base_name}.csv")
+    if not os.path.exists(summary_with_pv) or gen <= 0:
+        return 0.0
+    try:
+        df = pd.read_csv(summary_with_pv, low_memory=False)
+        row = df[df['county_slug'] == county_slug]
+        if row.empty or 'solar_kw' not in row.columns:
+            return 0.0
+        kw = float(row.iloc[0]['solar_kw'])
+        if kw <= 0:
+            return 0.0
+        return gen / (kw * 8760.0)
+    except Exception as exc:
+        print(f"Warning: could not compute capacity factor for {county_slug}: {exc}")
+        return 0.0
+
+
+def load_self_supply_ratio(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str
+) -> float:
+    """
+    Self-supply ratio = 1 − (Grid to Load kWh / Load Profile kWh)
+    """
+    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+    for pattern in [
+        f"sam_optimized_load_profiles_{county_slug}.csv",
+        f"sam_optimized_load_profiles_{scenario}_{county_slug}.csv"
+    ]:
+        path = os.path.join(county_dir, pattern)
+        if os.path.exists(path):
+            try:
+                df = pd.read_csv(path)
+                if 'Grid to Load' in df.columns and 'Load Profile' in df.columns:
+                    grid = float(df['Grid to Load'].sum())
+                    load = float(df['Load Profile'].sum())
+                    return 1.0 - (grid / load) if load > 0 else 0.0
+            except Exception as exc:
+                print(f"Warning: could not compute self-supply for {county_slug}: {exc}")
+    return 0.0
+
+
+def load_peak_period_load_share(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str
+) -> float:
+    """
+    Peak-period load share = sum(load 16–21) / sum(load) using 'Load Profile' from SAM CSV.
+    """
+    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+    path = os.path.join(county_dir, f"sam_optimized_load_profiles_{county_slug}.csv")
+    if not os.path.exists(path):
+        # Try alternate naming
+        path = os.path.join(county_dir, f"sam_optimized_load_profiles_{scenario}_{county_slug}.csv")
+        if not os.path.exists(path):
+            return 0.0
+    try:
+        df = pd.read_csv(path, parse_dates=[0], index_col=0)
+        if 'Load Profile' not in df.columns:
+            return 0.0
+        # Filter hours 16–20 inclusive (i.e., 4–9pm = 16–21 exclusive upper bound)
+        hours = df.index.hour
+        peak_mask = (hours >= 16) & (hours < 21)
+        peak_sum = float(df.loc[peak_mask, 'Load Profile'].sum())
+        total_sum = float(df['Load Profile'].sum())
+        return (peak_sum / total_sum) if total_sum > 0 else 0.0
+    except Exception as exc:
+        print(f"Warning: could not compute peak load share for {county_slug}: {exc}")
         return 0.0
 
 
@@ -1046,17 +1247,23 @@ def create_sam_weekly_chart(
         import matplotlib.dates as mdates
         from datetime import datetime
         
-        # Define the SAM metrics we want to analyze
+        # Define the SAM metrics we want to analyze for load profile charts
         sam_metrics = [
             'Load Profile',
             'System to Load', 
             'Battery to Load',
-            'Grid to Load',
-            'Solar + Battery to Load'
+            'Grid to Load'
         ]
         
-        # Load SAM weekly data
-        sam_df = load_sam_weekly_data(base_input_dir, scenario, housing_type, county_slug, sam_metrics)
+        # Define solar power metrics for solar generation charts
+        solar_metrics = [
+            'System to Load',      # Solar power directly to load
+            'System to Battery'    # Solar power charging battery
+        ]
+        
+        # Load SAM weekly data for load profiles and solar generation
+        all_metrics = sam_metrics + [metric for metric in solar_metrics if metric not in sam_metrics]
+        sam_df = load_sam_weekly_data(base_input_dir, scenario, housing_type, county_slug, all_metrics)
         
         if sam_df is None:
             return f"""
@@ -1066,9 +1273,9 @@ def create_sam_weekly_chart(
             </div>
             """
         
-        # Create figure with subplots - 2 time periods (Jan/July)
-        fig, axes = plt.subplots(2, 1, figsize=(16, 12))
-        fig.suptitle(f'SAM Load Profile Metrics - Weekly Analysis\n{county_slug.replace("-", " ").title()} County - {scenario.replace("_", " ").title()} Scenario', 
+        # Create figure with subplots - 4 charts (2 load profile charts + 2 solar power charts)
+        fig, axes = plt.subplots(4, 1, figsize=(16, 20))
+        fig.suptitle(f'SAM Load Profile and Solar Power Analysis - Weekly Comparison\n{county_slug.replace("-", " ").title()} County - {scenario.replace("_", " ").title()} Scenario', 
                      fontsize=16, fontweight='bold')
         
         # Define time periods
@@ -1083,62 +1290,117 @@ def create_sam_weekly_chart(
             'System to Load': '#F24236',       # Red - solar direct
             'Battery to Load': '#F6AE2D',      # Yellow/Orange - battery discharge
             'Grid to Load': '#2F9599',         # Teal - grid supply
-            'Solar + Battery to Load': '#F26419'  # Orange - combined renewable
+            'Solar + Battery to Load': '#F26419',  # Orange - combined renewable
+            'System to Battery': '#8B5A2B'     # Brown - solar charging battery
         }
         
-        # Create plots for each period
+        # Create plots for each period - both load profile and solar power charts
         for period_idx, (period_name, (start_date, end_date)) in enumerate(periods.items()):
-            ax = axes[period_idx]
+            # Load profile chart (axes 0 and 1)
+            ax_load = axes[period_idx]
+            # Solar power chart (axes 2 and 3)
+            ax_solar = axes[period_idx + 2]
             
             try:
                 # Extract the week's data
                 week_data = sam_df.loc[start_date:end_date]
                 
                 if not week_data.empty:
-                    # Plot each metric
+                    # Add peak TOU rate shading (4pm-9pm) for each day of the week
+                    for day in range(7):
+                        day_start = pd.Timestamp(start_date) + pd.Timedelta(days=day)
+                        peak_start = day_start + pd.Timedelta(hours=16)  # 4pm
+                        peak_end = day_start + pd.Timedelta(hours=21)    # 9pm
+                        
+                        # Only shade if both peak times are within our data range
+                        if peak_start >= week_data.index.min() and peak_end <= week_data.index.max():
+                            # Add shading to both load and solar charts
+                            ax_load.axvspan(peak_start, peak_end, color='#d62728', alpha=0.15, zorder=0, 
+                                          label='Peak TOU (4-9pm)' if day == 0 and period_idx == 0 else "")
+                            ax_solar.axvspan(peak_start, peak_end, color='#d62728', alpha=0.15, zorder=0, 
+                                           label='Peak TOU (4-9pm)' if day == 0 and period_idx == 0 else "")
+                    
+                    # Plot load profile metrics
                     for metric in sam_metrics:
                         color = metric_colors.get(metric, '#333333')
-                        ax.plot(week_data.index, week_data[metric], 
-                               linewidth=2, label=metric, color=color, alpha=0.8)
+                        ax_load.plot(week_data.index, week_data[metric], 
+                                   linewidth=2, label=metric, color=color, alpha=0.8)
                     
-                    # Customize the plot
-                    ax.set_ylabel('Power (kW)', fontsize=12)
-                    ax.set_title(f'{period_name}', fontsize=14, fontweight='bold')
-                    ax.grid(True, alpha=0.3)
-                    ax.legend(loc='upper right', fontsize=10)
+                    # Plot solar power metrics
+                    for metric in solar_metrics:
+                        color = metric_colors.get(metric, '#333333')
+                        ax_solar.plot(week_data.index, week_data[metric], 
+                                    linewidth=2, label=metric, color=color, alpha=0.8)
                     
-                    # Format x-axis
-                    ax.xaxis.set_major_locator(mdates.DayLocator())
-                    ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
-                    ax.xaxis.set_minor_locator(mdates.HourLocator(interval=6))
+                    # Calculate total solar generation (direct to load + charging battery)
+                    total_solar = week_data['System to Load'] + week_data['System to Battery']
+                    ax_solar.plot(week_data.index, total_solar, 
+                                linewidth=2, label='Total Solar Generation', color='#FF6B35', alpha=0.8, linestyle='--')
                     
-                    # Rotate x-axis labels
-                    plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
+                    # Customize the load profile chart
+                    ax_load.set_ylabel('Power (kW)', fontsize=12)
+                    ax_load.set_title(f'{period_name} - Load Profile Breakdown', fontsize=14, fontweight='bold')
+                    ax_load.grid(True, alpha=0.3)
+                    ax_load.legend(loc='upper right', fontsize=10)
                     
-                    # Add summary statistics
+                    # Customize the solar power chart
+                    ax_solar.set_ylabel('Solar Power (kW)', fontsize=12)
+                    ax_solar.set_title(f'{period_name} - Solar Power Profile', fontsize=14, fontweight='bold')
+                    ax_solar.grid(True, alpha=0.3)
+                    ax_solar.legend(loc='upper right', fontsize=10)
+                    
+                    # Format x-axis for both charts
+                    for ax in [ax_load, ax_solar]:
+                        ax.xaxis.set_major_locator(mdates.DayLocator())
+                        ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
+                        ax.xaxis.set_minor_locator(mdates.HourLocator(interval=6))
+                        plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
+                    
+                    # Add summary statistics for load profile chart
                     load_max = week_data['Load Profile'].max()
                     solar_avg = week_data['System to Load'].mean()
                     battery_total = week_data['Battery to Load'].sum()
                     
-                    # Add text annotation with weekly stats
-                    ax.text(0.02, 0.98, f'Week Summary:\nPeak Load: {load_max:.2f} kW\nAvg Solar: {solar_avg:.2f} kW\nBattery Discharge: {battery_total:.1f} kWh', 
-                           transform=ax.transAxes, fontsize=9, verticalalignment='top',
-                           bbox=dict(boxstyle='round', facecolor='white', alpha=0.9))
+                    ax_load.text(0.02, 0.98, f'Week Summary:\nPeak Load: {load_max:.2f} kW\nAvg Solar to Load: {solar_avg:.2f} kW\nBattery Discharge: {battery_total:.1f} kWh', 
+                               transform=ax_load.transAxes, fontsize=9, verticalalignment='top',
+                               bbox=dict(boxstyle='round', facecolor='white', alpha=0.9))
+                    
+                    # Add summary statistics for solar power chart
+                    solar_to_load_avg = week_data['System to Load'].mean()
+                    solar_to_battery_avg = week_data['System to Battery'].mean()
+                    total_solar_avg = total_solar.mean()
+                    solar_peak = total_solar.max()
+                    
+                    ax_solar.text(0.02, 0.98, f'Solar Summary:\nPeak Generation: {solar_peak:.2f} kW\nAvg Total Solar: {total_solar_avg:.2f} kW\nAvg to Load: {solar_to_load_avg:.2f} kW\nAvg to Battery: {solar_to_battery_avg:.2f} kW', 
+                                transform=ax_solar.transAxes, fontsize=9, verticalalignment='top',
+                                bbox=dict(boxstyle='round', facecolor='white', alpha=0.9))
                 else:
-                    ax.text(0.5, 0.5, f'No data available\nfor {period_name}', 
-                           ha='center', va='center', transform=ax.transAxes,
-                           fontsize=12, color='red')
-                    ax.set_title(f'{period_name}', fontsize=14, fontweight='bold')
+                    # Handle no data case for both charts
+                    ax_load.text(0.5, 0.5, f'No data available\nfor {period_name}', 
+                               ha='center', va='center', transform=ax_load.transAxes,
+                               fontsize=12, color='red')
+                    ax_load.set_title(f'{period_name} - Load Profile Breakdown', fontsize=14, fontweight='bold')
+                    
+                    ax_solar.text(0.5, 0.5, f'No data available\nfor {period_name}', 
+                                ha='center', va='center', transform=ax_solar.transAxes,
+                                fontsize=12, color='red')
+                    ax_solar.set_title(f'{period_name} - Solar Power Profile', fontsize=14, fontweight='bold')
             
             except Exception as e:
                 print(f"Error plotting {period_name}: {e}")
-                ax.text(0.5, 0.5, f'Error loading\n{period_name} data', 
-                       ha='center', va='center', transform=ax.transAxes,
-                       fontsize=12, color='red')
-                ax.set_title(f'{period_name}', fontsize=14, fontweight='bold')
+                # Handle error case for both charts
+                ax_load.text(0.5, 0.5, f'Error loading\n{period_name} data', 
+                           ha='center', va='center', transform=ax_load.transAxes,
+                           fontsize=12, color='red')
+                ax_load.set_title(f'{period_name} - Load Profile Breakdown', fontsize=14, fontweight='bold')
+                
+                ax_solar.text(0.5, 0.5, f'Error loading\n{period_name} data', 
+                            ha='center', va='center', transform=ax_solar.transAxes,
+                            fontsize=12, color='red')
+                ax_solar.set_title(f'{period_name} - Solar Power Profile', fontsize=14, fontweight='bold')
         
         # Add overall notes
-        fig.text(0.5, 0.02, 'Load Profile = total demand | System to Load = solar direct to load | Battery to Load = battery discharge | Grid to Load = grid supply', 
+        fig.text(0.5, 0.02, 'Top: Load Profile Breakdown (total demand vs. sources) | Bottom: Solar Power Profile (generation breakdown by usage)', 
                 ha='center', fontsize=10, style='italic')
         
         # Convert to base64
@@ -1257,6 +1519,10 @@ def create_single_map(base_input_dir: str, scenario: str, housing_type: str, cou
                 # Format as currency
                 pretty = f"${to_decimal_number(abs(metric_value))}"
                 gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
+                # Add a note field to show in tooltip clarifying definition
+                gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_note"] = (
+                    "Net outlay with PV/Storage (full incentives)"
+                )
                 
             elif metric_name == "Payback Period (years)":
                 metric_value = load_payback_period_data(
@@ -1269,6 +1535,42 @@ def create_single_map(base_input_dir: str, scenario: str, housing_type: str, cou
                     pretty = f"{metric_value:.1f} years"
                 gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
                 
+            elif data_loader_config.get("capital_component"):
+                comp = data_loader_config["capital_component"]
+                metric_value = load_capital_component(
+                    base_input_dir, scenario, housing_type, county_slug, comp
+                )
+                pretty = f"${to_decimal_number(abs(metric_value))}"
+                gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
+
+            elif data_loader_config.get("effective_price"):
+                metric_value = load_effective_electricity_price(
+                    base_input_dir, scenario, housing_type, county_slug
+                )
+                pretty = f"${metric_value:.3f}/kWh"
+                gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
+
+            elif data_loader_config.get("pv_cf"):
+                metric_value = load_pv_capacity_factor(
+                    base_input_dir, scenario, housing_type, county_slug
+                )
+                pretty = f"{metric_value*100:.1f}%"
+                gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
+
+            elif data_loader_config.get("self_supply"):
+                metric_value = load_self_supply_ratio(
+                    base_input_dir, scenario, housing_type, county_slug
+                )
+                pretty = f"{metric_value*100:.1f}%"
+                gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
+
+            elif data_loader_config.get("peak_share"):
+                metric_value = load_peak_period_load_share(
+                    base_input_dir, scenario, housing_type, county_slug
+                )
+                pretty = f"{metric_value*100:.1f}%"
+                gdf.loc[gdf["NAME"] == county_name, f"{metric_name}_fmt"] = pretty
+
             elif data_loader_config.get("sam_metric"):
                 # Handle SAM metrics using load_sam_metric_data
                 metric_column_map = {
@@ -1354,12 +1656,22 @@ def create_single_map(base_input_dir: str, scenario: str, housing_type: str, cou
     # Add county labels
     add_centroid_labels(m, gdf, metric_name)
     
-    # Add tooltip layer
-    tooltip = folium.GeoJsonTooltip(
-        fields=["NAME", f"{metric_name}_fmt"],
-        aliases=["County:", f"{metric_name}:"],
-        localize=True
-    )
+    # Add tooltip layer (with extra note for capital net outlay metric)
+    if metric_name == "Capital Costs, Net After Incentives ($)":
+        # Ensure note column exists for all rows to avoid KeyError
+        if f"{metric_name}_note" not in gdf.columns:
+            gdf[f"{metric_name}_note"] = "Net outlay with PV/Storage (full incentives)"
+        tooltip = folium.GeoJsonTooltip(
+            fields=["NAME", f"{metric_name}_fmt", f"{metric_name}_note"],
+            aliases=["County:", f"{metric_name}:", "Note:"],
+            localize=True
+        )
+    else:
+        tooltip = folium.GeoJsonTooltip(
+            fields=["NAME", f"{metric_name}_fmt"],
+            aliases=["County:", f"{metric_name}:"],
+            localize=True
+        )
     
     folium.GeoJson(
         gdf,
@@ -1548,7 +1860,7 @@ def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: 
         },
         "Payback Period (years)": {
             "color_scheme": "RdYlGn_r",
-            "bins": [0, 5, 10, 15, 20, 25, 30, 50, 100],
+            "bins": [0, 5, 10, 15, 20, 25, 30, 50],
             "unit": "years"
         },
         "Load Profile (kWh)": {
@@ -1580,6 +1892,61 @@ def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: 
             "bins": [0, 2000, 4000, 6000, 8000, 10000, 12000, 14000, 16000],
             "unit": "kWh",
             "sam_metric": True
+        },
+        # New diagnostics
+        "PV Capex ($)": {
+            "color_scheme": "Blues",
+            "bins": [0, 2000, 4000, 6000, 8000, 10000, 15000, 20000, 30000],
+            "unit": "$",
+            "capital_component": "pv_capex"
+        },
+        "Storage Capex ($)": {
+            "color_scheme": "Blues",
+            "bins": [0, 2000, 4000, 6000, 8000, 10000, 15000, 20000, 30000],
+            "unit": "$",
+            "capital_component": "storage_capex"
+        },
+        "PV Incentives (Full) ($)": {
+            "color_scheme": "Greens",
+            "bins": [0, 500, 1000, 2000, 3000, 4000, 6000, 8000, 12000],
+            "unit": "$",
+            "capital_component": "pv_incentives_full"
+        },
+        "Storage Incentives (Full) ($)": {
+            "color_scheme": "Greens",
+            "bins": [0, 500, 1000, 2000, 3000, 4000, 6000, 8000, 12000],
+            "unit": "$",
+            "capital_component": "storage_incentives_full"
+        },
+        "PV+Storage Net (Full) ($)": {
+            "color_scheme": "Purples",
+            "bins": [0, 2000, 5000, 8000, 12000, 16000, 20000, 30000, 50000],
+            "unit": "$",
+            "capital_component": "pv_storage_net_full"
+        },
+        "Effective Electricity Price ($/kWh)": {
+            "color_scheme": "OrRd",
+            "bins": [0, 0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50, 0.75],
+            "unit": "$/kWh",
+            "effective_price": True
+        },
+        "PV Capacity Factor": {
+            "color_scheme": "YlGn",
+            "bins": [0.0, 0.10, 0.15, 0.18, 0.20, 0.22, 0.24, 0.28, 0.32],
+            "unit": "fraction",
+            "pv_cf": True
+        },
+        "Self-Supply Ratio": {
+            "color_scheme": "PuBuGn",
+            "bins": [0.0, 0.20, 0.40, 0.55, 0.70, 0.80, 0.88, 0.94, 1.0],
+            "unit": "fraction",
+            "self_supply": True
+        },
+        "Peak-Period Load Share": {
+            "color_scheme": "PuRd",
+            "bins": [0.0, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.45, 0.60],
+            "unit": "fraction",
+            "peak_share": True
         },
     }
     
@@ -1774,7 +2141,7 @@ def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: 
     # Generate SAM weekly chart for scenarios with solar+storage
     if not scenario.startswith("baseline"):
         try:
-            sam_chart_b64 = create_sam_weekly_chart(base_input_dir, scenario, housing_type, "alameda")
+            sam_chart_b64 = create_sam_weekly_chart(base_input_dir, scenario, housing_type, "marin")
             if isinstance(sam_chart_b64, str) and sam_chart_b64.startswith('<div'):
                 # HTML fallback
                 html_content += sam_chart_b64

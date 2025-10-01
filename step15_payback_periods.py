@@ -30,6 +30,7 @@ import os
 import pandas as pd
 from main_helpers import log, slugify_county_name, norcal_counties, socal_counties, central_counties, get_scenario_path
 from helpers.maps_helpers import get_latest_csv_file
+from helpers.utility_helpers import get_utility_for_county
 
 COMPARISON_BASELINE = {
     "baseline_ev_car": "baseline_ice_car",
@@ -252,6 +253,189 @@ def calculate_annual_savings(base_input_dir: str, county: str, scenario: str, ho
     # print(f"  {scenario} + solar Annual: ${scenario_solar_annual_cost:.0f} (savings: ${savings_with_solar:.0f})")
 
     return baseline_annual_cost, scenario_annual_cost, scenario_solar_annual_cost, savings_scenario_only, savings_with_solar
+
+
+def _sam_csv_path(base_input_dir: str, scenario: str, housing_type: str, county_slug: str) -> str | None:
+    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+    a = os.path.join(county_dir, f"sam_optimized_load_profiles_{county_slug}.csv")
+    b = os.path.join(county_dir, f"sam_optimized_load_profiles_{scenario}_{county_slug}.csv")
+    if os.path.exists(a):
+        return a
+    if os.path.exists(b):
+        return b
+    return None
+
+
+def _effective_electricity_price_info(base_input_dir: str, scenario: str, housing_type: str, county_slug: str) -> dict:
+    """Return a dict with effective price info: price, utility, tariff, annual_cost, annual_kwh."""
+    out = {
+        "effective_price_per_kwh": 0.0,
+        "effective_price_utility": None,
+        "effective_price_tariff": None,
+        "effective_price_annual_cost": 0.0,
+        "effective_price_annual_kwh": 0.0,
+    }
+    try:
+        county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+        lfr_path = os.path.join(county_dir, f"loadprofiles_for_rates_{county_slug}.csv")
+        if not os.path.exists(lfr_path):
+            return out
+        df_lfr = pd.read_csv(lfr_path, low_memory=False)
+        if 'default.electricity.kwh' not in df_lfr.columns:
+            return out
+        annual_kwh = float(df_lfr['default.electricity.kwh'].sum())
+        out["effective_price_annual_kwh"] = annual_kwh
+        if annual_kwh <= 0:
+            return out
+
+        scen_path = get_scenario_path(base_input_dir, scenario, housing_type)
+        elec_dir = os.path.join(scen_path, county_slug, 'results', 'electricity')
+        res_path = get_latest_csv_file(elec_dir, f"RESULTS_electricity_annual_costs_{county_slug}")
+        df = pd.read_csv(res_path, index_col='scenario')
+        row = df.loc[scenario] if scenario in df.index else df.iloc[0]
+        util = get_utility_for_county(county_slug)
+        cols = [c for c in row.index if c.startswith(f"electricity.{util}.")] or [c for c in row.index if c.startswith("electricity.")]
+        if not cols:
+            return out
+        # Choose min annual cost and record tariff name
+        valid = [(c, row[c]) for c in cols if pd.notnull(row[c])]
+        if not valid:
+            return out
+        tariff, annual_cost = min(valid, key=lambda kv: kv[1])
+        out["effective_price_utility"] = util
+        out["effective_price_tariff"] = tariff
+        out["effective_price_annual_cost"] = float(annual_cost)
+        out["effective_price_per_kwh"] = float(annual_cost) / annual_kwh if annual_kwh > 0 else 0.0
+        return out
+    except Exception:
+        return out
+
+def _effective_electricity_price(base_input_dir: str, scenario: str, housing_type: str, county_slug: str) -> float:
+    return _effective_electricity_price_info(base_input_dir, scenario, housing_type, county_slug).get("effective_price_per_kwh", 0.0)
+
+
+def _total_pv_generation_kwh(base_input_dir: str, scenario: str, housing_type: str, county_slug: str) -> float:
+    path = _sam_csv_path(base_input_dir, scenario, housing_type, county_slug)
+    if not path:
+        return 0.0
+    try:
+        df = pd.read_csv(path)
+        total = 0.0
+        if 'System to Load' in df.columns:
+            total += float(df['System to Load'].sum())
+        if 'System to Battery' in df.columns:
+            total += float(df['System to Battery'].sum())
+        if 'System to Grid' in df.columns:
+            total += float(df['System to Grid'].sum())
+        return total
+    except Exception:
+        return 0.0
+
+
+def _pv_capacity_factor(base_input_dir: str, scenario: str, housing_type: str, county_slug: str, solar_kw: float | None) -> float:
+    if not solar_kw or solar_kw <= 0:
+        return 0.0
+    gen = _total_pv_generation_kwh(base_input_dir, scenario, housing_type, county_slug)
+    return gen / (solar_kw * 8760.0) if solar_kw > 0 else 0.0
+
+
+def _self_supply_ratio(base_input_dir: str, scenario: str, housing_type: str, county_slug: str) -> float:
+    path = _sam_csv_path(base_input_dir, scenario, housing_type, county_slug)
+    if not path:
+        return 0.0
+    try:
+        df = pd.read_csv(path)
+        if 'Grid to Load' in df.columns and 'Load Profile' in df.columns:
+            grid = float(df['Grid to Load'].sum())
+            load = float(df['Load Profile'].sum())
+            return 1.0 - (grid / load) if load > 0 else 0.0
+        return 0.0
+    except Exception:
+        return 0.0
+
+
+def _peak_period_load_share(base_input_dir: str, scenario: str, housing_type: str, county_slug: str) -> float:
+    path = _sam_csv_path(base_input_dir, scenario, housing_type, county_slug)
+    if not path:
+        return 0.0
+    try:
+        df = pd.read_csv(path, parse_dates=[0], index_col=0)
+        if 'Load Profile' not in df.columns:
+            return 0.0
+        hours = df.index.hour
+        mask = (hours >= 16) & (hours < 21)
+        peak = float(df.loc[mask, 'Load Profile'].sum())
+        total = float(df['Load Profile'].sum())
+        return (peak / total) if total > 0 else 0.0
+    except Exception:
+        return 0.0
+
+
+def _diagnostic_counties() -> set[str]:
+    """Return set of county slugs to log diagnostics for.
+    Override with PAYBACK_DIAGNOSTIC_COUNTIES env (comma-separated county names or slugs)."""
+    env = os.getenv("PAYBACK_DIAGNOSTIC_COUNTIES")
+    if env:
+        items = [slugify_county_name(x.strip()) for x in env.split(",") if x.strip()]
+        return set(items)
+    # Default: Alameda and nearby Bay Area counties for comparison
+    return {"alameda", "contra-costa", "santa-clara", "san-francisco", "san-mateo"}
+
+
+def _should_log_diagnostic(county_slug: str) -> bool:
+    return county_slug in _diagnostic_counties()
+
+
+def _capital_summary_details(base_input_dir: str, scenario: str, housing_type: str, county_slug: str) -> dict:
+    """Return step14 summary fields to explain net_outlay_no_pv differences."""
+    out = {
+        "total_capital_cost_electric": 0.0,
+        "capital_cost_gas": 0.0,
+        "incentives_full": 0.0,
+        "net_outlay_full": 0.0,
+        "net_outlay_half": 0.0,
+        "net_outlay_none": 0.0,
+        "pv_capex": 0.0,
+        "storage_capex": 0.0,
+        "pv_incentives_full": 0.0,
+        "storage_incentives_full": 0.0,
+        "pv_storage_net_full": 0.0,
+        "net_outlay_full_with_pv": 0.0,
+        "net_outlay_half_with_pv": 0.0,
+        "net_outlay_none_with_pv": 0.0,
+        "solar_kw": 0.0,
+    }
+    cap_dir = os.path.join(base_input_dir, "capital_costs")
+    base = f"{scenario}_{housing_type.replace('-', '_')}"
+    summary_path = os.path.join(cap_dir, f"capital_costs_summary_{base}.csv")
+    with_pv_path = os.path.join(cap_dir, f"capital_costs_summary_with_pv_{base}.csv")
+    try:
+        if os.path.exists(summary_path):
+            df = pd.read_csv(summary_path, low_memory=False)
+            row = df[df['county_slug'] == county_slug]
+            if not row.empty:
+                out["total_capital_cost_electric"] = float(row.iloc[0].get('total_capital_cost_electric', 0.0))
+                out["capital_cost_gas"] = float(row.iloc[0].get('capital_cost_gas', 0.0))
+                out["incentives_full"] = float(row.iloc[0].get('incentives_full', 0.0))
+                out["net_outlay_full"] = float(row.iloc[0].get('net_outlay_full', 0.0))
+                out["net_outlay_half"] = float(row.iloc[0].get('net_outlay_half', 0.0)) if 'net_outlay_half' in row.columns else 0.0
+                out["net_outlay_none"] = float(row.iloc[0].get('net_outlay_none', 0.0)) if 'net_outlay_none' in row.columns else 0.0
+        if os.path.exists(with_pv_path):
+            dfp = pd.read_csv(with_pv_path, low_memory=False)
+            rowp = dfp[dfp['county_slug'] == county_slug]
+            if not rowp.empty:
+                out["pv_capex"] = float(rowp.iloc[0].get('pv_capex', 0.0))
+                out["storage_capex"] = float(rowp.iloc[0].get('storage_capex', 0.0))
+                out["pv_incentives_full"] = float(rowp.iloc[0].get('pv_incentives_full', 0.0))
+                out["storage_incentives_full"] = float(rowp.iloc[0].get('storage_incentives_full', 0.0))
+                out["pv_storage_net_full"] = float(rowp.iloc[0].get('pv_storage_net_full', 0.0))
+                out["net_outlay_full_with_pv"] = float(rowp.iloc[0].get('net_outlay_full_with_pv', 0.0))
+                out["net_outlay_half_with_pv"] = float(rowp.iloc[0].get('net_outlay_half_with_pv', 0.0)) if 'net_outlay_half_with_pv' in rowp.columns else 0.0
+                out["net_outlay_none_with_pv"] = float(rowp.iloc[0].get('net_outlay_none_with_pv', 0.0)) if 'net_outlay_none_with_pv' in rowp.columns else 0.0
+                out["solar_kw"] = float(rowp.iloc[0].get('solar_kw', 0.0))
+    except Exception:
+        pass
+    return out
     
 def calculate_net_capital_cost(capital_summary: pd.DataFrame, county: str) -> pd.DataFrame:
     return capital_summary[capital_summary['county'] == county]
@@ -321,9 +505,9 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
         print("scenario_vehicle_adders", scenario_vehicle_adders)
         print("baseline_vehicle_adders", baseline_vehicle_adders)
         
-        # Group capital costs by county and incentive scenario
+        # Legacy recompute (kept for debugging only); Option A fix will not rely on this
         capital_summary = summarize_incremental_capex_against_baseline(scenario_df, baseline_df)
-        print("capital_summary", capital_summary)
+        print("capital_summary (legacy, not used for numerators)", capital_summary)
 
         pv_net_df = load_pv_net_adders(base_input_dir, scenario, housing_type)
         print("pv_net_df", pv_net_df)
@@ -348,20 +532,11 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
 
                 # Add vehicle O&M adders to the utility-bill totals
                 # Baseline uses ICE adders from the chosen baseline ledger
-                if county_slug in baseline_vehicle_adders.index:
-                    print(float(baseline_vehicle_adders.loc[county_slug, "ice_operating"]))
-                    float(baseline_vehicle_adders.loc[county_slug, "ice_operating"])
-                else:
-                    0.0
-        
                 baseline_annual_cost += float(baseline_vehicle_adders.loc[county_slug, "ice_operating"]) if county_slug in baseline_vehicle_adders.index else 0.0
-                print("baseline annual cost: ", baseline_annual_cost)
                 # Scenario uses EV adders from the scenario ledger
                 scenario_annual_cost += float(scenario_vehicle_adders.loc[county_slug, "ev_operating"]) if county_slug in scenario_vehicle_adders.index else 0.0
-                print("scenario annual cost ", scenario_annual_cost)
                 # Scenario + solar uses the same EV O&M adders (solar doesn't change maint/insurance)
                 scenario_solar_annual_cost += float(scenario_vehicle_adders.loc[county_slug, "ev_operating"]) if county_slug in scenario_vehicle_adders.index else 0.0
-                print("scenario_solar_annual_cost ", scenario_solar_annual_cost)
 
                 savings_scenario_only = baseline_annual_cost - scenario_annual_cost
                 savings_with_solar    = baseline_annual_cost - scenario_solar_annual_cost
@@ -370,24 +545,23 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
                 if baseline_annual_cost == 0 or (scenario_annual_cost == 0 and scenario_solar_annual_cost == 0):
                     continue
 
-                # Get capital costs for this county
-                county_capital = calculate_net_capital_cost(capital_summary, county)
-
-                if county_capital.empty:
+                # Option A: Use Step 14 summary numerators directly, per incentive scenario
+                caps = _capital_summary_details(base_input_dir, scenario, housing_type, county_slug)
+                if caps['net_outlay_full'] == 0.0 and caps['net_outlay_full_with_pv'] == 0.0:
+                    # No summary row for this county; skip
                     continue
 
-                for _, capital_row in county_capital.iterrows():
-                    incentive_scenario = str(capital_row['incentive_scenario']).lower()
-                    county_slug = slugify_county_name(county)
-
-                    inc_row = capital_summary[
-                        (capital_summary['county'] == county) &
-                        (capital_summary['incentive_scenario'].str.lower() == incentive_scenario)
-                    ]
-                    if inc_row.empty:
-                        continue
-
-                    net_cap_no_pv = float(inc_row.iloc[0]['net_capital_cost_no_pv'])
+                for incentive_scenario in ["full_incentives", "half_incentives", "no_incentives"]:
+                    # Select numerator by incentive_scenario
+                    if incentive_scenario == "full_incentives":
+                        num_no_pv = caps.get('net_outlay_full', 0.0)
+                        num_with_pv = caps.get('net_outlay_full_with_pv', 0.0)
+                    elif incentive_scenario == "half_incentives":
+                        num_no_pv = caps.get('net_outlay_half', 0.0)
+                        num_with_pv = caps.get('net_outlay_half_with_pv', 0.0)
+                    else:
+                        num_no_pv = caps.get('net_outlay_none', 0.0)
+                        num_with_pv = caps.get('net_outlay_none_with_pv', 0.0)
 
                     # 1) Choose which annual savings to use
                     if savings_with_solar > 0:
@@ -401,15 +575,73 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
                         savings_type = "no_savings"
                         print(f"  Warning: No positive savings for {county} {incentive_scenario}")
 
-                    # 2) Adjust capex if we’re using with-solar savings
+                    # 2) Numerator selection from Step 14 summary
                     if savings_type == "with_solar":
-                        pv_add = pv_adder_for(county_slug, incentive_scenario, pv_net_df)
-                        net_capital_cost = net_cap_no_pv + pv_add
+                        net_capital_cost = num_with_pv
                     else:
-                        net_capital_cost = net_cap_no_pv
+                        net_capital_cost = num_no_pv
+                    pv_add = num_with_pv - num_no_pv
 
                     # 3) Payback
                     payback_years = net_capital_cost / annual_savings if annual_savings > 0 else float('inf')
+
+                    # 4) Diagnostics log for selected counties
+                    if _should_log_diagnostic(county_slug):
+                        try:
+                            pv_capex = caps['pv_capex']
+                            storage_capex = caps['storage_capex']
+                            pv_inc_full = caps['pv_incentives_full']
+                            st_inc_full = caps['storage_incentives_full']
+                            pv_net_full = caps['pv_storage_net_full']
+                            solar_kw = caps['solar_kw']
+                        except Exception:
+                            pv_capex = storage_capex = pv_inc_full = st_inc_full = pv_net_full = solar_kw = 0.0
+
+                        price_info = _effective_electricity_price_info(base_input_dir, scenario, housing_type, county_slug)
+                        eff_price = price_info.get('effective_price_per_kwh', 0.0)
+                        pv_cf = _pv_capacity_factor(base_input_dir, scenario, housing_type, county_slug, solar_kw)
+                        self_supply = _self_supply_ratio(base_input_dir, scenario, housing_type, county_slug)
+                        peak_share = _peak_period_load_share(base_input_dir, scenario, housing_type, county_slug)
+                        util = get_utility_for_county(county_slug)
+
+                        log(
+                            at="payback_diagnostic",
+                            log_level="debug",
+                            county=county,
+                            county_slug=county_slug,
+                            utility=util,
+                            incentive_scenario=incentive_scenario,
+                            # Capital summary (no PV)
+                            total_capital_cost_electric=round(caps['total_capital_cost_electric'], 2),
+                            capital_cost_gas=round(caps['capital_cost_gas'], 2),
+                            incentives_full=round(caps['incentives_full'], 2),
+                            net_outlay_full=round(caps['net_outlay_full'], 2),
+                            net_outlay_no_pv=round(num_no_pv, 2),
+                            pv_adder_used=round(pv_add, 2),
+                            net_outlay_with_pv=round(net_capital_cost, 2),
+                            net_outlay_full_with_pv=round(caps['net_outlay_full_with_pv'], 2),
+                            baseline_annual_cost=round(baseline_annual_cost, 2),
+                            scenario_annual_cost=round(scenario_annual_cost, 2),
+                            scenario_solar_annual_cost=round(scenario_solar_annual_cost, 2),
+                            annual_savings_scenario_only=round(savings_scenario_only, 2),
+                            annual_savings_with_solar=round(savings_with_solar, 2),
+                            annual_savings_used=round(annual_savings, 2),
+                            savings_type=savings_type,
+                            solar_kw=round(solar_kw, 2),
+                            pv_capex=round(pv_capex, 2),
+                            storage_capex=round(storage_capex, 2),
+                            pv_incentives_full=round(pv_inc_full, 2),
+                            storage_incentives_full=round(st_inc_full, 2),
+                            pv_storage_net_full=round(pv_net_full, 2),
+                            effective_price_per_kwh=round(eff_price, 4),
+                            effective_price_tariff=price_info.get('effective_price_tariff'),
+                            effective_price_annual_cost=round(price_info.get('effective_price_annual_cost', 0.0), 2),
+                            effective_price_annual_kwh=round(price_info.get('effective_price_annual_kwh', 0.0), 2),
+                            pv_capacity_factor=round(pv_cf, 4),
+                            self_supply_ratio=round(self_supply, 4),
+                            peak_period_load_share=round(peak_share, 4),
+                            implied_payback_years=round((net_capital_cost / annual_savings) if annual_savings > 0 else float('inf'), 2),
+                        )
 
                     # print(f"    {incentive_scenario}: Capital ${net_capital_cost:.0f}, "
                     #     f"Savings ${annual_savings:.0f} ({savings_type}), "

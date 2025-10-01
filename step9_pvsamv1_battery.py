@@ -42,6 +42,13 @@ import matplotlib.pyplot as plt
 import PySAM.Pvsamv1 as Pvsamv1
 import PySAM.ResourceTools as ResourceTools
 
+# Use project slug rules for county folder names
+try:
+    from main_helpers import slugify_county_name
+except Exception:
+    def slugify_county_name(name: str) -> str:
+        return name.lower().replace("county", "").strip().replace(" ", "-")
+
 MIN_SOC = 25
 MAX_SOC = 90
 INITIAL_SOC = 50
@@ -380,15 +387,36 @@ def _soc_series(pv: Pvsamv1.Pvsamv1) -> np.ndarray:
 
 def _flow_series(pv: Pvsamv1.Pvsamv1) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     out = pv.Outputs.export()
+    
     def arr(k: str) -> np.ndarray:
-        return np.asarray(out.get(k, []), dtype=float).ravel()
-    return arr("system_to_load"), arr("batt_to_load"), arr("grid_to_load")
+        raw_data = out.get(k, [])
+        result = np.asarray(raw_data, dtype=float).ravel()
+        # Verify expected hourly length
+        if len(result) != 8760:
+            print(f"Warning: {k} has {len(result)} elements (expected 8760)")
+        return result
+    
+    system_to_load = arr("system_to_load")
+    batt_to_load = arr("batt_to_load") 
+    grid_to_load = arr("grid_to_load")
+    
+    return system_to_load, batt_to_load, grid_to_load
 
 def _battery_charging_series(pv: Pvsamv1.Pvsamv1) -> Tuple[np.ndarray, np.ndarray]:
     out = pv.Outputs.export()
+    
     def arr(k: str) -> np.ndarray:
-        return np.asarray(out.get(k, []), dtype=float).ravel()
-    return arr("system_to_batt"), arr("grid_to_batt")
+        raw_data = out.get(k, [])
+        result = np.asarray(raw_data, dtype=float).ravel()
+        # Verify expected hourly length
+        if len(result) != 8760:
+            print(f"Warning: {k} has {len(result)} elements (expected 8760)")
+        return result
+    
+    system_to_batt = arr("system_to_batt")
+    grid_to_batt = arr("grid_to_batt")
+    
+    return system_to_batt, grid_to_batt
 
 
 def _plot_eight_panel_weeks(
@@ -550,17 +578,19 @@ def _plot_eight_panel_weeks(
 # =====================
 
 
-def build_configuration_from_environment() -> SimulationConfiguration:
-    county_slug = os.environ.get("COUNTY_NAME", "alameda").lower().replace(" ", "-")
+def build_configuration_from_environment(scenario, county) -> SimulationConfiguration:
+    # Clean county name for file paths (consistent slug)
+    county_slug = slugify_county_name(county)
+    
     preset_dir = os.environ.get("SAM_PRESET_DIR", "SAM_Detailed_PV_Battery")
     pvsam_json_name = os.environ.get("PVSAMV1_JSON", "untitled_pvsamv1.json")
     weather_file = os.environ.get(
         "WEATHER_FILE",
-        f"data/loadprofiles/baseline/single-family-detached/{county_slug}/weather_TMY_{county_slug}.csv",
+        f"data/loadprofiles/{scenario}/single-family-detached/{county_slug}/weather_TMY_{county_slug}.csv",
     )
     load_file = os.environ.get(
         "LOAD_FILE",
-        f"data/loadprofiles/baseline/single-family-detached/{county_slug}/combined_profiles_baseline_{county_slug}.csv",
+        f"data/loadprofiles/{scenario}/single-family-detached/{county_slug}/combined_profiles_{scenario}_{county_slug}.csv",
     )
     load_col = os.environ.get(
         "LOAD_COL",
@@ -568,9 +598,10 @@ def build_configuration_from_environment() -> SimulationConfiguration:
     )
     show_plots = os.environ.get("SHOW_PLOTS", "1").strip() not in {"0", "false", "False"}
     try:
-        weather_shift_hours = int(os.environ.get("WEATHER_SHIFT_HOURS", "8"))
+        # No time shifting - use weather data as-is to avoid timing issues
+        weather_shift_hours = int(os.environ.get("WEATHER_SHIFT_HOURS", "0"))
     except Exception:
-        weather_shift_hours = 8
+        weather_shift_hours = 0
     return SimulationConfiguration(
         county_slug=county_slug,
         sam_preset_dir=preset_dir,
@@ -593,8 +624,8 @@ def validate_configuration(cfg: SimulationConfiguration) -> None:
         raise FileNotFoundError(f"Research load CSV not found: {cfg.load_file}")
 
 
-def configure() -> SimulationConfiguration:
-    cfg = build_configuration_from_environment()
+def configure(scenario: str = "baseline", county: str = "alameda") -> SimulationConfiguration:
+    cfg = build_configuration_from_environment(scenario, county)
     validate_configuration(cfg)
     log_section("Effective Configuration")
     print(f"county_slug={cfg.county_slug}")
@@ -717,6 +748,12 @@ def apply_runtime_overrides(pv: Pvsamv1.Pvsamv1, overrides: RuntimeOverrides) ->
     
     # Efficiency parameters
     set_if_present("batt_dc_dc_efficiency", overrides.batt_dc_dc_efficiency)
+    
+    # Force single-year outputs instead of 25-year lifetime to prevent 219,000 element arrays
+    set_if_present("analysis_period", 1)
+    set_if_present("system_use_lifetime_output", 0)
+    set_if_present("batt_replacement_option", 0)  # Disable battery replacements for single-year analysis
+    print(f"✓ Forced single-year analysis: analysis_period=1, system_use_lifetime_output=0, batt_replacement_option=0")
 
 
 def apply_dispatch_schedule(pv: Pvsamv1.Pvsamv1, dispatch_schedule: Dict[str, Any], 
@@ -941,17 +978,92 @@ def attach_weather_resource_to_pvsam(pv: Pvsamv1.Pvsamv1, cfg: SimulationConfigu
 
     srd = ResourceTools.SAM_CSV_to_solar_data(cfg.weather_file)
 
-    # Align weather from eastern time (ET) to local time (PT) to match typical load profiles
+    # Use weather data as-is without time shifting to avoid timing issues
     shift_hours = cfg.weather_shift_hours
-    hourly_keys = ["dn", "df", "gh", "tdry", "tdew", "rhum", "wdir", "wspd"]
-    for key in hourly_keys:
-        if key in srd and isinstance(srd[key], (list, tuple)) and len(srd[key]) == 8760:
-            arr = list(srd[key])
-            srd[key] = [arr[(i + shift_hours) % 8760] for i in range(8760)]
+    if shift_hours != 0:
+        hourly_keys = ["dn", "df", "gh", "tdry", "tdew", "rhum", "wdir", "wspd"]
+        for key in hourly_keys:
+            if key in srd and isinstance(srd[key], (list, tuple)) and len(srd[key]) == 8760:
+                arr = list(srd[key])
+                srd[key] = [arr[(i + shift_hours) % 8760] for i in range(8760)]
+        print(f"Attached weather from: {cfg.weather_file} (shifted +{shift_hours}h; no tz override)")
+    else:
+        print(f"Attached weather from: {cfg.weather_file} (no time shifting applied)")
 
+    # Debug: examine weather data before timezone changes
+    current_tz = srd.get('tz', 'not specified')
+    print(f"Weather timezone (original): {current_tz}")
+    
+    # Sample some weather data for debugging
+    if 'gh' in srd and len(srd['gh']) >= 24:
+        gh_sample = srd['gh'][:24]  # First 24 hours of global horizontal irradiance
+        max_gh = max(gh_sample)
+        max_gh_hour = gh_sample.index(max_gh)
+        print(f"Weather sample: max irradiance {max_gh:.1f} W/m² at hour {max_gh_hour} (before tz change)")
+    
+    # CONFIGURABLE: Set timezone override or leave as-is
+    # For testing, you can change this value or comment out the override
+    APPLY_TIMEZONE_OVERRIDE = True  # Set to True to enable timezone override for testing
+    TIMEZONE_VALUE = 8  # Try positive 8 instead of negative 8
+    
+    if APPLY_TIMEZONE_OVERRIDE:
+        # Try different timezone values to find the correct one
+        srd["tz"] = TIMEZONE_VALUE
+        print(f"Weather timezone (override): {TIMEZONE_VALUE}")
+    else:
+        print(f"Weather timezone (no override): using original {current_tz}")
+    
     pv.SolarResource.solar_resource_data = srd
-    print(f"Attached weather from: {cfg.weather_file} (shifted +{shift_hours}h for PT)")
     return True
+
+
+def align_load_profile_to_midnight(df: pd.DataFrame, load_col: str) -> List[float]:
+    """
+    Align the load profile to start at midnight (00:00:00) of January 1st.
+    
+    Args:
+        df: DataFrame with timestamp and load columns
+        load_col: Name of the load column
+        
+    Returns:
+        List of load values aligned to start at midnight, maintaining 8760 hours
+    """
+    if 'timestamp' not in df.columns:
+        print("WARNING: No timestamp column found, assuming data already starts at midnight")
+        return df[load_col].astype(float).tolist()
+    
+    # Parse timestamps
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    
+    # Find midnight of January 1st
+    # Look for the first occurrence of hour 0 on January 1st
+    january_first_mask = (df['timestamp'].dt.month == 1) & (df['timestamp'].dt.day == 1)
+    midnight_mask = df['timestamp'].dt.hour == 0
+    target_mask = january_first_mask & midnight_mask
+    
+    if not target_mask.any():
+        print("WARNING: Could not find January 1st midnight, assuming data already starts at midnight")
+        return df[load_col].astype(float).tolist()
+    
+    # Get the index of midnight January 1st
+    midnight_index = df[target_mask].index[0]
+    original_start_time = df['timestamp'].iloc[0]
+    midnight_time = df['timestamp'].iloc[midnight_index]
+    
+    print(f"Original start time: {original_start_time}")
+    print(f"Aligning to midnight: {midnight_time}")
+    print(f"Shifting by {midnight_index} hours")
+    
+    # Extract load values and rotate to start at midnight
+    load_values = df[load_col].astype(float).tolist()
+    
+    # Rotate the array: take from midnight_index to end, then from start to midnight_index
+    aligned_load = load_values[midnight_index:] + load_values[:midnight_index]
+    
+    if len(aligned_load) != 8760:
+        raise ValueError(f"Aligned load profile has {len(aligned_load)} hours, expected 8760")
+    
+    return aligned_load
 
 
 def attach_load_profile_to_pvsam(pv: Pvsamv1.Pvsamv1, cfg: SimulationConfiguration) -> bool:
@@ -967,7 +1079,10 @@ def attach_load_profile_to_pvsam(pv: Pvsamv1.Pvsamv1, cfg: SimulationConfigurati
         raise KeyError(
             f"Column '{cfg.load_col}' not found in {cfg.load_file}. Available columns: {list(df.columns)}"
         )
-    load = df[cfg.load_col].astype(float).tolist()
+    
+    # Align load profile to start at midnight and get the aligned load values
+    load = align_load_profile_to_midnight(df, cfg.load_col)
+    
     if len(load) != 8760:
         raise ValueError(
             f"Research load series must be 8760 hours; got len={len(load)} at {cfg.load_file}"
@@ -978,7 +1093,7 @@ def attach_load_profile_to_pvsam(pv: Pvsamv1.Pvsamv1, cfg: SimulationConfigurati
     pv.value("crit_load", [0.0] * len(load))
     pv.value("batt_load_ac_forecast", load)
     print(
-        f"Attached load from CSV: {cfg.load_file} (len={len(load)}, sum={sum(load):.1f} kWh)"
+        f"Attached aligned load from CSV: {cfg.load_file} (len={len(load)}, sum={sum(load):.1f} kWh)"
     )
     return True
 
@@ -1005,6 +1120,66 @@ def attach_resources(pv: Pvsamv1.Pvsamv1, cfg: SimulationConfiguration, presets:
 def execute_pvsam(pv: Pvsamv1.Pvsamv1) -> bool:
     try:
         pv.execute(0)
+        
+        # ==== DIAGNOSTIC: Solar Generation Profile Analysis ====
+        print("\n=== SOLAR GENERATION DIAGNOSTIC LOGGING ===")
+        
+        try:
+            out = pv.Outputs.export()
+            
+            # Extract solar generation components
+            system_to_batt = out.get("system_to_batt", [])
+            system_to_load = out.get("system_to_load", [])
+            system_to_grid = out.get("system_to_grid", [])
+            
+            if system_to_load and system_to_batt and system_to_grid:
+                # Calculate total solar generation
+                total_solar = [a + b + c for a, b, c in zip(system_to_load, system_to_batt, system_to_grid)]
+                
+                if len(total_solar) >= 24:
+                    print(f"Solar Generation Analysis:")
+                    print(f"  Profile length: {len(total_solar)} hours")
+                    print(f"  Annual total: {sum(total_solar):.2f} kWh")
+                    print(f"  Peak generation: {max(total_solar):.3f} kW")
+                    print(f"  Average generation: {sum(total_solar)/len(total_solar):.3f} kW")
+                    
+                    # Find peak generation time
+                    max_gen = max(total_solar)
+                    peak_hour = total_solar.index(max_gen)
+                    print(f"  Peak generation hour: {peak_hour} (hour of year)")
+                    print(f"  Peak generation time of day: {peak_hour % 24}:00")
+                    
+                    # Show first 24 hours pattern
+                    print(f"  First 24 hours: {[round(x, 3) for x in total_solar[:24]]}")
+                    
+                    # Show midday pattern (hours around solar noon)
+                    noon_start = 10
+                    noon_end = 16
+                    noon_pattern = total_solar[noon_start:noon_end]
+                    print(f"  Hours {noon_start}-{noon_end-1}: {[round(x, 3) for x in noon_pattern]}")
+                    
+                    # Count productive hours
+                    productive_hours = len([x for x in total_solar if x > 0.1])  # >0.1 kW
+                    print(f"  Productive hours (>0.1 kW): {productive_hours}")
+                    
+                    # Check for unusual patterns
+                    if max_gen < 1.0:
+                        print(f"  ⚠️  Low peak generation: {max_gen:.3f} kW")
+                    if peak_hour % 24 < 10 or peak_hour % 24 > 16:
+                        print(f"  ⚠️  Unusual peak time: {peak_hour % 24}:00")
+                    
+                else:
+                    print(f"  Warning: Short solar profile ({len(total_solar)} hours)")
+            else:
+                print(f"  Warning: Missing solar generation components")
+                print(f"  Available keys: {sorted(out.keys())}")
+        
+        except Exception as e:
+            print(f"Error in solar diagnostic logging: {e}")
+        
+        print(f"=== END SOLAR DIAGNOSTIC LOGGING ===\n")
+        # ==== END DIAGNOSTIC ====
+        
         print("\nExecuted Pvsamv1 successfully.")
         return True
     except Exception as e:
@@ -1430,8 +1605,120 @@ def print_first_24h_dispatch_table(dispatch_schedule: Dict[str, Any]) -> None:
             pass
         print(f"{h:4d} {hod:3d}        {g:6.1f}         {d:6.1f}")
 
-def main() -> None:
-    cfg = configure()                                 # Configuration phase
+def save_sam_results(county: str, outputs: SimulationSeries, pv: Pvsamv1.Pvsamv1, output_file: str) -> None:
+    """Save SAM simulation results in the format expected by downstream steps."""
+    
+    # Extract additional flow data needed for the output file
+    pv_to_load, batt_to_load, grid_to_load = per_source_load_series_kw_from_model(pv)
+    pv_to_batt, grid_to_batt = _battery_charging_series(pv)
+    
+    # Calculate derived series
+    solar_battery_to_load = [s + b for s, b in zip(pv_to_load, batt_to_load)]
+    total_supply = [s + b + g for s, b, g in zip(pv_to_load, batt_to_load, grid_to_load)]
+    difference = [l - t for l, t in zip(outputs.load_series_kw, total_supply)]
+    
+    # Validate energy balance
+    max_difference = max(abs(d) for d in difference)
+    if max_difference > 1e-6:
+        print(f"Warning: Energy balance discrepancy found in {county}. Max difference: {max_difference}")
+    
+    # Create output directory
+    os.makedirs(os.path.dirname(output_file), exist_ok=True)
+    
+    # Create timestamp index
+    date_range = pd.date_range(start='2018-01-01', periods=8760, freq='H')
+    
+    # Convert arrays to lists and validate lengths
+    pv_to_batt_list = pv_to_batt.tolist() if hasattr(pv_to_batt, 'tolist') else list(pv_to_batt)
+    grid_to_batt_list = grid_to_batt.tolist() if hasattr(grid_to_batt, 'tolist') else list(grid_to_batt)
+    
+    # Verify all arrays have correct length (8760 hours)
+    data_arrays = [
+        ('Load Profile', outputs.load_series_kw),
+        ('System to Load', pv_to_load),
+        ('Battery to Load', batt_to_load),
+        ('Grid to Load', grid_to_load),
+        ('System to Battery', pv_to_batt_list),
+        ('Grid to Battery', grid_to_batt_list),
+        ('Battery SOC', outputs.state_of_charge_series_percent),
+    ]
+    
+    for name, data in data_arrays:
+        if len(data) != 8760:
+            raise ValueError(f"Data length mismatch in {county}: {name} has {len(data)} elements (expected 8760)")
+    
+    # Create DataFrame with the exact columns expected by step10
+    df = pd.DataFrame({
+        'Load Profile': outputs.load_series_kw,
+        'System to Load': pv_to_load,
+        'Battery to Load': batt_to_load,
+        'Grid to Load': grid_to_load,
+        'Solar + Battery to Load': solar_battery_to_load,
+        'Total Supply': total_supply,
+        'Difference': difference,
+        'System to Battery': pv_to_batt_list,
+        'Grid to Battery': grid_to_batt_list,
+        'Battery SOC': outputs.state_of_charge_series_percent,
+    }, index=date_range)
+    
+    # Save to CSV file
+    df.to_csv(output_file)
+    
+    print(f"SAM results saved to: {output_file}")
+    print(f"Columns written: {list(df.columns)}")
+
+
+def get_system_capacities(pv: Pvsamv1.Pvsamv1) -> tuple:
+    """Extract solar and battery capacities from the SAM model."""
+    try:
+        # Get solar capacity
+        solar_capacity = float(pv.value("system_capacity"))
+    except Exception:
+        solar_capacity = 0.0
+    
+    try:
+        # Get battery capacity
+        battery_capacity = float(pv.value("batt_bank_installed_capacity"))
+    except Exception:
+        try:
+            battery_capacity = float(pv.value("batt_computed_bank_capacity"))
+        except Exception:
+            battery_capacity = 0.0
+    
+    return solar_capacity, battery_capacity
+
+
+def process_single_county(base_input_dir: str, base_output_dir: str, scenario: str, housing_type: str, county: str, force_recompute: bool = False) -> dict:
+    """Process a single county with the PvSAMv1 battery model."""
+    # Set environment variables for configuration
+    county_slug = slugify_county_name(county)
+    os.environ["COUNTY_NAME"] = county_slug
+    # Compute canonical resource paths and set env overrides so configure() uses them
+    weather_file_canon = f"{base_input_dir}/{scenario}/{housing_type}/{county_slug}/weather_TMY_{county_slug}.csv"
+    load_file_canon = f"{base_input_dir}/{scenario}/{housing_type}/{county_slug}/combined_profiles_{scenario}_{county_slug}.csv"
+    os.environ["WEATHER_FILE"] = weather_file_canon
+    os.environ["LOAD_FILE"] = load_file_canon
+    
+    # Define output file path to match step10 expectations
+    output_file = os.path.join(base_output_dir, scenario, housing_type, county_slug, f"sam_optimized_load_profiles_{county_slug}.csv")
+    
+    # Skip if output file already exists and force_recompute is False
+    if not force_recompute and os.path.exists(output_file):
+        print(f"Output file already exists: {output_file}. Skipping... (use force_recompute=True to rebuild)")
+        # Still return capacity info if available
+        try:
+            # Try to extract capacity from existing results or return defaults
+            return {
+                "Solar Capacity (kW)": 0.0,
+                "Battery Capacity (kWh)": 13.5  # Default Tesla Powerwall capacity
+            }
+        except Exception:
+            return {"Solar Capacity (kW)": 0.0, "Battery Capacity (kWh)": 13.5}
+    
+    cfg = configure(scenario, county)                                 # Configuration phase
+    # Log the exact files that will be used by this run
+    print(f"  Using weather_file={cfg.weather_file}")
+    print(f"  Using load_file={cfg.load_file}")
     presets = load_presets(cfg)                       # Presets phase
     overrides = build_runtime_overrides(cfg)          # Runtime overrides
     modules = initialize_modules()                    # Module lifecycle: create
@@ -1466,9 +1753,134 @@ def main() -> None:
     execute(pv)                                       # Execute model or raise
     outputs = extract(pv)                             # Collect outputs
     
+    # Save results in format expected by step10
+    save_sam_results(county, outputs, pv, output_file)
+    
+    # Extract system capacities for capacity tracking
+    solar_capacity, battery_capacity = get_system_capacities(pv)
     
     report(cfg, presets, outputs, pv)                 # Reporting/visualization
+    
+    return {
+        "Solar Capacity (kW)": round(solar_capacity, 2),
+        "Battery Capacity (kWh)": round(battery_capacity, 2)
+    }
 
 
-if __name__ == "__main__":
-    main()
+def process(base_input_dir: str, base_output_dir: str, scenario: str, housing_type: str, counties=None, years_of_analysis: int = 1, force_recompute: bool = False):
+    """
+    Process PvSAMv1 battery simulation for multiple counties.
+    
+    This function matches the signature expected by cost_service.py.
+    
+    Args:
+        base_input_dir: Base input directory path
+        base_output_dir: Base output directory path
+        scenario: Scenario name (e.g., "baseline", "heat_pump")
+        housing_type: Housing type (e.g., "single-family-detached")
+        counties: List of counties to process (if None, processes all available)
+        years_of_analysis: Number of years to analyze (default 1)
+        force_recompute: Whether to force recomputation of existing results
+    """
+    print(f"Running PvSAMv1 battery simulation for scenario: {scenario}")
+    
+    # Import required helpers to get county list if needed
+    try:
+        from main_helpers import get_counties, get_scenario_path
+        
+        # Get counties to process
+        if counties is None:
+            scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
+            counties_to_run = get_counties(scenario_path, counties)
+        else:
+            counties_to_run = counties
+            
+    except ImportError:
+        # Fallback if main_helpers not available
+        if counties is None:
+            print("Warning: main_helpers not available, using default county list")
+            counties_to_run = ["alameda"]
+        else:
+            counties_to_run = counties
+    
+    successful_counties = []
+    failed_counties = []
+    capacity_dict = {}
+    
+    for county in counties_to_run:
+        try:
+            print(f"\nProcessing county: {county}")
+            
+            # Clean county name for file paths
+            county_slug = slugify_county_name(county)
+            
+            # Check for required input files
+            weather_file = f"{base_input_dir}/{scenario}/{housing_type}/{county_slug}/weather_TMY_{county_slug}.csv"
+            load_file = f"{base_input_dir}/{scenario}/{housing_type}/{county_slug}/combined_profiles_{scenario}_{county_slug}.csv"
+            print(f"  Weather: {weather_file}  exists={os.path.exists(weather_file)}")
+            print(f"  Load:    {load_file}     exists={os.path.exists(load_file)}")
+            
+            if not os.path.exists(weather_file):
+                print(f"Weather file not found: {weather_file}. Skipping...")
+                failed_counties.append(county)
+                continue
+                
+            if not os.path.exists(load_file):
+                print(f"Load file not found: {load_file}. Skipping...")
+                failed_counties.append(county)
+                continue
+            
+            # Process this county and collect capacity data
+            capacity_data = process_single_county(base_input_dir, base_output_dir, scenario, housing_type, county, force_recompute)
+            # Store capacities keyed by slug so downstream maps (which use slugs) find them
+            capacity_dict[county_slug] = capacity_data
+            successful_counties.append(county)
+            
+        except Exception as e:
+            print(f"Error processing {county}: {e}")
+            failed_counties.append(county)
+    
+    # Save capacity data to CSV file (matching original step9 behavior)
+    if capacity_dict:
+        capital_costs_folder = f"{base_input_dir}/{scenario}/{housing_type}/CAPITAL_COSTS"
+        os.makedirs(capital_costs_folder, exist_ok=True)
+        
+        capacity_df = pd.DataFrame.from_dict(capacity_dict, orient='index').rename_axis('County')
+        output_csv_path = f"{capital_costs_folder}/electrified_assets.csv"
+        capacity_df.to_csv(output_csv_path)
+        print(f"\nCapacity data saved to: {output_csv_path}")
+    else:
+        print("\nNo capacity data to save.")
+    
+    # Summary report
+    print(f"\n{'='*60}")
+    print(f"PvSAMv1 Battery Simulation Summary")
+    print(f"{'='*60}")
+    print(f"Scenario: {scenario}")
+    print(f"Housing type: {housing_type}")
+    print(f"Successfully processed: {len(successful_counties)} counties")
+    print(f"Failed: {len(failed_counties)} counties")
+    
+    if successful_counties:
+        print(f"Successful counties: {', '.join(successful_counties)}")
+    if failed_counties:
+        print(f"Failed counties: {', '.join(failed_counties)}")
+    
+    return successful_counties
+
+
+scenario = "baseline"
+housing_type = "single-family-detached"
+
+if __name__ == '__main__':
+    # Default configuration for standalone execution
+    scenario = "baseline"
+    county = "alameda"
+    housing_type = "single-family-detached"
+    base_input_dir = "data/loadprofiles"
+    base_output_dir = "data/loadprofiles"
+    
+    print(f"Running PvSAMv1 battery simulation for {county} county, {scenario} scenario")
+    
+    # Run the main processing pipeline for single county
+    process_single_county(base_input_dir, base_output_dir, scenario, housing_type, county, force_recompute=True)
