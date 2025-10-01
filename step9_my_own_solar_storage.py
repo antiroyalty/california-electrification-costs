@@ -77,11 +77,11 @@ MAX_SOC_FRAC = 0.90
 
 
 # PV model constants (simple PVWatts‑like)
-PR_BASE = 0.85               # base performance ratio
-NOCT_C = 45.0                # Nominal Operating Cell Temp (°C)
+PR_BASE = 0.85               # base performance ratio (keep in sync with sizing)
+NOCT_C = 46.0                # Nominal Operating Cell Temp (°C), align with CEC t_noct
 G_REF = 1000.0               # reference irradiance (W/m^2)
 G_NOCT = 800.0               # NOCT reference irradiance (W/m^2)
-GAMMA_PDC = -0.004           # DC power temp coeff per °C
+GAMMA_PDC = -0.00280         # DC power temp coeff per °C (−0.280%/°C)
 
 # Weather alignment
 WEATHER_SHIFT_HOURS = 8      # Fixed shift (hours) to align weather to local load
@@ -125,7 +125,8 @@ def _read_weather_csv(path: str) -> pd.DataFrame:
     ghi = pd.to_numeric(df[ghi_col], errors='coerce').fillna(0.0)
     tamb = pd.to_numeric(df[temp_col], errors='coerce').fillna(20.0)
     out = pd.DataFrame({'ghi': ghi, 'tamb': tamb})
-    # Keep exactly 8760 values (trim/aggregate if needed)
+
+    # Keep exactly 8760 values
     if len(out) > 8760:
         out = out.iloc[:8760].reset_index(drop=True)
     elif len(out) < 8760:
@@ -220,10 +221,12 @@ def _compute_system_capacity_kW(weather_df: pd.DataFrame, load_profile: List[flo
     mean_ghi = float(weather_df['ghi'].mean())  # W/m²
     daily_irr_kwh_per_m2 = mean_ghi * 24.0 / 1000.0
     annual_irr_kwh_per_m2 = daily_irr_kwh_per_m2 * 365.0
-    pv_cell_eff = 0.206
-    system_pr = 0.80
+    # Align sizing with reference STC eff 21.07% and PR used in timeseries
+    pv_cell_eff = 0.2107
+    system_pr = PR_BASE
     annual_elec_per_m2 = annual_irr_kwh_per_m2 * pv_cell_eff * system_pr
-    panel_power_density_kw_per_m2 = 0.193
+    # Power density at STC ~ 210.7 W/m² for 21.07% eff (1000 W/m²)
+    panel_power_density_kw_per_m2 = 0.2107
 
     annual_load_kwh = sum(load_profile)
     required_panel_area_m2 = (annual_load_kwh / annual_elec_per_m2) if annual_elec_per_m2 > 0 else 0.0
