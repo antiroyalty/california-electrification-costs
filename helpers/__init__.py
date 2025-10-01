@@ -6,7 +6,7 @@ the analysis pipeline for home electrification cost modeling.
 
 Available modules:
 - utility_helpers: Utility company mappings and functions
-- gas_rate_helpers: Gas rate structures and calculations  
+- gas_rate_helpers: Gas rate structures and calculations
 - electricity_rate_helpers: Electricity rate structures and calculations
 - maps_helpers: Geographic mapping and visualization utilities
 - capital_costs_helper: Capital cost calculations and incentive handling
