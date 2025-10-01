@@ -1860,7 +1860,7 @@ def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: 
         },
         "Payback Period (years)": {
             "color_scheme": "RdYlGn_r",
-            "bins": [0, 5, 10, 15, 20, 25, 30, 50, 100],
+            "bins": [0, 5, 10, 15, 20, 25, 30, 50],
             "unit": "years"
         },
         "Load Profile (kWh)": {

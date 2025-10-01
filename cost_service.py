@@ -148,7 +148,7 @@ if __name__ == '__main__':
     print(f"Counties: {len(norcal_counties + central_counties + socal_counties)} total counties")
     print("-" * 60)
     
-    cost_service = CostService(scenario, housing_type, counties=["Alameda County"], rate_plans=rate_plans, input_dir=input_dir, output_dir=output_dir)
+    cost_service = CostService(scenario, housing_type, counties=norcal_counties + socal_counties + central_counties, rate_plans=rate_plans, input_dir=input_dir, output_dir=output_dir)
     cost_service.run()
     
     print("\nCost analysis completed successfully!")
