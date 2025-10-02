@@ -14,6 +14,7 @@ Display diagnostic maps for key metrics in a single HTML file:
 """
 
 import os
+from datetime import datetime
 import pandas as pd
 import folium
 from folium import plugins
@@ -2166,8 +2167,10 @@ def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: 
     # Save the combined HTML file
     output_dir = os.path.join("visualizations", "diagnostic_maps", "html")
     os.makedirs(output_dir, exist_ok=True)
-    
-    filename = f"diagnostic_dashboard_{scenario}_{housing_type.replace(' ', '-').lower()}.html"
+
+    # Append timestamp suffix at the end for versioning
+    timestamp_suffix = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"diagnostic_dashboard_{scenario}_{housing_type.replace(' ', '-').lower()}_{timestamp_suffix}.html"
     output_path = os.path.join(output_dir, filename)
     
     with open(output_path, 'w', encoding='utf-8') as f:
