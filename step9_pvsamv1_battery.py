@@ -38,9 +38,11 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import traceback
 
 import PySAM.Pvsamv1 as Pvsamv1
 import PySAM.ResourceTools as ResourceTools
+from step9_plotting_helper import plot_first_weeks
 
 # Use project slug rules for county folder names
 try:
@@ -60,6 +62,16 @@ BATTERY_EFFICIENCY = 5
 PEAK_START_HOUR = 16
 PEAK_END_HOUR = 21
 BATTERY_CAPACITY_KWH = 13.5
+
+# PV sizing/model alignment constants (match DIY step assumptions)
+PV_SIZING_CELL_EFF = 0.206            # STC cell efficiency (fraction)
+PV_SIZING_PR = 0.80                    # Performance ratio for sizing
+PV_SIZING_POWER_DENSITY = 0.193        # kW/m² at STC
+# DIY PV model constants for gross AC reconstruction from weather
+NOCT_C = 45.0
+G_NOCT = 800.0
+G_REF = 1000.0
+GAMMA_PDC = -0.00337
 
 # Solar charging control defaults (exact SAM parameter values)
 DISPATCH_MANUAL_SYSTEM_CHARGE_FIRST = 1         # dispatch_manual_system_charge_first
@@ -596,7 +608,7 @@ def build_configuration_from_environment(scenario, county) -> SimulationConfigur
         "LOAD_COL",
         "electricity.real_and_simulated.for_typical_county_home.kwh",
     )
-    show_plots = os.environ.get("SHOW_PLOTS", "1").strip() not in {"0", "false", "False"}
+    show_plots = True
     try:
         # No time shifting - use weather data as-is to avoid timing issues
         weather_shift_hours = int(os.environ.get("WEATHER_SHIFT_HOURS", "0"))
@@ -1140,6 +1152,65 @@ def attach_resources(pv: Pvsamv1.Pvsamv1, cfg: SimulationConfiguration, presets:
         raise RuntimeError("Failed to attach required weather and research load resources.")
 
 
+def _diy_pv_from_srd(pv: Pvsamv1.Pvsamv1, system_capacity_kw: float) -> list[float]:
+    """Reconstruct a simple gross PV AC series from SAM's weather resource.
+
+    Uses the same simplified model/parameters as the DIY step so that the
+    "PV AC (kWh)" panel represents gross available PV (pre‑constraint).
+    """
+    try:
+        srd = pv.SolarResource.solar_resource_data
+        ghi = np.asarray(srd.get('gh') or srd.get('ghi') or [], dtype=float)
+        tamb = np.asarray(srd.get('tdry') or srd.get('tamb') or [], dtype=float)
+        if ghi.size == 0:
+            return [0.0] * 8760
+        if tamb.size == 0:
+            tamb = np.full_like(ghi, 20.0)
+        # Cell temperature and temp derate
+        tcell = tamb + ((NOCT_C - 20.0) / G_NOCT) * ghi
+        temp_derate = np.clip(1.0 + (GAMMA_PDC) * (tcell - 25.0), 0.0, 1.5)
+        pac = system_capacity_kw * (ghi / G_REF) * PV_SIZING_PR * temp_derate
+        pac = np.clip(pac, 0.0, None)
+        if pac.size != 8760:
+            out = np.zeros(8760)
+            n = min(8760, pac.size)
+            out[:n] = pac[:n]
+            return out.tolist()
+        return pac.tolist()
+    except Exception:
+        return [0.0] * 8760
+
+
+def _compute_system_capacity_kW_from_pv_and_load(pv: Pvsamv1.Pvsamv1) -> float:
+    """Size PV capacity from weather (GHI) and load, mirroring the DIY step.
+
+    Uses:
+    - mean GHI (W/m²) → annual kWh/m² via 24h and 365d
+    - PV_SIZING_CELL_EFF and PV_SIZING_PR for electrical yield per m²
+    - PV_SIZING_POWER_DENSITY (kW/m²) to convert area to DC capacity
+    """
+    try:
+        srd = pv.SolarResource.solar_resource_data
+        ghi = srd.get('gh') or srd.get('ghi')
+        if not ghi or len(ghi) == 0:
+            return 0.0
+        mean_ghi = float(sum(ghi) / len(ghi))  # W/m²
+        daily_irr_kwh_per_m2 = mean_ghi * 24.0 / 1000.0
+        annual_irr_kwh_per_m2 = daily_irr_kwh_per_m2 * 365.0
+        annual_elec_per_m2 = annual_irr_kwh_per_m2 * PV_SIZING_CELL_EFF * PV_SIZING_PR
+        try:
+            load = pv.value('load')
+        except Exception:
+            load = []
+        annual_load_kwh = float(sum(load)) if load else 0.0
+        required_panel_area_m2 = (annual_load_kwh / annual_elec_per_m2) if annual_elec_per_m2 > 0 else 0.0
+        required_dc_capacity_kw = required_panel_area_m2 * PV_SIZING_POWER_DENSITY
+        # guardrail
+        return max(0.0, float(required_dc_capacity_kw))
+    except Exception:
+        return 0.0
+
+
 # ==========
 # Execution
 # ==========
@@ -1599,27 +1670,50 @@ def report(cfg: SimulationConfiguration, presets: SamPresetFiles, outputs: Simul
     print_first_day_flow_table(pv, day_index=0)
     print_first_day_soc_summary(pv, day_index=0)
 
-    if cfg.show_plots:
-        # Build series for stacked source load and SOC/PV panels
-        sL = outputs.solar_to_load_series_kw
-        bL = outputs.battery_to_load_series_kw
-        gL = outputs.grid_to_load_series_kw
-        # Get battery charging flows
+    # Always save plots (do not depend on SHOW_PLOTS for saving) — show flag controls UI only
+    try:
+        print("[PlotDebug] Begin plot assembly for", cfg.county_slug)
+        # Build series for unified helper: gross PV (DIY from weather) and used PV (flows)
+        sL = outputs.solar_to_load_series_kw or []
+        bL = outputs.battery_to_load_series_kw or []
+        gL = outputs.grid_to_load_series_kw or []
+        print("[PlotDebug] Series lengths (sL, bL, gL):", len(sL), len(bL), len(gL))
         pv_to_batt, grid_to_batt = _battery_charging_series(pv)
-        min_soc = read_soc_bounds(pv).min_soc
-        max_soc = read_soc_bounds(pv).max_soc
-        _plot_eight_panel_weeks(
-            np.array(outputs.load_series_kw, dtype=float),
-            np.array(outputs.state_of_charge_series_percent, dtype=float),
-            np.array(outputs.solar_ac_power_series_kw, dtype=float),
-            np.array(sL, dtype=float),
-            np.array(bL, dtype=float),
-            np.array(gL, dtype=float),
-            pv_to_batt,
-            grid_to_batt,
-            min_soc,
-            max_soc,
+        print("[PlotDebug] Series lengths (pv_to_batt, grid_to_batt):", len(pv_to_batt), len(grid_to_batt))
+        pv_used_series = (np.asarray(sL, dtype=float) + np.asarray(pv_to_batt, dtype=float)).tolist()
+        solar_capacity, _ = get_system_capacities(pv)
+        print(f"[PlotDebug] solar_capacity_kW={solar_capacity}")
+        pv_gross_series = _diy_pv_from_srd(pv, float(solar_capacity))
+        print("[PlotDebug] pv_gross_series len/sum:", len(pv_gross_series), sum(pv_gross_series) if pv_gross_series else 0)
+        county_dir = os.path.dirname(cfg.weather_file)
+        plots_path = os.path.join(county_dir, f"step9_pvsamv1_battery_plots_{cfg.county_slug}.png")
+        print("[PlotDebug] plots_path:", plots_path)
+        print("[PlotDebug] Calling plot_first_weeks …")
+        summary = {
+            "Solar size (kW)": float(solar_capacity),
+            "PV gross (kWh)": float(sum(pv_gross_series)) if pv_gross_series else 0.0,
+            "PV used (kWh)": float(sum(pv_used_series)),
+            "Battery→Load (kWh)": float(sum(bL)),
+            "Grid→Battery (kWh)": float(sum(grid_to_batt)),
+        }
+        plot_first_weeks(
+            load_kwh=outputs.load_series_kw,
+            pv_ac_kwh=pv_gross_series,
+            batt_to_load_kwh=bL,
+            grid_to_load_kwh=gL,
+            grid_to_batt_kwh=grid_to_batt,
+            pv_to_batt_kwh=pv_to_batt,
+            soc_percent=outputs.state_of_charge_series_percent,
+            pv_used_kwh=pv_used_series,
+            summary_stats=summary,
+            title=f"PySAM Dispatch — {cfg.county_slug}",
+            show=False,
+            save_path=plots_path,
         )
+        print(f"Saved step9_pvsamv1_battery plots to: {plots_path}")
+    except Exception as e:
+        print(f"Plotting failed: {e}")
+        traceback.print_exc()
 
     report_manual_dispatch_schedules(presets)
 
@@ -1708,6 +1802,55 @@ def save_sam_results(county: str, outputs: SimulationSeries, pv: Pvsamv1.Pvsamv1
         'Battery SOC': outputs.state_of_charge_series_percent,
     }, index=date_range)
     
+    # Summaries for diagnostics (helps compare with DIY PV)
+    try:
+        total_load = float(sum(outputs.load_series_kw))
+        used_pv_gen = float(sum(outputs.solar_ac_power_series_kw))  # flows-based
+        pv_to_load_sum = float(sum(pv_to_load))
+        pv_to_batt_sum = float(sum(pv_to_batt_list))
+        # Derive PV→Grid as remainder of PV gen after PV→Load and PV→Batt
+        pv_to_grid_sum = max(0.0, used_pv_gen - (pv_to_load_sum + pv_to_batt_sum))
+        batt_to_load_sum = float(sum(batt_to_load))
+        grid_to_load_sum = float(sum(grid_to_load))
+        grid_to_batt_sum = float(sum(grid_to_batt_list))
+        # Battery SOC stats
+        soc_series = outputs.state_of_charge_series_percent or []
+        soc_min = min(soc_series) if soc_series else 0.0
+        soc_max = max(soc_series) if soc_series else 0.0
+        soc_end = soc_series[-1] if soc_series else 0.0
+        # Capacities
+        solar_capacity, battery_capacity = get_system_capacities(pv)
+        # Gross PV AC energy from Outputs.gen if available
+        try:
+            out = pv.Outputs.export()
+            gross_pv_gen = float(sum(out.get('gen', []))) if isinstance(out.get('gen'), list) else None
+        except Exception:
+            gross_pv_gen = None
+        print("\n[PySAM PV Diagnostics]", county)
+        print(f"  system_capacity_kW       = {solar_capacity:.3f}")
+        if gross_pv_gen is not None:
+            print(f"  gross_pv_gen_kWh         = {gross_pv_gen:.1f}")
+        print(f"  used_pv_gen_kWh          = {used_pv_gen:.1f}")
+        print(f"  pv_to_load_kWh           = {pv_to_load_sum:.1f}")
+        print(f"  pv_to_batt_kWh           = {pv_to_batt_sum:.1f}")
+        print(f"  pv_to_grid_kWh(derived)  = {pv_to_grid_sum:.1f}")
+        print(f"  batt_to_load_kWh         = {batt_to_load_sum:.1f}")
+        print(f"  grid_to_load_kWh         = {grid_to_load_sum:.1f}")
+        print(f"  grid_to_batt_kWh         = {grid_to_batt_sum:.1f}")
+        print(f"  total_load_kWh           = {total_load:.1f}")
+        print(f"  batt_SOC[%]  min/ max/ end = {soc_min:.1f} / {soc_max:.1f} / {soc_end:.1f}")
+        # Selected dispatch/export flags (best effort)
+        def v(key, default=None):
+            try:
+                return pv.value(key)
+            except Exception:
+                return default
+        print("  flags: export_to_grid?=", v('batt_dispatch_auto_btm_can_discharge_to_grid'))
+        print("         grid_interconnection_limit_kwac=", v('grid_interconnection_limit_kwac'))
+        print("         dc_ac_ratio=", v('dc_ac_ratio'))
+    except Exception as _:
+        pass
+
     # Save to CSV file
     df.to_csv(output_file)
     
@@ -1772,7 +1915,17 @@ def process_single_county(base_input_dir: str, base_output_dir: str, scenario: s
     configure_modules(modules, presets, overrides)    # Apply + checks
     pv = modules.photovoltaic_model
     attach_resources(pv, cfg, presets)                # Weather + household load
-    
+
+    # Dynamically size PV capacity based on weather + load (aligned with DIY step)
+    sized_capacity_kw = _compute_system_capacity_kW_from_pv_and_load(pv)
+    if sized_capacity_kw > 0:
+        try:
+            # Set system capacity (DC) before any execution
+            pv.SystemDesign.system_capacity = float(sized_capacity_kw)
+            print(f"[Sizing] Set system_capacity_kW from weather+load: {sized_capacity_kw:.3f}")
+        except Exception as e:
+            print(f"[Sizing] Failed to set system_capacity_kW: {e}")
+
     # Get load forecast from attached load profile
     load_forecast = load_series_kw_from_model(pv)
     
@@ -1807,6 +1960,16 @@ def process_single_county(base_input_dir: str, base_output_dir: str, scenario: s
     solar_capacity, battery_capacity = get_system_capacities(pv)
     
     report(cfg, presets, outputs, pv)                 # Reporting/visualization
+    # Print the rendered plot path for convenience
+    try:
+        county_dir = os.path.dirname(cfg.weather_file)
+        plots_path = os.path.join(county_dir, f"step9_pvsamv1_battery_plots_{cfg.county_slug}.png")
+        if os.path.exists(plots_path):
+            print(f"Saved step9_pvsamv1_battery plots to: {plots_path}")
+        else:
+            print(f"Plot not generated (check SHOW_PLOTS). Expected at: {plots_path}")
+    except Exception:
+        pass
     
     return {
         "Solar Capacity (kW)": round(solar_capacity, 2),
