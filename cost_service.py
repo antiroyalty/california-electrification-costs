@@ -12,7 +12,8 @@ import step8_get_weather_files as WeatherFiles
 # Historical step 9 implementations (toggle as needed):
 # import step9_run_sam_model_for_solar_storage as RunSamModelForSolarStorage  # Pvwatts + Battwatts
 # import step9_pvsamv1_battery as RunSamModelForSolarStorage                 # Pvsamv1 integrated battery
-import step9_solar_storage_custom_dispatch as RunSamModelForSolarStorage     # Pvsamv1 PV + custom dispatch
+# import step9_solar_storage_custom_dispatch as RunSamModelForSolarStorage     # Pvsamv1 PV + custom dispatch
+import step9_my_own_solar_storage as RunSamModelForSolarStorage             # DIY PV + custom dispatch
 import step10_get_loads_for_rates as GetLoadsForRates
 import step11_evaluate_gas_rates as EvaluateGasRates
 import step12_evaluate_electricity_rates as EvaluateElectricityRates
