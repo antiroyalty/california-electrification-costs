@@ -38,6 +38,7 @@ from math import sqrt
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
+from datetime import datetime
 
 from main_helpers import (
     get_counties,
@@ -344,10 +345,10 @@ def process(
             solar_gen = _pv_timeseries_ac_kwh(weather_df, system_capacity_kW)
 
             # Battery (grid-only charge, PV immediate offset)
-            grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt, soc_percent = _simple_battery_dispatch(
+            grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt, pv_to_batt, soc_percent = _simple_battery_dispatch(
                 load_profile, solar_gen
             )
-            _validate_lengths([solar_gen, grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt, soc_percent])
+            _validate_lengths([solar_gen, grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt, pv_to_batt, soc_percent])
 
             # Human-readable summaries for verification
             log_profiles(
@@ -369,7 +370,7 @@ def process(
                 total_pv_gen = float(sum(solar_gen))
                 system_to_load = [min(s, l) for s, l in zip(solar_gen, load_profile)]
                 pv_to_load_sum = float(sum(system_to_load))
-                pv_to_batt_sum = 0.0  # DIY policy does not charge PV→Battery
+                pv_to_batt_sum = float(sum(pv_to_batt))
                 pv_to_grid_implied = max(0.0, total_pv_gen - (pv_to_load_sum + pv_to_batt_sum))
                 batt_to_load_sum = float(sum(batt_discharge))
                 grid_to_load_sum = float(sum(grid_to_load))
@@ -414,7 +415,7 @@ def process(
                 "Solar + Battery to Load": [a + b for a, b in zip(system_to_load, batt_to_load)],
                 "Total Supply": [a + b + c for a, b, c in zip(system_to_load, batt_to_load, grid_to_load)],
                 "Difference": [l - (a + b + c) for l, a, b, c in zip(load_profile, system_to_load, batt_to_load, grid_to_load)],
-                "System to Battery": [0.0] * 8760,
+                "System to Battery": pv_to_batt,
                 "Grid to Battery": grid_to_batt,
                 "Battery SOC": soc_percent,
             }, index=date_range)
@@ -426,11 +427,11 @@ def process(
                 scenario,
                 housing_type,
                 county,
-                f"step9_my_own_solar_storage_plots_{county}.png",
+                f"step9_my_own_solar_storage_plots_{county}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
             )
             try:
                 os.makedirs(os.path.dirname(plots_path), exist_ok=True)
-                pv_used_series = [min(s, l) for s, l in zip(solar_gen, load_profile)]
+                pv_used_series = [min(s, l) + pv for s, l, pv in zip(solar_gen, load_profile, pv_to_batt)]
                 summary = {
                     "Solar size (kW)": float(system_capacity_kW),
                     "PV gross (kWh)": float(sum(solar_gen)),
@@ -444,7 +445,7 @@ def process(
                     batt_to_load_kwh=batt_discharge,
                     grid_to_load_kwh=grid_to_load,
                     grid_to_batt_kwh=grid_to_batt,
-                    pv_to_batt_kwh=None,
+                    pv_to_batt_kwh=pv_to_batt,
                     soc_percent=soc_percent,
                     pv_used_kwh=pv_used_series,
                     summary_stats=summary,
