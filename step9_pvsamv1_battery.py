@@ -39,6 +39,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import traceback
+from datetime import datetime
 
 import PySAM.Pvsamv1 as Pvsamv1
 import PySAM.ResourceTools as ResourceTools
@@ -62,6 +63,9 @@ BATTERY_EFFICIENCY = 5
 PEAK_START_HOUR = 16
 PEAK_END_HOUR = 21
 BATTERY_CAPACITY_KWH = 13.5
+
+# Timestamp suffix for plot files (consistent across this run)
+PLOT_TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
 
 # PV sizing/model alignment constants (match DIY step assumptions)
 PV_SIZING_CELL_EFF = 0.206            # STC cell efficiency (fraction)
@@ -845,8 +849,9 @@ def apply_dispatch_schedule(pv: Pvsamv1.Pvsamv1, dispatch_schedule: Dict[str, An
     print(f"✓ PV charging capability: {overrides.batt_dispatch_auto_can_charge}")
     
     # Smart solar charging - only charge when solar exceeds load
-    pv.value('batt_dispatch_charge_only_system_exceeds_load', 0) # overrides.batt_dispatch_charge_only_system_exceeds_load)
-    print(f"✓ Smart solar charging: {overrides.batt_dispatch_charge_only_system_exceeds_load}")
+    # Only charge from PV when system exceeds load (enable PV→Battery on surplus)
+    pv.value('batt_dispatch_charge_only_system_exceeds_load', 1)
+    print("✓ Smart solar charging: only when PV exceeds load (enabled)")
     
     # Smart discharge - only discharge when load exceeds solar
     pv.value('batt_dispatch_discharge_only_load_exceeds_system', overrides.batt_dispatch_discharge_only_load_exceeds_system)
@@ -1686,7 +1691,10 @@ def report(cfg: SimulationConfiguration, presets: SamPresetFiles, outputs: Simul
         pv_gross_series = _diy_pv_from_srd(pv, float(solar_capacity))
         print("[PlotDebug] pv_gross_series len/sum:", len(pv_gross_series), sum(pv_gross_series) if pv_gross_series else 0)
         county_dir = os.path.dirname(cfg.weather_file)
-        plots_path = os.path.join(county_dir, f"step9_pvsamv1_battery_plots_{cfg.county_slug}.png")
+        plots_path = os.path.join(
+            county_dir,
+            f"step9_pvsamv1_battery_plots_{cfg.county_slug}_{PLOT_TIMESTAMP}.png",
+        )
         print("[PlotDebug] plots_path:", plots_path)
         print("[PlotDebug] Calling plot_first_weeks …")
         summary = {
@@ -1963,7 +1971,10 @@ def process_single_county(base_input_dir: str, base_output_dir: str, scenario: s
     # Print the rendered plot path for convenience
     try:
         county_dir = os.path.dirname(cfg.weather_file)
-        plots_path = os.path.join(county_dir, f"step9_pvsamv1_battery_plots_{cfg.county_slug}.png")
+        plots_path = os.path.join(
+            county_dir,
+            f"step9_pvsamv1_battery_plots_{cfg.county_slug}_{PLOT_TIMESTAMP}.png",
+        )
         if os.path.exists(plots_path):
             print(f"Saved step9_pvsamv1_battery plots to: {plots_path}")
         else:
