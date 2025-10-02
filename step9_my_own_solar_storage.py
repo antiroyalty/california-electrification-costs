@@ -1,15 +1,15 @@
 """
 Step 9 (DIY): PV + simple battery dispatch without PySAM
 
-Implements the same battery logic and outputs as step9_solar_storage_custom_dispatch.py,
-but computes the PV AC generation time series directly from the weather CSV instead
-of using Pvsamv1.
+Implements the same battery outputs as step9_solar_storage_custom_dispatch.py,
+but computes the PV AC generation time series directly from the weather CSV
+instead of using Pvsamv1.
 
 PV model (simplified PVWatts‑style):
 - AC_kW[h] = system_capacity_kW * (GHI[h] / 1000) * PR_base * temp_derate[h]
 - temp_derate[h] = 1 + gamma_pdc * (Tcell[h] − 25°C)
 - Tcell[h] ≈ Tamb[h] + ((NOCT − 20) / 800) * GHI[h]
-  where NOCT = 45°C, PR_base = 0.85, gamma_pdc = −0.004 / °C
+  where NOCT = 46°C, PR_base = 0.85, gamma_pdc = −0.00280 / °C
 - Clip at zero; no inverter clipping modeled (kept simple to match DIY intent).
 
 Battery dispatch (identical to custom dispatch):
@@ -76,12 +76,13 @@ MIN_SOC_FRAC = 0.20
 MAX_SOC_FRAC = 0.90
 
 
-# PV model constants (simple PVWatts‑like)
-PR_BASE = 0.85               # base performance ratio (keep in sync with sizing)
-NOCT_C = 46.0                # Nominal Operating Cell Temp (°C), align with CEC t_noct
+# PV model constants (simple PVWatts‑like), aligned to PySAM preset assumptions
+# Loss stack / PR approximates detailed model losses (soiling/mismatch/wiring/inverter/availability)
+PR_BASE = 0.80               # base performance ratio
+NOCT_C = 45.0                # Nominal Operating Cell Temp (°C)
 G_REF = 1000.0               # reference irradiance (W/m^2)
 G_NOCT = 800.0               # NOCT reference irradiance (W/m^2)
-GAMMA_PDC = -0.00280         # DC power temp coeff per °C (−0.280%/°C)
+GAMMA_PDC = -0.00337         # DC power temp coeff per °C (−0.337%/°C)
 
 # Weather alignment
 WEATHER_SHIFT_HOURS = 8      # Fixed shift (hours) to align weather to local load
@@ -221,12 +222,12 @@ def _compute_system_capacity_kW(weather_df: pd.DataFrame, load_profile: List[flo
     mean_ghi = float(weather_df['ghi'].mean())  # W/m²
     daily_irr_kwh_per_m2 = mean_ghi * 24.0 / 1000.0
     annual_irr_kwh_per_m2 = daily_irr_kwh_per_m2 * 365.0
-    # Align sizing with reference STC eff 21.07% and PR used in timeseries
-    pv_cell_eff = 0.2107
-    system_pr = PR_BASE
+    # Align sizing with PySAM step (efficiency and PR)
+    pv_cell_eff = 0.206
+    system_pr = PR_BASE   # 0.80
     annual_elec_per_m2 = annual_irr_kwh_per_m2 * pv_cell_eff * system_pr
-    # Power density at STC ~ 210.7 W/m² for 21.07% eff (1000 W/m²)
-    panel_power_density_kw_per_m2 = 0.2107
+    # Power density at STC ≈ 0.193 kW/m² used in the SAM-based step
+    panel_power_density_kw_per_m2 = 0.193
 
     annual_load_kwh = sum(load_profile)
     required_panel_area_m2 = (annual_load_kwh / annual_elec_per_m2) if annual_elec_per_m2 > 0 else 0.0
@@ -362,6 +363,44 @@ def process(
                 title=f"DIY Dispatch Profiles — {county}",
             )
 
+            # Detailed diagnostics comparable to PySAM step
+            try:
+                total_load = float(sum(load_profile))
+                total_pv_gen = float(sum(solar_gen))
+                system_to_load = [min(s, l) for s, l in zip(solar_gen, load_profile)]
+                pv_to_load_sum = float(sum(system_to_load))
+                pv_to_batt_sum = 0.0  # DIY policy does not charge PV→Battery
+                pv_to_grid_implied = max(0.0, total_pv_gen - (pv_to_load_sum + pv_to_batt_sum))
+                batt_to_load_sum = float(sum(batt_discharge))
+                grid_to_load_sum = float(sum(grid_to_load))
+                grid_to_batt_sum = float(sum(grid_to_batt))
+                soc_min = min(soc_percent) if soc_percent else 0.0
+                soc_max = max(soc_percent) if soc_percent else 0.0
+                soc_end = soc_percent[-1] if soc_percent else 0.0
+                mean_ghi = float(weather_df['ghi'].mean())
+                sum_ghi_kwhm2 = float(weather_df['ghi'].sum()) / 1000.0
+                jan_len = 31 * 24
+                jan_idx = int(pd.Series(solar_gen[:jan_len]).idxmax()) if total_pv_gen > 0 else -1
+                jan_hod = jan_idx % 24 if jan_idx >= 0 else -1
+                print("\n[DIY PV Diagnostics]", county)
+                print(f"  WEATHER_SHIFT_HOURS       = {WEATHER_SHIFT_HOURS}")
+                print(f"  PR_BASE / NOCT / gamma    = {PR_BASE} / {NOCT_C}C / {GAMMA_PDC}/C")
+                print(f"  mean_GHI_Wm2              = {mean_ghi:.1f}")
+                print(f"  sum_GHI_kWh_per_m2        = {sum_ghi_kwhm2:.1f}")
+                print(f"  system_capacity_kW        = {system_capacity_kW:.3f}")
+                print(f"  total_pv_gen_kWh          = {total_pv_gen:.1f}")
+                print(f"  pv_to_load_kWh            = {pv_to_load_sum:.1f}")
+                print(f"  pv_to_batt_kWh            = {pv_to_batt_sum:.1f}")
+                print(f"  pv_to_grid_kWh(derived)   = {pv_to_grid_implied:.1f}")
+                print(f"  batt_to_load_kWh          = {batt_to_load_sum:.1f}")
+                print(f"  grid_to_load_kWh          = {grid_to_load_sum:.1f}")
+                print(f"  grid_to_batt_kWh          = {grid_to_batt_sum:.1f}")
+                print(f"  total_load_kWh            = {total_load:.1f}")
+                print(f"  batt_SOC[%] min/max/end   = {soc_min:.1f}/{soc_max:.1f}/{soc_end:.1f}")
+                print(f"  Jan peak hour-of-day      = {jan_hod}")
+            except Exception:
+                pass
+
             # Save per-county outputs in the standard schema used by step10
             os.makedirs(os.path.dirname(output_file), exist_ok=True)
             date_range = pd.date_range(start="2018-01-01", periods=8760, freq="H")
@@ -382,9 +421,23 @@ def process(
             df.to_csv(output_file)
 
             # Create and save Jan/Jul plots
-            plots_path = os.path.join(base_output_dir, scenario, housing_type, county, f"custom_dispatch_plots_{county}.png")
+            plots_path = os.path.join(
+                base_output_dir,
+                scenario,
+                housing_type,
+                county,
+                f"step9_my_own_solar_storage_plots_{county}.png",
+            )
             try:
                 os.makedirs(os.path.dirname(plots_path), exist_ok=True)
+                pv_used_series = [min(s, l) for s, l in zip(solar_gen, load_profile)]
+                summary = {
+                    "Solar size (kW)": float(system_capacity_kW),
+                    "PV gross (kWh)": float(sum(solar_gen)),
+                    "PV used (kWh)": float(sum(pv_used_series)),
+                    "Battery→Load (kWh)": float(sum(batt_discharge)),
+                    "Grid→Battery (kWh)": float(sum(grid_to_batt)),
+                }
                 plot_first_weeks(
                     load_kwh=load_profile,
                     pv_ac_kwh=solar_gen,
@@ -393,11 +446,13 @@ def process(
                     grid_to_batt_kwh=grid_to_batt,
                     pv_to_batt_kwh=None,
                     soc_percent=soc_percent,
+                    pv_used_kwh=pv_used_series,
+                    summary_stats=summary,
                     title=f"DIY Dispatch — {county}",
                     show=False,
                     save_path=plots_path,
                 )
-                print(f"Saved custom dispatch plots to: {plots_path}")
+                print(f"Saved step9_my_own_solar_storage plots to: {plots_path}")
             except Exception as plot_err:
                 print(f"Plotting failed for {county}: {plot_err}")
 
@@ -437,6 +492,6 @@ if __name__ == "__main__":
         "data/loadprofiles",
         scenario,
         housing_type,
-        norcal_counties, # + socal_counties + central_counties,
+        ["Alameda County"], # norcal_counties, # + socal_counties + central_counties,
         force_recompute=True,
     )
