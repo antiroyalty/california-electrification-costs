@@ -75,7 +75,7 @@ ELECTRICITY_BILL_BINS = [0, 1000, 2000, 3000, 4000, 5000, 6000, 8000, 10000]
 GAS_BILL_BINS = [0, 500, 1000, 1500, 2000, 2500, 3000, 4000]
 SAVINGS_BINS = [-2000, -1000, -500, 0, 500, 1000, 1500, 2000, 3000]
 CAPITAL_COSTS_BINS = [-1000, 0, 5000, 10000, 15000, 20000, 25000, 30000, 40000, 50000, 100000]
-PAYBACK_PERIOD_BINS = [0, 5, 10, 15, 20, 25, 30, 50, 100]
+PAYBACK_PERIOD_BINS = [0, 5, 10, 15, 20, 25, 30, 50, 100, 120]
 NET_GRID_CONSUMPTION_BINS = [0, 2500, 5000, 7500, 10000, 12500, 15000,]
 TOTAL_ELECTRICITY_CONSUMPTION_BINS = [0, 2000, 4000, 6000, 8000, 10000, 12000, 14000, 16000]
 BATTERY_ENERGY_BINS = [0, 500, 1000, 1500, 2000, 2500, 3000]
@@ -1882,7 +1882,7 @@ def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: 
         },
         "Payback Period (years)": {
             "color_scheme": "RdYlGn_r",
-            "bins": [0, 5, 10, 15, 20, 25, 30, 50],
+            "bins": PAYBACK_PERIOD_BINS,
             "unit": "years"
         },
         "Load Profile (kWh)": {
