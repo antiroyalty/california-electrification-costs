@@ -12,10 +12,11 @@ PV model (simplified PVWatts‑style):
   where NOCT = 46°C, PR_base = 0.85, gamma_pdc = −0.00280 / °C
 - Clip at zero; no inverter clipping modeled (kept simple to match DIY intent).
 
-Battery dispatch (identical to custom dispatch):
+Battery dispatch (aligned with custom dispatch):
 - Capacity 13.5 kWh, round‑trip eff 96% as symmetric sqrt(RTE), 3 kW charge/discharge
 - Min SOC 20%, max SOC 90%
-- Charge 06:00–16:00 from grid only
+- Optional PV surplus charging (ENABLE_PV_SURPLUS_TO_BATTERY=True) any hour, subject to 3 kW cap and headroom
+- Grid top‑up charges 14:00–16:00 (subject to remaining power cap/headroom, after PV)
 - Discharge 16:00–21:00 to serve residual load after PV
 
 Outputs (identical columns used downstream by step10):
@@ -38,6 +39,7 @@ from math import sqrt
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
+import subprocess
 
 from main_helpers import (
     get_counties,
@@ -60,15 +62,32 @@ OUTPUT_LOADPROFILE_FILE_PREFIX = "sam_optimized_load_profiles"
 SOLAR_STORAGE_CAPACITY_PREFIX = "electrified_assets"
 CAPITAL_COSTS_FOLDER_NAME = "CAPITAL_COSTS"
 
+# Shared run identifiers for repeatable, versioned outputs
+
+def _get_git_short_sha() -> str:
+    try:
+        sha = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            stderr=subprocess.DEVNULL,
+        ).decode().strip()
+        return sha or "nogit"
+    except Exception:
+        return "nogit"
+
+GIT_SHORT_SHA = _get_git_short_sha()
+
 
 # Battery + dispatch constants (same as custom dispatch)
+# Toggle: enable/disable charging battery from PV surplus
+ENABLE_PV_SURPLUS_TO_BATTERY = False
 BATTERY_CAPACITY_KWH = 13.5
 ROUND_TRIP_EFFICIENCY = 0.96
 ETA_CHARGE = sqrt(ROUND_TRIP_EFFICIENCY)
 ETA_DISCHARGE = sqrt(ROUND_TRIP_EFFICIENCY)
 P_CHARGE_MAX_KW = 3.0
 P_DISCHARGE_MAX_KW = 3.0
-CHARGE_START_HOUR = 6
+# Grid top‑up window (2–4pm local)
+CHARGE_START_HOUR = 14
 CHARGE_END_HOUR = 16
 DISCHARGE_START_HOUR = 16
 DISCHARGE_END_HOUR = 21
@@ -255,7 +274,9 @@ def _pv_timeseries_ac_kwh(weather_df: pd.DataFrame, system_capacity_kw: float) -
     return pac
 
 
-def _simple_battery_dispatch(load_kwh: List[float], solar_kwh: List[float]) -> Tuple[List[float], List[float], List[float], List[float], List[float], List[float]]:
+def _simple_battery_dispatch(load_kwh: List[float], solar_kwh: List[float]) -> Tuple[
+    List[float], List[float], List[float], List[float], List[float], List[float], List[float]
+]:
     assert len(load_kwh) == 8760 and len(solar_kwh) == 8760
     soc_kwh = BATTERY_CAPACITY_KWH * MIN_SOC_FRAC
     min_soc_kwh = BATTERY_CAPACITY_KWH * MIN_SOC_FRAC
@@ -265,12 +286,16 @@ def _simple_battery_dispatch(load_kwh: List[float], solar_kwh: List[float]) -> T
     batt_discharge = [0.0] * 8760
     grid_to_load = [0.0] * 8760
     grid_to_batt = [0.0] * 8760
+    # In DIY model we only charge from grid (no PV→Battery); keep explicit channel for parity
+    pv_to_batt = [0.0] * 8760
     soc_percent = [0.0] * 8760
 
     for h in range(8760):
         hod = h % 24
         # Solar offsets household load immediately
         net_after_solar = max(load_kwh[h] - solar_kwh[h], 0.0)
+        # PV surplus available after serving load
+        pv_surplus = max(solar_kwh[h] - load_kwh[h], 0.0)
 
         # Discharge to cover peak window residual load
         if DISCHARGE_START_HOUR <= hod < DISCHARGE_END_HOUR and net_after_solar > 0 and soc_kwh > min_soc_kwh:
@@ -282,21 +307,36 @@ def _simple_battery_dispatch(load_kwh: List[float], solar_kwh: List[float]) -> T
             batt_discharge[h] = delivered
             net_after_solar -= delivered
 
-        # Charge from grid during 06:00–16:00
+        # First: charge from PV surplus (any hour), obeying power cap and headroom
+        pv_input_energy_used = 0.0
+        if ENABLE_PV_SURPLUS_TO_BATTERY and pv_surplus > 0 and soc_kwh < max_soc_kwh:
+            remaining_input_headroom = max((max_soc_kwh - soc_kwh) / ETA_CHARGE, 0.0)
+            # Limit by battery charge power
+            pv_input_energy = min(pv_surplus, P_CHARGE_MAX_KW, remaining_input_headroom)
+            if pv_input_energy > 0:
+                stored_pv = pv_input_energy * ETA_CHARGE
+                soc_kwh += stored_pv
+                batt_charge[h] += stored_pv
+                pv_to_batt[h] = pv_input_energy
+                pv_input_energy_used = pv_input_energy
+
+        # Then: optionally top-up from grid during 14:00–16:00, obeying remaining power and headroom
         if CHARGE_START_HOUR <= hod < CHARGE_END_HOUR and soc_kwh < max_soc_kwh:
-            remaining_capacity = max(max_soc_kwh - soc_kwh, 0.0)
-            max_grid_energy = min(P_CHARGE_MAX_KW, remaining_capacity / ETA_CHARGE)
+            remaining_input_headroom = max((max_soc_kwh - soc_kwh) / ETA_CHARGE, 0.0)
+            # Respect charge power cap; subtract PV portion already used this hour
+            remaining_power_cap = max(P_CHARGE_MAX_KW - pv_input_energy_used, 0.0)
+            max_grid_energy = min(remaining_power_cap, remaining_input_headroom)
             if max_grid_energy > 0:
-                stored = max_grid_energy * ETA_CHARGE
-                soc_kwh += stored
-                batt_charge[h] = stored
+                stored_grid = max_grid_energy * ETA_CHARGE
+                soc_kwh += stored_grid
+                batt_charge[h] += stored_grid
                 grid_to_batt[h] = max_grid_energy
 
         grid_to_load[h] = max(net_after_solar, 0.0)
         grid_demand[h] = grid_to_load[h] + grid_to_batt[h]
         soc_percent[h] = (soc_kwh / BATTERY_CAPACITY_KWH) * 100.0
 
-    return grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt, soc_percent
+    return grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt, pv_to_batt, soc_percent
 
 
 def _validate_lengths(*series_lists: List[List[float]]) -> None:
@@ -344,10 +384,10 @@ def process(
             solar_gen = _pv_timeseries_ac_kwh(weather_df, system_capacity_kW)
 
             # Battery (grid-only charge, PV immediate offset)
-            grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt, soc_percent = _simple_battery_dispatch(
+            grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt, pv_to_batt, soc_percent = _simple_battery_dispatch(
                 load_profile, solar_gen
             )
-            _validate_lengths([solar_gen, grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt, soc_percent])
+            _validate_lengths([solar_gen, grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt, pv_to_batt, soc_percent])
 
             # Human-readable summaries for verification
             log_profiles(
@@ -369,7 +409,7 @@ def process(
                 total_pv_gen = float(sum(solar_gen))
                 system_to_load = [min(s, l) for s, l in zip(solar_gen, load_profile)]
                 pv_to_load_sum = float(sum(system_to_load))
-                pv_to_batt_sum = 0.0  # DIY policy does not charge PV→Battery
+                pv_to_batt_sum = float(sum(pv_to_batt))
                 pv_to_grid_implied = max(0.0, total_pv_gen - (pv_to_load_sum + pv_to_batt_sum))
                 batt_to_load_sum = float(sum(batt_discharge))
                 grid_to_load_sum = float(sum(grid_to_load))
@@ -414,7 +454,7 @@ def process(
                 "Solar + Battery to Load": [a + b for a, b in zip(system_to_load, batt_to_load)],
                 "Total Supply": [a + b + c for a, b, c in zip(system_to_load, batt_to_load, grid_to_load)],
                 "Difference": [l - (a + b + c) for l, a, b, c in zip(load_profile, system_to_load, batt_to_load, grid_to_load)],
-                "System to Battery": [0.0] * 8760,
+                "System to Battery": pv_to_batt,
                 "Grid to Battery": grid_to_batt,
                 "Battery SOC": soc_percent,
             }, index=date_range)
@@ -426,15 +466,16 @@ def process(
                 scenario,
                 housing_type,
                 county,
-                f"step9_my_own_solar_storage_plots_{county}.png",
+                f"step9_my_own_solar_storage_plots_{county}_g{GIT_SHORT_SHA}.png",
             )
             try:
                 os.makedirs(os.path.dirname(plots_path), exist_ok=True)
-                pv_used_series = [min(s, l) for s, l in zip(solar_gen, load_profile)]
+                pv_used_series = [min(s, l) + pv for s, l, pv in zip(solar_gen, load_profile, pv_to_batt)]
                 summary = {
                     "Solar size (kW)": float(system_capacity_kW),
                     "PV gross (kWh)": float(sum(solar_gen)),
                     "PV used (kWh)": float(sum(pv_used_series)),
+                    "PV→Battery (kWh)": float(sum(pv_to_batt)),
                     "Battery→Load (kWh)": float(sum(batt_discharge)),
                     "Grid→Battery (kWh)": float(sum(grid_to_batt)),
                 }
@@ -444,7 +485,7 @@ def process(
                     batt_to_load_kwh=batt_discharge,
                     grid_to_load_kwh=grid_to_load,
                     grid_to_batt_kwh=grid_to_batt,
-                    pv_to_batt_kwh=None,
+                    pv_to_batt_kwh=pv_to_batt,
                     soc_percent=soc_percent,
                     pv_used_kwh=pv_used_series,
                     summary_stats=summary,
@@ -483,7 +524,7 @@ def process(
 
 
 # Example usage
-scenario = "baseline"
+scenario = "heat_pump"
 housing_type = "single-family-detached"
 
 if __name__ == "__main__":
