@@ -501,8 +501,14 @@ def process(
             )
 
             # Create and save Jan/Jul first-week plots (non-interactive)
+            # Add git short SHA for versioning
+            try:
+                import subprocess
+                sha = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL).decode().strip() or "nogit"
+            except Exception:
+                sha = "nogit"
             plots_path = os.path.join(
-                base_output_dir, scenario, housing_type, county, f"custom_dispatch_plots_{county}.png"
+                base_output_dir, scenario, housing_type, county, f"custom_dispatch_plots_{county}_g{sha}.png"
             )
             try:
                 os.makedirs(os.path.dirname(plots_path), exist_ok=True)

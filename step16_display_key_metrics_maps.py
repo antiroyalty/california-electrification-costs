@@ -14,6 +14,7 @@ Display diagnostic maps for key metrics in a single HTML file:
 """
 
 import os
+import subprocess
 import pandas as pd
 import folium
 from folium import plugins
@@ -28,6 +29,23 @@ from helpers.maps_helpers import (
 )
 from main_helpers import log, slugify_county_name, to_decimal_number, get_scenario_path, norcal_counties, central_counties, socal_counties
 from helpers.utility_helpers import get_utility_for_county
+
+
+# Shared run identifiers for repeatable, versioned outputs
+# No timestamp in filenames; use only git short SHA for versioning
+
+def _get_git_short_sha() -> str:
+    """Return the short git SHA for this repo, or 'nogit' if unavailable."""
+    try:
+        sha = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            stderr=subprocess.DEVNULL,
+        ).decode().strip()
+        return sha or "nogit"
+    except Exception:
+        return "nogit"
+
+GIT_SHORT_SHA = _get_git_short_sha()
 
 
 def format_currency_with_sign(value: float) -> str:
@@ -57,7 +75,7 @@ ELECTRICITY_BILL_BINS = [0, 1000, 2000, 3000, 4000, 5000, 6000, 8000, 10000]
 GAS_BILL_BINS = [0, 500, 1000, 1500, 2000, 2500, 3000, 4000]
 SAVINGS_BINS = [-2000, -1000, -500, 0, 500, 1000, 1500, 2000, 3000]
 CAPITAL_COSTS_BINS = [-1000, 0, 5000, 10000, 15000, 20000, 25000, 30000, 40000, 50000, 100000]
-PAYBACK_PERIOD_BINS = [0, 5, 10, 15, 20, 25, 30, 50, 100]
+PAYBACK_PERIOD_BINS = [0, 5, 10, 15, 20, 25, 30, 50, 100, 120]
 NET_GRID_CONSUMPTION_BINS = [0, 2500, 5000, 7500, 10000, 12500, 15000,]
 TOTAL_ELECTRICITY_CONSUMPTION_BINS = [0, 2000, 4000, 6000, 8000, 10000, 12000, 14000, 16000]
 BATTERY_ENERGY_BINS = [0, 500, 1000, 1500, 2000, 2500, 3000]
@@ -1784,7 +1802,11 @@ def create_appliance_breakdown_report(base_input_dir: str, scenario: str, housin
     output_dir = os.path.join("visualizations", "appliance_breakdown", "html")
     os.makedirs(output_dir, exist_ok=True)
     
-    filename = f"appliance_breakdown_{scenario}_{housing_type.replace(' ', '-').lower()}.html"
+    # Append git short SHA for versioning
+    filename = (
+        f"appliance_breakdown_{scenario}_{housing_type.replace(' ', '-').lower()}"
+        f"_g{GIT_SHORT_SHA}.html"
+    )
     output_path = os.path.join(output_dir, filename)
     
     with open(output_path, 'w', encoding='utf-8') as f:
@@ -1860,7 +1882,7 @@ def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: 
         },
         "Payback Period (years)": {
             "color_scheme": "RdYlGn_r",
-            "bins": [0, 5, 10, 15, 20, 25, 30, 50],
+            "bins": PAYBACK_PERIOD_BINS,
             "unit": "years"
         },
         "Load Profile (kWh)": {
@@ -2166,8 +2188,12 @@ def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: 
     # Save the combined HTML file
     output_dir = os.path.join("visualizations", "diagnostic_maps", "html")
     os.makedirs(output_dir, exist_ok=True)
-    
-    filename = f"diagnostic_dashboard_{scenario}_{housing_type.replace(' ', '-').lower()}.html"
+
+    # Append git short SHA for versioning
+    filename = (
+        f"diagnostic_dashboard_{scenario}_{housing_type.replace(' ', '-').lower()}"
+        f"_g{GIT_SHORT_SHA}.html"
+    )
     output_path = os.path.join(output_dir, filename)
     
     with open(output_path, 'w', encoding='utf-8') as f:
