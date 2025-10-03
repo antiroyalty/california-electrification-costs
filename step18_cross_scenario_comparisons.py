@@ -35,9 +35,12 @@ from plot_scenario_comparison_helper import (
     plot_kwh_flows_dotline,
     collect_savings_and_bills,
     plot_savings_and_bills_dotline,
+    collect_eac_components,
+    plot_eac_stacked_bar,
 )
 
 from main_helpers import get_scenario_path
+from scenarios import SCENARIOS
 
 
 def _git_short_sha() -> str:
@@ -67,13 +70,11 @@ def main() -> None:
     parser.add_argument("--base-input-dir", default="data/loadprofiles", help="Base input directory (default: data/loadprofiles)")
     parser.add_argument("--output-dir", default="analysis_results", help="Output directory for plots/CSVs")
     parser.add_argument("--housing-type", default="single-family-detached", help="Housing type")
-    parser.add_argument("--scenarios", nargs="*", default=[
-        "baseline",
-        "induction_stove",
-        "heat_pump",
-        "water_heating",
-        "full_electric_ev",
-    ], help="Scenarios to include")
+    parser.add_argument(
+        "--scenarios",
+        nargs="*",
+        help="Scenarios to include (default: all from scenarios.py)",
+    )
     parser.add_argument("--counties", nargs="*", help="Counties (names or slugs). If omitted, use --all-counties or default to Alameda County")
     parser.add_argument("--all-counties", action="store_true", help="Use all available counties under the provided scenarios")
     parser.add_argument("--agg", choices=["mean", "median"], default="mean", help="Aggregation across counties")
@@ -83,7 +84,11 @@ def main() -> None:
     base_input_dir = args.base_input_dir
     output_dir = args.output_dir
     housing_type = args.housing_type
-    scenarios = list(dict.fromkeys(args.scenarios))  # preserve order, dedup
+    # Use all scenarios from scenarios.py when none provided
+    if args.scenarios:
+        scenarios = list(dict.fromkeys(args.scenarios))  # preserve order, dedup
+    else:
+        scenarios = list(SCENARIOS.keys())
     os.makedirs(output_dir, exist_ok=True)
 
     if args.all_counties:
@@ -119,6 +124,14 @@ def main() -> None:
     fig = plot_savings_and_bills_dotline(sb_df, scenario_order=scenarios)
     fig.savefig(os.path.join(output_dir, f"step18_savings_bills_dotline_g{sha}.png"), dpi=150, bbox_inches="tight")
 
+    # 4) All-in annualized cost (EAC) stacked bar
+    eac_df = collect_eac_components(base_input_dir, housing_type, scenarios, counties, incentive='full_incentives', agg=args.agg)
+    eac_csv = os.path.join(output_dir, f"step18_eac_summary_g{sha}.csv")
+    if not eac_df.empty:
+        eac_df.to_csv(eac_csv, index=False)
+    fig = plot_eac_stacked_bar(eac_df, scenario_order=scenarios)
+    fig.savefig(os.path.join(output_dir, f"step18_eac_stacked_bar_g{sha}.png"), dpi=150, bbox_inches="tight")
+
     # Final console summary
     print("Cross-scenario comparisons complete.")
     print(f"  Scenarios: {scenarios}")
@@ -128,4 +141,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
