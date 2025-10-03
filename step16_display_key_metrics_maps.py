@@ -14,7 +14,7 @@ Display diagnostic maps for key metrics in a single HTML file:
 """
 
 import os
-from datetime import datetime
+import subprocess
 import pandas as pd
 import folium
 from folium import plugins
@@ -29,6 +29,23 @@ from helpers.maps_helpers import (
 )
 from main_helpers import log, slugify_county_name, to_decimal_number, get_scenario_path, norcal_counties, central_counties, socal_counties
 from helpers.utility_helpers import get_utility_for_county
+
+
+# Shared run identifiers for repeatable, versioned outputs
+# No timestamp in filenames; use only git short SHA for versioning
+
+def _get_git_short_sha() -> str:
+    """Return the short git SHA for this repo, or 'nogit' if unavailable."""
+    try:
+        sha = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            stderr=subprocess.DEVNULL,
+        ).decode().strip()
+        return sha or "nogit"
+    except Exception:
+        return "nogit"
+
+GIT_SHORT_SHA = _get_git_short_sha()
 
 
 def format_currency_with_sign(value: float) -> str:
@@ -1785,7 +1802,11 @@ def create_appliance_breakdown_report(base_input_dir: str, scenario: str, housin
     output_dir = os.path.join("visualizations", "appliance_breakdown", "html")
     os.makedirs(output_dir, exist_ok=True)
     
-    filename = f"appliance_breakdown_{scenario}_{housing_type.replace(' ', '-').lower()}.html"
+    # Append git short SHA for versioning
+    filename = (
+        f"appliance_breakdown_{scenario}_{housing_type.replace(' ', '-').lower()}"
+        f"_g{GIT_SHORT_SHA}.html"
+    )
     output_path = os.path.join(output_dir, filename)
     
     with open(output_path, 'w', encoding='utf-8') as f:
@@ -2168,9 +2189,11 @@ def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: 
     output_dir = os.path.join("visualizations", "diagnostic_maps", "html")
     os.makedirs(output_dir, exist_ok=True)
 
-    # Append timestamp suffix at the end for versioning
-    timestamp_suffix = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"diagnostic_dashboard_{scenario}_{housing_type.replace(' ', '-').lower()}_{timestamp_suffix}.html"
+    # Append git short SHA for versioning
+    filename = (
+        f"diagnostic_dashboard_{scenario}_{housing_type.replace(' ', '-').lower()}"
+        f"_g{GIT_SHORT_SHA}.html"
+    )
     output_path = os.path.join(output_dir, filename)
     
     with open(output_path, 'w', encoding='utf-8') as f:
