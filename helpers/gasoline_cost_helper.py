@@ -77,7 +77,13 @@ COUNTY_GASOLINE_COSTS = {
 }
 
 # County-specific annual vehicle miles traveled (VMT)
-# Based on regional driving patterns and urban/rural characteristics
+# Based on regional driving patterns and urban/rural characteristics.
+# If 0 or missing, we fall back to DEFAULT_ANNUAL_VMT (typical CA vehicle VMT).
+#
+# Reference (typical values):
+# - FHWA Highway Statistics Series (e.g., 2022) Tables VM-1/VM-4: average annual miles
+#   per light-duty vehicle in California is roughly ~11k–13k mi/vehicle/year.
+# - Caltrans "California Public Road Data (PRD)" can refine county values if desired.
 COUNTY_ANNUAL_VMT = {
     # Northern California Counties
     "alameda": 0,
@@ -145,7 +151,7 @@ COUNTY_ANNUAL_VMT = {
 
 # Default values for counties not in the database
 DEFAULT_GASOLINE_COST = 0.0  # dollars per gallon
-DEFAULT_ANNUAL_VMT = 0        # miles per year
+DEFAULT_ANNUAL_VMT = 12000   # miles per year (typical CA default)
 
 def get_gasoline_cost_for_county(county_name: str) -> float:
     county_slug = slugify_county_name(county_name)
@@ -154,7 +160,8 @@ def get_gasoline_cost_for_county(county_name: str) -> float:
 
 def get_annual_vmt_for_county(county_name: str) -> int:
     county_slug = slugify_county_name(county_name)
-    return COUNTY_ANNUAL_VMT.get(county_slug, DEFAULT_ANNUAL_VMT)
+    v = COUNTY_ANNUAL_VMT.get(county_slug, DEFAULT_ANNUAL_VMT)
+    return v if (v and v > 0) else DEFAULT_ANNUAL_VMT
 
 
 def calculate_annual_fuel_cost(county_name: str, 
@@ -167,6 +174,8 @@ def calculate_annual_fuel_cost(county_name: str,
     annual_gallons = annual_miles / fuel_efficiency_mpg
     annual_fuel_cost = annual_gallons * gas_price
     
+    # Guard against divide-by-zero when annual_miles == 0
+    per_mile = (annual_fuel_cost / annual_miles) if annual_miles and annual_miles > 0 else 0.0
     return {
         "county": county_name,
         "county_slug": county_slug,
@@ -175,7 +184,7 @@ def calculate_annual_fuel_cost(county_name: str,
         "fuel_efficiency_mpg": fuel_efficiency_mpg,
         "annual_gallons": annual_gallons,
         "annual_fuel_cost": annual_fuel_cost,
-        "fuel_cost_per_mile": annual_fuel_cost / annual_miles
+        "fuel_cost_per_mile": per_mile
     }
 
 
