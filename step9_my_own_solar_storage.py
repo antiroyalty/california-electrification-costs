@@ -79,7 +79,7 @@ GIT_SHORT_SHA = _get_git_short_sha()
 
 # Battery + dispatch constants (same as custom dispatch)
 # Toggle: enable/disable charging battery from PV surplus
-ENABLE_PV_SURPLUS_TO_BATTERY = True
+ENABLE_PV_SURPLUS_TO_BATTERY = False
 BATTERY_CAPACITY_KWH = 13.5
 ROUND_TRIP_EFFICIENCY = 0.96
 ETA_CHARGE = sqrt(ROUND_TRIP_EFFICIENCY)
@@ -524,7 +524,7 @@ def process(
 
 
 # Example usage
-scenario = "baseline"
+scenario = "heat_pump"
 housing_type = "single-family-detached"
 
 if __name__ == "__main__":
