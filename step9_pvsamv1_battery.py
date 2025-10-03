@@ -39,7 +39,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import traceback
-from datetime import datetime
+import subprocess
 
 import PySAM.Pvsamv1 as Pvsamv1
 import PySAM.ResourceTools as ResourceTools
@@ -65,7 +65,18 @@ PEAK_END_HOUR = 21
 BATTERY_CAPACITY_KWH = 13.5
 
 # Timestamp suffix for plot files (consistent across this run)
-PLOT_TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+def _get_git_short_sha() -> str:
+    try:
+        sha = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            stderr=subprocess.DEVNULL,
+        ).decode().strip()
+        return sha or "nogit"
+    except Exception:
+        return "nogit"
+
+GIT_SHORT_SHA = _get_git_short_sha()
 
 # PV sizing/model alignment constants (match DIY step assumptions)
 PV_SIZING_CELL_EFF = 0.206            # STC cell efficiency (fraction)
@@ -78,11 +89,14 @@ G_REF = 1000.0
 GAMMA_PDC = -0.00337
 
 # Solar charging control defaults (exact SAM parameter values)
-DISPATCH_MANUAL_SYSTEM_CHARGE_FIRST = 1         # dispatch_manual_system_charge_first
-BATT_DISPATCH_AUTO_CAN_CHARGE = 1              # batt_dispatch_auto_can_charge
-BATT_DISPATCH_CHARGE_ONLY_SYSTEM_EXCEEDS_LOAD = 0            # batt_dispatch_charge_only_system_exceeds_load
-BATT_DISPATCH_DISCHARGE_ONLY_LOAD_EXCEEDS_SYSTEM = 0                 # batt_dispatch_discharge_only_load_exceeds_system
-BATT_DISPATCH_AUTO_CAN_GRIDCHARGE = 1            # batt_dispatch_auto_can_gridcharge
+# Dispatch flags (kept consistent per SAM rules)
+# If batt_dispatch_charge_only_system_exceeds_load == 1, then
+# dispatch_manual_system_charge_first MUST be 0.
+DISPATCH_MANUAL_SYSTEM_CHARGE_FIRST = 0         # dispatch_manual_system_charge_first
+BATT_DISPATCH_AUTO_CAN_CHARGE = 1               # batt_dispatch_auto_can_charge
+BATT_DISPATCH_CHARGE_ONLY_SYSTEM_EXCEEDS_LOAD = 1  # batt_dispatch_charge_only_system_exceeds_load
+BATT_DISPATCH_DISCHARGE_ONLY_LOAD_EXCEEDS_SYSTEM = 0  # batt_dispatch_discharge_only_load_exceeds_system
+BATT_DISPATCH_AUTO_CAN_GRIDCHARGE = 1           # batt_dispatch_auto_can_gridcharge
 
 # Efficiency defaults
 BATT_DC_DC_EFFICIENCY = 96.0             # batt_dc_dc_efficiency
@@ -755,12 +769,20 @@ def apply_runtime_overrides(pv: Pvsamv1.Pvsamv1, overrides: RuntimeOverrides) ->
     
     # Solar charging control flags (direct SAM parameter values)
     set_if_present("en_standalone_batt", 0)
-    set_if_present("dispatch_manual_system_charge_first", 1) # overrides.dispatch_manual_system_charge_first)
-    set_if_present("batt_dispatch_auto_can_charge", 1) # overrides.batt_dispatch_auto_can_charge)
+    set_if_present("dispatch_manual_system_charge_first", overrides.dispatch_manual_system_charge_first)
+    set_if_present("batt_dispatch_auto_can_charge", overrides.batt_dispatch_auto_can_charge)
     set_if_present("batt_dispatch_auto_can_clipcharge", 1)
-    set_if_present("batt_dispatch_charge_only_system_exceeds_load", 1) # overrides.batt_dispatch_charge_only_system_exceeds_load)
+    set_if_present("batt_dispatch_charge_only_system_exceeds_load", overrides.batt_dispatch_charge_only_system_exceeds_load)
     set_if_present("batt_dispatch_discharge_only_load_exceeds_system", overrides.batt_dispatch_discharge_only_load_exceeds_system)
     set_if_present("batt_dispatch_auto_can_gridcharge", overrides.batt_dispatch_auto_can_gridcharge)
+
+    # Enforce valid combination required by SAM:
+    # If charge_only_system_exceeds_load == 1, then system_charge_first must be 0
+    try:
+        if int(pv.value("batt_dispatch_charge_only_system_exceeds_load")) == 1:
+            pv.value("dispatch_manual_system_charge_first", 0)
+    except Exception:
+        pass
     
     # Efficiency parameters
     set_if_present("batt_dc_dc_efficiency", overrides.batt_dc_dc_efficiency)
@@ -840,18 +862,23 @@ def apply_dispatch_schedule(pv: Pvsamv1.Pvsamv1, dispatch_schedule: Dict[str, An
     # SOLAR CHARGING PRIORITY AND CONTROL FLAGS
     # =======================
     
-    # Solar charging priority - critical for solar-first operation
-    pv.value('dispatch_manual_system_charge_first', overrides.dispatch_manual_system_charge_first)
-    print(f"✓ Solar charging priority: {overrides.dispatch_manual_system_charge_first}")
-    
     # Master PV charging enable
-    pv.value('batt_dispatch_auto_can_charge', overrides.batt_dispatch_auto_can_charge)
-    print(f"✓ PV charging capability: {overrides.batt_dispatch_auto_can_charge}")
-    
-    # Smart solar charging - only charge when solar exceeds load
-    # Only charge from PV when system exceeds load (enable PV→Battery on surplus)
-    pv.value('batt_dispatch_charge_only_system_exceeds_load', 1)
-    print("✓ Smart solar charging: only when PV exceeds load (enabled)")
+    pv_charge_enable = 1 if (overrides.batt_dispatch_auto_can_charge is None) else int(overrides.batt_dispatch_auto_can_charge)
+    pv.value('batt_dispatch_auto_can_charge', pv_charge_enable)
+    print(f"✓ PV charging capability: {pv_charge_enable}")
+
+    # Smart solar charging - only charge when solar exceeds load (PV surplus only)
+    charge_only_on_surplus = 1 if (overrides.batt_dispatch_charge_only_system_exceeds_load is None) else int(overrides.batt_dispatch_charge_only_system_exceeds_load)
+    pv.value('batt_dispatch_charge_only_system_exceeds_load', charge_only_on_surplus)
+    print(f"✓ Smart solar charging: only when PV exceeds load ({'enabled' if charge_only_on_surplus==1 else 'disabled'})")
+
+    # Solar charging priority must be 0 if 'charge only on surplus' is enabled
+    if charge_only_on_surplus == 1:
+        solar_priority = 0
+    else:
+        solar_priority = 1 if (overrides.dispatch_manual_system_charge_first is None) else int(overrides.dispatch_manual_system_charge_first)
+    pv.value('dispatch_manual_system_charge_first', solar_priority)
+    print(f"✓ Solar charging priority: {solar_priority}")
     
     # Smart discharge - only discharge when load exceeds solar
     pv.value('batt_dispatch_discharge_only_load_exceeds_system', overrides.batt_dispatch_discharge_only_load_exceeds_system)
@@ -909,9 +936,11 @@ def apply_dispatch_schedule(pv: Pvsamv1.Pvsamv1, dispatch_schedule: Dict[str, An
     current_dispatch_mode = pv.value('batt_dispatch_choice')
     current_solar_priority = pv.value('dispatch_manual_system_charge_first')
     current_pv_charge = pv.value('batt_dispatch_auto_can_charge')
+    current_charge_only_on_surplus = pv.value('batt_dispatch_charge_only_system_exceeds_load')
     
     print(f"Verification: dispatch_mode={current_dispatch_mode}, "
-          f"solar_priority={current_solar_priority}, pv_charge={current_pv_charge}")
+          f"solar_priority={current_solar_priority}, pv_charge={current_pv_charge}, "
+          f"pv_charge_only_exceeds_load={current_charge_only_on_surplus}")
     
     if current_dispatch_mode != 3:
         print(f"⚠ WARNING: Dispatch mode is {current_dispatch_mode}, expected 3 (Manual)")
@@ -1693,7 +1722,7 @@ def report(cfg: SimulationConfiguration, presets: SamPresetFiles, outputs: Simul
         county_dir = os.path.dirname(cfg.weather_file)
         plots_path = os.path.join(
             county_dir,
-            f"step9_pvsamv1_battery_plots_{cfg.county_slug}_{PLOT_TIMESTAMP}.png",
+            f"step9_pvsamv1_battery_plots_{cfg.county_slug}_g{GIT_SHORT_SHA}.png",
         )
         print("[PlotDebug] plots_path:", plots_path)
         print("[PlotDebug] Calling plot_first_weeks …")
@@ -1973,7 +2002,7 @@ def process_single_county(base_input_dir: str, base_output_dir: str, scenario: s
         county_dir = os.path.dirname(cfg.weather_file)
         plots_path = os.path.join(
             county_dir,
-            f"step9_pvsamv1_battery_plots_{cfg.county_slug}_{PLOT_TIMESTAMP}.png",
+            f"step9_pvsamv1_battery_plots_{cfg.county_slug}_g{GIT_SHORT_SHA}.png",
         )
         if os.path.exists(plots_path):
             print(f"Saved step9_pvsamv1_battery plots to: {plots_path}")
