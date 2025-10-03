@@ -90,8 +90,7 @@ def main() -> None:
     else:
         scenarios = list(SCENARIOS.keys())
 
-    # Exclude baseline_ice_car from cross-scenario plots
-    scenarios = [s for s in scenarios if s != "baseline_ice_car"]
+    # Include all scenarios, including baseline_ice_car, so Vehicle O&M (gasoline) can be shown in EAC.
     os.makedirs(output_dir, exist_ok=True)
 
     if args.all_counties:
