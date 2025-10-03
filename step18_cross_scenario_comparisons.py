@@ -89,6 +89,9 @@ def main() -> None:
         scenarios = list(dict.fromkeys(args.scenarios))  # preserve order, dedup
     else:
         scenarios = list(SCENARIOS.keys())
+
+    # Exclude baseline_ice_car from cross-scenario plots
+    scenarios = [s for s in scenarios if s != "baseline_ice_car"]
     os.makedirs(output_dir, exist_ok=True)
 
     if args.all_counties:
