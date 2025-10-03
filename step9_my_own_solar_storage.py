@@ -38,7 +38,7 @@ from math import sqrt
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
-from datetime import datetime
+import subprocess
 
 from main_helpers import (
     get_counties,
@@ -60,6 +60,20 @@ TOTAL_LOAD_COLUMN_NAME = "electricity.real_and_simulated.for_typical_county_home
 OUTPUT_LOADPROFILE_FILE_PREFIX = "sam_optimized_load_profiles"
 SOLAR_STORAGE_CAPACITY_PREFIX = "electrified_assets"
 CAPITAL_COSTS_FOLDER_NAME = "CAPITAL_COSTS"
+
+# Shared run identifiers for repeatable, versioned outputs
+
+def _get_git_short_sha() -> str:
+    try:
+        sha = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            stderr=subprocess.DEVNULL,
+        ).decode().strip()
+        return sha or "nogit"
+    except Exception:
+        return "nogit"
+
+GIT_SHORT_SHA = _get_git_short_sha()
 
 
 # Battery + dispatch constants (same as custom dispatch)
@@ -256,7 +270,9 @@ def _pv_timeseries_ac_kwh(weather_df: pd.DataFrame, system_capacity_kw: float) -
     return pac
 
 
-def _simple_battery_dispatch(load_kwh: List[float], solar_kwh: List[float]) -> Tuple[List[float], List[float], List[float], List[float], List[float], List[float]]:
+def _simple_battery_dispatch(load_kwh: List[float], solar_kwh: List[float]) -> Tuple[
+    List[float], List[float], List[float], List[float], List[float], List[float], List[float]
+]:
     assert len(load_kwh) == 8760 and len(solar_kwh) == 8760
     soc_kwh = BATTERY_CAPACITY_KWH * MIN_SOC_FRAC
     min_soc_kwh = BATTERY_CAPACITY_KWH * MIN_SOC_FRAC
@@ -266,6 +282,8 @@ def _simple_battery_dispatch(load_kwh: List[float], solar_kwh: List[float]) -> T
     batt_discharge = [0.0] * 8760
     grid_to_load = [0.0] * 8760
     grid_to_batt = [0.0] * 8760
+    # In DIY model we only charge from grid (no PV→Battery); keep explicit channel for parity
+    pv_to_batt = [0.0] * 8760
     soc_percent = [0.0] * 8760
 
     for h in range(8760):
@@ -297,7 +315,7 @@ def _simple_battery_dispatch(load_kwh: List[float], solar_kwh: List[float]) -> T
         grid_demand[h] = grid_to_load[h] + grid_to_batt[h]
         soc_percent[h] = (soc_kwh / BATTERY_CAPACITY_KWH) * 100.0
 
-    return grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt, soc_percent
+    return grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt, pv_to_batt, soc_percent
 
 
 def _validate_lengths(*series_lists: List[List[float]]) -> None:
@@ -427,7 +445,7 @@ def process(
                 scenario,
                 housing_type,
                 county,
-                f"step9_my_own_solar_storage_plots_{county}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
+                f"step9_my_own_solar_storage_plots_{county}_g{GIT_SHORT_SHA}.png",
             )
             try:
                 os.makedirs(os.path.dirname(plots_path), exist_ok=True)
