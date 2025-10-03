@@ -2165,12 +2165,12 @@ def process(base_input_dir: str, base_output_dir: str, scenario: str, housing_ty
     return successful_counties
 
 
-scenario = "baseline"
+scenario = "heat_pump"
 housing_type = "single-family-detached"
 
 if __name__ == '__main__':
     # Default configuration for standalone execution
-    scenario = "baseline"
+    scenario = "heat_pump"
     county = "alameda"
     housing_type = "single-family-detached"
     base_input_dir = "data/loadprofiles"
