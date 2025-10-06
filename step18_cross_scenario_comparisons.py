@@ -37,6 +37,8 @@ from plot_scenario_comparison_helper import (
     plot_savings_and_bills_dotline,
     collect_eac_components,
     plot_eac_stacked_bar,
+    collect_pv_sizes,
+    plot_pv_size_bar,
 )
 
 from main_helpers import get_scenario_path
@@ -133,6 +135,14 @@ def main() -> None:
         eac_df.to_csv(eac_csv, index=False)
     fig = plot_eac_stacked_bar(eac_df, scenario_order=scenarios)
     fig.savefig(os.path.join(output_dir, f"step18_eac_stacked_bar_g{sha}.png"), dpi=150, bbox_inches="tight")
+
+    # 5) PV size (kW) by scenario
+    pv_df = collect_pv_sizes(base_input_dir, housing_type, scenarios, counties, agg=args.agg)
+    pv_csv = os.path.join(output_dir, f"step18_pv_size_summary_g{sha}.csv")
+    if not pv_df.empty:
+        pv_df.to_csv(pv_csv, index=False)
+    fig = plot_pv_size_bar(pv_df, scenario_order=scenarios)
+    fig.savefig(os.path.join(output_dir, f"step18_pv_size_bar_g{sha}.png"), dpi=150, bbox_inches="tight")
 
     # Final console summary
     print("Cross-scenario comparisons complete.")
