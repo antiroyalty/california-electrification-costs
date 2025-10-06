@@ -485,6 +485,73 @@ def _read_capital_summary_with_pv(base_input_dir: str, scenario: str, housing_ty
         return None
 
 
+# ---------- PV size collection + plotting ----------
+
+def collect_pv_sizes(
+    base_input_dir: str,
+    housing_type: str,
+    scenarios: Iterable[str],
+    counties: Iterable[str],
+    agg: str = "mean",
+) -> pd.DataFrame:
+    """Collect PV system size (kW) by scenario, aggregated across counties.
+
+    Returns DataFrame with columns: scenario, pv_kw.
+    """
+    county_slugs = [slugify_county_name(c) for c in counties]
+    rows: List[Dict] = []
+    for scen in scenarios:
+        pvsum = _read_capital_summary_with_pv(base_input_dir, scen, housing_type)
+        if pvsum is None or pvsum.empty or 'solar_kw' not in pvsum.columns:
+            rows.append({"scenario": scen, "pv_kw": 0.0})
+            continue
+        sub = pvsum[pvsum['county_slug'].str.lower().isin([s.lower() for s in county_slugs])]
+        if sub.empty:
+            rows.append({"scenario": scen, "pv_kw": 0.0})
+            continue
+        vals = pd.to_numeric(sub['solar_kw'], errors='coerce').fillna(0.0)
+        pv_val = float(vals.median()) if agg == 'median' else float(vals.mean())
+        rows.append({"scenario": scen, "pv_kw": pv_val})
+    return pd.DataFrame(rows)
+
+
+def plot_pv_size_bar(
+    df: pd.DataFrame,
+    scenario_order: Optional[List[str]] = None,
+    title: str = "PV Size (kW) by Scenario",
+) -> plt.Figure:
+    """Simple bar chart of PV system size by scenario."""
+    if df.empty:
+        fig, ax = plt.subplots(figsize=(8, 4))
+        ax.set_title("No PV size data to plot")
+        return fig
+
+    if scenario_order is None:
+        scenario_order = list(df['scenario'])
+
+    x = np.arange(len(scenario_order))
+    vals = []
+    for scen in scenario_order:
+        row = df[df['scenario'] == scen]
+        vals.append(float(row['pv_kw'].values[0]) if not row.empty else 0.0)
+
+    fig, ax = plt.subplots(figsize=(max(8, len(scenario_order) * 1.0), 4.5))
+    bars = ax.bar(x, vals, color="#ffbb78")
+    ax.set_xticks(x)
+    ax.set_xticklabels(scenario_order, rotation=20, ha='right')
+    ax.set_ylabel('PV size (kW)')
+    ax.set_title(title)
+    ax.grid(True, axis='y', linestyle=':', alpha=0.4)
+    # Annotate values above each bar
+    if vals:
+        ymax = max(vals) if len(vals) > 0 else 0.0
+        offset = 0.02 * ymax if ymax > 0 else 0.1
+        for xi, v in zip(x, vals):
+            ax.text(xi, v + offset, f"{v:.2f}", ha='center', va='bottom', fontsize=9)
+    fig.tight_layout()
+    return fig
+
+
 def collect_eac_components(
     base_input_dir: str,
     housing_type: str,
