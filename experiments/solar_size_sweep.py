@@ -92,7 +92,9 @@ def _plot_summaries(df: pd.DataFrame, out_dir: str, county_slug: str) -> None:
     ax.grid(True, axis="y", alpha=0.3, linestyle=":")
     ax.legend(loc="best", fontsize=8)
     fig.tight_layout()
-    fig.savefig(os.path.join(out_dir, f"sweep_flows_vs_fraction_{county_slug}.png"), dpi=130)
+    flows_path = os.path.join(out_dir, f"sweep_flows_vs_fraction_{county_slug}.png")
+    fig.savefig(flows_path, dpi=130)
+    print(f"Saved flows-vs-fraction plot: {os.path.abspath(flows_path)}")
     plt.close(fig)
 
     # Plot PV net capex vs fraction
@@ -103,7 +105,9 @@ def _plot_summaries(df: pd.DataFrame, out_dir: str, county_slug: str) -> None:
     ax.set_title(f"PV net capex vs PV size — {county_slug}")
     ax.grid(True, axis="y", alpha=0.3, linestyle=":")
     fig.tight_layout()
-    fig.savefig(os.path.join(out_dir, f"sweep_capex_vs_fraction_{county_slug}.png"), dpi=130)
+    capex_path = os.path.join(out_dir, f"sweep_capex_vs_fraction_{county_slug}.png")
+    fig.savefig(capex_path, dpi=130)
+    print(f"Saved capex-vs-fraction plot: {os.path.abspath(capex_path)}")
     plt.close(fig)
 
 
@@ -200,7 +204,9 @@ def _plot_eac(df: pd.DataFrame, out_dir: str, county_slug: str) -> None:
     ax.legend(loc='best', fontsize=8, frameon=False)
     ax.grid(True, axis='y', linestyle=':', alpha=0.4)
     fig.tight_layout()
-    fig.savefig(os.path.join(out_dir, f"sweep_eac_vs_fraction_{county_slug}.png"), dpi=130)
+    eac_path = os.path.join(out_dir, f"sweep_eac_vs_fraction_{county_slug}.png")
+    fig.savefig(eac_path, dpi=130)
+    print(f"Saved EAC-vs-fraction plot: {os.path.abspath(eac_path)}")
     plt.close(fig)
 
 
