@@ -27,6 +27,9 @@ from main_helpers import slugify_county_name, get_scenario_path, get_counties
 # Reuse PV + dispatch implementation from Step 9 DIY
 import step9_my_own_solar_storage as diy
 from helpers.capital_costs_helper import get_solar_cost_params, calculate_solar_storage_cost, apply_solar_storage_incentives
+from helpers.payback_period_helper import CAPITAL_COSTS_NEW
+from capital_cost_map_builder import LIFETIMES
+from step15_payback_periods import vehicle_annual_adders_from_ledger
 
 
 @dataclass
@@ -59,13 +62,8 @@ def _collect_metrics(load_profile: List[float], pv: List[float], bc: List[float]
 
 
 def _pv_capex_rows(solar_kw: float, utility: Optional[str] = None) -> Dict[str, float]:
-    # Pull parameters from capital cost helper
-    dollars_per_watt, labour_pct, design_pct, storage_cost = get_solar_cost_params({
-        # Using the NEW/CRIS structure is not required; get_solar_cost_params handles both formats.
-        # Here we provide only enough structure to get the parameters from the configured helper.
-        # If the helper uses global constants, these are ignored.
-        "solar": {}, "storage": {}
-    })
+    # Pull parameters from capital cost helper (use NEW structure by default)
+    dollars_per_watt, labour_pct, design_pct, storage_cost = get_solar_cost_params(CAPITAL_COSTS_NEW)
     base_total, _pv_only = calculate_solar_storage_cost(
         solar_kw, dollars_per_watt, labour_pct, design_pct, storage_cost=0.0
     )
@@ -116,6 +114,103 @@ def _plot_summaries(df: pd.DataFrame, out_dir: str, county_slug: str) -> None:
     ax.grid(True, axis="y", alpha=0.3, linestyle=":")
     fig.tight_layout()
     fig.savefig(os.path.join(out_dir, f"sweep_capex_vs_fraction_{county_slug}.png"), dpi=130)
+    plt.close(fig)
+
+
+def _crf(rate: float, n_years: float) -> float:
+    if rate <= 0 or n_years <= 0:
+        return 1.0 / max(n_years, 1.0)
+    r = float(rate)
+    n = float(n_years)
+    return (r * (1 + r) ** n) / (((1 + r) ** n) - 1)
+
+
+def _read_capital_ledger(base_input_dir: str, scenario: str, housing_type: str) -> Optional[pd.DataFrame]:
+    cap_dir = os.path.join(base_input_dir, "capital_costs")
+    fname = f"capital_costs_{scenario}_{housing_type.replace('-', '_')}.csv"
+    path = os.path.join(cap_dir, fname)
+    if not os.path.exists(path):
+        return None
+    try:
+        return pd.read_csv(path)
+    except Exception:
+        return None
+
+
+def _eac_baseline_components(
+    ledger: Optional[pd.DataFrame],
+    scenario: str,
+    county_slug: str,
+    discount_rate: float = 0.07,
+) -> Dict[str, float]:
+    """Compute annualized capex for 'electric' (ex PV/storage) and 'gas', and vehicle O&M from the ledger.
+    Independent of PV size.
+    """
+    capex_electric = 0.0
+    capex_gas = 0.0
+    vehicle_om = 0.0
+    if ledger is None or ledger.empty:
+        return {"capex_electric": 0.0, "capex_gas": 0.0, "vehicle_om": 0.0}
+    df = ledger.copy()
+    df = df[df['county_slug'].str.lower() == county_slug.lower()]
+    # Use 'full_incentives' rows by default
+    if 'incentive_scenario' in df.columns:
+        df['incentive_scenario'] = df['incentive_scenario'].str.lower()
+        df = df[df['incentive_scenario'] == 'full_incentives']
+    # Annualize per-row
+    for _, r in df.iterrows():
+        try:
+            lt = float(r.get('lifetime_years', 15) or 15)
+            c = _crf(discount_rate, lt)
+            if r.get('appliance_category') == 'electric' and r.get('appliance_type') not in ('solar', 'storage'):
+                capex_electric += float(r.get('net_cost', 0.0)) * c
+            if r.get('appliance_category') == 'gas':
+                capex_gas += float(r.get('base_cost', 0.0)) * c
+        except Exception:
+            continue
+    # Vehicle O&M
+    try:
+        adders = vehicle_annual_adders_from_ledger(df)
+        if county_slug in adders.index:
+            ev_val = float(adders.loc[county_slug, 'ev_operating']) if 'ev_operating' in adders.columns else 0.0
+            ice_val = float(adders.loc[county_slug, 'ice_operating']) if 'ice_operating' in adders.columns else 0.0
+            scen_l = (scenario or '').lower()
+            if ('ev' in scen_l) or (ev_val > 0):
+                vehicle_om += ev_val
+            if ('ice' in scen_l) or (ice_val > 0 and 'ev' not in scen_l):
+                vehicle_om += ice_val
+    except Exception:
+        pass
+    return {
+        "capex_electric": float(capex_electric),
+        "capex_gas": float(capex_gas),
+        "vehicle_om": float(vehicle_om),
+    }
+
+
+def _plot_eac(df: pd.DataFrame, out_dir: str, county_slug: str) -> None:
+    comps = [
+        ('capex_pv_annual', '#fdae6b', 'PV capex (annualized)'),
+        ('capex_storage_annual', '#9ecae1', 'Storage capex (annualized)'),
+        ('capex_electric', '#31a354', 'Electrification capex (annualized)'),
+        ('capex_gas', '#756bb1', 'Gas capex (annualized)'),
+        ('annual_bill_with_solar', '#1f77b4', 'Annual energy bill (with solar+storage)'),
+        ('vehicle_om', '#d62728', 'Vehicle O&M'),
+    ]
+    x = df['fraction'].values
+    bottoms = np.zeros_like(x, dtype=float)
+    fig, ax = plt.subplots(figsize=(9.5, 5.0))
+    for key, color, label in comps:
+        vals = pd.to_numeric(df.get(key, pd.Series([0.0] * len(df))), errors='coerce').fillna(0.0).values
+        ax.bar(x, vals, bottom=bottoms, color=color, label=label)
+        bottoms = bottoms + vals
+    ax.set_xlabel('PV size as fraction of annual-load match')
+    ax.set_ylabel('$ per year')
+    ax.set_title(f'EAC components vs PV size — {county_slug}')
+    ax.legend(loc='best', fontsize=8, frameon=False)
+    ax.grid(True, axis='y', linestyle=':', alpha=0.4)
+    fig.tight_layout()
+    fig.savefig(os.path.join(out_dir, f"sweep_eac_vs_fraction_{county_slug}.png"), dpi=130)
     plt.close(fig)
 
 
@@ -177,6 +272,9 @@ def run_for_county(
     base_kw = diy._compute_system_capacity_kW(weather_df, load_profile)  # type: ignore
 
     rows: List[Dict] = []
+    # Read ledger once per county to compute baseline components
+    ledger = _read_capital_ledger(base_input_dir, scenario, housing_type)
+    base_eac = _eac_baseline_components(ledger, scenario, county_slug)
     exp_county_dir = os.path.join(experiments_root, scenario, housing_type, county_slug)
     _ensure_dir(exp_county_dir)
 
@@ -195,7 +293,27 @@ def run_for_county(
         )
         m = _collect_metrics(load_profile, pv_series, bc, bd, gtl, gtb, ptb)
         cap = _pv_capex_rows(system_kw, utility=None)
-        row = {"fraction": f, "solar_kw": float(system_kw), **m, **cap}
+        # Annualized PV & storage capex per fraction
+        crf_pv = _crf(0.07, LIFETIMES.get('solar', 25))
+        crf_st = _crf(0.07, LIFETIMES.get('storage', 15))
+        pv_net = cap["pv_capex_net"]
+        pvst_net = cap["pvst_capex_net"]
+        storage_net = max(0.0, pvst_net - pv_net)
+        capex_pv_annual = pv_net * crf_pv
+        capex_storage_annual = storage_net * crf_st
+
+        row = {
+            "fraction": f,
+            "solar_kw": float(system_kw),
+            **m,
+            **cap,
+            "capex_pv_annual": float(capex_pv_annual),
+            "capex_storage_annual": float(capex_storage_annual),
+            # Add baseline EAC components (independent of PV size)
+            "capex_electric": base_eac.get("capex_electric", 0.0),
+            "capex_gas": base_eac.get("capex_gas", 0.0),
+            "vehicle_om": base_eac.get("vehicle_om", 0.0),
+        }
         rows.append(row)
 
         # Optionally write hourly & compute bills for this fraction
@@ -223,6 +341,8 @@ def run_for_county(
     # Save county summary and plots
     out_df.to_csv(os.path.join(exp_county_dir, f"sweep_summary_{county_slug}.csv"), index=False)
     _plot_summaries(out_df, exp_county_dir, county_slug)
+    # Save EAC plot if bills present or even without (bills column may be NaN)
+    _plot_eac(out_df, exp_county_dir, county_slug)
     return out_df
 
 
@@ -256,4 +376,3 @@ def run(
         except Exception as e:
             print(f"Sweep failed for {county}: {e}")
     return results
-
