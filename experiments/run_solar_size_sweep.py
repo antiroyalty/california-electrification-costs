@@ -4,7 +4,14 @@ import argparse
 import os
 from typing import List
 
-from experiments.solar_size_sweep import run, SweepOptions
+# Support running both as a module (-m experiments.run_solar_size_sweep)
+# and as a script (python experiments/run_solar_size_sweep.py)
+try:
+    from .solar_size_sweep import run, SweepOptions  # type: ignore
+except Exception:
+    import sys, os
+    sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+    from experiments.solar_size_sweep import run, SweepOptions  # type: ignore
 from main_helpers import norcal_counties, socal_counties, central_counties
 
 
@@ -54,4 +61,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
