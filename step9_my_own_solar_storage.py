@@ -274,7 +274,13 @@ def _pv_timeseries_ac_kwh(weather_df: pd.DataFrame, system_capacity_kw: float) -
     return pac
 
 
-def _simple_battery_dispatch(load_kwh: List[float], solar_kwh: List[float]) -> Tuple[
+def _simple_battery_dispatch(
+    load_kwh: List[float],
+    solar_kwh: List[float],
+    *,
+    enable_pv_surplus_to_battery: Optional[bool] = None,
+    grid_charging_enabled: Optional[bool] = None,
+) -> Tuple[
     List[float], List[float], List[float], List[float], List[float], List[float], List[float]
 ]:
     assert len(load_kwh) == 8760 and len(solar_kwh) == 8760
@@ -289,6 +295,10 @@ def _simple_battery_dispatch(load_kwh: List[float], solar_kwh: List[float]) -> T
     # In DIY model we only charge from grid (no PV→Battery); keep explicit channel for parity
     pv_to_batt = [0.0] * 8760
     soc_percent = [0.0] * 8760
+
+    # Resolve toggles with module-level defaults
+    pv_surplus_flag = ENABLE_PV_SURPLUS_TO_BATTERY if enable_pv_surplus_to_battery is None else bool(enable_pv_surplus_to_battery)
+    grid_charge_flag = GRID_CHARGING_ENABLED if grid_charging_enabled is None else bool(grid_charging_enabled)
 
     for h in range(8760):
         hod = h % 24
@@ -309,7 +319,7 @@ def _simple_battery_dispatch(load_kwh: List[float], solar_kwh: List[float]) -> T
 
         # First: charge from PV surplus (any hour), obeying power cap and headroom
         pv_input_energy_used = 0.0
-        if ENABLE_PV_SURPLUS_TO_BATTERY and pv_surplus > 0 and soc_kwh < max_soc_kwh:
+        if pv_surplus_flag and pv_surplus > 0 and soc_kwh < max_soc_kwh:
             remaining_input_headroom = max((max_soc_kwh - soc_kwh) / ETA_CHARGE, 0.0)
             # Limit by battery charge power
             pv_input_energy = min(pv_surplus, P_CHARGE_MAX_KW, remaining_input_headroom)
@@ -321,7 +331,7 @@ def _simple_battery_dispatch(load_kwh: List[float], solar_kwh: List[float]) -> T
                 pv_input_energy_used = pv_input_energy
 
         # Then: optionally top-up from grid during 14:00–16:00, obeying remaining power and headroom
-        if CHARGE_START_HOUR <= hod < CHARGE_END_HOUR and soc_kwh < max_soc_kwh:
+        if grid_charge_flag and CHARGE_START_HOUR <= hod < CHARGE_END_HOUR and soc_kwh < max_soc_kwh:
             remaining_input_headroom = max((max_soc_kwh - soc_kwh) / ETA_CHARGE, 0.0)
             # Respect charge power cap; subtract PV portion already used this hour
             remaining_power_cap = max(P_CHARGE_MAX_KW - pv_input_energy_used, 0.0)
