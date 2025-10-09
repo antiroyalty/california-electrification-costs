@@ -2,7 +2,7 @@
 Experimental PV size sweep helper (does not alter the main pipeline).
 
 Given a scenario, housing type, and counties, sweeps PV size as a fraction of the
-"annual-energy match" size (e.g., 10%..100%) and records:
+"annual-energy match" size (e.g., 10%..200%) and records:
   - Annual flows (PV gross, PV→Load, PV→Battery, Battery→Load, Grid→Load, Grid→Battery)
   - PV capacity (kW)
   - PV capex estimates (base and after incentives)
@@ -80,6 +80,12 @@ def _plot_summaries(df: pd.DataFrame, out_dir: str, county_slug: str) -> None:
     # Plot flows vs fraction
     fig, ax = plt.subplots(figsize=(8.5, 4.8))
     x = df["fraction"].values
+    # Determine x-axis span dynamically to support oversizing > 1.0
+    try:
+        x_max = float(np.nanmax(np.asarray(x, dtype=float))) if len(x) else 1.0
+    except Exception:
+        x_max = 1.0
+    x_upper = max(1.0, x_max)
     for col, color, label in [
         ("pv_to_load_kwh", "#ff7f0e", "PV→Load"),
         ("battery_to_load_kwh", "#2ca02c", "Battery→Load"),
@@ -90,8 +96,14 @@ def _plot_summaries(df: pd.DataFrame, out_dir: str, county_slug: str) -> None:
     ax.set_ylabel("Annual energy (kWh)")
     ax.set_title(f"Flows vs PV size — {county_slug}")
     ax.grid(True, axis="y", alpha=0.3, linestyle=":")
-    # Clamp x-axis to [0, 1]
-    ax.set_xlim(0.0, 1.0)
+    # Dynamic x-axis to include any oversizing (e.g., up to 2.0)
+    ax.set_xlim(0.0, x_upper)
+    # Use 0.1 increments on the x-axis
+    try:
+        ticks = np.round(np.arange(0.0, x_upper + 1e-9, 0.1), 1)
+        ax.set_xticks(ticks)
+    except Exception:
+        pass
     ax.legend(loc="best", fontsize=8)
     fig.tight_layout()
     flows_path = os.path.join(out_dir, f"sweep_flows_vs_fraction_{county_slug}.png")
@@ -106,7 +118,12 @@ def _plot_summaries(df: pd.DataFrame, out_dir: str, county_slug: str) -> None:
     ax.set_ylabel("$ (net, with incentives)")
     ax.set_title(f"PV net capex vs PV size — {county_slug}")
     ax.grid(True, axis="y", alpha=0.3, linestyle=":")
-    ax.set_xlim(0.0, 1.0)
+    ax.set_xlim(0.0, x_upper)
+    try:
+        ticks = np.round(np.arange(0.0, x_upper + 1e-9, 0.1), 1)
+        ax.set_xticks(ticks)
+    except Exception:
+        pass
     fig.tight_layout()
     capex_path = os.path.join(out_dir, f"sweep_capex_vs_fraction_{county_slug}.png")
     fig.savefig(capex_path, dpi=130)
@@ -196,7 +213,8 @@ def _plot_eac(df: pd.DataFrame, out_dir: str, county_slug: str) -> None:
     ]
     x = df['fraction'].values
     bottoms = np.zeros_like(x, dtype=float)
-    fig, ax = plt.subplots(figsize=(9.5, 5.0))
+    # Make the bar chart 10% wider to reduce label overlap
+    fig, ax = plt.subplots(figsize=(14, 5.0))
     # Choose a reasonable bar width based on spacing of fractions
     xf = np.asarray(x, dtype=float)
     if xf.size > 1:
@@ -204,7 +222,8 @@ def _plot_eac(df: pd.DataFrame, out_dir: str, county_slug: str) -> None:
         dx = float(dx_vals.min()) if dx_vals.size > 0 else 0.1
     else:
         dx = 0.1
-    width = max(0.02, min(0.8 * dx, 0.1))
+    # Make bars 10% wider than before (increase factor and cap by 10%)
+    width = max(0.02, min(0.8 * dx * 1.10, 0.11))
     for key, color, label in comps:
         vals = pd.to_numeric(df.get(key, pd.Series([0.0] * len(df))), errors='coerce').fillna(0.0).values
         # Keep a copy of current bottoms before adding this layer for centering labels
@@ -224,14 +243,46 @@ def _plot_eac(df: pd.DataFrame, out_dir: str, county_slug: str) -> None:
                     ha='center', va='center', fontsize=7, color='black'
                 )
         bottoms = bottoms + vals
+    # Add total EAC labels at the top of each bar
+    try:
+        totals = np.asarray(bottoms, dtype=float)
+        if totals.size > 0:
+            ymax = float(np.nanmax(totals)) if np.isfinite(totals).any() else 0.0
+            # Give a bit of headroom so labels aren't clipped
+            if ymax > 0:
+                ax.set_ylim(0.0, ymax * 1.08)
+            yoff = max(1.0, 0.02 * ymax) if ymax > 0 else 1.0
+            for xi, tot in zip(x, totals):
+                tval = float(tot) if np.isfinite(tot) else 0.0
+                if tval > 0:
+                    ax.text(float(xi), tval + yoff, f"{tval:.0f}", ha='center', va='bottom', fontsize=8, color='black')
+    except Exception:
+        pass
     ax.set_xlabel('PV size as fraction of annual-load match')
     ax.set_ylabel('$ per year')
     ax.set_title(f'EAC components vs PV size — {county_slug}')
-    ax.legend(loc='best', fontsize=8, frameon=False)
+    # Place legend outside the plotting area on the right
+    ax.legend(loc='center left', bbox_to_anchor=(1.01, 0.5), fontsize=8, frameon=False)
     ax.grid(True, axis='y', linestyle=':', alpha=0.4)
-    fig.tight_layout()
-    # Clamp x-axis to [0, 1]
-    ax.set_xlim(0.0, 1.0)
+    # Expand x-limits slightly based on actual data (supports >1.0)
+    if xf.size > 0:
+        xmin = float(np.nanmin(xf))
+        xmax = float(np.nanmax(xf))
+    else:
+        xmin, xmax = 0.0, 1.0
+    margin = max(0.02, width * 0.6)
+    ax.set_xlim(max(0.0, xmin - margin), xmax + margin)
+    # Use 0.1 increments on the x-axis
+    try:
+        # Anchor ticks to 0.0 up to xmax (with some headroom)
+        tmax = float(np.nanmax(xf)) if xf.size > 0 else 1.0
+        ticks = np.round(np.arange(0.0, max(1.0, tmax) + 1e-9, 0.1), 1)
+        ax.set_xticks(ticks)
+    except Exception:
+        pass
+    # Leave room on the right for the legend
+    fig.tight_layout(rect=[0, 0, 0.82, 1])
+    # Do not clamp; allow oversizing (e.g., up to 2.0) to be visible
     eac_path = os.path.join(out_dir, f"sweep_eac_vs_fraction_{county_slug}.png")
     fig.savefig(eac_path, dpi=130)
     print(f"Saved EAC-vs-fraction plot: {os.path.abspath(eac_path)}")
@@ -478,7 +529,8 @@ def run(
     experiments_root: str = "data/experiments/solar_size_sweep",
 ) -> Dict[str, pd.DataFrame]:
     """Run the PV-size sweep for one or more counties and return per-county DataFrames."""
-    fractions = fractions or [i/10.0 for i in range(1, 11)]
+    # Default sweep: 0.1 .. 2.0 in 0.1 steps (supports 200% oversizing)
+    fractions = fractions or [i/10.0 for i in range(1, 21)]
     scen_path = get_scenario_path(base_input_dir, scenario, housing_type)
     county_list = get_counties(scen_path, counties)
     results: Dict[str, pd.DataFrame] = {}
