@@ -23,7 +23,8 @@ def parse_args():
     p.add_argument("--housing-type", default="single-family-detached")
     p.add_argument("--counties", nargs="*")
     p.add_argument("--all-counties", action="store_true")
-    p.add_argument("--fractions", default="0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0")
+    # Fractions: if omitted, defaults to 0.1..2.0 in 0.1 steps
+    p.add_argument("--fractions", default=None, help="Comma-separated PV size fractions; default=0.1..2.0 by 0.1")
     p.add_argument("--enable-pv-surplus", action="store_true", help="Enable PV→Battery surplus charging")
     p.add_argument("--disable-grid-charging", action="store_true", help="Disable scheduled grid charging")
     p.add_argument("--compute-bills", action="store_true", help="Compute total bills via Steps 10/11/13 into experiments tree")
@@ -40,7 +41,10 @@ def main():
         counties = norcal_counties + socal_counties + central_counties
     else:
         counties = args.counties or ["Alameda County"]
-    fracs = [float(s) for s in args.fractions.split(',') if s.strip()]
+    if args.fractions:
+        fracs = [float(s) for s in args.fractions.split(',') if s.strip()]
+    else:
+        fracs = [i / 10.0 for i in range(1, 21)]  # 0.1 .. 2.0
     opts = SweepOptions(
         enable_pv_surplus_to_battery=args.enable_pv_surplus,
         grid_charging_enabled=(not args.disable_grid_charging),
