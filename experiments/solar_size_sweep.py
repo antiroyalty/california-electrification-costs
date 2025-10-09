@@ -252,15 +252,32 @@ def _plot_eac(df: pd.DataFrame, out_dir: str, county_slug: str, scenario: Option
             ax2.plot(x, util, color='black', marker='x', linestyle='-', label='Battery utilization (%)')
             ax2.set_ylim(0.0, 100.0)
             ax2.set_ylabel('Battery utilization (%)')
-            # Merge legends from both axes
+            # Merge legends and place further right to avoid overlapping the right y-axis
             h1, l1 = ax.get_legend_handles_labels()
             h2, l2 = ax2.get_legend_handles_labels()
-            ax.legend(h1 + h2, l1 + l2, loc='center left', bbox_to_anchor=(1.01, 0.5), fontsize=8, frameon=False)
+            ax.legend(
+                h1 + h2,
+                l1 + l2,
+                loc='center left',
+                bbox_to_anchor=(1.18, 0.5),
+                fontsize=8,
+                frameon=False,
+            )
         else:
             # Place legend for bars only
-            ax.legend(loc='center left', bbox_to_anchor=(1.01, 0.5), fontsize=8, frameon=False)
+            ax.legend(
+                loc='center left',
+                bbox_to_anchor=(1.18, 0.5),
+                fontsize=8,
+                frameon=False,
+            )
     except Exception:
-        ax.legend(loc='center left', bbox_to_anchor=(1.01, 0.5), fontsize=8, frameon=False)
+        ax.legend(
+            loc='center left',
+            bbox_to_anchor=(1.18, 0.5),
+            fontsize=8,
+            frameon=False,
+        )
     ax.grid(True, axis='y', linestyle=':', alpha=0.4)
     # Expand x-limits slightly based on actual data (supports >1.0)
     if xf.size > 0:
@@ -278,8 +295,8 @@ def _plot_eac(df: pd.DataFrame, out_dir: str, county_slug: str, scenario: Option
         ax.set_xticks(ticks)
     except Exception:
         pass
-    # Leave room on the right for the legend
-    fig.tight_layout(rect=[0, 0, 0.82, 1])
+    # Leave more room on the right for the outside legend
+    fig.tight_layout(rect=[0, 0, 0.76, 1])
     # Do not clamp; allow oversizing (e.g., up to 2.0) to be visible
     eac_path = os.path.join(out_dir, f"sweep_eac_vs_fraction_{county_slug}.png")
     fig.savefig(eac_path, dpi=130)
