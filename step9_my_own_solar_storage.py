@@ -107,6 +107,13 @@ GAMMA_PDC = -0.00337         # DC power temp coeff per °C (−0.337%/°C)
 WEATHER_SHIFT_HOURS = 8      # Fixed shift (hours) to align weather to local load
 # 8 hours is the most correct timeshift for the custom solar / storage -- the sun really does go down before 4pm in January, and after 6pm in July. 
 
+# Sizing fraction relative to the "annual-energy match" anchor (1.0 = match).
+# The main pipeline now defaults to 0.5 (50% of annual-load match). Override via env PV_SIZE_FRACTION.
+try:
+    PV_SIZE_FRACTION = float(os.getenv("PV_SIZE_FRACTION", "0.5"))
+except Exception:
+    PV_SIZE_FRACTION = 0.5
+
 
 def _find_header_row(path: str) -> int:
     """Find the zero‑based index of the header row containing 'Year' in NSRDB CSV."""
@@ -388,8 +395,8 @@ def process(
 
             # Weather + load
             weather_df, load_profile = _prepare_weather_and_load(weather_file, load_file)
-            # Size PV capacity like the custom step
-            system_capacity_kW = _compute_system_capacity_kW(weather_df, load_profile)
+            # Size PV capacity like the custom step, then scale by pipeline fraction
+            system_capacity_kW = _compute_system_capacity_kW(weather_df, load_profile) * PV_SIZE_FRACTION
             # Compute PV hourly AC (kWh)
             solar_gen = _pv_timeseries_ac_kwh(weather_df, system_capacity_kW)
 
