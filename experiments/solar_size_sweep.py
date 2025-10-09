@@ -76,7 +76,7 @@ def _ensure_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
 
 
-def _plot_summaries(df: pd.DataFrame, out_dir: str, county_slug: str) -> None:
+def _plot_summaries(df: pd.DataFrame, out_dir: str, county_slug: str, scenario: Optional[str] = None) -> None:
     # Plot flows vs fraction
     fig, ax = plt.subplots(figsize=(8.5, 4.8))
     x = df["fraction"].values
@@ -94,7 +94,8 @@ def _plot_summaries(df: pd.DataFrame, out_dir: str, county_slug: str) -> None:
         ax.plot(x, df[col].values, marker="o", color=color, label=label)
     ax.set_xlabel("PV size as fraction of annual-load match")
     ax.set_ylabel("Annual energy (kWh)")
-    ax.set_title(f"Flows vs PV size — {county_slug}")
+    scen_suffix = f" — {scenario}" if scenario else ""
+    ax.set_title(f"Flows vs PV size — {county_slug}{scen_suffix}")
     ax.grid(True, axis="y", alpha=0.3, linestyle=":")
     # Dynamic x-axis to include any oversizing (e.g., up to 2.0)
     ax.set_xlim(0.0, x_upper)
@@ -109,25 +110,6 @@ def _plot_summaries(df: pd.DataFrame, out_dir: str, county_slug: str) -> None:
     flows_path = os.path.join(out_dir, f"sweep_flows_vs_fraction_{county_slug}.png")
     fig.savefig(flows_path, dpi=130)
     print(f"Saved flows-vs-fraction plot: {os.path.abspath(flows_path)}")
-    plt.close(fig)
-
-    # Plot PV net capex vs fraction
-    fig, ax = plt.subplots(figsize=(8.5, 4.6))
-    ax.plot(x, df["pv_capex_net"].values, marker="o", color="#ffbb78", label="PV net capex")
-    ax.set_xlabel("PV size as fraction of annual-load match")
-    ax.set_ylabel("$ (net, with incentives)")
-    ax.set_title(f"PV net capex vs PV size — {county_slug}")
-    ax.grid(True, axis="y", alpha=0.3, linestyle=":")
-    ax.set_xlim(0.0, x_upper)
-    try:
-        ticks = np.round(np.arange(0.0, x_upper + 1e-9, 0.1), 1)
-        ax.set_xticks(ticks)
-    except Exception:
-        pass
-    fig.tight_layout()
-    capex_path = os.path.join(out_dir, f"sweep_capex_vs_fraction_{county_slug}.png")
-    fig.savefig(capex_path, dpi=130)
-    print(f"Saved capex-vs-fraction plot: {os.path.abspath(capex_path)}")
     plt.close(fig)
 
 
@@ -202,7 +184,7 @@ def _eac_baseline_components(
     }
 
 
-def _plot_eac(df: pd.DataFrame, out_dir: str, county_slug: str) -> None:
+def _plot_eac(df: pd.DataFrame, out_dir: str, county_slug: str, scenario: Optional[str] = None) -> None:
     comps = [
         ('capex_pv_annual', '#fdae6b', 'PV capex (annualized)'),
         ('capex_storage_annual', '#9ecae1', 'Storage capex (annualized)'),
@@ -260,9 +242,25 @@ def _plot_eac(df: pd.DataFrame, out_dir: str, county_slug: str) -> None:
         pass
     ax.set_xlabel('PV size as fraction of annual-load match')
     ax.set_ylabel('$ per year')
-    ax.set_title(f'EAC components vs PV size — {county_slug}')
-    # Place legend outside the plotting area on the right
-    ax.legend(loc='center left', bbox_to_anchor=(1.01, 0.5), fontsize=8, frameon=False)
+    scen_suffix = f" — {scenario}" if scenario else ""
+    ax.set_title(f'EAC components vs PV size — {county_slug}{scen_suffix}')
+    # Overlay battery utilization (%) as a line on a secondary Y axis
+    try:
+        util = pd.to_numeric(df.get('battery_util_percent', pd.Series([np.nan] * len(df))), errors='coerce').values
+        if np.isfinite(util).any():
+            ax2 = ax.twinx()
+            ax2.plot(x, util, color='black', marker='x', linestyle='-', label='Battery utilization (%)')
+            ax2.set_ylim(0.0, 100.0)
+            ax2.set_ylabel('Battery utilization (%)')
+            # Merge legends from both axes
+            h1, l1 = ax.get_legend_handles_labels()
+            h2, l2 = ax2.get_legend_handles_labels()
+            ax.legend(h1 + h2, l1 + l2, loc='center left', bbox_to_anchor=(1.01, 0.5), fontsize=8, frameon=False)
+        else:
+            # Place legend for bars only
+            ax.legend(loc='center left', bbox_to_anchor=(1.01, 0.5), fontsize=8, frameon=False)
+    except Exception:
+        ax.legend(loc='center left', bbox_to_anchor=(1.01, 0.5), fontsize=8, frameon=False)
     ax.grid(True, axis='y', linestyle=':', alpha=0.4)
     # Expand x-limits slightly based on actual data (supports >1.0)
     if xf.size > 0:
@@ -443,6 +441,21 @@ def run_for_county(
             grid_charging_enabled=options.grid_charging_enabled,
         )
         m = _collect_metrics(load_profile, pv_series, bc, bd, gtl, gtb, ptb)
+        # Battery utilization metrics
+        try:
+            peak_hours = max(0, int(getattr(diy, 'DISCHARGE_END_HOUR', 21)) - int(getattr(diy, 'DISCHARGE_START_HOUR', 16)))
+            daily_power_cap = float(getattr(diy, 'P_DISCHARGE_MAX_KW', 3.0)) * float(peak_hours)
+            usable_energy_delivered = (
+                float(getattr(diy, 'MAX_SOC_FRAC', 0.9)) - float(getattr(diy, 'MIN_SOC_FRAC', 0.2))
+            ) * float(getattr(diy, 'BATTERY_CAPACITY_KWH', 13.5)) * float(getattr(diy, 'ETA_DISCHARGE', 0.98))
+            daily_theoretical_max = float(min(daily_power_cap, usable_energy_delivered)) if usable_energy_delivered > 0 else 0.0
+            annual_theoretical_max = daily_theoretical_max * 365.0
+            actual_discharge_annual = float(sum(bd))
+            battery_util_percent = (100.0 * actual_discharge_annual / annual_theoretical_max) if annual_theoretical_max > 0 else 0.0
+            eq_full_cycles_per_year = (actual_discharge_annual / usable_energy_delivered) if usable_energy_delivered > 0 else 0.0
+        except Exception:
+            battery_util_percent = 0.0
+            eq_full_cycles_per_year = 0.0
         # Scale PV capex/incentives linearly from Step14 base values; keep storage constant
         base_solar_kw = float(pv_row.get('solar_kw', 0.0) or 0.0)
         ratio = (system_kw / base_solar_kw) if base_solar_kw > 0 else 0.0
@@ -471,6 +484,9 @@ def run_for_county(
             "pvst_capex_net": float(pvst_net),
             "capex_pv_annual": float(capex_pv_annual),
             "capex_storage_annual": float(capex_storage_annual),
+            # battery utilization diagnostics
+            "battery_util_percent": float(battery_util_percent),
+            "battery_eq_full_cycles_per_year": float(eq_full_cycles_per_year),
             # Add baseline EAC components (independent of PV size)
             "capex_electric": base_eac.get("capex_electric", 0.0),
             "capex_gas": base_eac.get("capex_gas", 0.0),
@@ -512,9 +528,9 @@ def run_for_county(
     out_df = pd.DataFrame(rows).sort_values("fraction")
     # Save county summary and plots
     out_df.to_csv(os.path.join(exp_county_dir, f"sweep_summary_{county_slug}.csv"), index=False)
-    _plot_summaries(out_df, exp_county_dir, county_slug)
+    _plot_summaries(out_df, exp_county_dir, county_slug, scenario)
     # Save EAC plot if bills present or even without (bills column may be NaN)
-    _plot_eac(out_df, exp_county_dir, county_slug)
+    _plot_eac(out_df, exp_county_dir, county_slug, scenario)
     return out_df
 
 
