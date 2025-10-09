@@ -207,7 +207,22 @@ def _plot_eac(df: pd.DataFrame, out_dir: str, county_slug: str) -> None:
     width = max(0.02, min(0.8 * dx, 0.1))
     for key, color, label in comps:
         vals = pd.to_numeric(df.get(key, pd.Series([0.0] * len(df))), errors='coerce').fillna(0.0).values
+        # Keep a copy of current bottoms before adding this layer for centering labels
+        btm = bottoms.copy()
         ax.bar(x, vals, width=width, bottom=bottoms, color=color, label=label)
+        # Overlay numeric labels centered in each colored segment
+        for xi, v, b in zip(x, vals, btm):
+            try:
+                v_float = float(v)
+            except Exception:
+                v_float = 0.0
+            if v_float > 0:
+                ax.text(
+                    float(xi),
+                    float(b + v_float / 2.0),
+                    f"{v_float:.0f}",
+                    ha='center', va='center', fontsize=7, color='black'
+                )
         bottoms = bottoms + vals
     ax.set_xlabel('PV size as fraction of annual-load match')
     ax.set_ylabel('$ per year')
