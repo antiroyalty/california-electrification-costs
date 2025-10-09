@@ -90,6 +90,8 @@ def _plot_summaries(df: pd.DataFrame, out_dir: str, county_slug: str) -> None:
     ax.set_ylabel("Annual energy (kWh)")
     ax.set_title(f"Flows vs PV size — {county_slug}")
     ax.grid(True, axis="y", alpha=0.3, linestyle=":")
+    # Clamp x-axis to [0, 1]
+    ax.set_xlim(0.0, 1.0)
     ax.legend(loc="best", fontsize=8)
     fig.tight_layout()
     flows_path = os.path.join(out_dir, f"sweep_flows_vs_fraction_{county_slug}.png")
@@ -104,6 +106,7 @@ def _plot_summaries(df: pd.DataFrame, out_dir: str, county_slug: str) -> None:
     ax.set_ylabel("$ (net, with incentives)")
     ax.set_title(f"PV net capex vs PV size — {county_slug}")
     ax.grid(True, axis="y", alpha=0.3, linestyle=":")
+    ax.set_xlim(0.0, 1.0)
     fig.tight_layout()
     capex_path = os.path.join(out_dir, f"sweep_capex_vs_fraction_{county_slug}.png")
     fig.savefig(capex_path, dpi=130)
@@ -194,9 +197,17 @@ def _plot_eac(df: pd.DataFrame, out_dir: str, county_slug: str) -> None:
     x = df['fraction'].values
     bottoms = np.zeros_like(x, dtype=float)
     fig, ax = plt.subplots(figsize=(9.5, 5.0))
+    # Choose a reasonable bar width based on spacing of fractions
+    xf = np.asarray(x, dtype=float)
+    if xf.size > 1:
+        dx_vals = np.diff(np.sort(np.unique(xf)))
+        dx = float(dx_vals.min()) if dx_vals.size > 0 else 0.1
+    else:
+        dx = 0.1
+    width = max(0.02, min(0.8 * dx, 0.1))
     for key, color, label in comps:
         vals = pd.to_numeric(df.get(key, pd.Series([0.0] * len(df))), errors='coerce').fillna(0.0).values
-        ax.bar(x, vals, bottom=bottoms, color=color, label=label)
+        ax.bar(x, vals, width=width, bottom=bottoms, color=color, label=label)
         bottoms = bottoms + vals
     ax.set_xlabel('PV size as fraction of annual-load match')
     ax.set_ylabel('$ per year')
@@ -204,6 +215,8 @@ def _plot_eac(df: pd.DataFrame, out_dir: str, county_slug: str) -> None:
     ax.legend(loc='best', fontsize=8, frameon=False)
     ax.grid(True, axis='y', linestyle=':', alpha=0.4)
     fig.tight_layout()
+    # Clamp x-axis to [0, 1]
+    ax.set_xlim(0.0, 1.0)
     eac_path = os.path.join(out_dir, f"sweep_eac_vs_fraction_{county_slug}.png")
     fig.savefig(eac_path, dpi=130)
     print(f"Saved EAC-vs-fraction plot: {os.path.abspath(eac_path)}")
@@ -288,6 +301,7 @@ def _compute_bill_for_fraction(exp_base: str, scenario: str, housing_type: str, 
     """Run Steps 10/11/13 into the experiment tree and return totals CSV dir path."""
     try:
         import step10_get_loads_for_rates as Step10
+        import step12_evaluate_electricity_rates as Step12
         import step11_evaluate_gas_rates as Step11
         import step13_combine_total_annual_costs as Step13
     except Exception:
@@ -295,6 +309,8 @@ def _compute_bill_for_fraction(exp_base: str, scenario: str, housing_type: str, 
 
     # Electricity: both input and output under the experiment tree
     Step10.process(exp_base, exp_base, scenario, [housing_type], counties)
+    # Electricity rates into experiments tree
+    Step12.process(exp_base, exp_base, scenario, housing_type, counties)
     # Gas: read from canonical, write into experiment tree
     Step11.process("data/loadprofiles", exp_base, scenario, [housing_type], counties)
     # Totals
