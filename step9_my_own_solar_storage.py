@@ -107,6 +107,13 @@ GAMMA_PDC = -0.00337         # DC power temp coeff per °C (−0.337%/°C)
 WEATHER_SHIFT_HOURS = 8      # Fixed shift (hours) to align weather to local load
 # 8 hours is the most correct timeshift for the custom solar / storage -- the sun really does go down before 4pm in January, and after 6pm in July. 
 
+# Sizing fraction relative to the "annual-energy match" anchor (1.0 = match).
+# The main pipeline now defaults to 0.5 (50% of annual-load match). Override via env PV_SIZE_FRACTION.
+try:
+    PV_SIZE_FRACTION = float(os.getenv("PV_SIZE_FRACTION", "0.5"))
+except Exception:
+    PV_SIZE_FRACTION = 0.5
+
 
 def _find_header_row(path: str) -> int:
     """Find the zero‑based index of the header row containing 'Year' in NSRDB CSV."""
@@ -274,7 +281,13 @@ def _pv_timeseries_ac_kwh(weather_df: pd.DataFrame, system_capacity_kw: float) -
     return pac
 
 
-def _simple_battery_dispatch(load_kwh: List[float], solar_kwh: List[float]) -> Tuple[
+def _simple_battery_dispatch(
+    load_kwh: List[float],
+    solar_kwh: List[float],
+    *,
+    enable_pv_surplus_to_battery: Optional[bool] = None,
+    grid_charging_enabled: Optional[bool] = None,
+) -> Tuple[
     List[float], List[float], List[float], List[float], List[float], List[float], List[float]
 ]:
     assert len(load_kwh) == 8760 and len(solar_kwh) == 8760
@@ -289,6 +302,10 @@ def _simple_battery_dispatch(load_kwh: List[float], solar_kwh: List[float]) -> T
     # In DIY model we only charge from grid (no PV→Battery); keep explicit channel for parity
     pv_to_batt = [0.0] * 8760
     soc_percent = [0.0] * 8760
+
+    # Resolve toggles with module-level defaults
+    pv_surplus_flag = ENABLE_PV_SURPLUS_TO_BATTERY if enable_pv_surplus_to_battery is None else bool(enable_pv_surplus_to_battery)
+    grid_charge_flag = GRID_CHARGING_ENABLED if grid_charging_enabled is None else bool(grid_charging_enabled)
 
     for h in range(8760):
         hod = h % 24
@@ -309,7 +326,7 @@ def _simple_battery_dispatch(load_kwh: List[float], solar_kwh: List[float]) -> T
 
         # First: charge from PV surplus (any hour), obeying power cap and headroom
         pv_input_energy_used = 0.0
-        if ENABLE_PV_SURPLUS_TO_BATTERY and pv_surplus > 0 and soc_kwh < max_soc_kwh:
+        if pv_surplus_flag and pv_surplus > 0 and soc_kwh < max_soc_kwh:
             remaining_input_headroom = max((max_soc_kwh - soc_kwh) / ETA_CHARGE, 0.0)
             # Limit by battery charge power
             pv_input_energy = min(pv_surplus, P_CHARGE_MAX_KW, remaining_input_headroom)
@@ -321,7 +338,7 @@ def _simple_battery_dispatch(load_kwh: List[float], solar_kwh: List[float]) -> T
                 pv_input_energy_used = pv_input_energy
 
         # Then: optionally top-up from grid during 14:00–16:00, obeying remaining power and headroom
-        if CHARGE_START_HOUR <= hod < CHARGE_END_HOUR and soc_kwh < max_soc_kwh:
+        if grid_charge_flag and CHARGE_START_HOUR <= hod < CHARGE_END_HOUR and soc_kwh < max_soc_kwh:
             remaining_input_headroom = max((max_soc_kwh - soc_kwh) / ETA_CHARGE, 0.0)
             # Respect charge power cap; subtract PV portion already used this hour
             remaining_power_cap = max(P_CHARGE_MAX_KW - pv_input_energy_used, 0.0)
@@ -378,8 +395,8 @@ def process(
 
             # Weather + load
             weather_df, load_profile = _prepare_weather_and_load(weather_file, load_file)
-            # Size PV capacity like the custom step
-            system_capacity_kW = _compute_system_capacity_kW(weather_df, load_profile)
+            # Size PV capacity like the custom step, then scale by pipeline fraction
+            system_capacity_kW = _compute_system_capacity_kW(weather_df, load_profile) * PV_SIZE_FRACTION
             # Compute PV hourly AC (kWh)
             solar_gen = _pv_timeseries_ac_kwh(weather_df, system_capacity_kW)
 
