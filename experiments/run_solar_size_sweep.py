@@ -13,6 +13,7 @@ except Exception:
     sys.path.append(os.path.dirname(os.path.dirname(__file__)))
     from experiments.solar_size_sweep import run, SweepOptions  # type: ignore
 from main_helpers import norcal_counties, socal_counties, central_counties
+import step9_my_own_solar_storage as diy
 
 
 def parse_args():
@@ -50,7 +51,9 @@ def main():
         grid_charging_enabled=(not args.disable_grid_charging),
         compute_bills=args.compute_bills,
     )
-    os.makedirs(exp_root, exist_ok=True)
+    dispatch_label = "dispatch_dynamic" if getattr(diy, "USE_DYNAMIC_DISPATCH", False) else "dispatch_classic"
+    eff_root = os.path.join(exp_root, dispatch_label)
+    os.makedirs(eff_root, exist_ok=True)
     results = run(
         base_input,
         scenario,
@@ -58,9 +61,9 @@ def main():
         counties=counties,
         fractions=fracs,
         options=opts,
-        experiments_root=exp_root,
+        experiments_root=eff_root,
     )
-    print(f"PV-size sweep complete for {len(results)} counties. Output: {os.path.abspath(exp_root)}")
+    print(f"PV-size sweep complete for {len(results)} counties. Output: {os.path.abspath(eff_root)}")
 
 
 if __name__ == "__main__":

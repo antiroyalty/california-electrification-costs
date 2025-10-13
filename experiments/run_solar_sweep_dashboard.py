@@ -1,4 +1,4 @@
-gitfrom __future__ import annotations
+from __future__ import annotations
 
 """
 Run PV-size sweeps for all scenarios and render a single-page HTML dashboard
@@ -35,6 +35,7 @@ except Exception:
 
 from scenarios import SCENARIOS
 from main_helpers import norcal_counties, socal_counties, central_counties, slugify_county_name
+import step9_my_own_solar_storage as diy
 
 
 def parse_args():
@@ -148,12 +149,14 @@ def _run_and_build(
     compute_bills: bool,
     dashboard_name: str,
 ):
+    dispatch_label = "dispatch_dynamic" if getattr(diy, "USE_DYNAMIC_DISPATCH", False) else "dispatch_classic"
+    eff_root = os.path.join(exp_root, dispatch_label)
     opts = SweepOptions(
         enable_pv_surplus_to_battery=enable_pv_surplus,
         grid_charging_enabled=grid_charging_enabled,
         compute_bills=compute_bills,
     )
-    os.makedirs(exp_root, exist_ok=True)
+    os.makedirs(eff_root, exist_ok=True)
     ran_counties: List[str] = []
     for scen in scenarios:
         results = run(
@@ -163,13 +166,13 @@ def _run_and_build(
             counties=counties,
             fractions=fracs,
             options=opts,
-            experiments_root=exp_root,
+            experiments_root=eff_root,
         )
         ran_counties = sorted(set(ran_counties) | set(results.keys()))
-    out_html = os.path.join(exp_root, dashboard_name)
+    out_html = os.path.join(eff_root, dashboard_name)
     _write_dashboard(
         out_html,
-        exp_root,
+        eff_root,
         scenarios,
         housing,
         ran_counties or counties,
@@ -222,9 +225,10 @@ def main():
             compute_bills=args.compute_bills,
             dashboard_name=f"sweep_dashboard_grid_off.html",
         )
+        dispatch_label = "dispatch_dynamic" if getattr(diy, "USE_DYNAMIC_DISPATCH", False) else "dispatch_classic"
         print("Built comparison dashboards:")
-        print(f"  ON:  {os.path.abspath(os.path.join(root_on, 'sweep_dashboard_grid_on.html'))}")
-        print(f"  OFF: {os.path.abspath(os.path.join(root_off, 'sweep_dashboard_grid_off.html'))}")
+        print(f"  ON:  {os.path.abspath(os.path.join(root_on, dispatch_label, 'sweep_dashboard_grid_on.html'))}")
+        print(f"  OFF: {os.path.abspath(os.path.join(root_off, dispatch_label, 'sweep_dashboard_grid_off.html'))}")
     else:
         # Single mode based on --disable-grid-charging flag
         _run_and_build(

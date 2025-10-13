@@ -174,6 +174,7 @@ def _plot_flows(df: pd.DataFrame, out_dir: str, county_slug: str, scenario: Opti
     x = df["battery_kwh"].values
     for col, color, label in [
         ("pv_to_load_kwh", "#ff7f0e", "PV→Load"),
+        ("pv_to_battery_kwh", "#9467bd", "PV→Battery"),
         ("battery_to_load_kwh", "#2ca02c", "Battery→Load"),
         ("grid_to_load_kwh", "#7f7f7f", "Grid→Load"),
     ]:
