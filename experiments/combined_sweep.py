@@ -370,8 +370,8 @@ def run_for_county(
     # Include scenario in filenames for easier side-by-side comparison
     eac_path = os.path.join(exp_county_dir, f"combined_eac_heatmap_{scenario}_{county_slug}.png")
     util_path = os.path.join(exp_county_dir, f"combined_utilization_heatmap_{scenario}_{county_slug}.png")
-    _plot_heatmap(out_df, 'fraction', 'battery_kwh', 'eac_total', eac_path, f"EAC heatmap — {county_slug} — {scenario}", "PV fraction (annual‑match)", "Battery (kWh)")
-    _plot_heatmap(out_df, 'fraction', 'battery_kwh', 'battery_util_percent', util_path, f"Battery utilization heatmap — {county_slug} — {scenario}", "PV fraction (annual‑match)", "Battery (kWh)")
+    _plot_heatmap(out_df, 'solar_kw', 'battery_kwh', 'eac_total', eac_path, f"EAC heatmap — {county_slug} — {scenario}", "PV size (kW)", "Battery (kWh)")
+    _plot_heatmap(out_df, 'solar_kw', 'battery_kwh', 'battery_util_percent', util_path, f"Battery utilization heatmap — {county_slug} — {scenario}", "PV size (kW)", "Battery (kWh)")
     return out_df
 
 

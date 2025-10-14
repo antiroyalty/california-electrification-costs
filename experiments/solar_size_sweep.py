@@ -76,15 +76,15 @@ def _ensure_dir(path: str) -> None:
 
 
 def _plot_summaries(df: pd.DataFrame, out_dir: str, county_slug: str, scenario: Optional[str] = None) -> None:
-    # Plot flows vs fraction
+    # Plot flows vs PV size (kW)
     fig, ax = plt.subplots(figsize=(8.5, 4.8))
-    x = df["fraction"].values
-    # Determine x-axis span dynamically to support oversizing > 1.0
+    x = df["solar_kw"].values
+    # Determine x-axis span dynamically based on kW values
     try:
+        x_min = float(np.nanmin(np.asarray(x, dtype=float))) if len(x) else 0.0
         x_max = float(np.nanmax(np.asarray(x, dtype=float))) if len(x) else 1.0
     except Exception:
-        x_max = 1.0
-    x_upper = max(1.0, x_max)
+        x_min, x_max = 0.0, 1.0
     for col, color, label in [
         ("pv_to_load_kwh", "#ff7f0e", "PV→Load"),
         ("pv_to_battery_kwh", "#9467bd", "PV→Battery"),
@@ -92,17 +92,17 @@ def _plot_summaries(df: pd.DataFrame, out_dir: str, county_slug: str, scenario: 
         ("grid_to_load_kwh", "#7f7f7f", "Grid→Load"),
     ]:
         ax.plot(x, df[col].values, marker="o", color=color, label=label)
-    ax.set_xlabel("PV size as fraction of annual-load match")
+    ax.set_xlabel("PV size (kW)")
     ax.set_ylabel("Annual energy (kWh)")
     scen_suffix = f" — {scenario}" if scenario else ""
     ax.set_title(f"Flows vs PV size — {county_slug}{scen_suffix}")
     ax.grid(True, axis="y", alpha=0.3, linestyle=":")
-    # Dynamic x-axis to include any oversizing (e.g., up to 2.0)
-    ax.set_xlim(0.0, x_upper)
-    # Use 0.1 increments on the x-axis
+    # Dynamic x-axis using actual kW range and unique PV sizes as ticks
+    pad = max(0.01 * (x_max - x_min), 0.02)
+    ax.set_xlim(x_min - pad, x_max + pad)
     try:
-        ticks = np.round(np.arange(0.0, x_upper + 1e-9, 0.1), 1)
-        ax.set_xticks(ticks)
+        xticks = sorted(np.unique(np.asarray(x, dtype=float)))
+        ax.set_xticks(xticks)
     except Exception:
         pass
     ax.legend(loc="best", fontsize=8)
@@ -193,7 +193,7 @@ def _plot_eac(df: pd.DataFrame, out_dir: str, county_slug: str, scenario: Option
         ('vehicle_om', '#d62728', 'Vehicle O&M'),
     ]
 
-    x = df['fraction'].values
+    x = df['solar_kw'].values
     bottoms = np.zeros_like(x, dtype=float)
     fig, ax = plt.subplots(figsize=(11, 4.8))
 
@@ -228,7 +228,7 @@ def _plot_eac(df: pd.DataFrame, out_dir: str, county_slug: str, scenario: Option
                 ax.text(float(xi), tval + yoff, f"{tval:.0f}",
                         ha='center', va='bottom', fontsize=8, color='black')
 
-    ax.set_xlabel('PV size as fraction of annual-load match')
+    ax.set_xlabel('PV size (kW)')
     ax.set_ylabel('$ per year')
     scen_suffix = f" — {scenario}" if scenario else ""
     ax.set_title(f'EAC components vs PV size — {county_slug}{scen_suffix}')
@@ -237,11 +237,10 @@ def _plot_eac(df: pd.DataFrame, out_dir: str, county_slug: str, scenario: Option
     xmin = float(np.nanmin(xf)) if xf.size > 0 else 0.0
     xmax = float(np.nanmax(xf)) if xf.size > 0 else 1.0
     margin = max(0.02, width * 0.6)
-    ax.set_xlim(max(0.0, xmin - margin), xmax + margin)
+    ax.set_xlim(xmin - margin, xmax + margin)
     try:
-        tmax = float(np.nanmax(xf)) if xf.size > 0 else 1.0
-        ticks = np.round(np.arange(0.0, max(1.0, tmax) + 1e-9, 0.1), 1)
-        ax.set_xticks(ticks)
+        xticks = sorted(np.unique(np.asarray(xf, dtype=float)))
+        ax.set_xticks(xticks)
     except Exception:
         pass
 
