@@ -22,6 +22,7 @@ import shutil
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from main_helpers import slugify_county_name, get_scenario_path, get_counties
 
@@ -33,8 +34,6 @@ from step15_payback_periods import vehicle_annual_adders_from_ledger
 
 @dataclass
 class SweepOptions:
-    enable_pv_surplus_to_battery: bool = True
-    grid_charging_enabled: bool = True
     compute_bills: bool = False
 
 
@@ -77,32 +76,33 @@ def _ensure_dir(path: str) -> None:
 
 
 def _plot_summaries(df: pd.DataFrame, out_dir: str, county_slug: str, scenario: Optional[str] = None) -> None:
-    # Plot flows vs fraction
+    # Plot flows vs PV size (kW)
     fig, ax = plt.subplots(figsize=(8.5, 4.8))
-    x = df["fraction"].values
-    # Determine x-axis span dynamically to support oversizing > 1.0
+    x = df["solar_kw"].values
+    # Determine x-axis span dynamically based on kW values
     try:
+        x_min = float(np.nanmin(np.asarray(x, dtype=float))) if len(x) else 0.0
         x_max = float(np.nanmax(np.asarray(x, dtype=float))) if len(x) else 1.0
     except Exception:
-        x_max = 1.0
-    x_upper = max(1.0, x_max)
+        x_min, x_max = 0.0, 1.0
     for col, color, label in [
         ("pv_to_load_kwh", "#ff7f0e", "PV→Load"),
+        ("pv_to_battery_kwh", "#9467bd", "PV→Battery"),
         ("battery_to_load_kwh", "#2ca02c", "Battery→Load"),
         ("grid_to_load_kwh", "#7f7f7f", "Grid→Load"),
     ]:
         ax.plot(x, df[col].values, marker="o", color=color, label=label)
-    ax.set_xlabel("PV size as fraction of annual-load match")
+    ax.set_xlabel("PV size (kW)")
     ax.set_ylabel("Annual energy (kWh)")
     scen_suffix = f" — {scenario}" if scenario else ""
     ax.set_title(f"Flows vs PV size — {county_slug}{scen_suffix}")
     ax.grid(True, axis="y", alpha=0.3, linestyle=":")
-    # Dynamic x-axis to include any oversizing (e.g., up to 2.0)
-    ax.set_xlim(0.0, x_upper)
-    # Use 0.1 increments on the x-axis
+    # Dynamic x-axis using actual kW range and unique PV sizes as ticks
+    pad = max(0.01 * (x_max - x_min), 0.02)
+    ax.set_xlim(x_min - pad, x_max + pad)
     try:
-        ticks = np.round(np.arange(0.0, x_upper + 1e-9, 0.1), 1)
-        ax.set_xticks(ticks)
+        xticks = sorted(np.unique(np.asarray(x, dtype=float)))
+        ax.set_xticks(xticks)
     except Exception:
         pass
     ax.legend(loc="best", fontsize=8)
@@ -183,7 +183,6 @@ def _eac_baseline_components(
         "vehicle_om": float(vehicle_om),
     }
 
-
 def _plot_eac(df: pd.DataFrame, out_dir: str, county_slug: str, scenario: Optional[str] = None) -> None:
     comps = [
         ('capex_pv_annual', '#fdae6b', 'PV capex (annualized)'),
@@ -193,115 +192,120 @@ def _plot_eac(df: pd.DataFrame, out_dir: str, county_slug: str, scenario: Option
         ('annual_bill_with_solar', '#1f77b4', 'Annual energy bill (with solar+storage)'),
         ('vehicle_om', '#d62728', 'Vehicle O&M'),
     ]
-    x = df['fraction'].values
+
+    x = df['solar_kw'].values
     bottoms = np.zeros_like(x, dtype=float)
-    # Make the bar chart 10% wider to reduce label overlap
-    fig, ax = plt.subplots(figsize=(14, 5.0))
-    # Choose a reasonable bar width based on spacing of fractions
+    fig, ax = plt.subplots(figsize=(11, 4.8))
+
     xf = np.asarray(x, dtype=float)
     if xf.size > 1:
         dx_vals = np.diff(np.sort(np.unique(xf)))
         dx = float(dx_vals.min()) if dx_vals.size > 0 else 0.1
     else:
         dx = 0.1
-    # Make bars 10% wider than before (increase factor and cap by 10%)
-    width = max(0.02, min(0.8 * dx * 1.10, 0.11))
+    width = max(0.02, min(0.8 * dx, 0.11))
+
     for key, color, label in comps:
         vals = pd.to_numeric(df.get(key, pd.Series([0.0] * len(df))), errors='coerce').fillna(0.0).values
-        # Keep a copy of current bottoms before adding this layer for centering labels
         btm = bottoms.copy()
         ax.bar(x, vals, width=width, bottom=bottoms, color=color, label=label)
-        # Overlay numeric labels centered in each colored segment
         for xi, v, b in zip(x, vals, btm):
-            try:
-                v_float = float(v)
-            except Exception:
-                v_float = 0.0
+            v_float = float(v) if np.isfinite(v) else 0.0
             if v_float > 0:
-                ax.text(
-                    float(xi),
-                    float(b + v_float / 2.0),
-                    f"{v_float:.0f}",
-                    ha='center', va='center', fontsize=7, color='black'
-                )
-        bottoms = bottoms + vals
-    # Add total EAC labels at the top of each bar
-    try:
-        totals = np.asarray(bottoms, dtype=float)
-        if totals.size > 0:
-            ymax = float(np.nanmax(totals)) if np.isfinite(totals).any() else 0.0
-            # Give a bit of headroom so labels aren't clipped
-            if ymax > 0:
-                ax.set_ylim(0.0, ymax * 1.08)
-            yoff = max(1.0, 0.02 * ymax) if ymax > 0 else 1.0
-            for xi, tot in zip(x, totals):
-                tval = float(tot) if np.isfinite(tot) else 0.0
-                if tval > 0:
-                    ax.text(float(xi), tval + yoff, f"{tval:.0f}", ha='center', va='bottom', fontsize=8, color='black')
-    except Exception:
-        pass
-    ax.set_xlabel('PV size as fraction of annual-load match')
+                ax.text(float(xi), float(b + v_float / 2.0), f"{v_float:.0f}",
+                        ha='center', va='center', fontsize=7, color='black')
+        bottoms += vals
+
+    totals = np.asarray(bottoms, dtype=float)
+    if totals.size > 0 and np.isfinite(totals).any():
+        ymax = float(np.nanmax(totals))
+        if ymax > 0:
+            ax.set_ylim(0.0, ymax * 1.08)
+        yoff = max(1.0, 0.02 * ymax) if ymax > 0 else 1.0
+        for xi, tot in zip(x, totals):
+            tval = float(tot) if np.isfinite(tot) else 0.0
+            if tval > 0:
+                ax.text(float(xi), tval + yoff, f"{tval:.0f}",
+                        ha='center', va='bottom', fontsize=8, color='black')
+
+    ax.set_xlabel('PV size (kW)')
     ax.set_ylabel('$ per year')
     scen_suffix = f" — {scenario}" if scenario else ""
     ax.set_title(f'EAC components vs PV size — {county_slug}{scen_suffix}')
-    # Overlay battery utilization (%) as a line on a secondary Y axis
-    try:
-        util = pd.to_numeric(df.get('battery_util_percent', pd.Series([np.nan] * len(df))), errors='coerce').values
-        if np.isfinite(util).any():
-            ax2 = ax.twinx()
-            ax2.plot(x, util, color='black', marker='x', linestyle='-', label='Battery utilization (%)')
-            ax2.set_ylim(0.0, 100.0)
-            ax2.set_ylabel('Battery utilization (%)')
-            # Merge legends and place further right to avoid overlapping the right y-axis
-            h1, l1 = ax.get_legend_handles_labels()
-            h2, l2 = ax2.get_legend_handles_labels()
-            ax.legend(
-                h1 + h2,
-                l1 + l2,
-                loc='center left',
-                bbox_to_anchor=(1.18, 0.5),
-                fontsize=8,
-                frameon=False,
-            )
-        else:
-            # Place legend for bars only
-            ax.legend(
-                loc='center left',
-                bbox_to_anchor=(1.18, 0.5),
-                fontsize=8,
-                frameon=False,
-            )
-    except Exception:
-        ax.legend(
-            loc='center left',
-            bbox_to_anchor=(1.18, 0.5),
-            fontsize=8,
-            frameon=False,
-        )
     ax.grid(True, axis='y', linestyle=':', alpha=0.4)
-    # Expand x-limits slightly based on actual data (supports >1.0)
-    if xf.size > 0:
-        xmin = float(np.nanmin(xf))
-        xmax = float(np.nanmax(xf))
-    else:
-        xmin, xmax = 0.0, 1.0
+
+    xmin = float(np.nanmin(xf)) if xf.size > 0 else 0.0
+    xmax = float(np.nanmax(xf)) if xf.size > 0 else 1.0
     margin = max(0.02, width * 0.6)
-    ax.set_xlim(max(0.0, xmin - margin), xmax + margin)
-    # Use 0.1 increments on the x-axis
+    ax.set_xlim(xmin - margin, xmax + margin)
     try:
-        # Anchor ticks to 0.0 up to xmax (with some headroom)
-        tmax = float(np.nanmax(xf)) if xf.size > 0 else 1.0
-        ticks = np.round(np.arange(0.0, max(1.0, tmax) + 1e-9, 0.1), 1)
-        ax.set_xticks(ticks)
+        xticks = sorted(np.unique(np.asarray(xf, dtype=float)))
+        ax.set_xticks(xticks)
     except Exception:
         pass
-    # Leave more room on the right for the outside legend
-    fig.tight_layout(rect=[0, 0, 0.76, 1])
-    # Do not clamp; allow oversizing (e.g., up to 2.0) to be visible
+
+    h, l = ax.get_legend_handles_labels()
+    ax.legend(h, l, loc='center left', bbox_to_anchor=(1.02, 0.5),
+              frameon=False, fontsize=8, borderaxespad=0.)
+
     eac_path = os.path.join(out_dir, f"sweep_eac_vs_fraction_{county_slug}.png")
-    fig.savefig(eac_path, dpi=130)
+    fig.savefig(eac_path, dpi=130, bbox_inches='tight')
     print(f"Saved EAC-vs-fraction plot: {os.path.abspath(eac_path)}")
     plt.close(fig)
+
+def _plot_two_days_deployment(
+    out_dir: str,
+    county_slug: str,
+    scenario: str,
+    system_kw: float,
+    load_profile: List[float],
+    pv_series: List[float],
+    batt_to_load: List[float],
+    grid_to_load: List[float],
+) -> None:
+    """Plot 24h slices for one January day and one July day showing Load, PV, Battery→Load, Grid→Load.
+
+    The PV size corresponds to the 1.0 annual-match fraction.
+    """
+    try:
+        idx = pd.date_range(start="2018-01-01", periods=8760, freq="H")
+        df = pd.DataFrame({
+            "Load": load_profile,
+            "PV": pv_series,
+            "Battery→Load": batt_to_load,
+            "Grid→Load": grid_to_load,
+        }, index=idx)
+
+        days = [pd.Timestamp("2018-01-15"), pd.Timestamp("2018-07-15")]
+        titles = ["January 15", "July 15"]
+
+        fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(10.5, 6.2), sharex=False)
+        for ax, day, title in zip(axes, days, titles):
+            mask = (df.index.date == day.date())
+            d = df.loc[mask]
+            if d.empty:
+                continue
+            hours = range(0, len(d))
+            ax.plot(hours, d["Load"].values, color="black", label="Load")
+            ax.plot(hours, d["PV"].values, color="#ff7f0e", label="Solar (PV)")
+            ax.plot(hours, d["Battery→Load"].values, color="#2ca02c", label="Battery→Load")
+            ax.plot(hours, d["Grid→Load"].values, color="#7f7f7f", label="Grid→Load")
+            ax.set_ylabel("kW (per hour)")
+            ax.set_title(f"{title}")
+            ax.grid(True, axis="y", linestyle=":", alpha=0.4)
+            ax.set_xlim(0, 23)
+            ax.set_xticks([0, 4, 8, 12, 16, 20, 23])
+            # Add an in-axes legend so colors are clearly labeled
+            ax.legend(loc='upper right', fontsize=8, frameon=False)
+        axes[-1].set_xlabel("Hour of day")
+        fig.suptitle(f"PV fraction 1.0 — Solar capacity: {system_kw:.2f} kW — {county_slug} — {scenario}")
+        fig.tight_layout(rect=[0, 0, 1, 0.95])
+        out_path = os.path.join(out_dir, f"two_days_deployment_f100_{county_slug}.png")
+        fig.savefig(out_path, dpi=130)
+        plt.close(fig)
+        print(f"Saved two-days deployment plot: {os.path.abspath(out_path)}")
+    except Exception as e:
+        print(f"Two-days deployment plot failed for {county_slug}: {e}")
 
 
 def _write_hourly_for_fraction(out_dir: str, county_slug: str, load_profile: List[float], pv: List[float], bd: List[float], gtl: List[float], gtb: List[float], ptb: List[float], soc: List[float]) -> None:
@@ -454,8 +458,6 @@ def run_for_county(
         _, bc, bd, gtl, gtb, ptb, soc = diy._simple_battery_dispatch(  # type: ignore
             load_profile,
             pv_series,
-            enable_pv_surplus_to_battery=options.enable_pv_surplus_to_battery,
-            grid_charging_enabled=options.grid_charging_enabled,
         )
         m = _collect_metrics(load_profile, pv_series, bc, bd, gtl, gtb, ptb)
         # Battery utilization metrics
@@ -541,6 +543,22 @@ def run_for_county(
                     row["annual_bill_with_solar"] = float(df.iloc[0].iloc[0])
             except Exception:
                 row["annual_bill_with_solar"] = np.nan
+
+        # For 1.0 fraction, also render a focused two-day (Jan/Jul) deployment view
+        try:
+            if abs(f - 1.0) < 1e-9:
+                _plot_two_days_deployment(
+                    exp_county_dir,
+                    county_slug,
+                    scenario,
+                    system_kw,
+                    load_profile,
+                    pv_series,
+                    bd,
+                    gtl,
+                )
+        except Exception as _two_day_err:
+            print(f"Two-day deployment plotting skipped for {county_slug}: {_two_day_err}")
 
     out_df = pd.DataFrame(rows).sort_values("fraction")
     # Save county summary and plots

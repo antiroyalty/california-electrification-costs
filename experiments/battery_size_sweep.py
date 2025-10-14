@@ -37,8 +37,6 @@ from step15_payback_periods import vehicle_annual_adders_from_ledger
 
 @dataclass
 class BatterySweepOptions:
-    enable_pv_surplus_to_battery: bool = True
-    grid_charging_enabled: bool = True
     compute_bills: bool = False
 
 
@@ -174,6 +172,7 @@ def _plot_flows(df: pd.DataFrame, out_dir: str, county_slug: str, scenario: Opti
     x = df["battery_kwh"].values
     for col, color, label in [
         ("pv_to_load_kwh", "#ff7f0e", "PV→Load"),
+        ("pv_to_battery_kwh", "#9467bd", "PV→Battery"),
         ("battery_to_load_kwh", "#2ca02c", "Battery→Load"),
         ("grid_to_load_kwh", "#7f7f7f", "Grid→Load"),
     ]:
@@ -211,6 +210,15 @@ def _plot_eac(df: pd.DataFrame, out_dir: str, county_slug: str, scenario: Option
     else:
         dx = 1.0
     width = max(0.2, min(0.8 * dx, 1.2))
+    # Tighten horizontal padding by explicitly setting x-limits around the bars
+    try:
+        xmin = float(np.nanmin(xf)) if xf.size > 0 else 0.0
+        xmax = float(np.nanmax(xf)) if xf.size > 0 else 1.0
+        xpad = max(0.02, 0.55 * width)
+        ax.set_xlim(xmin - xpad, xmax + xpad)
+        ax.margins(x=0.0)
+    except Exception:
+        pass
     for key, color, label in comps:
         vals = pd.to_numeric(df.get(key, pd.Series([0.0] * len(df))), errors='coerce').fillna(0.0).values
         btm = bottoms.copy()
@@ -241,41 +249,10 @@ def _plot_eac(df: pd.DataFrame, out_dir: str, county_slug: str, scenario: Option
     ax.set_ylabel('$ per year')
     scen_suffix = f" — {scenario}" if scenario else ""
     ax.set_title(f'EAC vs Battery size — {county_slug}{scen_suffix}')
-    # Utilization overlay
-    try:
-        util = pd.to_numeric(df.get('battery_util_percent', pd.Series([np.nan] * len(df))), errors='coerce').values
-        if np.isfinite(util).any():
-            ax2 = ax.twinx()
-            ax2.plot(x, util, color='black', marker='x', linestyle='-', label='Battery utilization (%)')
-            ax2.set_ylim(0.0, 100.0)
-            ax2.set_ylabel('Battery utilization (%)')
-            h1, l1 = ax.get_legend_handles_labels()
-            h2, l2 = ax2.get_legend_handles_labels()
-            # Place legend further right to avoid overlapping the right y-axis
-            ax.legend(
-                h1 + h2,
-                l1 + l2,
-                loc='center left',
-                bbox_to_anchor=(1.18, 0.5),
-                fontsize=8,
-                frameon=False,
-            )
-        else:
-            ax.legend(
-                loc='center left',
-                bbox_to_anchor=(1.18, 0.5),
-                fontsize=8,
-                frameon=False,
-            )
-    except Exception:
-        ax.legend(
-            loc='center left',
-            bbox_to_anchor=(1.18, 0.5),
-            fontsize=8,
-            frameon=False,
-        )
-    # Leave more room on the right for the outside legend
-    fig.tight_layout(rect=[0, 0, 0.76, 1])
+    # Legend for stacked bars only (no utilization overlay)
+    ax.legend(loc='center left', bbox_to_anchor=(1.08, 0.5), fontsize=8, frameon=False)
+    # Reduce excess left padding; reserve extra right margin for the outside legend
+    fig.tight_layout(rect=[0.06, 0, 0.78, 1])
     path = os.path.join(out_dir, f"battery_sweep_eac_{county_slug}.png")
     fig.savefig(path, dpi=130)
     print(f"Saved EAC plot: {os.path.abspath(path)}")
@@ -377,8 +354,6 @@ def run_for_county(
             _, bc, bd, gtl, gtb, ptb, soc = diy._simple_battery_dispatch(  # type: ignore
                 load_profile,
                 pv_series,
-                enable_pv_surplus_to_battery=options.enable_pv_surplus_to_battery,
-                grid_charging_enabled=options.grid_charging_enabled,
             )
         m = _collect_metrics(load_profile, pv_series, bd, gtl, gtb, ptb)
 

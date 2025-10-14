@@ -237,6 +237,7 @@ KWH_METRICS = [
     ("System to Load", "System to Load"),
     ("Battery to Load", "Battery to Load"),
     ("Grid to Load", "Grid to Load"),
+    ("System to Battery", "System to Battery"),  # PV→Battery
 ]
 
 

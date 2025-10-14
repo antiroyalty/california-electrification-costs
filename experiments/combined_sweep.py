@@ -34,8 +34,6 @@ from step15_payback_periods import vehicle_annual_adders_from_ledger
 
 @dataclass
 class CombinedSweepOptions:
-    enable_pv_surplus_to_battery: bool = True
-    grid_charging_enabled: bool = True
     compute_bills: bool = False
 
 
@@ -263,8 +261,6 @@ def run_for_county(
                 _, bc, bd, gtl, gtb, ptb, soc = diy._simple_battery_dispatch(  # type: ignore
                     load_profile,
                     pv_series,
-                    enable_pv_surplus_to_battery=options.enable_pv_surplus_to_battery,
-                    grid_charging_enabled=options.grid_charging_enabled,
                 )
             m = _collect_metrics(load_profile, pv_series, bd, gtl, gtb, ptb)
 
@@ -374,8 +370,8 @@ def run_for_county(
     # Include scenario in filenames for easier side-by-side comparison
     eac_path = os.path.join(exp_county_dir, f"combined_eac_heatmap_{scenario}_{county_slug}.png")
     util_path = os.path.join(exp_county_dir, f"combined_utilization_heatmap_{scenario}_{county_slug}.png")
-    _plot_heatmap(out_df, 'fraction', 'battery_kwh', 'eac_total', eac_path, f"EAC heatmap — {county_slug} — {scenario}", "PV fraction (annual‑match)", "Battery (kWh)")
-    _plot_heatmap(out_df, 'fraction', 'battery_kwh', 'battery_util_percent', util_path, f"Battery utilization heatmap — {county_slug} — {scenario}", "PV fraction (annual‑match)", "Battery (kWh)")
+    _plot_heatmap(out_df, 'solar_kw', 'battery_kwh', 'eac_total', eac_path, f"EAC heatmap — {county_slug} — {scenario}", "PV size (kW)", "Battery (kWh)")
+    _plot_heatmap(out_df, 'solar_kw', 'battery_kwh', 'battery_util_percent', util_path, f"Battery utilization heatmap — {county_slug} — {scenario}", "PV size (kW)", "Battery (kWh)")
     return out_df
 
 

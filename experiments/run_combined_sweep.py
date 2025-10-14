@@ -12,6 +12,7 @@ except Exception:
     from experiments.combined_sweep import run, CombinedSweepOptions  # type: ignore
 
 from main_helpers import norcal_counties, socal_counties, central_counties
+import step9_my_own_solar_storage as diy
 
 
 def parse_args():
@@ -24,8 +25,7 @@ def parse_args():
     p.add_argument("--all-counties", action="store_true")
     p.add_argument("--fractions", default=None, help="Comma-separated PV size fractions; default=0.1..2.0 by 0.1")
     p.add_argument("--capacities", default="3,5,7.5,10,12.5,15", help="Comma-separated battery sizes (kWh)")
-    p.add_argument("--enable-pv-surplus", action="store_true", help="Enable PV→Battery surplus charging")
-    p.add_argument("--disable-grid-charging", action="store_true", help="Disable scheduled grid charging")
+    # PV→Battery surplus charging controlled by step9 constant only
     p.add_argument("--compute-bills", action="store_true", help="Compute total bills via Steps 10/11/13 into experiments tree")
     return p.parse_args()
 
@@ -45,12 +45,10 @@ def main():
     else:
         fracs = [i / 10.0 for i in range(1, 21)]  # 0.1..2.0
     capacities = [float(s) for s in args.capacities.split(',') if s.strip()]
-    opts = CombinedSweepOptions(
-        enable_pv_surplus_to_battery=args.enable_pv_surplus,
-        grid_charging_enabled=(not args.disable_grid_charging),
-        compute_bills=args.compute_bills,
-    )
-    os.makedirs(exp_root, exist_ok=True)
+    opts = CombinedSweepOptions(compute_bills=args.compute_bills)
+    dispatch_label = "dispatch_dynamic" if getattr(diy, "USE_DYNAMIC_DISPATCH", False) else "dispatch_classic"
+    eff_root = os.path.join(exp_root, dispatch_label)
+    os.makedirs(eff_root, exist_ok=True)
     results = run(
         base_input,
         scenario,
@@ -59,11 +57,10 @@ def main():
         fractions=fracs,
         capacities_kwh=capacities,
         options=opts,
-        experiments_root=exp_root,
+        experiments_root=eff_root,
     )
-    print(f"Combined sweep complete for {len(results)} counties. Output: {os.path.abspath(exp_root)}")
+    print(f"Combined sweep complete for {len(results)} counties. Output: {os.path.abspath(eff_root)}")
 
 
 if __name__ == "__main__":
     main()
-
