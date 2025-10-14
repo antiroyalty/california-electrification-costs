@@ -105,6 +105,14 @@ MAX_SOC_FRAC = 0.90
 # Default grid-charging toggle (applied when function arg is None)
 GRID_CHARGING_ENABLED = False
 
+def _resolve_flag(user_value: Optional[bool], default_value: bool) -> bool:
+    """Return a concrete boolean for tri-state toggles.
+
+    If the caller passes None, fall back to the module-level default. Otherwise
+    coerce the provided value to bool. Keeps all call sites consistent.
+    """
+    return default_value if user_value is None else bool(user_value)
+
 
 # PV model constants (simple PVWatts‑like), aligned to PySAM preset assumptions
 # Loss stack / PR approximates detailed model losses (soiling/mismatch/wiring/inverter/availability)
@@ -296,7 +304,6 @@ def _battery_dispatch_classic(
     solar_kwh: List[float],
     *,
     enable_pv_surplus_to_battery: Optional[bool] = None,
-    grid_charging_enabled: Optional[bool] = None,
 ) -> Tuple[
     List[float], List[float], List[float], List[float], List[float], List[float], List[float]
 ]:
@@ -316,9 +323,9 @@ def _battery_dispatch_classic(
     pv_to_batt = [0.0] * 8760
     soc_percent = [0.0] * 8760
 
-    # Resolve toggles with module-level defaults
-    pv_surplus_flag = ENABLE_PV_SURPLUS_TO_BATTERY if enable_pv_surplus_to_battery is None else bool(enable_pv_surplus_to_battery)
-    grid_charge_flag = GRID_CHARGING_ENABLED if grid_charging_enabled is None else bool(grid_charging_enabled)
+    # Resolve toggles: PV surplus via helper; grid charging via module constant only
+    pv_surplus_flag = _resolve_flag(enable_pv_surplus_to_battery, ENABLE_PV_SURPLUS_TO_BATTERY)
+    grid_charge_flag = GRID_CHARGING_ENABLED
 
     for h in range(8760):
         hod = h % 24
@@ -374,7 +381,6 @@ def _battery_dispatch_dynamic(
     solar_kwh: List[float],
     *,
     enable_pv_surplus_to_battery: Optional[bool] = None,
-    grid_charging_enabled: Optional[bool] = None,  # ignored in dynamic strategy
 ) -> Tuple[
     List[float], List[float], List[float], List[float], List[float], List[float], List[float]
 ]:
@@ -395,7 +401,7 @@ def _battery_dispatch_dynamic(
     pv_to_batt = [0.0] * 8760
     soc_percent = [0.0] * 8760
 
-    pv_surplus_flag = ENABLE_PV_SURPLUS_TO_BATTERY if enable_pv_surplus_to_battery is None else bool(enable_pv_surplus_to_battery)
+    pv_surplus_flag = _resolve_flag(enable_pv_surplus_to_battery, ENABLE_PV_SURPLUS_TO_BATTERY)
     discharge_mode = False
 
     for h in range(8760):
@@ -441,7 +447,6 @@ def _simple_battery_dispatch(
     solar_kwh: List[float],
     *,
     enable_pv_surplus_to_battery: Optional[bool] = None,
-    grid_charging_enabled: Optional[bool] = None,
 ) -> Tuple[
     List[float], List[float], List[float], List[float], List[float], List[float], List[float]
 ]:
@@ -452,12 +457,10 @@ def _simple_battery_dispatch(
         return _battery_dispatch_dynamic(
             load_kwh, solar_kwh,
             enable_pv_surplus_to_battery=enable_pv_surplus_to_battery,
-            grid_charging_enabled=grid_charging_enabled,
         )
     return _battery_dispatch_classic(
         load_kwh, solar_kwh,
         enable_pv_surplus_to_battery=enable_pv_surplus_to_battery,
-        grid_charging_enabled=grid_charging_enabled,
     )
 
 
