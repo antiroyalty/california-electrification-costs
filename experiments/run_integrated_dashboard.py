@@ -18,6 +18,7 @@ import datetime as dt
 import html
 import os
 from typing import Iterable, List, Optional
+import subprocess
 
 from scenarios import SCENARIOS
 from main_helpers import norcal_counties, socal_counties, central_counties, slugify_county_name
@@ -216,7 +217,13 @@ def main():
         for scen in scenarios:
             run_combined(base_input, scen, housing, counties=counties, fractions=None, capacities_kwh=None, options=c_opts, experiments_root=combined_root)
 
-    out_html = os.path.join(eff_root, "integrated_dashboard.html")
+    # Include current git short SHA in the dashboard filename for traceability
+    try:
+        sha = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL).decode().strip()
+        sha = sha or "nogit"
+    except Exception:
+        sha = "nogit"
+    out_html = os.path.join(eff_root, f"integrated_dashboard_g{sha}.html")
     _write_dashboard(
         out_html,
         solar_root=solar_root,
