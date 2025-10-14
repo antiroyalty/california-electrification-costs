@@ -84,7 +84,7 @@ GIT_SHORT_SHA = _get_git_short_sha()
 # Dispatch strategy selector:
 #   - False: classic windowed discharge (16–21), optional PV surplus charge, optional grid top-up
 #   - True:  dynamic PV-only strategy (PV charges; discharge from 16:00 until PV≥load next day)
-USE_DYNAMIC_DISPATCH = False
+USE_DYNAMIC_DISPATCH = True
 
 # Toggle: default PV→Battery surplus charging (applied when function arg is None)
 ENABLE_PV_SURPLUS_TO_BATTERY = True
@@ -407,9 +407,9 @@ def _battery_dispatch_dynamic(
         net_after_pv = max(load_h - pv_h, 0.0)
         pv_surplus = max(pv_h - load_h, 0.0)
 
-        if hod == DISCHARGE_START_HOUR:
-            discharge_mode = net_after_pv > 0.0
-        if pv_surplus > 0.0:
+        if (hod >= DISCHARGE_START_HOUR or discharge_mode) and net_after_pv > 0.0: # decide whether we should be in discharge mode this hour
+            discharge_mode = True
+        if pv_surplus > 0.0: # stop discharging once PV >= load (first hour surplus)
             discharge_mode = False
 
         if discharge_mode and net_after_pv > 0.0 and soc_kwh > min_soc_kwh:
@@ -602,7 +602,7 @@ def process(
                     soc_percent=soc_percent,
                     pv_used_kwh=pv_used_series,
                     summary_stats=summary,
-                    title=f"DIY Dispatch — {county}",
+                    title=f"DIY Dispatch — {scenario} — {county}",
                     show=False,
                     save_path=plots_path,
                 )
@@ -637,7 +637,7 @@ def process(
 
 
 # Example usage
-scenario = "heat_pump"
+scenario = "baseline"
 housing_type = "single-family-detached"
 
 if __name__ == "__main__":
