@@ -43,7 +43,7 @@ def parse_args():
     p.add_argument("--counties", nargs="*")
     p.add_argument("--all-counties", action="store_true")
     p.add_argument("--fractions", default=None, help="Comma-separated PV size fractions; default=0.1..2.0 by 0.1")
-    p.add_argument("--enable-pv-surplus", action="store_true", help="Enable PV→Battery surplus charging")
+    p.add_argument("--enable-pv-surplus", action="store_true", default=None, help="Enable PV→Battery surplus charging (omit to use step9 default)")
     p.add_argument("--compute-bills", action="store_true", help="Compute total bills via Steps 10/11/13 into experiments tree")
     p.add_argument("--scenarios", nargs="*", help="Optional subset of scenarios to run; default uses scenarios.py keys")
     p.add_argument("--dashboard-name", default="sweep_dashboard.html", help="HTML filename to write within experiments root")
@@ -77,7 +77,6 @@ def _write_dashboard(
     counties: List[str],
     *,
     fractions: Iterable[float],
-    enable_pv_surplus: bool,
     compute_bills: bool,
 ) -> None:
     ts = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -106,7 +105,7 @@ def _write_dashboard(
     # Grid charging state reflects step9 constant
     import step9_my_own_solar_storage as diy
     lines.append(
-        f"  <div class='meta'>PV surplus→battery: {'on' if enable_pv_surplus else 'off'} · Grid charging: {'on' if diy.GRID_CHARGING_ENABLED else 'off'} · Compute bills: {'on' if compute_bills else 'off'}</div>"
+        f"  <div class='meta'>PV surplus→battery: {'on' if diy.ENABLE_PV_SURPLUS_TO_BATTERY else 'off'} · Grid charging: {'on' if diy.GRID_CHARGING_ENABLED else 'off'} · Compute bills: {'on' if compute_bills else 'off'}</div>"
     )
 
     for scen in scenarios:
@@ -140,16 +139,12 @@ def _run_and_build(
     housing: str,
     counties: List[str],
     fracs: List[float],
-    enable_pv_surplus: bool,
     compute_bills: bool,
     dashboard_name: str,
 ):
     dispatch_label = "dispatch_dynamic" if getattr(diy, "USE_DYNAMIC_DISPATCH", False) else "dispatch_classic"
     eff_root = os.path.join(exp_root, dispatch_label)
-    opts = SweepOptions(
-        enable_pv_surplus_to_battery=enable_pv_surplus,
-        compute_bills=compute_bills,
-    )
+    opts = SweepOptions(compute_bills=compute_bills)
     os.makedirs(eff_root, exist_ok=True)
     ran_counties: List[str] = []
     for scen in scenarios:
@@ -171,7 +166,6 @@ def _run_and_build(
         housing,
         ran_counties or counties,
         fractions=fracs,
-        enable_pv_surplus=enable_pv_surplus,
         compute_bills=compute_bills,
     )
     print(f"Dashboard written to: {os.path.abspath(out_html)}")
@@ -197,7 +191,6 @@ def main():
         housing=housing,
         counties=counties,
         fracs=fracs,
-        enable_pv_surplus=args.enable_pv_surplus,
         compute_bills=args.compute_bills,
         dashboard_name=args.dashboard_name,
     )

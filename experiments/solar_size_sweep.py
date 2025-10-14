@@ -33,7 +33,6 @@ from step15_payback_periods import vehicle_annual_adders_from_ledger
 
 @dataclass
 class SweepOptions:
-    enable_pv_surplus_to_battery: bool = True
     compute_bills: bool = False
 
 
@@ -304,6 +303,62 @@ def _plot_eac(df: pd.DataFrame, out_dir: str, county_slug: str, scenario: Option
     plt.close(fig)
 
 
+def _plot_two_days_deployment(
+    out_dir: str,
+    county_slug: str,
+    scenario: str,
+    system_kw: float,
+    load_profile: List[float],
+    pv_series: List[float],
+    batt_to_load: List[float],
+    grid_to_load: List[float],
+) -> None:
+    """Plot 24h slices for one January day and one July day showing Load, PV, Battery→Load, Grid→Load.
+
+    The PV size corresponds to the 1.0 annual-match fraction.
+    """
+    try:
+        idx = pd.date_range(start="2018-01-01", periods=8760, freq="H")
+        df = pd.DataFrame({
+            "Load": load_profile,
+            "PV": pv_series,
+            "Battery→Load": batt_to_load,
+            "Grid→Load": grid_to_load,
+        }, index=idx)
+
+        days = [pd.Timestamp("2018-01-15"), pd.Timestamp("2018-07-15")]
+        titles = ["January 15", "July 15"]
+
+        fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(10.5, 6.2), sharex=False)
+        for ax, day, title in zip(axes, days, titles):
+            mask = (df.index.date == day.date())
+            d = df.loc[mask]
+            if d.empty:
+                continue
+            hours = range(0, len(d))
+            ax.plot(hours, d["Load"].values, color="black", label="Load")
+            ax.plot(hours, d["PV"].values, color="#ff7f0e", label="Solar (PV)")
+            ax.plot(hours, d["Battery→Load"].values, color="#2ca02c", label="Battery→Load")
+            ax.plot(hours, d["Grid→Load"].values, color="#7f7f7f", label="Grid→Load")
+            ax.set_ylabel("kW (per hour)")
+            ax.set_title(f"{title}")
+            ax.grid(True, axis="y", linestyle=":", alpha=0.4)
+            ax.set_xlim(0, 23)
+            ax.set_xticks([0, 4, 8, 12, 16, 20, 23])
+        axes[-1].set_xlabel("Hour of day")
+        # Single legend outside on the right
+        handles, labels = axes[0].get_legend_handles_labels()
+        fig.legend(handles, labels, loc='center left', bbox_to_anchor=(1.01, 0.5), fontsize=9, frameon=False)
+        fig.suptitle(f"PV fraction 1.0 — Solar capacity: {system_kw:.2f} kW — {county_slug} — {scenario}")
+        fig.tight_layout(rect=[0, 0, 0.80, 0.95])
+        out_path = os.path.join(out_dir, f"two_days_deployment_f100_{county_slug}.png")
+        fig.savefig(out_path, dpi=130)
+        plt.close(fig)
+        print(f"Saved two-days deployment plot: {os.path.abspath(out_path)}")
+    except Exception as e:
+        print(f"Two-days deployment plot failed for {county_slug}: {e}")
+
+
 def _write_hourly_for_fraction(out_dir: str, county_slug: str, load_profile: List[float], pv: List[float], bd: List[float], gtl: List[float], gtb: List[float], ptb: List[float], soc: List[float]) -> None:
     idx = pd.date_range(start="2018-01-01", periods=8760, freq="H")
     system_to_load = [min(s, l) for s, l in zip(pv, load_profile)]
@@ -454,7 +509,6 @@ def run_for_county(
         _, bc, bd, gtl, gtb, ptb, soc = diy._simple_battery_dispatch(  # type: ignore
             load_profile,
             pv_series,
-            enable_pv_surplus_to_battery=options.enable_pv_surplus_to_battery,
         )
         m = _collect_metrics(load_profile, pv_series, bc, bd, gtl, gtb, ptb)
         # Battery utilization metrics
@@ -540,6 +594,22 @@ def run_for_county(
                     row["annual_bill_with_solar"] = float(df.iloc[0].iloc[0])
             except Exception:
                 row["annual_bill_with_solar"] = np.nan
+
+        # For 1.0 fraction, also render a focused two-day (Jan/Jul) deployment view
+        try:
+            if abs(f - 1.0) < 1e-9:
+                _plot_two_days_deployment(
+                    exp_county_dir,
+                    county_slug,
+                    scenario,
+                    system_kw,
+                    load_profile,
+                    pv_series,
+                    bd,
+                    gtl,
+                )
+        except Exception as _two_day_err:
+            print(f"Two-day deployment plotting skipped for {county_slug}: {_two_day_err}")
 
     out_df = pd.DataFrame(rows).sort_values("fraction")
     # Save county summary and plots

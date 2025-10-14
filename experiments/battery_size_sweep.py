@@ -37,7 +37,6 @@ from step15_payback_periods import vehicle_annual_adders_from_ledger
 
 @dataclass
 class BatterySweepOptions:
-    enable_pv_surplus_to_battery: bool = True
     compute_bills: bool = False
 
 
@@ -211,6 +210,15 @@ def _plot_eac(df: pd.DataFrame, out_dir: str, county_slug: str, scenario: Option
     else:
         dx = 1.0
     width = max(0.2, min(0.8 * dx, 1.2))
+    # Tighten horizontal padding by explicitly setting x-limits around the bars
+    try:
+        xmin = float(np.nanmin(xf)) if xf.size > 0 else 0.0
+        xmax = float(np.nanmax(xf)) if xf.size > 0 else 1.0
+        xpad = max(0.02, 0.55 * width)
+        ax.set_xlim(xmin - xpad, xmax + xpad)
+        ax.margins(x=0.0)
+    except Exception:
+        pass
     for key, color, label in comps:
         vals = pd.to_numeric(df.get(key, pd.Series([0.0] * len(df))), errors='coerce').fillna(0.0).values
         btm = bottoms.copy()
@@ -252,30 +260,14 @@ def _plot_eac(df: pd.DataFrame, out_dir: str, county_slug: str, scenario: Option
             h1, l1 = ax.get_legend_handles_labels()
             h2, l2 = ax2.get_legend_handles_labels()
             # Place legend further right to avoid overlapping the right y-axis
-            ax.legend(
-                h1 + h2,
-                l1 + l2,
-                loc='center left',
-                bbox_to_anchor=(1.18, 0.5),
-                fontsize=8,
-                frameon=False,
-            )
+            # Give more right-side space so legend doesn't crowd the axes
+            ax.legend(h1 + h2, l1 + l2, loc='center left', bbox_to_anchor=(1.08, 0.5), fontsize=8, frameon=False)
         else:
-            ax.legend(
-                loc='center left',
-                bbox_to_anchor=(1.18, 0.5),
-                fontsize=8,
-                frameon=False,
-            )
+            ax.legend(loc='center left', bbox_to_anchor=(1.08, 0.5), fontsize=8, frameon=False)
     except Exception:
-        ax.legend(
-            loc='center left',
-            bbox_to_anchor=(1.18, 0.5),
-            fontsize=8,
-            frameon=False,
-        )
-    # Leave more room on the right for the outside legend
-    fig.tight_layout(rect=[0, 0, 0.76, 1])
+        ax.legend(loc='center left', bbox_to_anchor=(1.08, 0.5), fontsize=8, frameon=False)
+    # Reduce excess left padding; reserve extra right margin for the outside legend
+    fig.tight_layout(rect=[0.06, 0, 0.78, 1])
     path = os.path.join(out_dir, f"battery_sweep_eac_{county_slug}.png")
     fig.savefig(path, dpi=130)
     print(f"Saved EAC plot: {os.path.abspath(path)}")
@@ -377,7 +369,6 @@ def run_for_county(
             _, bc, bd, gtl, gtb, ptb, soc = diy._simple_battery_dispatch(  # type: ignore
                 load_profile,
                 pv_series,
-                enable_pv_surplus_to_battery=options.enable_pv_surplus_to_battery,
             )
         m = _collect_metrics(load_profile, pv_series, bd, gtl, gtb, ptb)
 

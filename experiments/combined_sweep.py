@@ -34,7 +34,6 @@ from step15_payback_periods import vehicle_annual_adders_from_ledger
 
 @dataclass
 class CombinedSweepOptions:
-    enable_pv_surplus_to_battery: bool = True
     compute_bills: bool = False
 
 
@@ -262,7 +261,6 @@ def run_for_county(
                 _, bc, bd, gtl, gtb, ptb, soc = diy._simple_battery_dispatch(  # type: ignore
                     load_profile,
                     pv_series,
-                    enable_pv_surplus_to_battery=options.enable_pv_surplus_to_battery,
                 )
             m = _collect_metrics(load_profile, pv_series, bd, gtl, gtb, ptb)
 

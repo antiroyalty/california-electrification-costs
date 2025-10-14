@@ -1,4 +1,4 @@
-experiments/run_integrated_dashboard.pyfrom __future__ import annotations
+from __future__ import annotations
 
 """
 Integrated dashboard: runs solar, battery, and combined sweeps (always with bills)
@@ -44,7 +44,7 @@ def parse_args():
     p.add_argument("--counties", nargs="*")
     p.add_argument("--all-counties", action="store_true")
     p.add_argument("--scenarios", nargs="*", help="Optional subset of scenarios to run; default uses scenarios.py keys")
-    p.add_argument("--enable-pv-surplus", action="store_true", help="Enable PV→Battery surplus charging")
+    # PV→Battery surplus charging controlled by step9 constant only
     p.add_argument("--no-rerun", action="store_true", help="Do not rerun sweeps; just build dashboard from existing outputs")
     return p.parse_args()
 
@@ -103,11 +103,11 @@ def _write_dashboard(
     scenarios: List[str],
     housing: str,
     counties: List[str],
-    enable_pv_surplus: Optional[bool],
+    # PV surplus flag now drawn only from step9 constant (no CLI override)
 ) -> None:
     ts = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     dispatch_label = "dispatch_dynamic" if getattr(diy, "USE_DYNAMIC_DISPATCH", False) else "dispatch_classic"
-    pv_flag = enable_pv_surplus if enable_pv_surplus is not None else True
+    pv_flag = diy.ENABLE_PV_SURPLUS_TO_BATTERY
 
     lines: List[str] = []
     lines.append("<!doctype html>")
@@ -130,7 +130,7 @@ def _write_dashboard(
     lines.append("<body>")
     lines.append("  <h1>Integrated PV+Battery Sweep Dashboard</h1>")
     lines.append(f"  <div class='meta'>Generated: {_html_escape(ts)} · Housing: {_html_escape(housing)} · Dispatch: {_html_escape(dispatch_label)}</div>")
-    lines.append(f"  <div class='meta'>PV surplus→battery: {'on' if pv_flag else 'off'} · Grid charging: {'on' if diy.GRID_CHARGING_ENABLED else 'off'} · Bills: on</div>")
+    lines.append(f"  <div class='meta'>PV surplus→battery: {'on' if diy.ENABLE_PV_SURPLUS_TO_BATTERY else 'off'} · Grid charging: {'on' if diy.GRID_CHARGING_ENABLED else 'off'} · Bills: on</div>")
 
     for scen in scenarios:
         lines.append(f"  <div class='scenario'>")
@@ -188,22 +188,21 @@ def main():
     battery_root = os.path.join(eff_root, "battery")
     combined_root = os.path.join(eff_root, "combined")
 
-    # Prepare options (always compute bills). If flags omitted, let Step 9 defaults apply via None.
-    pv_flag = True if args.enable_pv_surplus else None
+    # Prepare options (always compute bills). PV surplus follows step9 constant.
 
     if not args.no_rerun:
         # Run solar sweep (default fractions)
-        s_opts = SweepOptions(enable_pv_surplus_to_battery=pv_flag, compute_bills=True)
+        s_opts = SweepOptions(compute_bills=True)
         os.makedirs(solar_root, exist_ok=True)
         for scen in scenarios:
             run_solar(base_input, scen, housing, counties=counties, fractions=None, options=s_opts, experiments_root=solar_root)
         # Run battery sweep (default capacities)
-        b_opts = BatterySweepOptions(enable_pv_surplus_to_battery=pv_flag, compute_bills=True)
+        b_opts = BatterySweepOptions(compute_bills=True)
         os.makedirs(battery_root, exist_ok=True)
         for scen in scenarios:
             run_battery(base_input, scen, housing, counties=counties, capacities_kwh=None, options=b_opts, experiments_root=battery_root)
         # Run combined sweep (default grids)
-        c_opts = CombinedSweepOptions(enable_pv_surplus_to_battery=pv_flag, compute_bills=True)
+        c_opts = CombinedSweepOptions(compute_bills=True)
         os.makedirs(combined_root, exist_ok=True)
         for scen in scenarios:
             run_combined(base_input, scen, housing, counties=counties, fractions=None, capacities_kwh=None, options=c_opts, experiments_root=combined_root)
@@ -217,7 +216,7 @@ def main():
         scenarios=scenarios,
         housing=housing,
         counties=counties,
-        enable_pv_surplus=pv_flag,
+        # PV surplus status is shown in dashboard from step9 constant
     )
     print(f"Integrated dashboard written to: {os.path.abspath(out_html)}")
 

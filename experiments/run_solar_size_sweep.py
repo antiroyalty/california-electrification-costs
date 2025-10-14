@@ -26,7 +26,7 @@ def parse_args():
     p.add_argument("--all-counties", action="store_true")
     # Fractions: if omitted, defaults to 0.1..2.0 in 0.1 steps
     p.add_argument("--fractions", default=None, help="Comma-separated PV size fractions; default=0.1..2.0 by 0.1")
-    p.add_argument("--enable-pv-surplus", action="store_true", help="Enable PV→Battery surplus charging")
+    # PV→Battery surplus charging controlled by step9 constant only
     p.add_argument("--compute-bills", action="store_true", help="Compute total bills via Steps 10/11/13 into experiments tree")
     return p.parse_args()
 
@@ -45,10 +45,7 @@ def main():
         fracs = [float(s) for s in args.fractions.split(',') if s.strip()]
     else:
         fracs = [i / 10.0 for i in range(1, 21)]  # 0.1 .. 2.0
-    opts = SweepOptions(
-        enable_pv_surplus_to_battery=args.enable_pv_surplus,
-        compute_bills=args.compute_bills,
-    )
+    opts = SweepOptions(compute_bills=args.compute_bills)
     dispatch_label = "dispatch_dynamic" if getattr(diy, "USE_DYNAMIC_DISPATCH", False) else "dispatch_classic"
     eff_root = os.path.join(exp_root, dispatch_label)
     os.makedirs(eff_root, exist_ok=True)

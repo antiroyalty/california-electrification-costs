@@ -84,7 +84,7 @@ GIT_SHORT_SHA = _get_git_short_sha()
 # Dispatch strategy selector:
 #   - False: classic windowed discharge (16–21), optional PV surplus charge, optional grid top-up
 #   - True:  dynamic PV-only strategy (PV charges; discharge from 16:00 until PV≥load next day)
-USE_DYNAMIC_DISPATCH = False
+USE_DYNAMIC_DISPATCH = True
 
 # Toggle: default PV→Battery surplus charging (applied when function arg is None)
 ENABLE_PV_SURPLUS_TO_BATTERY = True
@@ -302,8 +302,6 @@ def _pv_timeseries_ac_kwh(weather_df: pd.DataFrame, system_capacity_kw: float) -
 def _battery_dispatch_classic(
     load_kwh: List[float],
     solar_kwh: List[float],
-    *,
-    enable_pv_surplus_to_battery: Optional[bool] = None,
 ) -> Tuple[
     List[float], List[float], List[float], List[float], List[float], List[float], List[float]
 ]:
@@ -323,8 +321,8 @@ def _battery_dispatch_classic(
     pv_to_batt = [0.0] * 8760
     soc_percent = [0.0] * 8760
 
-    # Resolve toggles: PV surplus via helper; grid charging via module constant only
-    pv_surplus_flag = _resolve_flag(enable_pv_surplus_to_battery, ENABLE_PV_SURPLUS_TO_BATTERY)
+    # Resolve toggles: PV surplus via module constant; grid charging via module constant only
+    pv_surplus_flag = ENABLE_PV_SURPLUS_TO_BATTERY
     grid_charge_flag = GRID_CHARGING_ENABLED
 
     for h in range(8760):
@@ -379,8 +377,6 @@ def _battery_dispatch_classic(
 def _battery_dispatch_dynamic(
     load_kwh: List[float],
     solar_kwh: List[float],
-    *,
-    enable_pv_surplus_to_battery: Optional[bool] = None,
 ) -> Tuple[
     List[float], List[float], List[float], List[float], List[float], List[float], List[float]
 ]:
@@ -401,7 +397,7 @@ def _battery_dispatch_dynamic(
     pv_to_batt = [0.0] * 8760
     soc_percent = [0.0] * 8760
 
-    pv_surplus_flag = _resolve_flag(enable_pv_surplus_to_battery, ENABLE_PV_SURPLUS_TO_BATTERY)
+    pv_surplus_flag = ENABLE_PV_SURPLUS_TO_BATTERY
     discharge_mode = False
 
     for h in range(8760):
@@ -445,8 +441,6 @@ def _battery_dispatch_dynamic(
 def _simple_battery_dispatch(
     load_kwh: List[float],
     solar_kwh: List[float],
-    *,
-    enable_pv_surplus_to_battery: Optional[bool] = None,
 ) -> Tuple[
     List[float], List[float], List[float], List[float], List[float], List[float], List[float]
 ]:
@@ -454,14 +448,8 @@ def _simple_battery_dispatch(
     Toggle with USE_DYNAMIC_DISPATCH at the top of this file.
     """
     if USE_DYNAMIC_DISPATCH:
-        return _battery_dispatch_dynamic(
-            load_kwh, solar_kwh,
-            enable_pv_surplus_to_battery=enable_pv_surplus_to_battery,
-        )
-    return _battery_dispatch_classic(
-        load_kwh, solar_kwh,
-        enable_pv_surplus_to_battery=enable_pv_surplus_to_battery,
-    )
+        return _battery_dispatch_dynamic(load_kwh, solar_kwh)
+    return _battery_dispatch_classic(load_kwh, solar_kwh)
 
 
 def _validate_lengths(*series_lists: List[List[float]]) -> None:
