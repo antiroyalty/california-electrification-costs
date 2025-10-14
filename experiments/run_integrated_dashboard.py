@@ -122,7 +122,7 @@ def _write_dashboard(
     lines.append("    .scenario { margin-top: 28px; }")
     lines.append("    .scenario h2 { margin-bottom: 6px; }")
     lines.append("    .county { margin-top: 14px; }")
-    lines.append("    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 10px; align-items: start; }")
+    lines.append("    .grid { display: grid; grid-template-columns: repeat(2, minmax(360px, 1fr)); gap: 10px; align-items: start; }")
     lines.append("    img { max-width: 100%; height: auto; border: 1px solid #e6e6e6; }")
     lines.append("    .note { font-size: 13px; color: #666; }")
     lines.append("  </style>")
@@ -131,6 +131,14 @@ def _write_dashboard(
     lines.append("  <h1>Integrated PV+Battery Sweep Dashboard</h1>")
     lines.append(f"  <div class='meta'>Generated: {_html_escape(ts)} · Housing: {_html_escape(housing)} · Dispatch: {_html_escape(dispatch_label)}</div>")
     lines.append(f"  <div class='meta'>PV surplus→battery: {'on' if diy.ENABLE_PV_SURPLUS_TO_BATTERY else 'off'} · Grid charging: {'on' if diy.GRID_CHARGING_ENABLED else 'off'} · Bills: on</div>")
+    # Dispatch mode descriptions
+    lines.append("  <div class='note'>")
+    lines.append("    <strong>Dispatch modes</strong>:")
+    lines.append("    <ul>")
+    lines.append("      <li><em>Classic</em>: Discharge between 16:00–21:00 up to residual load (3 kW cap, SOC 20–90%). PV surplus may charge any hour. Grid top-up 14:00–16:00 is available but defaults off.</li>")
+    lines.append("      <li><em>Dynamic</em>: PV-only charging; at 16:00 if PV &lt; load, discharge until min SOC or the first hour PV ≥ load (typically next morning). No grid charging to battery.</li>")
+    lines.append("    </ul>")
+    lines.append("  </div>")
 
     for scen in scenarios:
         lines.append(f"  <div class='scenario'>")
@@ -150,7 +158,8 @@ def _write_dashboard(
                 lines.append("      </div>")
             # Plots grid
             lines.append("      <div class='grid'>")
-            for key in ["solar_flows", "solar_eac", "solar_two_days", "batt_eac", "comb_eac"]:
+            # Order: start with the focused two-day view (PV=1.0), then other plots
+            for key in ["solar_two_days", "solar_flows", "solar_eac", "batt_eac", "comb_eac"]:
                 path = paths[key]
                 rel = os.path.relpath(path, start=os.path.dirname(out_html))
                 alt = os.path.basename(path)

@@ -84,7 +84,7 @@ GIT_SHORT_SHA = _get_git_short_sha()
 # Dispatch strategy selector:
 #   - False: classic windowed discharge (16–21), optional PV surplus charge, optional grid top-up
 #   - True:  dynamic PV-only strategy (PV charges; discharge from 16:00 until PV≥load next day)
-USE_DYNAMIC_DISPATCH = True
+USE_DYNAMIC_DISPATCH = False
 
 # Toggle: default PV→Battery surplus charging (applied when function arg is None)
 ENABLE_PV_SURPLUS_TO_BATTERY = True
