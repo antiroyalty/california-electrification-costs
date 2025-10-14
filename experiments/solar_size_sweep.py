@@ -22,6 +22,7 @@ import shutil
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from main_helpers import slugify_county_name, get_scenario_path, get_counties
 
@@ -182,7 +183,6 @@ def _eac_baseline_components(
         "vehicle_om": float(vehicle_om),
     }
 
-
 def _plot_eac(df: pd.DataFrame, out_dir: str, county_slug: str, scenario: Optional[str] = None) -> None:
     comps = [
         ('capex_pv_annual', '#fdae6b', 'PV capex (annualized)'),
@@ -192,116 +192,67 @@ def _plot_eac(df: pd.DataFrame, out_dir: str, county_slug: str, scenario: Option
         ('annual_bill_with_solar', '#1f77b4', 'Annual energy bill (with solar+storage)'),
         ('vehicle_om', '#d62728', 'Vehicle O&M'),
     ]
+
     x = df['fraction'].values
     bottoms = np.zeros_like(x, dtype=float)
-    # Make the bar chart 10% wider to reduce label overlap
-    fig, ax = plt.subplots(figsize=(14, 5.0))
-    # Choose a reasonable bar width based on spacing of fractions
+    fig, ax = plt.subplots(figsize=(11, 4.8))
+
     xf = np.asarray(x, dtype=float)
     if xf.size > 1:
         dx_vals = np.diff(np.sort(np.unique(xf)))
         dx = float(dx_vals.min()) if dx_vals.size > 0 else 0.1
     else:
         dx = 0.1
-    # Make bars 10% wider than before (increase factor and cap by 10%)
-    width = max(0.02, min(0.8 * dx * 1.10, 0.11))
+    width = max(0.02, min(0.8 * dx, 0.11))
+
     for key, color, label in comps:
         vals = pd.to_numeric(df.get(key, pd.Series([0.0] * len(df))), errors='coerce').fillna(0.0).values
-        # Keep a copy of current bottoms before adding this layer for centering labels
         btm = bottoms.copy()
         ax.bar(x, vals, width=width, bottom=bottoms, color=color, label=label)
-        # Overlay numeric labels centered in each colored segment
         for xi, v, b in zip(x, vals, btm):
-            try:
-                v_float = float(v)
-            except Exception:
-                v_float = 0.0
+            v_float = float(v) if np.isfinite(v) else 0.0
             if v_float > 0:
-                ax.text(
-                    float(xi),
-                    float(b + v_float / 2.0),
-                    f"{v_float:.0f}",
-                    ha='center', va='center', fontsize=7, color='black'
-                )
-        bottoms = bottoms + vals
-    # Add total EAC labels at the top of each bar
-    try:
-        totals = np.asarray(bottoms, dtype=float)
-        if totals.size > 0:
-            ymax = float(np.nanmax(totals)) if np.isfinite(totals).any() else 0.0
-            # Give a bit of headroom so labels aren't clipped
-            if ymax > 0:
-                ax.set_ylim(0.0, ymax * 1.08)
-            yoff = max(1.0, 0.02 * ymax) if ymax > 0 else 1.0
-            for xi, tot in zip(x, totals):
-                tval = float(tot) if np.isfinite(tot) else 0.0
-                if tval > 0:
-                    ax.text(float(xi), tval + yoff, f"{tval:.0f}", ha='center', va='bottom', fontsize=8, color='black')
-    except Exception:
-        pass
+                ax.text(float(xi), float(b + v_float / 2.0), f"{v_float:.0f}",
+                        ha='center', va='center', fontsize=7, color='black')
+        bottoms += vals
+
+    totals = np.asarray(bottoms, dtype=float)
+    if totals.size > 0 and np.isfinite(totals).any():
+        ymax = float(np.nanmax(totals))
+        if ymax > 0:
+            ax.set_ylim(0.0, ymax * 1.08)
+        yoff = max(1.0, 0.02 * ymax) if ymax > 0 else 1.0
+        for xi, tot in zip(x, totals):
+            tval = float(tot) if np.isfinite(tot) else 0.0
+            if tval > 0:
+                ax.text(float(xi), tval + yoff, f"{tval:.0f}",
+                        ha='center', va='bottom', fontsize=8, color='black')
+
     ax.set_xlabel('PV size as fraction of annual-load match')
     ax.set_ylabel('$ per year')
     scen_suffix = f" — {scenario}" if scenario else ""
     ax.set_title(f'EAC components vs PV size — {county_slug}{scen_suffix}')
-    # Overlay battery utilization (%) as a line on a secondary Y axis
-    try:
-        util = pd.to_numeric(df.get('battery_util_percent', pd.Series([np.nan] * len(df))), errors='coerce').values
-        if np.isfinite(util).any():
-            ax2 = ax.twinx()
-            ax2.plot(x, util, color='black', marker='x', linestyle='-', label='Battery utilization (%)')
-            ax2.set_ylim(0.0, 100.0)
-            ax2.set_ylabel('Battery utilization (%)')
-            # Merge legends and place further right to avoid overlapping the right y-axis
-            h1, l1 = ax.get_legend_handles_labels()
-            h2, l2 = ax2.get_legend_handles_labels()
-            ax.legend(
-                h1 + h2,
-                l1 + l2,
-                loc='center left',
-                bbox_to_anchor=(1.18, 0.5),
-                fontsize=8,
-                frameon=False,
-            )
-        else:
-            # Place legend for bars only
-            ax.legend(
-                loc='center left',
-                bbox_to_anchor=(1.18, 0.5),
-                fontsize=8,
-                frameon=False,
-            )
-    except Exception:
-        ax.legend(
-            loc='center left',
-            bbox_to_anchor=(1.18, 0.5),
-            fontsize=8,
-            frameon=False,
-        )
     ax.grid(True, axis='y', linestyle=':', alpha=0.4)
-    # Expand x-limits slightly based on actual data (supports >1.0)
-    if xf.size > 0:
-        xmin = float(np.nanmin(xf))
-        xmax = float(np.nanmax(xf))
-    else:
-        xmin, xmax = 0.0, 1.0
+
+    xmin = float(np.nanmin(xf)) if xf.size > 0 else 0.0
+    xmax = float(np.nanmax(xf)) if xf.size > 0 else 1.0
     margin = max(0.02, width * 0.6)
     ax.set_xlim(max(0.0, xmin - margin), xmax + margin)
-    # Use 0.1 increments on the x-axis
     try:
-        # Anchor ticks to 0.0 up to xmax (with some headroom)
         tmax = float(np.nanmax(xf)) if xf.size > 0 else 1.0
         ticks = np.round(np.arange(0.0, max(1.0, tmax) + 1e-9, 0.1), 1)
         ax.set_xticks(ticks)
     except Exception:
         pass
-    # Leave more room on the right for the outside legend
-    fig.tight_layout(rect=[0, 0, 0.76, 1])
-    # Do not clamp; allow oversizing (e.g., up to 2.0) to be visible
+
+    h, l = ax.get_legend_handles_labels()
+    ax.legend(h, l, loc='center left', bbox_to_anchor=(1.02, 0.5),
+              frameon=False, fontsize=8, borderaxespad=0.)
+
     eac_path = os.path.join(out_dir, f"sweep_eac_vs_fraction_{county_slug}.png")
-    fig.savefig(eac_path, dpi=130)
+    fig.savefig(eac_path, dpi=130, bbox_inches='tight')
     print(f"Saved EAC-vs-fraction plot: {os.path.abspath(eac_path)}")
     plt.close(fig)
-
 
 def _plot_two_days_deployment(
     out_dir: str,

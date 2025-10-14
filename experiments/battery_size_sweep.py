@@ -249,23 +249,8 @@ def _plot_eac(df: pd.DataFrame, out_dir: str, county_slug: str, scenario: Option
     ax.set_ylabel('$ per year')
     scen_suffix = f" — {scenario}" if scenario else ""
     ax.set_title(f'EAC vs Battery size — {county_slug}{scen_suffix}')
-    # Utilization overlay
-    try:
-        util = pd.to_numeric(df.get('battery_util_percent', pd.Series([np.nan] * len(df))), errors='coerce').values
-        if np.isfinite(util).any():
-            ax2 = ax.twinx()
-            ax2.plot(x, util, color='black', marker='x', linestyle='-', label='Battery utilization (%)')
-            ax2.set_ylim(0.0, 100.0)
-            ax2.set_ylabel('Battery utilization (%)')
-            h1, l1 = ax.get_legend_handles_labels()
-            h2, l2 = ax2.get_legend_handles_labels()
-            # Place legend further right to avoid overlapping the right y-axis
-            # Give more right-side space so legend doesn't crowd the axes
-            ax.legend(h1 + h2, l1 + l2, loc='center left', bbox_to_anchor=(1.08, 0.5), fontsize=8, frameon=False)
-        else:
-            ax.legend(loc='center left', bbox_to_anchor=(1.08, 0.5), fontsize=8, frameon=False)
-    except Exception:
-        ax.legend(loc='center left', bbox_to_anchor=(1.08, 0.5), fontsize=8, frameon=False)
+    # Legend for stacked bars only (no utilization overlay)
+    ax.legend(loc='center left', bbox_to_anchor=(1.08, 0.5), fontsize=8, frameon=False)
     # Reduce excess left padding; reserve extra right margin for the outside legend
     fig.tight_layout(rect=[0.06, 0, 0.78, 1])
     path = os.path.join(out_dir, f"battery_sweep_eac_{county_slug}.png")
