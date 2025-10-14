@@ -68,7 +68,7 @@ def _gather_paths(
     return {
         "solar_flows": os.path.join(base_solar, f"sweep_flows_vs_fraction_{cslug}.png"),
         "solar_eac": os.path.join(base_solar, f"sweep_eac_vs_fraction_{cslug}.png"),
-        "batt_flows": os.path.join(base_batt, f"battery_sweep_flows_{cslug}.png"),
+        "solar_two_days": os.path.join(base_solar, f"two_days_deployment_f100_{cslug}.png"),
         "batt_eac": os.path.join(base_batt, f"battery_sweep_eac_{cslug}.png"),
         "comb_eac": os.path.join(base_comb, f"combined_eac_heatmap_{scenario}_{cslug}.png"),
         "comb_csv": os.path.join(base_comb, f"combined_sweep_{cslug}.csv"),
@@ -150,7 +150,7 @@ def _write_dashboard(
                 lines.append("      </div>")
             # Plots grid
             lines.append("      <div class='grid'>")
-            for key in ["solar_flows", "solar_eac", "batt_flows", "batt_eac", "comb_eac"]:
+            for key in ["solar_flows", "solar_eac", "solar_two_days", "batt_eac", "comb_eac"]:
                 path = paths[key]
                 rel = os.path.relpath(path, start=os.path.dirname(out_html))
                 alt = os.path.basename(path)
