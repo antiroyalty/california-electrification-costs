@@ -296,12 +296,11 @@ def _plot_two_days_deployment(
             ax.grid(True, axis="y", linestyle=":", alpha=0.4)
             ax.set_xlim(0, 23)
             ax.set_xticks([0, 4, 8, 12, 16, 20, 23])
+            # Add an in-axes legend so colors are clearly labeled
+            ax.legend(loc='upper right', fontsize=8, frameon=False)
         axes[-1].set_xlabel("Hour of day")
-        # Single legend outside on the right
-        handles, labels = axes[0].get_legend_handles_labels()
-        fig.legend(handles, labels, loc='center left', bbox_to_anchor=(1.01, 0.5), fontsize=9, frameon=False)
         fig.suptitle(f"PV fraction 1.0 — Solar capacity: {system_kw:.2f} kW — {county_slug} — {scenario}")
-        fig.tight_layout(rect=[0, 0, 0.80, 0.95])
+        fig.tight_layout(rect=[0, 0, 1, 0.95])
         out_path = os.path.join(out_dir, f"two_days_deployment_f100_{county_slug}.png")
         fig.savefig(out_path, dpi=130)
         plt.close(fig)
