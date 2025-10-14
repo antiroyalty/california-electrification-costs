@@ -25,7 +25,6 @@ def parse_args():
     p.add_argument("--all-counties", action="store_true")
     p.add_argument("--capacities", default="3,5,7.5,10,12.5,15", help="Comma-separated battery sizes in kWh")
     p.add_argument("--enable-pv-surplus", action="store_true", help="Enable PV→Battery surplus charging")
-    p.add_argument("--disable-grid-charging", action="store_true", help="Disable scheduled grid charging")
     p.add_argument("--compute-bills", action="store_true", help="Compute total bills via Steps 10/11/13 into experiments tree")
     return p.parse_args()
 
@@ -43,7 +42,6 @@ def main():
     capacities = [float(s) for s in args.capacities.split(',') if s.strip()]
     opts = BatterySweepOptions(
         enable_pv_surplus_to_battery=args.enable_pv_surplus,
-        grid_charging_enabled=(not args.disable_grid_charging),
         compute_bills=args.compute_bills,
     )
     dispatch_label = "dispatch_dynamic" if getattr(diy, "USE_DYNAMIC_DISPATCH", False) else "dispatch_classic"

@@ -8,16 +8,13 @@ This is a non-intrusive experiment tool: it writes under `--experiments-root`
 and does not modify the main pipeline's canonical outputs.
 
 Examples:
-  # Single grid mode (grid charging off, bills on)
+  # Single mode (grid charging controlled by step9 constant, bills on)
   python -m experiments.run_solar_sweep_dashboard \
     --housing-type single-family-detached \
     --counties "Alameda County" \
-    --disable-grid-charging --compute-bills
+    --compute-bills
 
-  # Compare grid charging ON vs OFF in one go (two dashboards written)
-  python -m experiments.run_solar_sweep_dashboard \
-    --counties "Alameda County" \
-    --compare-grid-modes --compute-bills
+  # Grid charging ON/OFF is controlled only by step9 constant.
 """
 
 import argparse
@@ -47,11 +44,9 @@ def parse_args():
     p.add_argument("--all-counties", action="store_true")
     p.add_argument("--fractions", default=None, help="Comma-separated PV size fractions; default=0.1..2.0 by 0.1")
     p.add_argument("--enable-pv-surplus", action="store_true", help="Enable PV→Battery surplus charging")
-    p.add_argument("--disable-grid-charging", action="store_true", help="Disable scheduled grid charging")
     p.add_argument("--compute-bills", action="store_true", help="Compute total bills via Steps 10/11/13 into experiments tree")
     p.add_argument("--scenarios", nargs="*", help="Optional subset of scenarios to run; default uses scenarios.py keys")
     p.add_argument("--dashboard-name", default="sweep_dashboard.html", help="HTML filename to write within experiments root")
-    p.add_argument("--compare-grid-modes", action="store_true", help="Run twice with grid charging ON and OFF; write two dashboards under subfolders grid_on/ and grid_off/")
     return p.parse_args()
 
 
@@ -83,7 +78,6 @@ def _write_dashboard(
     *,
     fractions: Iterable[float],
     enable_pv_surplus: bool,
-    grid_charging_enabled: bool,
     compute_bills: bool,
 ) -> None:
     ts = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -109,8 +103,10 @@ def _write_dashboard(
     lines.append("<body>")
     lines.append("  <h1>PV-size Sweep Dashboard</h1>")
     lines.append(f"  <div class='meta'>Generated: {_html_escape(ts)} · Housing: {_html_escape(housing)} · Fractions: {_html_escape(','.join(str(f) for f in fractions))}</div>")
+    # Grid charging state reflects step9 constant
+    import step9_my_own_solar_storage as diy
     lines.append(
-        f"  <div class='meta'>PV surplus→battery: {'on' if enable_pv_surplus else 'off'} · Grid charging: {'on' if grid_charging_enabled else 'off'} · Compute bills: {'on' if compute_bills else 'off'}</div>"
+        f"  <div class='meta'>PV surplus→battery: {'on' if enable_pv_surplus else 'off'} · Grid charging: {'on' if diy.GRID_CHARGING_ENABLED else 'off'} · Compute bills: {'on' if compute_bills else 'off'}</div>"
     )
 
     for scen in scenarios:
@@ -145,7 +141,6 @@ def _run_and_build(
     counties: List[str],
     fracs: List[float],
     enable_pv_surplus: bool,
-    grid_charging_enabled: bool,
     compute_bills: bool,
     dashboard_name: str,
 ):
@@ -153,7 +148,6 @@ def _run_and_build(
     eff_root = os.path.join(exp_root, dispatch_label)
     opts = SweepOptions(
         enable_pv_surplus_to_battery=enable_pv_surplus,
-        grid_charging_enabled=grid_charging_enabled,
         compute_bills=compute_bills,
     )
     os.makedirs(eff_root, exist_ok=True)
@@ -178,7 +172,6 @@ def _run_and_build(
         ran_counties or counties,
         fractions=fracs,
         enable_pv_surplus=enable_pv_surplus,
-        grid_charging_enabled=grid_charging_enabled,
         compute_bills=compute_bills,
     )
     print(f"Dashboard written to: {os.path.abspath(out_html)}")
@@ -196,53 +189,18 @@ def main():
         counties = args.counties or ["Alameda County"]
     fracs = _infer_fractions(args.fractions)
     scenarios = args.scenarios or list(SCENARIOS.keys())
-    if args.compare_grid_modes:
-        # Run grid ON
-        root_on = os.path.join(exp_root, "grid_on")
-        _run_and_build(
-            base_input=base_input,
-            exp_root=root_on,
-            scenarios=scenarios,
-            housing=housing,
-            counties=counties,
-            fracs=fracs,
-            enable_pv_surplus=args.enable_pv_surplus,
-            grid_charging_enabled=True,
-            compute_bills=args.compute_bills,
-            dashboard_name=f"sweep_dashboard_grid_on.html",
-        )
-        # Run grid OFF
-        root_off = os.path.join(exp_root, "grid_off")
-        _run_and_build(
-            base_input=base_input,
-            exp_root=root_off,
-            scenarios=scenarios,
-            housing=housing,
-            counties=counties,
-            fracs=fracs,
-            enable_pv_surplus=args.enable_pv_surplus,
-            grid_charging_enabled=False,
-            compute_bills=args.compute_bills,
-            dashboard_name=f"sweep_dashboard_grid_off.html",
-        )
-        dispatch_label = "dispatch_dynamic" if getattr(diy, "USE_DYNAMIC_DISPATCH", False) else "dispatch_classic"
-        print("Built comparison dashboards:")
-        print(f"  ON:  {os.path.abspath(os.path.join(root_on, dispatch_label, 'sweep_dashboard_grid_on.html'))}")
-        print(f"  OFF: {os.path.abspath(os.path.join(root_off, dispatch_label, 'sweep_dashboard_grid_off.html'))}")
-    else:
-        # Single mode based on --disable-grid-charging flag
-        _run_and_build(
-            base_input=base_input,
-            exp_root=exp_root,
-            scenarios=scenarios,
-            housing=housing,
-            counties=counties,
-            fracs=fracs,
-            enable_pv_surplus=args.enable_pv_surplus,
-            grid_charging_enabled=(not args.disable_grid_charging),
-            compute_bills=args.compute_bills,
-            dashboard_name=args.dashboard_name,
-        )
+    # Single mode only; grid charging controlled solely by step9 constant
+    _run_and_build(
+        base_input=base_input,
+        exp_root=exp_root,
+        scenarios=scenarios,
+        housing=housing,
+        counties=counties,
+        fracs=fracs,
+        enable_pv_surplus=args.enable_pv_surplus,
+        compute_bills=args.compute_bills,
+        dashboard_name=args.dashboard_name,
+    )
 
 
 if __name__ == "__main__":
