@@ -85,7 +85,7 @@ class CostService:
         PaybackPeriods.process("data/loadprofiles", scenario, self.housing_type, self.counties)
         
         self.log_step(16)
-        DisplayKeyMetricsMaps.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties, self.desired_rate_plans)
+        # DisplayKeyMetricsMaps.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties, self.desired_rate_plans)
 
 def parse_arguments():
     """
