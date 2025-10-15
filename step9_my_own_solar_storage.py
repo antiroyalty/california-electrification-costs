@@ -40,6 +40,7 @@ import os
 import csv
 from math import sqrt
 from typing import Dict, List, Optional, Tuple
+import contextlib
 
 import pandas as pd
 import subprocess
@@ -53,6 +54,7 @@ from main_helpers import (
     norcal_counties,
     central_counties,
     socal_counties,
+    slugify_county_name,
 )
 from helpers import log_profiles
 from step9_plotting_helper import plot_first_weeks
@@ -129,6 +131,17 @@ WEATHER_SHIFT_HOURS = 8      # Fixed shift (hours) to align weather to local loa
 # Sizing fraction relative to the "annual-energy match" anchor (1.0 = match).
 # Pipeline default: 0.5 (50% of annual-load match). Change this constant to adjust.
 PV_SIZE_FRACTION = 1
+
+# Optional: use EAC sweep (PV×Battery) "best" sizes per scenario/county.
+# Deterministic behavior: when enabled, Step 9 reads only the dynamic‑dispatch
+# integrated dashboard CSV to size PV and battery; if missing, the county run
+# fails (no fallback to other sources or default sizing).
+USE_EAC_OPTIMAL_SIZING = False
+
+# Deterministic source root for min‑EAC results (dynamic dispatch only).
+EAC_DYNAMIC_RESULTS_ROOT = os.path.join(
+    "data", "experiments", "integrated_dashboard", "dispatch_dynamic", "combined"
+)
 
 
 def _find_header_row(path: str) -> int:
@@ -257,6 +270,74 @@ def _prepare_weather_and_load(weather_file: str, load_file: str) -> Tuple[pd.Dat
         vals = _aggregate_to_hourly(vals, 8760)
 
     return w, vals
+
+
+@contextlib.contextmanager
+def _temp_battery_capacity_kwh(kwh: float):
+    """Temporarily override BATTERY_CAPACITY_KWH within this module.
+
+    This keeps the change scoped to a single county iteration without
+    refactoring dispatch signatures. Restores the previous value on exit.
+    """
+    global BATTERY_CAPACITY_KWH
+    prev = BATTERY_CAPACITY_KWH
+    try:
+        BATTERY_CAPACITY_KWH = float(kwh)
+        yield
+    finally:
+        BATTERY_CAPACITY_KWH = prev
+
+
+def _find_eac_min_sizes(
+    scenario: str,
+    housing_type: str,
+    county_dir_name: str,
+) -> Optional[Tuple[float, float]]:
+    """Return (solar_kw, battery_kwh) at min EAC from dynamic‑dispatch integrated CSV.
+
+    Deterministic: uses only EAC_DYNAMIC_RESULTS_ROOT. Raises if missing.
+    """
+    slug = slugify_county_name(county_dir_name)
+    csv_path = os.path.join(
+        EAC_DYNAMIC_RESULTS_ROOT,
+        scenario,
+        housing_type,
+        slug,
+        f"combined_sweep_{slug}.csv",
+    )
+    if not os.path.exists(csv_path):
+        raise FileNotFoundError(
+            f"EAC sweep CSV not found (dynamic dispatch): {csv_path}. "
+            f"Run the integrated combined sweep first."
+        )
+    df = pd.read_csv(csv_path)
+    if df.empty:
+        raise ValueError(f"EAC sweep CSV is empty: {csv_path}")
+    if 'eac_total' not in df.columns:
+        comp_cols = [
+            'capex_pv_annual', 'capex_storage_annual', 'capex_electric',
+            'capex_gas', 'vehicle_om', 'annual_bill_with_solar'
+        ]
+        for c in comp_cols:
+            if c not in df.columns:
+                df[c] = 0.0
+        eac = (
+            pd.to_numeric(df['capex_pv_annual'], errors='coerce').fillna(0)
+            + pd.to_numeric(df['capex_storage_annual'], errors='coerce').fillna(0)
+            + pd.to_numeric(df['capex_electric'], errors='coerce').fillna(0)
+            + pd.to_numeric(df['capex_gas'], errors='coerce').fillna(0)
+            + pd.to_numeric(df['vehicle_om'], errors='coerce').fillna(0)
+            + pd.to_numeric(df['annual_bill_with_solar'], errors='coerce').fillna(0)
+        )
+        df['eac_total'] = pd.to_numeric(eac, errors='coerce').fillna(0)
+    row = df.loc[df['eac_total'].idxmin()]
+    solar_kw = float(row.get('solar_kw', float('nan')))
+    batt_kwh = float(row.get('battery_kwh', float('nan')))
+    if pd.isna(solar_kw) or pd.isna(batt_kwh):
+        raise ValueError(
+            f"EAC CSV missing required columns (solar_kw, battery_kwh): {csv_path}"
+        )
+    return (float(solar_kw), float(batt_kwh))
 
 
 def _compute_system_capacity_kW(weather_df: pd.DataFrame, load_profile: List[float]) -> float:
@@ -491,15 +572,33 @@ def process(
 
             # Weather + load
             weather_df, load_profile = _prepare_weather_and_load(weather_file, load_file)
-            # Size PV capacity like the custom step, then scale by pipeline fraction
-            system_capacity_kW = _compute_system_capacity_kW(weather_df, load_profile) * PV_SIZE_FRACTION
+            # Decide sizing approach
+            base_capacity_kw = _compute_system_capacity_kW(weather_df, load_profile)
+            system_capacity_kW = base_capacity_kw * PV_SIZE_FRACTION
+            selected_batt_kwh: Optional[float] = None
+            if USE_EAC_OPTIMAL_SIZING:
+                opt_solar_kw, opt_batt_kwh = _find_eac_min_sizes(scenario, housing_type, county)
+                system_capacity_kW = float(opt_solar_kw)
+                selected_batt_kwh = float(opt_batt_kwh)
+                log(eac_optimal_sizing_applied=True, solar_kw=system_capacity_kW, battery_kwh=selected_batt_kwh)
+
+            # Record the sizing that will be used for this county
+            used_batt_kwh = float(selected_batt_kwh) if selected_batt_kwh is not None else float(BATTERY_CAPACITY_KWH)
+            log(at="step9_sizing", county=county, solar_capacity_kw_used=system_capacity_kW, battery_capacity_kwh_used=used_batt_kwh)
+
             # Compute PV hourly AC (kWh)
             solar_gen = _pv_timeseries_ac_kwh(weather_df, system_capacity_kW)
 
             # Battery (grid-only charge, PV immediate offset)
-            grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt, pv_to_batt, soc_percent = _simple_battery_dispatch(
-                load_profile, solar_gen
-            )
+            if selected_batt_kwh is not None:
+                with _temp_battery_capacity_kwh(selected_batt_kwh):
+                    grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt, pv_to_batt, soc_percent = _simple_battery_dispatch(
+                        load_profile, solar_gen
+                    )
+            else:
+                grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt, pv_to_batt, soc_percent = _simple_battery_dispatch(
+                    load_profile, solar_gen
+                )
             _validate_lengths([solar_gen, grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt, pv_to_batt, soc_percent])
 
             # Human-readable summaries for verification
@@ -541,6 +640,7 @@ def process(
                 print(f"  mean_GHI_Wm2              = {mean_ghi:.1f}")
                 print(f"  sum_GHI_kWh_per_m2        = {sum_ghi_kwhm2:.1f}")
                 print(f"  system_capacity_kW        = {system_capacity_kW:.3f}")
+                print(f"  battery_capacity_kWh      = {used_batt_kwh:.2f}")
                 print(f"  total_pv_gen_kWh          = {total_pv_gen:.1f}")
                 print(f"  pv_to_load_kWh            = {pv_to_load_sum:.1f}")
                 print(f"  pv_to_batt_kWh            = {pv_to_batt_sum:.1f}")
@@ -613,7 +713,7 @@ def process(
             # Track capacity for capital costs linkage
             capacity_dict[county] = {
                 "Solar Capacity (kW)": to_decimal_number(system_capacity_kW),
-                "Battery Capacity (kWh)": to_decimal_number(BATTERY_CAPACITY_KWH),
+                "Battery Capacity (kWh)": to_decimal_number(selected_batt_kwh if selected_batt_kwh is not None else BATTERY_CAPACITY_KWH),
             }
 
             # Compact log

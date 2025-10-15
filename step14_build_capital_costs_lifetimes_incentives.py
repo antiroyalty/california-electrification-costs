@@ -303,37 +303,59 @@ def build_pv_storage_adjustments_df(
     If a county has no PV capacity, row values are zeros.
     """
     cap = load_solar_capacity_data(base_input_dir, scenario, housing_type)  # {county_slug: kW}
+    # Battery capacities (kWh) per county; may be empty if not present
+    batt_cap = load_battery_capacity_data(base_input_dir, scenario, housing_type)
 
     rows = []
-    # Pre-create one battery per site, and a PV system per kW
+    # Pre-create one battery unit to derive per‑kWh economics
+    bat_unit = BatteryStorageAppliance(num_units=1, lifetime_years=15)
+    unit_kwh = float(getattr(bat_unit, 'capacity_kwh', 12.5) or 12.5)
+    unit_capex = float(bat_unit.base_cost)
+    unit_net_full = float(bat_unit.get_net_cost(IncentiveScenario.FULL_INCENTIVES))
+    unit_net_half = float(bat_unit.get_net_cost(IncentiveScenario.HALF_INCENTIVES))
+    unit_net_none = float(bat_unit.get_net_cost(IncentiveScenario.NO_INCENTIVES))
+
+    per_kwh_capex = unit_capex / unit_kwh if unit_kwh > 0 else 0.0
+    per_kwh_net_full = unit_net_full / unit_kwh if unit_kwh > 0 else 0.0
+    per_kwh_net_half = unit_net_half / unit_kwh if unit_kwh > 0 else 0.0
+    per_kwh_net_none = unit_net_none / unit_kwh if unit_kwh > 0 else 0.0
+    per_kwh_incentive_full = per_kwh_capex - per_kwh_net_full
+
     for county_slug, solar_kw in cap.items():
-        if solar_kw and solar_kw > 0:
-            pv  = SolarSystemAppliance(capacity_kw=solar_kw, lifetime_years=25)
-            bat = BatteryStorageAppliance(num_units=1, lifetime_years=15)
+        battery_kwh = float(batt_cap.get(county_slug, 0.0) or 0.0)
+        has_pv = bool(solar_kw and solar_kw > 0)
+        has_batt = bool(battery_kwh and battery_kwh > 0)
 
-            # capex (constant across incentives)
-            pv_capex = pv.base_cost
-            st_capex = bat.base_cost
+        if has_pv or has_batt:
+            pv_capex = 0.0
+            pv_inc_full = 0.0
+            pv_net_full = 0.0
+            pv_net_half = 0.0
+            pv_net_none = 0.0
+            if has_pv:
+                pv = SolarSystemAppliance(capacity_kw=float(solar_kw), lifetime_years=25)
+                pv_capex = float(pv.base_cost)
+                pv_inc_full = float(pv.calculate_total_incentives(IncentiveScenario.FULL_INCENTIVES))
+                pv_net_full = float(pv.get_net_cost(IncentiveScenario.FULL_INCENTIVES))
+                pv_net_half = float(pv.get_net_cost(IncentiveScenario.HALF_INCENTIVES))
+                pv_net_none = float(pv.get_net_cost(IncentiveScenario.NO_INCENTIVES))
 
-            # only FULL incentives (sanity check)
-            pv_inc_full = pv.calculate_total_incentives(IncentiveScenario.FULL_INCENTIVES)
-            st_inc_full = bat.calculate_total_incentives(IncentiveScenario.FULL_INCENTIVES)
-
-            # nets for all three incentive scenarios
-            net_full = pv.get_net_cost(IncentiveScenario.FULL_INCENTIVES) + bat.get_net_cost(IncentiveScenario.FULL_INCENTIVES)
-            net_half = pv.get_net_cost(IncentiveScenario.HALF_INCENTIVES) + bat.get_net_cost(IncentiveScenario.HALF_INCENTIVES)
-            net_none = pv.get_net_cost(IncentiveScenario.NO_INCENTIVES)   + bat.get_net_cost(IncentiveScenario.NO_INCENTIVES)
+            st_capex = per_kwh_capex * battery_kwh
+            st_inc_full = per_kwh_incentive_full * battery_kwh
+            net_full = pv_net_full + (per_kwh_net_full * battery_kwh)
+            net_half = pv_net_half + (per_kwh_net_half * battery_kwh)
+            net_none = pv_net_none + (per_kwh_net_none * battery_kwh)
 
             rows.append({
                 "county_slug": county_slug,
-                "solar_kw": solar_kw,
-                "pv_capex": pv_capex,
-                "storage_capex": st_capex,
-                "pv_incentives_full": pv_inc_full,
-                "storage_incentives_full": st_inc_full,
-                "pv_storage_net_full": net_full,
-                "pv_storage_net_half": net_half,
-                "pv_storage_net_none": net_none,
+                "solar_kw": float(solar_kw or 0.0),
+                "pv_capex": float(pv_capex),
+                "storage_capex": float(st_capex),
+                "pv_incentives_full": float(pv_inc_full),
+                "storage_incentives_full": float(st_inc_full),
+                "pv_storage_net_full": float(net_full),
+                "pv_storage_net_half": float(net_half),
+                "pv_storage_net_none": float(net_none),
             })
         else:
             rows.append({
@@ -485,6 +507,33 @@ def load_solar_capacity_data(base_input_dir: str, scenario: str, housing_type: s
         counties_count=len(slug_mapping)
     )
     return slug_mapping
+
+def load_battery_capacity_data(base_input_dir: str, scenario: str, housing_type: str) -> dict:
+    """Return mapping county_slug -> Battery Capacity (kWh) from electrified_assets.csv.
+
+    If the file or column is missing, returns an empty mapping (treated as 0s).
+    """
+    scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
+    assets_path = os.path.join(scenario_path, "CAPITAL_COSTS", "electrified_assets.csv")
+    if not os.path.exists(assets_path):
+        return {}
+    try:
+        df = pd.read_csv(assets_path)
+    except Exception:
+        return {}
+    if "County" not in df.columns or "Battery Capacity (kWh)" not in df.columns:
+        return {}
+    out: dict[str, float] = {}
+    for _, r in df.iterrows():
+        county = str(r.get("County", ""))
+        if not county:
+            continue
+        slug = slugify_county_name(county)
+        try:
+            out[slug] = float(r.get("Battery Capacity (kWh)", 0.0) or 0.0)
+        except Exception:
+            out[slug] = 0.0
+    return out
 
 # def make_heating_appliance(gas: bool, electric_classes=None, gas_classes=None):
 #     if gas:

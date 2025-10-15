@@ -708,6 +708,20 @@ def plot_eac_stacked_bar(
             vals.append(float(row[key].values[0]) if not row.empty and key in row.columns else 0.0)
         ax.bar(x, vals, bottom=bottoms, color=color, label=label)
         bottoms = bottoms + np.array(vals)
+    # Annotate total EAC above each stacked bar
+    try:
+        totals = np.asarray(bottoms, dtype=float)
+        if totals.size > 0 and np.isfinite(totals).any():
+            ymax = float(np.nanmax(totals))
+            if ymax > 0:
+                ax.set_ylim(0.0, ymax * 1.08)
+            yoff = max(1.0, 0.02 * ymax) if ymax > 0 else 1.0
+            for xi, tot in zip(x, totals):
+                tval = float(tot) if np.isfinite(tot) else 0.0
+                if tval > 0:
+                    ax.text(float(xi), tval + yoff, f"{tval:.0f}", ha='center', va='bottom', fontsize=9, color='black')
+    except Exception:
+        pass
     ax.set_xticks(x)
     ax.set_xticklabels(scenario_order, rotation=20, ha='right')
     ax.set_ylabel('$ per year')
