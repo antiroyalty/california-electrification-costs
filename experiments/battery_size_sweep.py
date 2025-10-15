@@ -191,6 +191,12 @@ def _plot_flows(df: pd.DataFrame, out_dir: str, county_slug: str, scenario: Opti
 
 
 def _plot_eac(df: pd.DataFrame, out_dir: str, county_slug: str, scenario: Optional[str] = None) -> None:
+    """Stacked EAC bars vs. battery size with even categorical spacing.
+
+    Uses categorical positions (0..N-1) so bars are evenly spaced, and the
+    capacity (kWh) values are shown as x-tick labels. This avoids uneven
+    spacing from numeric x positions when capacities are not on a uniform grid.
+    """
     comps = [
         ('capex_pv_annual', '#fdae6b', 'PV capex (annualized)'),
         ('capex_storage_annual', '#9ecae1', 'Storage capex (annualized)'),
@@ -199,60 +205,52 @@ def _plot_eac(df: pd.DataFrame, out_dir: str, county_slug: str, scenario: Option
         ('annual_bill_with_solar', '#1f77b4', 'Annual energy bill (with solar+storage)'),
         ('vehicle_om', '#d62728', 'Vehicle O&M'),
     ]
-    x = df['battery_kwh'].values
+
+    data = df.copy()
+    if 'battery_kwh' in data.columns:
+        data = data.sort_values('battery_kwh')
+    x_labels = pd.to_numeric(data.get('battery_kwh', pd.Series([])), errors='coerce').fillna(0.0).tolist()
+    x = np.arange(len(x_labels), dtype=float)
+
     bottoms = np.zeros_like(x, dtype=float)
-    fig, ax = plt.subplots(figsize=(12.0, 5.0))
-    # Estimate a reasonable width
-    xf = np.asarray(x, dtype=float)
-    if xf.size > 1:
-        dx_vals = np.diff(np.sort(np.unique(xf)))
-        dx = float(dx_vals.min()) if dx_vals.size > 0 else 1.0
-    else:
-        dx = 1.0
-    width = max(0.2, min(0.8 * dx, 1.2))
-    # Tighten horizontal padding by explicitly setting x-limits around the bars
-    try:
-        xmin = float(np.nanmin(xf)) if xf.size > 0 else 0.0
-        xmax = float(np.nanmax(xf)) if xf.size > 0 else 1.0
-        xpad = max(0.02, 0.55 * width)
-        ax.set_xlim(xmin - xpad, xmax + xpad)
-        ax.margins(x=0.0)
-    except Exception:
-        pass
+    fig, ax = plt.subplots(figsize=(11.5, 5.0))
+    width = 0.72  # simple, consistent bar width (categorical units)
+
     for key, color, label in comps:
-        vals = pd.to_numeric(df.get(key, pd.Series([0.0] * len(df))), errors='coerce').fillna(0.0).values
+        vals = pd.to_numeric(data.get(key, pd.Series([0.0] * len(data))), errors='coerce').fillna(0.0).values
         btm = bottoms.copy()
         ax.bar(x, vals, width=width, bottom=bottoms, color=color, label=label)
         for xi, v, b in zip(x, vals, btm):
-            try:
-                v_float = float(v)
-            except Exception:
-                v_float = 0.0
+            v_float = float(v) if np.isfinite(v) else 0.0
             if v_float > 0:
-                ax.text(float(xi), float(b + v_float / 2.0), f"{v_float:.0f}", ha='center', va='center', fontsize=7, color='black')
+                ax.text(float(xi), float(b + v_float / 2.0), f"{v_float:.0f}",
+                        ha='center', va='center', fontsize=7, color='black')
         bottoms = bottoms + vals
-    # Totals
-    try:
-        totals = np.asarray(bottoms, dtype=float)
-        if totals.size > 0:
-            ymax = float(np.nanmax(totals)) if np.isfinite(totals).any() else 0.0
-            if ymax > 0:
-                ax.set_ylim(0.0, ymax * 1.08)
-            yoff = max(1.0, 0.02 * ymax) if ymax > 0 else 1.0
-            for xi, tot in zip(x, totals):
-                tval = float(tot) if np.isfinite(tot) else 0.0
-                if tval > 0:
-                    ax.text(float(xi), tval + yoff, f"{tval:.0f}", ha='center', va='bottom', fontsize=8, color='black')
-    except Exception:
-        pass
+
+    # Totals above each bar
+    totals = np.asarray(bottoms, dtype=float)
+    if totals.size > 0 and np.isfinite(totals).any():
+        ymax = float(np.nanmax(totals))
+        if ymax > 0:
+            ax.set_ylim(0.0, ymax * 1.08)
+        yoff = max(1.0, 0.02 * ymax) if ymax > 0 else 1.0
+        for xi, tot in zip(x, totals):
+            tval = float(tot) if np.isfinite(tot) else 0.0
+            if tval > 0:
+                ax.text(float(xi), tval + yoff, f"{tval:.0f}", ha='center', va='bottom', fontsize=8, color='black')
+
+    # Axes, ticks, and layout
     ax.set_xlabel('Battery capacity (kWh)')
     ax.set_ylabel('$ per year')
     scen_suffix = f" — {scenario}" if scenario else ""
     ax.set_title(f'EAC vs Battery size — {county_slug}{scen_suffix}')
-    # Legend for stacked bars only (no utilization overlay)
+    ax.set_xticks(x)
+    ax.set_xticklabels([f"{v:g}" for v in x_labels])
+    ax.set_xlim(-0.5, len(x_labels) - 0.5)
+    ax.grid(True, axis='y', linestyle=':', alpha=0.4)
     ax.legend(loc='center left', bbox_to_anchor=(1.08, 0.5), fontsize=8, frameon=False)
-    # Reduce excess left padding; reserve extra right margin for the outside legend
     fig.tight_layout(rect=[0.06, 0, 0.78, 1])
+
     path = os.path.join(out_dir, f"battery_sweep_eac_{county_slug}.png")
     fig.savefig(path, dpi=130)
     print(f"Saved EAC plot: {os.path.abspath(path)}")
