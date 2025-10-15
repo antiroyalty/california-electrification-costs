@@ -136,7 +136,7 @@ PV_SIZE_FRACTION = 1
 # Deterministic behavior: when enabled, Step 9 reads only the dynamic‑dispatch
 # integrated dashboard CSV to size PV and battery; if missing, the county run
 # fails (no fallback to other sources or default sizing).
-USE_EAC_OPTIMAL_SIZING = False
+USE_EAC_OPTIMAL_SIZING = True
 
 # Deterministic source root for min‑EAC results (dynamic dispatch only).
 EAC_DYNAMIC_RESULTS_ROOT = os.path.join(
