@@ -191,14 +191,26 @@ def _plot_eac(
     *,
     bar_width: Optional[float] = None,
 ) -> None:
-    comps = [
-        ('capex_pv_annual', '#fdae6b', 'PV capex (annualized)'),
-        ('capex_storage_annual', '#9ecae1', 'Storage capex (annualized)'),
-        ('capex_electric', '#31a354', 'Electrification capex (annualized)'),
-        ('capex_gas', '#756bb1', 'Gas capex (annualized)'),
-        ('annual_bill_with_solar', '#1f77b4', 'Annual energy bill (with solar+storage)'),
-        ('vehicle_om', '#d62728', 'Vehicle O&M'),
-    ]
+    # Prefer split bills if present; fallback to single combined bill
+    if 'annual_bill_electric' in df.columns and 'annual_bill_gas' in df.columns:
+        comps = [
+            ('capex_pv_annual', '#fdae6b', 'PV capex (annualized)'),
+            ('capex_storage_annual', '#9ecae1', 'Storage capex (annualized)'),
+            ('capex_electric', '#31a354', 'Electrification capex (annualized)'),
+            ('capex_gas', '#756bb1', 'Gas capex (annualized)'),
+            ('vehicle_om', '#d62728', 'Vehicle O&M'),
+            ('annual_bill_electric', '#1f77b4', 'Annual electricity bill'),
+            ('annual_bill_gas', '#17becf', 'Annual gas bill'),
+        ]
+    else:
+        comps = [
+            ('capex_pv_annual', '#fdae6b', 'PV capex (annualized)'),
+            ('capex_storage_annual', '#9ecae1', 'Storage capex (annualized)'),
+            ('capex_electric', '#31a354', 'Electrification capex (annualized)'),
+            ('capex_gas', '#756bb1', 'Gas capex (annualized)'),
+            ('annual_bill_with_solar', '#1f77b4', 'Annual energy bill (with solar+storage)'),
+            ('vehicle_om', '#d62728', 'Vehicle O&M'),
+        ]
 
     x = df['solar_kw'].values
     bottoms = np.zeros_like(x, dtype=float)
@@ -548,7 +560,12 @@ def run_for_county(
             totals_base = _compute_bill_for_fraction(exp_scen_root, scenario, housing_type, [county])
             # Read back the total annual bill if available
             try:
-                from plot_scenario_comparison_helper import _latest_totals_csv
+                from plot_scenario_comparison_helper import (
+                    _latest_totals_csv,
+                    _latest_electricity_csv,
+                    _latest_gas_csv,
+                    _read_first_numeric_for_row,
+                )
                 totals_csv = _latest_totals_csv(exp_scen_root, scenario, housing_type, county_slug)
                 df = pd.read_csv(totals_csv, index_col="scenario")
                 # scenario with solarstorage row usually named f"{scenario}.solarstorage"
@@ -557,8 +574,15 @@ def run_for_county(
                     row["annual_bill_with_solar"] = float(df.loc[scen_key].iloc[0])
                 else:
                     row["annual_bill_with_solar"] = float(df.iloc[0].iloc[0])
+                # Split electricity/gas bills for stacked plotting
+                e_csv = _latest_electricity_csv(exp_scen_root, scenario, housing_type, county_slug)
+                g_csv = _latest_gas_csv(exp_scen_root, scenario, housing_type, county_slug)
+                row["annual_bill_electric"] = _read_first_numeric_for_row(e_csv, scen_key)
+                row["annual_bill_gas"] = _read_first_numeric_for_row(g_csv, scen_key)
             except Exception:
                 row["annual_bill_with_solar"] = np.nan
+                row["annual_bill_electric"] = np.nan
+                row["annual_bill_gas"] = np.nan
 
         # For 1.0 fraction, also render a focused two-day (Jan/Jul) deployment view
         try:
