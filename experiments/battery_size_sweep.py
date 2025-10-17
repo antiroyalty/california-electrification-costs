@@ -2,7 +2,7 @@
 Experimental Battery size sweep helper (does not alter the main pipeline).
 
 Given a scenario, housing type, and counties, sweeps Battery usable capacity
-from 3 kWh to 15 kWh (default points: 3, 5, 7.5, 10, 12.5, 15) while keeping
+from 0.1 kWh to 15 kWh (default points: 0.1, 3, 5, 7.5, 10, 12.5, 15) while keeping
 PV size aligned with the main Step 9 sizing (annual‑match × PV_SIZE_FRACTION).
 
 Reuses Step 9 DIY PV and dispatch functions directly, so behavior stays aligned
@@ -435,7 +435,7 @@ def run(
     options: BatterySweepOptions = BatterySweepOptions(),
     experiments_root: str = "data/experiments/battery_size_sweep",
 ) -> Dict[str, pd.DataFrame]:
-    capacities = list(capacities_kwh) if capacities_kwh is not None else [3.0, 5.0, 7.5, 10.0, 12.5, 15.0]
+    capacities = list(capacities_kwh) if capacities_kwh is not None else [0.1, 3.0, 5.0, 7.5, 10.0, 12.5, 15.0]
     scen_path = get_scenario_path(base_input_dir, scenario, housing_type)
     county_list = get_counties(scen_path, counties)
     results: Dict[str, pd.DataFrame] = {}
