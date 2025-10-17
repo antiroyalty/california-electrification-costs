@@ -86,7 +86,7 @@ GIT_SHORT_SHA = _get_git_short_sha()
 # Dispatch strategy selector:
 #   - False: classic windowed discharge (16–21), optional PV surplus charge, optional grid top-up
 #   - True:  dynamic PV-only strategy (PV charges; discharge from 16:00 until PV≥load next day)
-USE_DYNAMIC_DISPATCH = False
+USE_DYNAMIC_DISPATCH = True
 
 # Toggle: default PV→Battery surplus charging (applied when function arg is None)
 ENABLE_PV_SURPLUS_TO_BATTERY = True
@@ -136,11 +136,13 @@ PV_SIZE_FRACTION = 1
 # Deterministic behavior: when enabled, Step 9 reads only the dynamic‑dispatch
 # integrated dashboard CSV to size PV and battery; if missing, the county run
 # fails (no fallback to other sources or default sizing).
-USE_EAC_OPTIMAL_SIZING = True
+USE_EAC_OPTIMAL_SIZING = False
 
-# Deterministic source root for min‑EAC results (dynamic dispatch only).
+# Deterministic source root for min‑EAC results (integrated dashboard),
+# keyed by the local dispatch mode.
+DISPATCH_LABEL = "dispatch_dynamic" if USE_DYNAMIC_DISPATCH else "dispatch_classic"
 EAC_DYNAMIC_RESULTS_ROOT = os.path.join(
-    "data", "experiments", "integrated_dashboard", "dispatch_dynamic", "combined"
+    "data", "experiments", "integrated_dashboard", DISPATCH_LABEL, "combined"
 )
 
 
