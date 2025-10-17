@@ -91,6 +91,51 @@ def _read_totals_cost(base_input_dir: str, scenario: str, housing_type: str, cou
         return 0.0
 
 
+# ---------- Helpers to read latest electricity/gas annual costs ----------
+def _latest_electricity_csv(base_input_dir: str, scenario: str, housing_type: str, county_slug: str) -> Optional[str]:
+    directory = os.path.join(base_input_dir, scenario, housing_type, county_slug, "results", "electricity")
+    if not os.path.isdir(directory):
+        return None
+    try:
+        return get_latest_csv_file(directory, f"RESULTS_electricity_annual_costs_{county_slug}_")
+    except Exception:
+        return None
+
+
+def _latest_gas_csv(base_input_dir: str, scenario: str, housing_type: str, county_slug: str) -> Optional[str]:
+    directory = os.path.join(base_input_dir, scenario, housing_type, county_slug, "results", "gas")
+    if not os.path.isdir(directory):
+        return None
+    try:
+        return get_latest_csv_file(directory, f"RESULTS_gas_annual_costs_{county_slug}_")
+    except Exception:
+        return None
+
+
+def _read_first_numeric_for_row(path: Optional[str], row_name: str) -> float:
+    if not path or not os.path.exists(path):
+        return 0.0
+    try:
+        df = pd.read_csv(path, index_col="scenario")
+        if row_name not in df.index:
+            row = df.iloc[0]
+        else:
+            row = df.loc[row_name]
+        # first numeric cell of the row
+        return float(pd.to_numeric(row, errors="coerce").dropna().iloc[0])
+    except Exception:
+        return 0.0
+
+
+def _annual_bill_parts(base_input_dir: str, scenario: str, housing_type: str, county_slug: str, with_solar: bool) -> tuple[float, float]:
+    row = f"{scenario}.solarstorage" if with_solar else scenario
+    e_path = _latest_electricity_csv(base_input_dir, scenario, housing_type, county_slug)
+    g_path = _latest_gas_csv(base_input_dir, scenario, housing_type, county_slug)
+    e_val = _read_first_numeric_for_row(e_path, row)
+    g_val = _read_first_numeric_for_row(g_path, row)
+    return e_val, g_val
+
+
 def _sam_csv_path(base_input_dir: str, scenario: str, housing_type: str, county_slug: str) -> Optional[str]:
     county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
     a = os.path.join(county_dir, f"sam_optimized_load_profiles_{county_slug}.csv")
@@ -586,7 +631,8 @@ def collect_eac_components(
             capex_electric = 0.0
             capex_gas = 0.0
             vehicle_om = 0.0
-            bill = _total_annual_bill_with_solar(base_input_dir, scen, housing_type, slug)
+            # Bills split into electricity + gas under with-solar variant
+            e_bill, g_bill = _annual_bill_parts(base_input_dir, scen, housing_type, slug, with_solar=True)
 
             # From capital ledger (annualize per appliance)
             if ledger is not None and not ledger.empty:
@@ -659,7 +705,8 @@ def collect_eac_components(
                 'capex_storage': capex_storage,
                 'capex_electric': capex_electric,
                 'capex_gas': capex_gas,
-                'annual_bill_with_solar': bill,
+                'annual_bill_electric': e_bill,
+                'annual_bill_gas': g_bill,
                 'vehicle_om': vehicle_om,
             })
 
@@ -700,8 +747,21 @@ def plot_eac_stacked_bar(
     x = np.arange(len(scenario_order))
     fig, ax = plt.subplots(figsize=(max(10, len(scenario_order) * 1.3), 5.0))
     bottoms = np.zeros_like(x, dtype=float)
-    labels_drawn = set()
-    for key, color, label in components:
+    # Choose bill components: split into electric + gas if present, else fall back to single total
+    has_split_bill = ('annual_bill_electric' in df.columns) and ('annual_bill_gas' in df.columns)
+    if has_split_bill:
+        comps = [
+            ('capex_pv', '#fdae6b', 'PV capex (annualized)'),
+            ('capex_storage', '#9ecae1', 'Storage capex (annualized)'),
+            ('capex_electric', '#31a354', 'Electrification capex (annualized)'),
+            ('capex_gas', '#756bb1', 'Gas capex (annualized)'),
+            ('vehicle_om', '#d62728', 'Vehicle O&M'),
+            ('annual_bill_electric', '#1f77b4', 'Annual electricity bill'),
+            ('annual_bill_gas', '#17becf', 'Annual gas bill'),
+        ]
+    else:
+        comps = components
+    for key, color, label in comps:
         vals = []
         for scen in scenario_order:
             row = df[df['scenario'] == scen]
