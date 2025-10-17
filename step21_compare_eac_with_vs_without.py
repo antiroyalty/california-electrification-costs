@@ -56,20 +56,23 @@ def _discover_counties(base_input_dir: str, housing_type: str, scenarios: List[s
 def _prepare_combined_df(df_with: pd.DataFrame, df_no: pd.DataFrame) -> pd.DataFrame:
     """Return tidy frame with variant column and harmonized bill column name."""
     a = df_with.copy()
-    if 'annual_bill_with_solar' in a.columns:
-        a = a.rename(columns={'annual_bill_with_solar': 'annual_bill'})
+    # ensure consistent bill split columns
+    if 'annual_bill_electric' not in a.columns and 'annual_bill_with_solar' in a.columns:
+        a['annual_bill_electric'] = a['annual_bill_with_solar']
+        a['annual_bill_gas'] = 0.0
     a['variant'] = 'with_pv'
 
     b = df_no.copy()
-    if 'annual_bill_default' in b.columns:
-        b = b.rename(columns={'annual_bill_default': 'annual_bill'})
-    # ensure PV components present (zeros) for no-PV
+    # ensure PV components present (zeros) for no-PV and align bill columns
+    if 'annual_bill_electric' not in b.columns and 'annual_bill_default' in b.columns:
+        b['annual_bill_electric'] = b['annual_bill_default']
+        b['annual_bill_gas'] = 0.0
     for c in ['capex_pv', 'capex_storage']:
         if c not in b.columns:
             b[c] = 0.0
     b['variant'] = 'no_pv'
 
-    keep_cols = ['scenario', 'variant', 'capex_pv', 'capex_storage', 'capex_electric', 'capex_gas', 'vehicle_om', 'annual_bill']
+    keep_cols = ['scenario', 'variant', 'capex_pv', 'capex_storage', 'capex_electric', 'capex_gas', 'vehicle_om', 'annual_bill_electric', 'annual_bill_gas']
     return pd.concat([a[keep_cols], b[keep_cols]], ignore_index=True)
 
 
@@ -89,7 +92,8 @@ def plot_grouped_eac(df: pd.DataFrame, scenario_order: Optional[List[str]] = Non
         ('capex_electric', '#31a354', 'Electrification capex (annualized)'),
         ('capex_gas', '#756bb1', 'Gas capex (annualized)'),
         ('vehicle_om', '#d62728', 'Vehicle O&M'),
-        ('annual_bill', '#1f77b4', 'Annual energy bill'),
+        ('annual_bill_electric', '#1f77b4', 'Annual electricity bill'),
+        ('annual_bill_gas', '#17becf', 'Annual gas bill'),
     ]
 
     x = np.arange(len(scenario_order), dtype=float)
@@ -141,10 +145,10 @@ def plot_grouped_eac(df: pd.DataFrame, scenario_order: Optional[List[str]] = Non
     ax.set_xticklabels(scenario_order, rotation=20, ha='right')
     ax.set_ylabel('$ per year')
     ax.set_title(f"All-in Annualized Cost — No PV vs With PV — {county_label}")
-    # legend outside (one set for components)
-    ax.legend(loc='center left', bbox_to_anchor=(1.02, 0.5), frameon=False, fontsize=9)
+    # Legend inside, top-left to reduce eye travel and avoid outside spacing
+    ax.legend(loc='upper left', frameon=False, fontsize=9)
     ax.grid(True, axis='y', linestyle=':', alpha=0.4)
-    fig.tight_layout(rect=[0.04, 0.0, 0.78, 1.0])
+    fig.tight_layout()
     return fig
 
 

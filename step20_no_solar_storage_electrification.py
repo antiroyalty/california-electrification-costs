@@ -111,7 +111,8 @@ def collect_eac_no_pv(
     """Collect EAC components WITHOUT PV/storage for each scenario (aggregated over counties).
 
     Returns a DataFrame with columns:
-      scenario, capex_electric, capex_gas, vehicle_om, annual_bill_default
+      scenario, capex_electric, capex_gas, vehicle_om,
+      annual_bill_electric, annual_bill_gas
     """
     inc = incentive.lower()
     county_slugs = [slugify_county_name(c) for c in counties]
@@ -125,7 +126,14 @@ def collect_eac_no_pv(
             capex_electric = 0.0
             capex_gas = 0.0
             vehicle_om = 0.0
-            bill_default = _read_totals_cost_default(base_input_dir, scen, housing_type, slug)
+            # Split default (no PV/storage) bills into electric + gas
+            try:
+                from plot_scenario_comparison_helper import _annual_bill_parts as _bill_parts  # reuse helper
+                e_bill, g_bill = _bill_parts(base_input_dir, scen, housing_type, slug, with_solar=False)
+            except Exception:
+                # Fallback to totals if helper import fails
+                total_bill = _read_totals_cost_default(base_input_dir, scen, housing_type, slug)
+                e_bill, g_bill = total_bill, 0.0
 
             # Annualize capital ledger rows (exclude PV/storage entirely)
             if ledger is not None and not ledger.empty:
@@ -172,7 +180,8 @@ def collect_eac_no_pv(
                 'capex_electric': capex_electric,
                 'capex_gas': capex_gas,
                 'vehicle_om': vehicle_om,
-                'annual_bill_default': bill_default,
+                'annual_bill_electric': e_bill,
+                'annual_bill_gas': g_bill,
             })
 
         if not per_county:
@@ -199,7 +208,8 @@ def plot_eac_no_pv_stacked_bar(df: pd.DataFrame, scenario_order: Optional[List[s
         ('capex_electric', '#31a354', 'Electrification capex (annualized)'),
         ('capex_gas', '#756bb1', 'Gas capex (annualized)'),
         ('vehicle_om', '#d62728', 'Vehicle O&M'),
-        ('annual_bill_default', '#1f77b4', 'Annual energy bill (no PV/storage)'),
+        ('annual_bill_electric', '#1f77b4', 'Annual electricity bill'),
+        ('annual_bill_gas', '#17becf', 'Annual gas bill'),
     ]
 
     x = np.arange(len(scenario_order))
@@ -293,11 +303,13 @@ def main() -> None:
         county_label = counties[0] if len(counties) == 1 else ", ".join(counties)
     plot_title = f"All-in Annualized Cost (No Solar + Storage) — {county_label}"
     fig = plot_eac_no_pv_stacked_bar(df, scenario_order=scenarios, title=plot_title)
-    fig.savefig(os.path.join(out_dir, f"step20_eac_no_pv_stacked_bar_g{sha}.png"), dpi=150, bbox_inches="tight")
+    png_path = os.path.join(out_dir, f"step20_eac_no_pv_stacked_bar_g{sha}.png")
+    fig.savefig(png_path, dpi=150, bbox_inches="tight")
     print("EAC (no PV) complete.")
     print(f"  Scenarios: {scenarios}")
     print(f"  Counties:  {counties[:6]}{' …' if len(counties) > 6 else ''}")
     print(f"  Outputs in: {os.path.abspath(out_dir)}")
+    print(f"  Plot: {os.path.abspath(png_path)}")
 
 
 if __name__ == "__main__":
