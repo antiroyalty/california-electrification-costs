@@ -134,7 +134,13 @@ def main() -> None:
     if not eac_df.empty:
         eac_df.to_csv(eac_csv, index=False)
     fig = plot_eac_stacked_bar(eac_df, scenario_order=scenarios)
-    fig.savefig(os.path.join(output_dir, f"step18_eac_stacked_bar_g{sha}.png"), dpi=150, bbox_inches="tight")
+    eac_png = os.path.join(output_dir, f"step18_eac_stacked_bar_g{sha}.png")
+    fig.savefig(eac_png, dpi=150, bbox_inches="tight")
+    # Print the absolute path for quick access in logs
+    try:
+        print(f"EAC stacked bar PNG: {os.path.abspath(eac_png)}")
+    except Exception:
+        pass
 
     # 5) PV size (kW) by scenario
     pv_df = collect_pv_sizes(base_input_dir, housing_type, scenarios, counties, agg=args.agg)
