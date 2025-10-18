@@ -44,21 +44,21 @@ class CostService:
         PullBuildings.process(scenario, self.housing_type, self.counties, output_base_dir="data", download_new_files=False) # output directory should just be 'data', not 'loadprofiles'
     
         self.log_step(3)
-        BuildElectricityLoadProfiles.process(scenario, SCENARIOS[scenario], self.housing_type, self.counties, "data", "data/loadprofiles", force_recompute=True)
+        BuildElectricityLoadProfiles.process(scenario, SCENARIOS[scenario], self.housing_type, self.counties, "data", "data/loadprofiles", force_recompute=False)
 
         self.log_step(4)
-        BuildGasLoadProfiles.process("data", "data/loadprofiles", scenario, SCENARIOS, self.housing_type, self.counties, force_recompute=True)
+        BuildGasLoadProfiles.process("data", "data/loadprofiles", scenario, SCENARIOS, self.housing_type, self.counties, force_recompute=False)
 
         self.log_step(5)
         ConvertGasToElectric.process("data/loadprofiles", "data/loadprofiles", self.counties, scenario, [self.housing_type], force_recompute=False)
 
         self.log_step(6)
         # Build vehicle load profiles (EV charging and/or ICE fuel consumption) based on scenario
-        BuildElectricVehicleLoadProfiles.process("data", "data/loadprofiles", scenario, SCENARIOS[scenario], [self.housing_type], self.counties, force_recompute=True)
+        BuildElectricVehicleLoadProfiles.process("data", "data/loadprofiles", scenario, SCENARIOS[scenario], [self.housing_type], self.counties, force_recompute=False)
 
         self.log_step(7)
         # Add EVs here so they get used in SAM model deployment
-        CombineRealAndSimulatedProfiles.process("data/loadprofiles", "data/loadprofiles", scenario, [self.housing_type], self.counties, force_recompute=True)
+        CombineRealAndSimulatedProfiles.process("data/loadprofiles", "data/loadprofiles", scenario, [self.housing_type], self.counties, force_recompute=False)
     
         self.log_step(8)
         WeatherFiles.process("data/loadprofiles", "data/loadprofiles", scenario, [self.housing_type], 2018, self.counties)
@@ -85,7 +85,7 @@ class CostService:
         PaybackPeriods.process("data/loadprofiles", scenario, self.housing_type, self.counties)
         
         self.log_step(16)
-        DisplayKeyMetricsMaps.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties, self.desired_rate_plans)
+        # DisplayKeyMetricsMaps.process("data/loadprofiles", "data/loadprofiles", scenario, self.housing_type, self.counties, self.desired_rate_plans)
 
 def parse_arguments():
     """

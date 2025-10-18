@@ -183,27 +183,53 @@ def _eac_baseline_components(
         "vehicle_om": float(vehicle_om),
     }
 
-def _plot_eac(df: pd.DataFrame, out_dir: str, county_slug: str, scenario: Optional[str] = None) -> None:
-    comps = [
-        ('capex_pv_annual', '#fdae6b', 'PV capex (annualized)'),
-        ('capex_storage_annual', '#9ecae1', 'Storage capex (annualized)'),
-        ('capex_electric', '#31a354', 'Electrification capex (annualized)'),
-        ('capex_gas', '#756bb1', 'Gas capex (annualized)'),
-        ('annual_bill_with_solar', '#1f77b4', 'Annual energy bill (with solar+storage)'),
-        ('vehicle_om', '#d62728', 'Vehicle O&M'),
-    ]
+def _plot_eac(
+    df: pd.DataFrame,
+    out_dir: str,
+    county_slug: str,
+    scenario: Optional[str] = None,
+    *,
+    bar_width: Optional[float] = None,
+) -> None:
+    # Prefer split bills if present; fallback to single combined bill
+    if 'annual_bill_electric' in df.columns and 'annual_bill_gas' in df.columns:
+        comps = [
+            ('capex_pv_annual', '#fdae6b', 'PV capex (annualized)'),
+            ('capex_storage_annual', '#9ecae1', 'Storage capex (annualized)'),
+            ('capex_electric', '#31a354', 'Electrification capex (annualized)'),
+            ('capex_gas', '#756bb1', 'Gas capex (annualized)'),
+            ('vehicle_om', '#d62728', 'Vehicle O&M'),
+            ('annual_bill_electric', '#1f77b4', 'Annual electricity bill'),
+            ('annual_bill_gas', '#17becf', 'Annual gas bill'),
+        ]
+    else:
+        comps = [
+            ('capex_pv_annual', '#fdae6b', 'PV capex (annualized)'),
+            ('capex_storage_annual', '#9ecae1', 'Storage capex (annualized)'),
+            ('capex_electric', '#31a354', 'Electrification capex (annualized)'),
+            ('capex_gas', '#756bb1', 'Gas capex (annualized)'),
+            ('annual_bill_with_solar', '#1f77b4', 'Annual energy bill (with solar+storage)'),
+            ('vehicle_om', '#d62728', 'Vehicle O&M'),
+        ]
 
     x = df['solar_kw'].values
     bottoms = np.zeros_like(x, dtype=float)
-    fig, ax = plt.subplots(figsize=(11, 4.8))
+    fig, ax = plt.subplots(figsize=(11.2, 5.0))
 
     xf = np.asarray(x, dtype=float)
-    if xf.size > 1:
-        dx_vals = np.diff(np.sort(np.unique(xf)))
-        dx = float(dx_vals.min()) if dx_vals.size > 0 else 0.1
+    if bar_width is not None:
+        try:
+            width = float(bar_width)
+        except Exception:
+            width = 0.2
     else:
-        dx = 0.1
-    width = max(0.02, min(0.8 * dx, 0.11))
+        if xf.size > 1:
+            dx_vals = np.diff(np.sort(np.unique(xf)))
+            dx = float(dx_vals.min()) if dx_vals.size > 0 else 1.0
+        else:
+            dx = 1.0
+        # Choose a width relative to spacing; keep sensible bounds
+        width = max(0.2, min(0.8 * dx, 1.2))
 
     for key, color, label in comps:
         vals = pd.to_numeric(df.get(key, pd.Series([0.0] * len(df))), errors='coerce').fillna(0.0).values
@@ -236,8 +262,9 @@ def _plot_eac(df: pd.DataFrame, out_dir: str, county_slug: str, scenario: Option
 
     xmin = float(np.nanmin(xf)) if xf.size > 0 else 0.0
     xmax = float(np.nanmax(xf)) if xf.size > 0 else 1.0
-    margin = max(0.02, width * 0.6)
-    ax.set_xlim(xmin - margin, xmax + margin)
+    xpad = max(0.02, width * 0.55)
+    ax.set_xlim(xmin - xpad, xmax + xpad)
+    ax.margins(x=0.0)
     try:
         xticks = sorted(np.unique(np.asarray(xf, dtype=float)))
         ax.set_xticks(xticks)
@@ -412,6 +439,7 @@ def run_for_county(
     *,
     options: SweepOptions = SweepOptions(),
     experiments_root: str = "data/experiments/solar_size_sweep",
+    bar_width: Optional[float] = None,
 ) -> pd.DataFrame:
     """Run PV-size sweep for a single county and return a summary DataFrame."""
     county_slug = slugify_county_name(county)
@@ -532,7 +560,12 @@ def run_for_county(
             totals_base = _compute_bill_for_fraction(exp_scen_root, scenario, housing_type, [county])
             # Read back the total annual bill if available
             try:
-                from plot_scenario_comparison_helper import _latest_totals_csv
+                from plot_scenario_comparison_helper import (
+                    _latest_totals_csv,
+                    _latest_electricity_csv,
+                    _latest_gas_csv,
+                    _read_first_numeric_for_row,
+                )
                 totals_csv = _latest_totals_csv(exp_scen_root, scenario, housing_type, county_slug)
                 df = pd.read_csv(totals_csv, index_col="scenario")
                 # scenario with solarstorage row usually named f"{scenario}.solarstorage"
@@ -541,8 +574,15 @@ def run_for_county(
                     row["annual_bill_with_solar"] = float(df.loc[scen_key].iloc[0])
                 else:
                     row["annual_bill_with_solar"] = float(df.iloc[0].iloc[0])
+                # Split electricity/gas bills for stacked plotting
+                e_csv = _latest_electricity_csv(exp_scen_root, scenario, housing_type, county_slug)
+                g_csv = _latest_gas_csv(exp_scen_root, scenario, housing_type, county_slug)
+                row["annual_bill_electric"] = _read_first_numeric_for_row(e_csv, scen_key)
+                row["annual_bill_gas"] = _read_first_numeric_for_row(g_csv, scen_key)
             except Exception:
                 row["annual_bill_with_solar"] = np.nan
+                row["annual_bill_electric"] = np.nan
+                row["annual_bill_gas"] = np.nan
 
         # For 1.0 fraction, also render a focused two-day (Jan/Jul) deployment view
         try:
@@ -565,7 +605,7 @@ def run_for_county(
     out_df.to_csv(os.path.join(exp_county_dir, f"sweep_summary_{county_slug}.csv"), index=False)
     _plot_summaries(out_df, exp_county_dir, county_slug, scenario)
     # Save EAC plot if bills present or even without (bills column may be NaN)
-    _plot_eac(out_df, exp_county_dir, county_slug, scenario)
+    _plot_eac(out_df, exp_county_dir, county_slug, scenario, bar_width=bar_width)
     return out_df
 
 
@@ -578,6 +618,7 @@ def run(
     *,
     options: SweepOptions = SweepOptions(),
     experiments_root: str = "data/experiments/solar_size_sweep",
+    bar_width: Optional[float] = None,
 ) -> Dict[str, pd.DataFrame]:
     """Run the PV-size sweep for one or more counties and return per-county DataFrames."""
     # Default sweep: 0.1 .. 2.0 in 0.1 steps (supports 200% oversizing)
@@ -595,6 +636,7 @@ def run(
                 fractions,
                 options=options,
                 experiments_root=experiments_root,
+                bar_width=bar_width,
             )
             results[county] = df
         except Exception as e:

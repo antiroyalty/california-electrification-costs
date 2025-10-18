@@ -28,6 +28,7 @@ def parse_args():
     p.add_argument("--fractions", default=None, help="Comma-separated PV size fractions; default=0.1..2.0 by 0.1")
     # PV→Battery surplus charging controlled by step9 constant only
     p.add_argument("--compute-bills", action="store_true", help="Compute total bills via Steps 10/11/13 into experiments tree")
+    p.add_argument("--bar-width", type=float, default=None, help="Override EAC bar width (in kW on x-axis units)")
     return p.parse_args()
 
 
@@ -57,6 +58,7 @@ def main():
         fractions=fracs,
         options=opts,
         experiments_root=eff_root,
+        bar_width=args.bar_width,
     )
     print(f"PV-size sweep complete for {len(results)} counties. Output: {os.path.abspath(eff_root)}")
 

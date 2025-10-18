@@ -45,6 +45,7 @@ def parse_args():
     p.add_argument("--fractions", default=None, help="Comma-separated PV size fractions; default=0.1..2.0 by 0.1")
     p.add_argument("--enable-pv-surplus", action="store_true", default=None, help="Enable PV→Battery surplus charging (omit to use step9 default)")
     p.add_argument("--compute-bills", action="store_true", help="Compute total bills via Steps 10/11/13 into experiments tree")
+    p.add_argument("--bar-width", type=float, default=None, help="Override EAC bar width (kW units)")
     p.add_argument("--scenarios", nargs="*", help="Optional subset of scenarios to run; default uses scenarios.py keys")
     p.add_argument("--dashboard-name", default="sweep_dashboard.html", help="HTML filename to write within experiments root")
     return p.parse_args()
@@ -140,6 +141,7 @@ def _run_and_build(
     counties: List[str],
     fracs: List[float],
     compute_bills: bool,
+    bar_width: Optional[float],
     dashboard_name: str,
 ):
     dispatch_label = "dispatch_dynamic" if getattr(diy, "USE_DYNAMIC_DISPATCH", False) else "dispatch_classic"
@@ -156,6 +158,7 @@ def _run_and_build(
             fractions=fracs,
             options=opts,
             experiments_root=eff_root,
+            bar_width=bar_width,
         )
         ran_counties = sorted(set(ran_counties) | set(results.keys()))
     out_html = os.path.join(eff_root, dashboard_name)
@@ -192,6 +195,7 @@ def main():
         counties=counties,
         fracs=fracs,
         compute_bills=args.compute_bills,
+        bar_width=args.bar_width,
         dashboard_name=args.dashboard_name,
     )
 
