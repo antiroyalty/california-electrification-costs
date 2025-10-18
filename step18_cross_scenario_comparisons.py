@@ -80,6 +80,11 @@ def main() -> None:
     parser.add_argument("--counties", nargs="*", help="Counties (names or slugs). If omitted, use --all-counties or default to Alameda County")
     parser.add_argument("--all-counties", action="store_true", help="Use all available counties under the provided scenarios")
     parser.add_argument("--agg", choices=["mean", "median"], default="mean", help="Aggregation across counties")
+    parser.add_argument(
+        "--run-timestamp",
+        default=None,
+        help="Optional YYYYMMDD_HH timestamp to select specific Step 10/11/13 results instead of latest",
+    )
 
     args = parser.parse_args()
 
@@ -129,7 +134,15 @@ def main() -> None:
     fig.savefig(os.path.join(output_dir, f"step18_savings_bills_dotline_g{sha}.png"), dpi=150, bbox_inches="tight")
 
     # 4) All-in annualized cost (EAC) stacked bar
-    eac_df = collect_eac_components(base_input_dir, housing_type, scenarios, counties, incentive='full_incentives', agg=args.agg)
+    eac_df = collect_eac_components(
+        base_input_dir,
+        housing_type,
+        scenarios,
+        counties,
+        incentive='full_incentives',
+        agg=args.agg,
+        timestamp=args.run_timestamp,
+    )
     eac_csv = os.path.join(output_dir, f"step18_eac_summary_g{sha}.csv")
     if not eac_df.empty:
         eac_df.to_csv(eac_csv, index=False)

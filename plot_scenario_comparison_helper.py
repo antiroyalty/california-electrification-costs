@@ -92,22 +92,43 @@ def _read_totals_cost(base_input_dir: str, scenario: str, housing_type: str, cou
 
 
 # ---------- Helpers to read latest electricity/gas annual costs ----------
-def _latest_electricity_csv(base_input_dir: str, scenario: str, housing_type: str, county_slug: str) -> Optional[str]:
+def _find_csv_with_timestamp(directory: str, prefix: str, ts: str) -> Optional[str]:
+    """Return a CSV path in directory matching prefix and exact timestamp 'YYYYMMDD_HH'."""
+    try:
+        for f in os.listdir(directory):
+            if f.startswith(prefix) and f.endswith(".csv") and f.endswith(f"_{ts}.csv"):
+                return os.path.join(directory, f)
+    except Exception:
+        pass
+    return None
+
+
+def _latest_electricity_csv(base_input_dir: str, scenario: str, housing_type: str, county_slug: str, timestamp: Optional[str] = None) -> Optional[str]:
     directory = os.path.join(base_input_dir, scenario, housing_type, county_slug, "results", "electricity")
     if not os.path.isdir(directory):
         return None
     try:
-        return get_latest_csv_file(directory, f"RESULTS_electricity_annual_costs_{county_slug}_")
+        prefix = f"RESULTS_electricity_annual_costs_{county_slug}_"
+        if timestamp:
+            p = _find_csv_with_timestamp(directory, prefix, timestamp)
+            if p:
+                return p
+        return get_latest_csv_file(directory, prefix)
     except Exception:
         return None
 
 
-def _latest_gas_csv(base_input_dir: str, scenario: str, housing_type: str, county_slug: str) -> Optional[str]:
+def _latest_gas_csv(base_input_dir: str, scenario: str, housing_type: str, county_slug: str, timestamp: Optional[str] = None) -> Optional[str]:
     directory = os.path.join(base_input_dir, scenario, housing_type, county_slug, "results", "gas")
     if not os.path.isdir(directory):
         return None
     try:
-        return get_latest_csv_file(directory, f"RESULTS_gas_annual_costs_{county_slug}_")
+        prefix = f"RESULTS_gas_annual_costs_{county_slug}_"
+        if timestamp:
+            p = _find_csv_with_timestamp(directory, prefix, timestamp)
+            if p:
+                return p
+        return get_latest_csv_file(directory, prefix)
     except Exception:
         return None
 
@@ -127,10 +148,10 @@ def _read_first_numeric_for_row(path: Optional[str], row_name: str) -> float:
         return 0.0
 
 
-def _annual_bill_parts(base_input_dir: str, scenario: str, housing_type: str, county_slug: str, with_solar: bool) -> tuple[float, float]:
+def _annual_bill_parts(base_input_dir: str, scenario: str, housing_type: str, county_slug: str, with_solar: bool, timestamp: Optional[str] = None) -> tuple[float, float]:
     row = f"{scenario}.solarstorage" if with_solar else scenario
-    e_path = _latest_electricity_csv(base_input_dir, scenario, housing_type, county_slug)
-    g_path = _latest_gas_csv(base_input_dir, scenario, housing_type, county_slug)
+    e_path = _latest_electricity_csv(base_input_dir, scenario, housing_type, county_slug, timestamp=timestamp)
+    g_path = _latest_gas_csv(base_input_dir, scenario, housing_type, county_slug, timestamp=timestamp)
     e_val = _read_first_numeric_for_row(e_path, row)
     g_val = _read_first_numeric_for_row(g_path, row)
     return e_val, g_val
@@ -606,6 +627,7 @@ def collect_eac_components(
     incentive: str = "full_incentives",
     discount_rate: float = 0.07,
     agg: str = "mean",
+    timestamp: Optional[str] = None,
 ) -> pd.DataFrame:
     """Collect Equivalent Annual Cost components.
 
@@ -632,7 +654,7 @@ def collect_eac_components(
             capex_gas = 0.0
             vehicle_om = 0.0
             # Bills split into electricity + gas under with-solar variant
-            e_bill, g_bill = _annual_bill_parts(base_input_dir, scen, housing_type, slug, with_solar=True)
+            e_bill, g_bill = _annual_bill_parts(base_input_dir, scen, housing_type, slug, with_solar=True, timestamp=timestamp)
 
             # From capital ledger (annualize per appliance)
             if ledger is not None and not ledger.empty:
