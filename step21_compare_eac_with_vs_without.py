@@ -10,8 +10,10 @@ Inputs
   - Totals (annual bills) written by Steps 10–13
 
 Outputs
-  - CSV (merged summary): analysis_results/step21_eac_with_vs_without_g<sha>.csv
-  - Plot (PNG):          analysis_results/step21_eac_with_vs_without_g<sha>.png
+  - CSV (merged summary): analysis_results/step21_eac_with_vs_without_<counties>_g<sha>.csv
+  - Plot (PNG):          analysis_results/step21_eac_with_vs_without_<counties>_g<sha>.png
+    where <counties> is 'all-counties' when using --all-counties, otherwise a
+    hyphenated list of the selected county names (slugified).
 """
 
 from __future__ import annotations
@@ -172,6 +174,16 @@ def main() -> None:
     counties = _discover_counties(base, housing, scenarios) if args.all_counties else (args.counties or ["Alameda County"])
     os.makedirs(out_dir, exist_ok=True)
 
+    # Build a county token for filenames
+    if args.all_counties:
+        counties_token = "all-counties"
+    else:
+        try:
+            # slugify provided counties for safe filenames and deterministic order
+            counties_token = "--".join(sorted(slugify_county_name(c) for c in counties)) or "counties"
+        except Exception:
+            counties_token = "counties"
+
     # Collect
     df_with = collect_eac_components(base, housing, scenarios, counties, incentive=args.incentive)
     df_no = collect_eac_no_pv(base, housing, scenarios, counties, incentive=args.incentive, discount_rate=args.discount_rate, agg=args.agg)
@@ -179,14 +191,14 @@ def main() -> None:
 
     # Save merged CSV
     sha = _git_short_sha()
-    csv_path = os.path.join(out_dir, f"step21_eac_with_vs_without_g{sha}.csv")
+    csv_path = os.path.join(out_dir, f"step21_eac_with_vs_without_{counties_token}_g{sha}.csv")
     merged.to_csv(csv_path, index=False)
 
     # Title county label
     county_label = "All Counties" if args.all_counties else (counties[0] if len(counties)==1 else ", ".join(counties))
 
     fig = plot_grouped_eac(merged, scenario_order=scenarios, county_label=county_label)
-    out_png = os.path.join(out_dir, f"step21_eac_with_vs_without_g{sha}.png")
+    out_png = os.path.join(out_dir, f"step21_eac_with_vs_without_{counties_token}_g{sha}.png")
     fig.savefig(out_png, dpi=150, bbox_inches='tight')
     print("EAC with-vs-without comparison complete.")
     print(f"  Scenarios: {scenarios}")
