@@ -35,13 +35,53 @@ Add the following columns to `sam_optimized_load_profiles_<county>.csv` (both `s
 - `PV to Grid (kWh)`: hourly net PV export to grid. For the DIY dispatch, this is
   `max(0, PV_AC − System to Load − System to Battery)`.
 
+Keep the core energy balance identity unchanged:
+`Load Profile = System→Load + Battery→Load + Grid→Load`.
+
 Rationale: downstream steps need explicit PV exports to compute ACC credits without re‑deriving PV generation.
+
+Battery exports (optional, default OFF):
+- Add a new column `Battery to Grid (kWh)` when battery export is enabled.
+- Gate with a module‑level toggle, e.g., `ENABLE_BATTERY_EXPORT = False`.
+- Discharge split per hour: `Battery to Load = min(target_discharge, residual_load)` and
+  `Battery to Grid = max(0, target_discharge − Battery to Load)`.
+- Recommended policy: keep `GRID_CHARGING_ENABLED = False` when exporting to avoid grid‑charged arbitrage.
+
+Provenance tracking (recommended if future grid charging is enabled):
+- Track two SOC pools: PV‑charged and grid‑charged energy.
+- Only allow export credits from the PV‑charged pool; disallow export of grid‑charged energy (compliance).
+
+Guardrails and diagnostics:
+- Optional export cap by interconnection/inverter rating `EXPORT_LIMIT_KW` applied to `(PV to Grid + Battery to Grid)`.
+- Validate non‑negativity; assert `PV_AC ≥ System→Load + System→Battery + PV→Grid ± ε`.
+- Log hourly/annual sums for PV generation, PV→Load, PV→Battery, PV→Grid, Battery→Load, Grid→Battery for QA.
+
+Export potential and eligibility (what “could” be exported):
+- Define an instantaneous export cap (kW):
+  - `export_cap_kw = min(INVERTER_AC_RATING_KW, EXPORT_LIMIT_KW)` (defaults to inverter rating if no separate limit).
+- Compute hourly export budget (kWh): `export_budget = export_cap_kw * Δt` (Δt = 1 hour here).
+- PV export potential (kWh):
+  - `pv_export_potential = max(0, PV_AC − System→Load − System→Battery)`.
+  - Actual PV export: `pv_to_grid = min(pv_export_potential, export_budget)`; reduce `export_budget -= pv_to_grid`.
+- Battery export potential (eligible energy only):
+  - Track SOC provenance: `soc_pv` (PV‑charged) and `soc_grid` (grid‑charged).
+  - Eligible energy (kWh): `eligible_kwh = max(0, (soc_pv − MIN_SOC_FRAC) * BATTERY_CAPACITY_KWH)`.
+  - Power limit (kWh): `power_kwh = P_DISCHARGE_MAX_KW * Δt`.
+  - Not required by load: we already satisfied load; battery export can use remaining discharge headroom.
+  - Actual battery export: `batt_to_grid = min(eligible_kwh * ETA_DISCHARGE, power_kwh, export_budget)`; decrement SOC buckets accordingly.
+- Final combined export (kWh): `export_kwh = pv_to_grid + batt_to_grid`.
+- If battery export is disabled, set `batt_to_grid = 0` and skip SOC provenance.
 
 ### 2) Step 10 — include export series for rate evaluation
 Extend `loadprofiles_for_rates_<county>.csv` with a new column for solar+storage cases:
-- `solarstorage.electricity.export.kwh` — read from Step 9 (`PV to Grid (kWh)`). If missing (older runs), default to 0.0.
+- `solarstorage.electricity.export.kwh` — computed as `(PV to Grid + Battery to Grid)` from Step 9.
+  If `Battery to Grid` is absent (older runs or export disabled), treat it as 0.0.
 
 No change to the `default` series (no PV export).
+
+Optional additional outputs (for diagnostics and policy analysis):
+- `solarstorage.electricity.export.eligible.kwh` — eligible export credited under NEM 3.0 (PV + PV‑charged battery only).
+- `solarstorage.electricity.export.ineligible.kwh` — any export derived from grid‑charged energy (should be 0 if guarded).
 
 ### 3) New helpers — NEM 3.0 core logic and data
 Add two helper modules under `helpers/`:
@@ -96,10 +136,10 @@ Add two helper modules under `helpers/`:
 
 ### 4) Step 12 — add NEM 3.0 billing path
 Enhance `step12_evaluate_electricity_rates.py` to compute, per county/tariff, the solar+storage bill using NEM 3.0:
-- Inputs:
-  - `solarstorage.electricity.kwh` (imports = Grid→Load),
-  - `solarstorage.electricity.export.kwh` (exports),
-  - Timestamps (existing `loadprofiles_for_rates` has `timestamp`).
+- Inputs and mapping:
+  - Imports: `solarstorage.electricity.kwh` = `Grid to Load` from Step 9.
+  - Exports: `solarstorage.electricity.export.kwh` = `PV to Grid` [+ `Battery to Grid` if enabled].
+  - Timestamps: from `loadprofiles_for_rates` column `timestamp`.
 - For each IOU tariff:
   - Compute retail import charges with existing TOU logic.
   - Split out NBC portion via `NEM3Options.nbc_cents_per_kwh`.
@@ -211,4 +251,3 @@ Questions or preferences (for reviewers):
 - Provide ACC tables in‑repo as constants vs CSVs under `data/nem3_export_rates/`?
 - Default NSC handling: cash‑out at IOU‑specific NSC vs assume 0?
 - Keep both `{scenario}.solarstorage` (NEM3) and `{scenario}.solarstorage_retail_only` for comparison?
-
