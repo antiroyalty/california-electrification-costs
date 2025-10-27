@@ -661,6 +661,13 @@ def process(
             date_range = pd.date_range(start="2018-01-01", periods=8760, freq="H")
             system_to_load = [min(s, l) for s, l in zip(solar_gen, load_profile)]
             batt_to_load = batt_discharge
+            # Derive PV→Grid from PV AC and on-site PV uses (PV→Load, PV→Battery).
+            # Keep non-negative and consistent with energy balance.
+            pv_to_grid = [
+                max(0.0, float(s) - float(a) - float(b))
+                for s, a, b in zip(solar_gen, system_to_load, pv_to_batt)
+            ]
+
             df = pd.DataFrame({
                 "Load Profile": load_profile,
                 "System to Load": system_to_load,
@@ -672,6 +679,9 @@ def process(
                 "System to Battery": pv_to_batt,
                 "Grid to Battery": grid_to_batt,
                 "Battery SOC": soc_percent,
+                # New columns to support NEM 3.0 accounting downstream
+                "PV AC (kWh)": solar_gen,
+                "PV to Grid (kWh)": pv_to_grid,
             }, index=date_range)
             df.to_csv(output_file)
 
