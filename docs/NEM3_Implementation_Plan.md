@@ -251,3 +251,47 @@ Questions or preferences (for reviewers):
 - Provide ACC tables in‑repo as constants vs CSVs under `data/nem3_export_rates/`?
 - Default NSC handling: cash‑out at IOU‑specific NSC vs assume 0?
 - Keep both `{scenario}.solarstorage` (NEM3) and `{scenario}.solarstorage_retail_only` for comparison?
+
+## Sources and validation
+
+Authoritative CPUC policy and export values
+- Net Billing Tariff (NEM 3.0) decision: CPUC Decision D.22‑12‑056 (R.20‑08‑020). Establishes hourly export compensation based on ACC, monthly crediting with carry‑forward, and that export credits cannot offset non‑bypassable charges or fixed/minimum charges.
+  - PDF: Search CPUC “Decision D.22‑12‑056” in proceeding R.20‑08‑020 or use the CPUC Decisions repository link for the published PDF.
+- CPUC Net Billing Tariff overview and FAQ: high‑level mechanics (ACC export, monthly accounting, true‑up).
+  - https://www.cpuc.ca.gov (navigate: Energy > Solar > Net Billing Tariff)
+- CPUC Avoided Cost Calculator (ACC) portal: hourly export values and documentation for the applicable year.
+  - https://www.cpuc.ca.gov/industries-and-topics/electrical-energy/demand-side-management/avoided-cost-calculator
+
+Retail import pricing (IOU tariff PDFs)
+- PG&E Electric Tariff Book (PDFs used in this repo):
+  - E‑TOU‑C: https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_E-TOU-C.pdf
+  - EV2‑A:  https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_EV2%20(Sch).pdf
+  - E‑ELEC:  https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_E-ELEC.pdf
+- SCE Tariff Book (find “Schedule TOU‑D (Domestic)”, 4‑9 pm and 5‑8 pm variants):
+  - https://www.sce.com/regulatory/tariff-books
+  - Download the current PDF for Schedule TOU‑D for the model year and record its effective date.
+- SDG&E Tariffs (find “Schedule TOU‑ELEC”, “TOU‑DR1” as applicable):
+  - https://www.sdge.com/rates-and-regulations/current-and-effective-tariffs
+  - Download the current PDF for the model year and record its effective date.
+
+Non‑bypassable charges (NBCs), fixed/minimum charges
+- NBCs are payable on imports and not offsettable by export credits under NBT (see D.22‑12‑056 and IOU NBT tariffs).
+- Fixed/minimum charges are specified in each tariff schedule above; model them per the effective PDF.
+
+Paired storage export eligibility (Rule 21 / NBT implementation)
+- Under NBT, export from storage is eligible only to the extent the storage was charged by on‑site renewable generation (not the grid). IOUs operationalize this via Rule 21 interconnection, metering, and program rules.
+  - CPUC Rule 21 (Interconnection): https://www.cpuc.ca.gov (navigate: Energy > Electric Rule 21)
+  - IOU paired‑storage/NBT guidance pages for PG&E/SCE/SDG&E (interconnection program sites).
+
+Customer‑facing “Solar Billing Plan” (useful validation aids)
+- PG&E Solar Billing Plan (NBT):
+  - https://www.pge.com (navigate: Residential > Solar > Solar Billing Plan)
+- SCE Solar Billing Plan:
+  - https://www.sce.com (navigate: Residential > Solar > Solar Billing Plan / Net Billing Tariff)
+- SDG&E Solar Billing Plan:
+  - https://www.sdge.com (navigate: Residential > Solar > Solar Billing Plan)
+
+Model governance and data provenance
+- Store import tariff tables and export ACC tables with `effective_on` metadata (YYYY‑MM‑DD) alongside the PDFs.
+- Pin the model year (e.g., 2025) and ensure tariff/ACC sources correspond to that year.
+- Add a small validation harness comparing one county’s bill to each IOU’s public estimate/calculator, where available.
