@@ -10,7 +10,10 @@ run end-to-end. Replace with real tables sourced from CPUC/utility filings.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
+import os
+import pandas as pd
+from main_helpers import slugify_county_name
 
 
 def _zeros_table() -> Dict[int, List[float]]:
@@ -35,6 +38,170 @@ def get_export_rate_table(utility: str) -> Dict[int, List[float]]:
     return _zeros_table()
 
 
+def _find_excel_for_utility(base_dir: str, utility: str) -> Optional[str]:
+    """Return a path to an Excel file for a given utility inside base_dir/NEM3.
+
+    Accepts flexible naming, e.g., 'PGE', 'PG&E', 'SCE', 'SDGE', 'SDG&E'.
+    """
+    u = (utility or "").lower().replace("&", "").replace(".", "").replace(" ", "")
+    candidates = []
+    try:
+        for root, _, files in os.walk(base_dir):
+            for f in files:
+                if f.lower().endswith((".xlsx", ".xls")):
+                    fnorm = f.lower().replace("&", "").replace(".", "").replace(" ", "")
+                    if any(tag in fnorm for tag in (u,)):
+                        candidates.append(os.path.join(root, f))
+    except Exception:
+        return None
+    # Prefer files closer to base_dir (shorter path)
+    return sorted(candidates, key=lambda p: (p.count(os.sep), len(p)))[0] if candidates else None
+
+
+def _parse_12x24_table(df: pd.DataFrame) -> Optional[Dict[int, List[float]]]:
+    """Try to coerce a DataFrame into a 12x24 month-hour table of floats.
+
+    Supports two layouts:
+      1) Matrix: 12 rows (months), 24 columns (hours 0..23 or 1..24)
+      2) Long: columns include 'month' and 'hour' and 'rate'
+    """
+    # Case 2: long form
+    lower_cols = [c.strip().lower() for c in df.columns]
+    if all(col in lower_cols for col in ["month", "hour"]) and any(c in lower_cols for c in ["rate", "value", "export", "acc"]):
+        cmonth = df.columns[lower_cols.index("month")]
+        chour = df.columns[lower_cols.index("hour")]
+        # pick rate-like column
+        for cand in ("rate", "value", "export", "acc"):
+            if cand in lower_cols:
+                crate = df.columns[lower_cols.index(cand)]
+                break
+        pivot = df[[cmonth, chour, crate]].copy()
+        pivot[cmonth] = pd.to_numeric(pivot[cmonth], errors="coerce").astype("Int64")
+        pivot[chour] = pd.to_numeric(pivot[chour], errors="coerce").astype("Int64")
+        pivot[crate] = pd.to_numeric(pivot[crate], errors="coerce").fillna(0.0)
+        out: Dict[int, List[float]] = {}
+        for m in range(1, 13):
+            sub = pivot[pivot[cmonth] == m]
+            if sub.empty:
+                out[m] = [0.0] * 24
+                continue
+            # build hour list 0..23
+            row = [0.0] * 24
+            for _, r in sub.iterrows():
+                h = int(r[chour])
+                if 0 <= h <= 23:
+                    row[h] = float(r[crate])
+            out[m] = row
+        return out
+
+    # Case 1: wide 12x24
+    # Identify 24 numeric columns; allow hour labels 0..23 or 1..24 or strings containing hour numbers
+    # Drop non-numeric columns except maybe the first if it's 'month'
+    df2 = df.copy()
+    # Try to detect a month column and drop it
+    if any(str(c).strip().lower() in ("month", "mon") for c in df2.columns[:2]):
+        for c in df2.columns[:2]:
+            if str(c).strip().lower() in ("month", "mon"):
+                df2 = df2.drop(columns=[c])
+                break
+    # Keep first 24 columns
+    if df2.shape[1] >= 24:
+        df2 = df2.iloc[:, :24]
+        # Coerce to floats
+        df2 = df2.apply(pd.to_numeric, errors="coerce").fillna(0.0)
+        # Need at least 12 rows; if more, take first 12
+        if df2.shape[0] >= 12:
+            df2 = df2.iloc[:12, :]
+            out = {m + 1: [float(x) for x in df2.iloc[m, :].tolist()] for m in range(12)}
+            return out
+    return None
+
+
+def _load_export_rates_from_excel(base_dir: str, utility: str, climate_zone: Optional[str]) -> Optional[Dict[int, List[float]]]:
+    path = _find_excel_for_utility(base_dir, utility)
+    if not path:
+        return None
+    try:
+        # Strategy: if climate_zone is provided and matches a sheet, read that sheet; else try first sheet
+        xls = pd.ExcelFile(path)
+        sheet = None
+        if climate_zone and climate_zone in xls.sheet_names:
+            sheet = climate_zone
+        else:
+            # Try sheet with 'Rates' keyword; else first sheet
+            sheet = next((s for s in xls.sheet_names if 'rate' in s.lower()), xls.sheet_names[0])
+        df = pd.read_excel(path, sheet_name=sheet)
+        table = _parse_12x24_table(df)
+        if table is not None:
+            return table
+        # Fallback: iterate all sheets and pick first parseable
+        for s in xls.sheet_names:
+            try:
+                df2 = pd.read_excel(path, sheet_name=s)
+                table = _parse_12x24_table(df2)
+                if table is not None:
+                    return table
+            except Exception:
+                continue
+    except Exception as e:
+        print(f"[NEM3] Failed to read Excel for {utility}: {e}")
+    return None
+
+
+def _load_county_to_zone_mapping(base_dir: str) -> Dict[Tuple[str, str], str]:
+    """Load optional county→climate_zone mapping from CSV at base_dir/county_to_climate_zone.csv.
+
+    Expected columns: utility, county_slug, climate_zone
+    """
+    mapping: Dict[Tuple[str, str], str] = {}
+    csv_path = os.path.join(base_dir, "county_to_climate_zone.csv")
+    if not os.path.exists(csv_path):
+        return mapping
+    try:
+        df = pd.read_csv(csv_path)
+        util_col = next((c for c in df.columns if c.strip().lower() in ("utility", "iou")), None)
+        county_col = next((c for c in df.columns if c.strip().lower() in ("county_slug", "county")), None)
+        zone_col = next((c for c in df.columns if c.strip().lower() in ("climate_zone", "zone")), None)
+        if not (util_col and county_col and zone_col):
+            return mapping
+        for _, r in df.iterrows():
+            util = str(r[util_col]).strip().upper()
+            cslug = slugify_county_name(str(r[county_col]))
+            zone = str(r[zone_col]).strip()
+            mapping[(util, cslug)] = zone
+    except Exception as e:
+        print(f"[NEM3] Failed to read mapping CSV: {e}")
+    return mapping
+
+
+def get_export_rate_table_for_county(base_dir: str, utility: str, county_name_or_slug: str) -> Dict[int, List[float]]:
+    """Return ACC-based export table for a county by selecting a climate zone.
+
+    Selection order:
+      1) If mapping CSV exists at base_dir/county_to_climate_zone.csv, use it.
+      2) Else, attempt to load any table for the utility and use it as a fallback.
+
+    TODO: Provide a robust county→climate_zone mapping per IOU. A suggested approach:
+      - For PG&E, reuse baseline territories (P,Q,R,S,T,V,W,X,Y,Z) as zones and map counties accordingly.
+      - For SCE, reuse baseline regions (5,6,8,9,10,13,14,15,16).
+      - For SDG&E, define a single zone or coastal/inland split per utility publication.
+      - Maintain mapping in NEM3/county_to_climate_zone.csv with columns: utility, county_slug, climate_zone.
+    """
+    util = (utility or "").strip().upper()
+    cslug = slugify_county_name(county_name_or_slug)
+    mapping = _load_county_to_zone_mapping(base_dir)
+    zone = mapping.get((util, cslug), None)
+    table = _load_export_rates_from_excel(base_dir, utility, zone)
+    if table is None:
+        print(
+            f"[NEM3] TODO: Missing county→climate_zone mapping for utility={util}, county={cslug}. "
+            f"Using first available sheet in Excel as fallback. Create {os.path.join(base_dir, 'county_to_climate_zone.csv')}"
+        )
+        # Try again without a zone to pick the first available sheet
+        table = _load_export_rates_from_excel(base_dir, utility, None)
+    return table if table is not None else _zeros_table()
+
+
 @dataclass
 class NEM3Options:
     nbc_dollars_per_kwh: float = 0.0
@@ -53,4 +220,3 @@ def default_options_for_utility(utility: str) -> NEM3Options:
     if "SDG&E" in util or util in ("SDGE", "SDG&E"):
         return NEM3Options(nbc_dollars_per_kwh=0.0, fixed_charge_monthly=0.0, minimum_bill_monthly=0.0)
     return NEM3Options()
-
