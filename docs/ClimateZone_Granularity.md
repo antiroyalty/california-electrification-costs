@@ -45,6 +45,11 @@ TODO (tracked in code and here): Publish `NEM3/county_to_climate_zone.csv` with 
   3) Build a 12×24 month×hour $/kWh matrix for ACC export rates.
 - If mapping is missing, the loader prints a TODO and falls back to the first available sheet in the IOU Excel.
 
+Where to introduce the mapping:
+- Introduce the county→climate_zone mapping right before Step 12 (i.e., once Steps 9–11 have produced the export/import series).
+- Practically, keep the mapping file at `NEM3/county_to_climate_zone.csv` and commit it. Step 12 will read it when `--nem3` is used.
+- No changes to Steps 9–11 are required; they remain county‑centric and do not depend on the mapping.
+
 Outputs (unchanged schema):
 - Per-county annual electricity costs CSV remains the same. `{scenario}.solarstorage` now reflects NEM3 credits using the county’s climate zone export table.
 
@@ -99,4 +104,3 @@ Questions or preferences:
 - Which zone system do we standardize on for each IOU (exact names from Excel or normalized aliases)?
 - Do we prefer mean, median, or population-weighted aggregation for zone rollups?
 - Should Step 12/13 write both county and zone outputs in one run by default?
-
