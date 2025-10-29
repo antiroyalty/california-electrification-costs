@@ -1,4 +1,5 @@
-data
+data/*
+!data/NEM3/
 __pycache__
 reference
 wip-outputs
