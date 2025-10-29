@@ -9,13 +9,19 @@
 # Baseline Allowances for E-TOU-C Rate Plan
 
 from datetime import datetime, timedelta
+import argparse
 import os
 import pandas as pd
 from collections import defaultdict
 from datetime import datetime, timedelta
 from main_helpers import get_counties, get_scenario_path, log, to_number, get_timestamp, norcal_counties, socal_counties, central_counties, slugify_county_name
 from helpers.electricity_rate_helpers import PGE_RATE_PLANS, SCE_RATE_PLANS, SDGE_RATE_PLANS
-from helpers.nem3_export_rates import get_export_rate_table, default_options_for_utility, NEM3Options
+from helpers.nem3_export_rates import (
+    get_export_rate_table,
+    get_export_rate_table_for_county,
+    default_options_for_utility,
+    NEM3Options,
+)
 from helpers.utility_helpers import get_utility_for_county
 
 
@@ -154,6 +160,7 @@ def calculate_nem3_annual_costs(
     rate_plan_name: str,
     *,
     options: NEM3Options | None = None,
+    export_table: dict | None = None,
 ):
     """Compute NEM 3.0 bill: monthly energy charges (retail), monthly export credits (ACC), NBCs, fixed/minimum, carry-forward.
 
@@ -162,7 +169,7 @@ def calculate_nem3_annual_costs(
     annual_costs = {}
     plan_details = RATE_PLANS[utility][rate_plan_name]
     opts = options or default_options_for_utility(utility)
-    export_table = get_export_rate_table(utility)
+    export_table = export_table or get_export_rate_table(utility)
 
     # Ensure aligned series
     ts = pd.to_datetime(timestamps)
@@ -250,6 +257,9 @@ def process_county_scenario_nem3(file_path, county, utility, selected_rate_plan)
 
     # Solar+storage with NEM3 (imports at retail + exports credited at ACC)
     opts = default_options_for_utility(utility)
+    # Load county-specific ACC export table from NEM3/ Excel files.
+    export_table = get_export_rate_table_for_county(base_dir="NEM3", utility=utility, county_name_or_slug=county)
+
     annual_solar_nem3 = calculate_nem3_annual_costs(
         ts,
         df[solar_col].tolist(),
@@ -257,6 +267,7 @@ def process_county_scenario_nem3(file_path, county, utility, selected_rate_plan)
         utility,
         selected_rate_plan,
         options=opts,
+        export_table=export_table,
     )
 
     return annual_default, annual_solar_nem3
@@ -375,10 +386,27 @@ def process(base_input_dir, base_output_dir, scenario, housing_type, counties, u
         )
 
 if __name__ == '__main__':
-    base_input_dir = "data/loadprofiles"
-    base_output_dir = "data/loadprofiles"
-    counties = ['Los Angeles']
-    scenario = "baseline"
-    housing_type = "single-family-detached"
+    p = argparse.ArgumentParser(description="Step 12: Evaluate electricity rates (with optional NEM 3.0)")
+    p.add_argument("--base-input-dir", default="data/loadprofiles")
+    p.add_argument("--base-output-dir", default="data/loadprofiles")
+    p.add_argument("--scenario", default="baseline")
+    p.add_argument("--housing-type", default="single-family-detached")
+    p.add_argument("--counties", nargs="*", help="Counties (names or slugs). Use --all-counties to auto-discover.")
+    p.add_argument("--all-counties", action="store_true")
+    p.add_argument("--nem3", action="store_true", help="Enable NEM 3.0 export crediting for solar+storage rows")
+    args = p.parse_args()
 
-    process(base_input_dir, base_output_dir, scenario, housing_type, norcal_counties+socal_counties+central_counties)
+    if args.all_counties:
+        scen_path = get_scenario_path(args.base_input_dir, args.scenario, args.housing_type)
+        counties = get_counties(scen_path, None)
+    else:
+        counties = args.counties or ["Alameda County"]
+
+    process(
+        args.base_input_dir,
+        args.base_output_dir,
+        args.scenario,
+        args.housing_type,
+        counties,
+        use_nem3=args.nem3,
+    )
