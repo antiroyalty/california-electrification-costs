@@ -219,7 +219,14 @@ SCENARIO_DATA_MAP = {
 }
 
 OUTPUT_FILE_NAME = "loadprofiles_for_rates"
-OUTPUT_COLUMNS = ["timestamp", "default.electricity.kwh", "default.gas.therms", "solarstorage.electricity.kwh", "solarstorage.gas.therms"]
+OUTPUT_COLUMNS = [
+    "timestamp",
+    "default.electricity.kwh",
+    "default.gas.therms",
+    "solarstorage.electricity.kwh",
+    "solarstorage.electricity.export.kwh",
+    "solarstorage.gas.therms",
+]
 
 def aggregate_to_hourly(file_path, column_name):
     try:
@@ -244,6 +251,16 @@ def read_load_profile(file_path, column_name):
     except Exception as e:
         raise RuntimeError(f"Error reading file {file_path}: {e}")
 
+def read_optional_load_profile(file_path, column_name, fallback_series=None):
+    """Read a column if present; otherwise return the fallback series or a zero series of len 8760."""
+    try:
+        df = pd.read_csv(file_path)
+        if column_name in df.columns:
+            return df[column_name]
+        return fallback_series if fallback_series is not None else pd.Series([0.0] * 8760)
+    except Exception:
+        return fallback_series if fallback_series is not None else pd.Series([0.0] * 8760)
+
 def prepare_for_rates_analysis(base_input_dir, base_output_dir, housing_type, scenario, county):
     directory = SCENARIO_DATA_MAP.get(scenario, {})
     county = slugify_county_name(county)
@@ -258,16 +275,34 @@ def prepare_for_rates_analysis(base_input_dir, base_output_dir, housing_type, sc
 
     timestamp = read_load_profile(electricity_default_file, "timestamp")
     electricity_default = read_load_profile(electricity_default_file, directory["default"]["electricity"]["column"])
-    electricity_solar_storage = read_load_profile(electricity_solar_storage_file, directory["solar_storage"]["electricity"]["column"])
+    electricity_solar_storage = read_load_profile(
+        electricity_solar_storage_file, directory["solar_storage"]["electricity"]["column"]
+    )
     gas_default_hourly = aggregate_to_hourly(gas_default_file, directory["default"]["gas"]["column"])
     gas_solar_storage_hourly = aggregate_to_hourly(gas_solar_storage_file, directory["solar_storage"]["gas"]["column"])
+
+    # NEM3 exports: prefer the dedicated column from Step 9 if available; otherwise derive a conservative fallback
+    # Fallback derivation (if needed): PV export = max(0, PV AC - PV→Load - PV→Battery)
+    try:
+        pv_ac = read_optional_load_profile(electricity_solar_storage_file, "PV AC (kWh)")
+        pv_to_load = read_optional_load_profile(electricity_solar_storage_file, "System to Load")
+        pv_to_batt = read_optional_load_profile(electricity_solar_storage_file, "System to Battery")
+        fallback_export = (pv_ac.astype(float) - pv_to_load.astype(float) - pv_to_batt.astype(float)).clip(lower=0.0)
+    except Exception:
+        fallback_export = pd.Series([0.0] * len(electricity_solar_storage))
+    electricity_solar_storage_export = read_optional_load_profile(
+        electricity_solar_storage_file, "PV to Grid (kWh)", fallback_series=fallback_export
+    )
 
     combined_df = pd.DataFrame({
         "timestamp": timestamp,
         "default.electricity.kwh": electricity_default,
         "default.gas.therms": gas_default_hourly,
+        # Imports (Grid→Load) for solar+storage
         "solarstorage.electricity.kwh": electricity_solar_storage,
-        "solarstorage.gas.therms": gas_solar_storage_hourly
+        # Exports (PV→Grid [+ Battery→Grid if enabled]; currently PV→Grid only)
+        "solarstorage.electricity.export.kwh": electricity_solar_storage_export,
+        "solarstorage.gas.therms": gas_solar_storage_hourly,
     }).dropna()
 
     output_file_path = os.path.join(base_output_dir, scenario, housing_type, county, f"{OUTPUT_FILE_NAME}_{county}.csv")

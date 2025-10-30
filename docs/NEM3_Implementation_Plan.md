@@ -295,3 +295,89 @@ Model governance and data provenance
 - Store import tariff tables and export ACC tables with `effective_on` metadata (YYYY‑MM‑DD) alongside the PDFs.
 - Pin the model year (e.g., 2025) and ensure tariff/ACC sources correspond to that year.
 - Add a small validation harness comparing one county’s bill to each IOU’s public estimate/calculator, where available.
+
+### Pinned Sources Manifest (example `sources.yaml`)
+
+Below is an example manifest you can commit to the repo (e.g., `docs/sources.yaml`) to lock model inputs to specific, verifiable documents. Update URLs/effective dates as needed for your model year.
+
+```yaml
+model_year: 2025
+
+cpuc:
+  nem3_decision:
+    id: D.22-12-056
+    proceeding: R.20-08-020
+    # Official PDF link for the published decision (verify on CPUC’s docket site):
+    pdf_url: "https://docs.cpuc.ca.gov/"  # replace with the specific PublishedDocs URL
+    overview_url: "https://www.cpuc.ca.gov"  # Net Billing Tariff overview/FAQ landing
+
+acc_exports:
+  # ACC-based hourly export values used for NBT export compensation
+  year: 2025
+  official_portal_url: "https://www.cpuc.ca.gov/industries-and-topics/electrical-energy/demand-side-management/avoided-cost-calculator"
+  tables:
+    pge:
+      local_path: data/nem3_export_rates/PGE_ACC_2025.csv
+      notes: "12x24 $/kWh table, local copy from ACC/NBT filings"
+    sce:
+      local_path: data/nem3_export_rates/SCE_ACC_2025.csv
+    sdge:
+      local_path: data/nem3_export_rates/SDGE_ACC_2025.csv
+
+retail_tariffs:
+  pge:
+    - plan: E-TOU-C
+      effective_on: 2025-02-01  # example; set to actual PDF effective date
+      pdf_url: "https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_E-TOU-C.pdf"
+    - plan: EV2-A
+      effective_on: 2025-02-01
+      pdf_url: "https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_EV2%20(Sch).pdf"
+    - plan: E-ELEC
+      effective_on: 2025-02-01
+      pdf_url: "https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_E-ELEC.pdf"
+  sce:
+    - plan: TOU-D-4-9PM
+      effective_on: 2025-02-01
+      landing_url: "https://www.sce.com/regulatory/tariff-books"
+      pdf_url: ""  # paste direct Schedule TOU-D PDF for the effective date
+    - plan: TOU-D-5-8PM
+      effective_on: 2025-02-01
+      landing_url: "https://www.sce.com/regulatory/tariff-books"
+      pdf_url: ""
+  sdge:
+    - plan: TOU-ELEC
+      effective_on: 2025-02-01
+      pdf_url: "https://www.sdge.com/sites/default/files/regulatory/2-1-25%20Schedule%20TOU-ELEC%20Total%20Rates%20Table.pdf"
+    - plan: TOU-DR1
+      effective_on: 2025-02-01
+      landing_url: "https://www.sdge.com/rates-and-regulations/current-and-effective-tariffs"
+      pdf_url: ""
+
+baselines_and_maps:
+  pge_baseline_overview: "https://www.pge.com/en/account/rate-plans/how-rates-work/baseline-allowance.html"
+  sce_baseline_region_map_pdf: "https://www.sce.com/sites/default/files/inline-files/Baseline_Region_Map.pdf"
+
+nem3_parameters:
+  # Non-bypassable charges portion of import rate (dollars per kWh)
+  nbc_dollars_per_kwh:
+    pge: 0.025   # placeholder; set per current filings
+    sce: 0.025
+    sdge: 0.025
+  fixed_charge_monthly:
+    pge: 10.00   # or 0 if modeled in plan tables
+    sce: 0.00    # SCE often has a daily basic charge in plan PDFs
+    sdge: 16.00  # TOU-ELEC fixed charge already in plan
+  minimum_bill_monthly:
+    pge: 10.00
+    sce: 10.00
+    sdge: 0.00
+  true_up_month: 12
+  nsc_dollars_per_kwh: 0.00  # NSC payout for leftover credits (often 0 for NBT)
+
+interconnection_and_eligibility:
+  rule_21_url: "https://www.cpuc.ca.gov"  # Electric Rule 21 landing page
+  paired_storage_guidance:
+    pge: "https://www.pge.com"   # link to PG&E NBT/paired storage guidance page
+    sce: "https://www.sce.com"
+    sdge: "https://www.sdge.com"
+```
