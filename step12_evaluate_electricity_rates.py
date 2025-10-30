@@ -272,24 +272,32 @@ def process_county_scenario_nem3(file_path, county, utility, selected_rate_plan)
 
     return annual_default, annual_solar_nem3
 
-def build_results_df(scenario, utility, annual_costs, annual_costs_solarstorage):
-    """
-    Creates a DataFrame with two rows: 
-    one for the default tariffs (row name = {scenario})
-    one for the solarstorage tariffs (row name = '{scenario}.solarstorage')
-    """
-    columns = [f"electricity.{utility}.{tariff}" for tariff in annual_costs.keys()]
-    df = pd.DataFrame(columns=columns, index=[scenario, f"{scenario}.solarstorage"])
+def build_results_df_with_variants(scenario: str, utility: str, *, retail_default: dict, retail_solar: dict, nem3_solar: dict | None = None) -> pd.DataFrame:
+    """Return DataFrame with two rows (<scenario>, <scenario>.solarstorage) and columns per plan variant.
 
-    # Default tarrifs
-    for tariff, cost in annual_costs.items():
-        col_name = f"electricity.{utility}.{tariff}"
-        df.loc[scenario, col_name] = cost
+    Columns written in this order to preserve legacy behavior where downstream readers pick the first numeric column:
+      1) electricity.<utility>.<plan>              (retail import)
+      2) electricity.<utility>.<plan>_NEM3        (with NEM3 credits for .solarstorage row only)
+    """
+    plan_names = list(retail_default.keys())
+    base_cols = [f"electricity.{utility}.{p}" for p in plan_names]
+    nem3_cols = [f"electricity.{utility}.{p}_NEM3" for p in plan_names] if nem3_solar else []
+    columns = base_cols + nem3_cols
+    idx = [scenario, f"{scenario}.solarstorage"]
+    df = pd.DataFrame(columns=columns, index=idx)
 
-    # Solarstorage tarrifs
-    for tariff, cost in annual_costs_solarstorage.items():
-        col_name = f"electricity.{utility}.{tariff}"
-        df.loc[f"{scenario}.solarstorage", col_name] = cost
+    # Default (no PV) retail
+    for plan, cost in retail_default.items():
+        df.loc[scenario, f"electricity.{utility}.{plan}"] = cost
+
+    # Solar+storage retail imports (no export credits)
+    for plan, cost in retail_solar.items():
+        df.loc[f"{scenario}.solarstorage", f"electricity.{utility}.{plan}"] = cost
+
+    # Solar+storage with NEM3 overlay (optional)
+    if nem3_solar:
+        for plan, cost in nem3_solar.items():
+            df.loc[f"{scenario}.solarstorage", f"electricity.{utility}.{plan}_NEM3"] = cost
 
     return df
 
@@ -358,19 +366,29 @@ def process(base_input_dir, base_output_dir, scenario, housing_type, counties, u
         
         log_kwargs = {}
         for rate_plan in rate_plans:
-            if use_nem3:
-                annual_costs, annual_costs_solarstorage = process_county_scenario_nem3(scenario_path, county, utility, rate_plan)
-            else:
-                # Process the county's scenario using the selected rate plan.
-                annual_costs = process_county_scenario(scenario_path, county, utility, rate_plan, "default")
-                annual_costs_solarstorage = process_county_scenario(scenario_path, county, utility, rate_plan, "solarstorage")
-            annual_costs_results = build_results_df(scenario, utility, annual_costs, annual_costs_solarstorage) #  utility)
+            # Always compute retail import-only costs for baseline and solarstorage
+            retail_default = process_county_scenario(scenario_path, county, utility, rate_plan, "default")
+            retail_solar = process_county_scenario(scenario_path, county, utility, rate_plan, "solarstorage")
+
+            # Compute NEM3 overlay for solarstorage (exports credited at ACC, NBCs applied)
+            # Note: This is computed regardless of 'use_nem3' so that we always emit a variant for comparison.
+            # The 'use_nem3' flag remains for CLI compatibility and can be used for logging/UI.
+            _, solar_nem3 = process_county_scenario_nem3(scenario_path, county, utility, rate_plan)
+
+            annual_costs_results = build_results_df_with_variants(
+                scenario,
+                utility,
+                retail_default=retail_default,
+                retail_solar=retail_solar,
+                nem3_solar=solar_nem3,
+            )
 
             results_df = update_df_with_results(results_df, annual_costs_results)
 
             log_kwargs.update({
-                f"annual_electricity_costs_{rate_plan}": to_number(annual_costs[rate_plan]),
-                f"annual_electricity_costs_solarstorage_{rate_plan}": to_number(annual_costs_solarstorage[rate_plan])
+                f"annual_electricity_costs_{rate_plan}": to_number(retail_default.get(rate_plan, 0.0)),
+                f"annual_electricity_costs_solarstorage_{rate_plan}": to_number(retail_solar.get(rate_plan, 0.0)),
+                f"annual_electricity_costs_solarstorage_{rate_plan}_NEM3": to_number(solar_nem3.get(rate_plan, 0.0)),
             })
 
         output_file_path = get_output_file_path(base_output_dir, scenario, housing_type, county, timestamp)
