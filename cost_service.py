@@ -145,7 +145,10 @@ class CostService:
             sizing = "EAC-optimal per county" if getattr(Step9, "USE_EAC_OPTIMAL_SIZING", False) else f"fraction of annual-match (PV_SIZE_FRACTION={getattr(Step9, 'PV_SIZE_FRACTION', 'n/a')})"
             batt = getattr(Step9, "BATTERY_CAPACITY_KWH", None)
             batt_str = f", default battery ≈{batt} kWh" if batt else ""
-            return f"Dispatch: {mode}; Sizing: {sizing}{batt_str}"
+            # Electricity plan preference summary
+            plans = sorted({v.get('electricity') for v in self.desired_rate_plans.values() if isinstance(v, dict) and v.get('electricity')})
+            plan_str = f"; Electricity plan preference: {', '.join(plans)}" if plans else ""
+            return f"Dispatch: {mode}; Sizing: {sizing}{batt_str}{plan_str}; Billing variant: NEM3 for with-solar"
         except Exception:
             return ""
 
@@ -178,6 +181,8 @@ class CostService:
                 self.counties,
                 incentive="full_incentives",
                 agg="mean",
+                electricity_plan_preference=list({v.get('electricity') for v in self.desired_rate_plans.values() if isinstance(v, dict) and v.get('electricity')}),
+                electricity_variant="nem3",
             )
             if not eac_df.empty:
                 # Compute totals for ranking
@@ -216,7 +221,16 @@ class CostService:
         try:
             pair = [s for s in ["baseline_ice_car", "baseline_ev_car"] if s in SCENARIOS]
             if len(pair) == 2:
-                eac19 = collect_eac_components(base_input_dir, self.housing_type, pair, self.counties, incentive="full_incentives", agg="mean")
+                eac19 = collect_eac_components(
+                    base_input_dir,
+                    self.housing_type,
+                    pair,
+                    self.counties,
+                    incentive="full_incentives",
+                    agg="mean",
+                    electricity_plan_preference=list({v.get('electricity') for v in self.desired_rate_plans.values() if isinstance(v, dict) and v.get('electricity')}),
+                    electricity_variant="nem3",
+                )
                 if not eac19.empty:
                     # Compute totals and difference (EV - ICE)
                     if "annual_bill_electric" in eac19.columns and "annual_bill_gas" in eac19.columns:
@@ -284,6 +298,8 @@ class CostService:
                 self.counties,
                 incentive="full_incentives",
                 agg="mean",
+                electricity_plan_preference=list({v.get('electricity') for v in self.desired_rate_plans.values() if isinstance(v, dict) and v.get('electricity')}),
+                electricity_variant="nem3",
             )
             no_df = collect_eac_no_pv(
                 base_input_dir,
