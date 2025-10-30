@@ -148,11 +148,75 @@ def _read_first_numeric_for_row(path: Optional[str], row_name: str) -> float:
         return 0.0
 
 
-def _annual_bill_parts(base_input_dir: str, scenario: str, housing_type: str, county_slug: str, with_solar: bool, timestamp: Optional[str] = None) -> tuple[float, float]:
+def _read_row_value_for_plan(
+    path: Optional[str],
+    row_name: str,
+    *,
+    plan_preference: Optional[Iterable[str]] = None,
+    variant: Optional[str] = None,
+) -> float:
+    """Return a row value for a specific electricity plan/variant; fallback to first numeric.
+
+    - plan_preference: ordered sequence of substrings to match within the plan token.
+    - variant: 'nem3' selects columns ending with '_NEM3'; 'retail' selects columns without that suffix.
+    """
+    if not path or not os.path.exists(path):
+        return 0.0
+    try:
+        df = pd.read_csv(path, index_col="scenario")
+        row = df.iloc[0] if row_name not in df.index else df.loc[row_name]
+        # Electricity-only columns
+        cols = [c for c in row.index if str(c).startswith("electricity.")]
+        if not cols:
+            return _read_first_numeric_for_row(path, row_name)
+        # Filter by variant
+        if variant:
+            v = str(variant).lower()
+            if v == "nem3":
+                cols = [c for c in cols if str(c).endswith("_NEM3")]
+            elif v == "retail":
+                cols = [c for c in cols if not str(c).endswith("_NEM3")]
+        # Filter by plan preference
+        if plan_preference:
+            prefs = list(plan_preference)
+            for pref in prefs:
+                sub = [c for c in cols if str(pref).lower() in str(c).lower()]
+                if sub:
+                    val = pd.to_numeric(row[sub[0]], errors="coerce")
+                    if pd.notna(val):
+                        return float(val)
+        # Fallback: first numeric among considered columns
+        for c in cols:
+            val = pd.to_numeric(row[c], errors="coerce")
+            if pd.notna(val):
+                return float(val)
+        # Last resort: first numeric anywhere in row
+        ser = pd.to_numeric(row, errors="coerce").dropna()
+        return float(ser.iloc[0]) if not ser.empty else 0.0
+    except Exception:
+        return 0.0
+
+
+def _annual_bill_parts(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+    with_solar: bool,
+    timestamp: Optional[str] = None,
+    *,
+    electricity_plan_preference: Optional[Iterable[str]] = None,
+    electricity_variant: Optional[str] = None,
+) -> tuple[float, float]:
     row = f"{scenario}.solarstorage" if with_solar else scenario
     e_path = _latest_electricity_csv(base_input_dir, scenario, housing_type, county_slug, timestamp=timestamp)
     g_path = _latest_gas_csv(base_input_dir, scenario, housing_type, county_slug, timestamp=timestamp)
-    e_val = _read_first_numeric_for_row(e_path, row)
+    e_val = _read_row_value_for_plan(
+        e_path,
+        row,
+        plan_preference=electricity_plan_preference,
+        variant=electricity_variant,
+    )
     g_val = _read_first_numeric_for_row(g_path, row)
     return e_val, g_val
 
@@ -628,6 +692,8 @@ def collect_eac_components(
     discount_rate: float = 0.07,
     agg: str = "mean",
     timestamp: Optional[str] = None,
+    electricity_plan_preference: Optional[Iterable[str]] = None,
+    electricity_variant: Optional[str] = None,
 ) -> pd.DataFrame:
     """Collect Equivalent Annual Cost components.
 
@@ -654,7 +720,16 @@ def collect_eac_components(
             capex_gas = 0.0
             vehicle_om = 0.0
             # Bills split into electricity + gas under with-solar variant
-            e_bill, g_bill = _annual_bill_parts(base_input_dir, scen, housing_type, slug, with_solar=True, timestamp=timestamp)
+            e_bill, g_bill = _annual_bill_parts(
+                base_input_dir,
+                scen,
+                housing_type,
+                slug,
+                with_solar=True,
+                timestamp=timestamp,
+                electricity_plan_preference=electricity_plan_preference,
+                electricity_variant=electricity_variant,
+            )
 
             # From capital ledger (annualize per appliance)
             if ledger is not None and not ledger.empty:
