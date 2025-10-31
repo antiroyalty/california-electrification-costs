@@ -693,7 +693,7 @@ def collect_eac_components(
     agg: str = "mean",
     timestamp: Optional[str] = None,
     electricity_plan_preference: Optional[Iterable[str]] = None,
-    electricity_variant: Optional[str] = None,
+    electricity_variant: Optional[str] = "nem3",
 ) -> pd.DataFrame:
     """Collect Equivalent Annual Cost components.
 
@@ -702,8 +702,14 @@ def collect_eac_components(
       - capex_storage (annualized)
       - capex_electric (annualized, excluding PV/storage)
       - capex_gas (annualized)
-      - annual_bill_with_solar
+      - annual_bill_with_solar (defaults to NEM 3.0 if available)
       - vehicle_om (ICE for baseline_ice_car; EV for full_electric_ev; else 0)
+
+    Parameters
+    - electricity_plan_preference: optional ordered list of plan tokens to match
+      (e.g., ["E-TOU-D", "TOU-D-4-9PM", "TOU-DR1"]).
+    - electricity_variant: billing variant for with-solar electricity bills.
+      Defaults to "nem3". Use "retail" to ignore export credits and use import-only.
     """
     inc = incentive.lower()
     county_slugs = [slugify_county_name(c) for c in counties]
