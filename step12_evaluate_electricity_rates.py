@@ -257,8 +257,9 @@ def process_county_scenario_nem3(file_path, county, utility, selected_rate_plan)
 
     # Solar+storage with NEM3 (imports at retail + exports credited at ACC)
     opts = default_options_for_utility(utility)
-    # Load county-specific ACC export table from NEM3/ Excel files.
-    export_table = get_export_rate_table_for_county(base_dir="NEM3", utility=utility, county_name_or_slug=county)
+    # Load county-specific ACC export table from data/NEM3 only (explicit location).
+    base_dir = os.path.join("data", "NEM3")
+    export_table = get_export_rate_table_for_county(base_dir=base_dir, utility=utility, county_name_or_slug=county)
 
     annual_solar_nem3 = calculate_nem3_annual_costs(
         ts,
