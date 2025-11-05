@@ -45,7 +45,7 @@ import contextlib
 import pandas as pd
 import subprocess
 
-from main_helpers import (
+from helpers.main_helpers import (
     get_counties,
     get_scenario_path,
     log,
@@ -57,7 +57,7 @@ from main_helpers import (
     slugify_county_name,
 )
 from helpers import log_profiles
-from step9_plotting_helper import plot_first_weeks
+from helpers.step9_plotting_helper import plot_first_weeks
 
 
 # I/O constants

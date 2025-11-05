@@ -21,10 +21,10 @@ import step13_combine_total_annual_costs as CombineTotalAnnualCosts
 import step14_build_capital_costs_lifetimes_incentives as BuildCapitalCostsLifetimesIncentives
 import step15_payback_periods as PaybackPeriods
 import step16_display_key_metrics_maps as DisplayKeyMetricsMaps
-from main_helpers import norcal_counties, socal_counties, central_counties
+from helpers.main_helpers import norcal_counties, socal_counties, central_counties
 
 # Comparison + EAC helpers (Steps 18–21)
-from plot_scenario_comparison_helper import (
+from helpers.plot_scenario_comparison_helper import (
     collect_eac_components,
     collect_eac_components_by_county,
     plot_eac_stacked_bar,
@@ -512,8 +512,9 @@ if __name__ == '__main__':
     print(f"Housing type: {housing_type}")
     print(f"Counties: {len(norcal_counties + central_counties + socal_counties)} total counties")
     print("-" * 60)
+    alameda_county = ["Alameda County"]
 
-    cost_service = CostService(scenario, housing_type, counties=norcal_counties + socal_counties + central_counties, rate_plans=rate_plans, input_dir=input_dir, output_dir=output_dir)
+    cost_service = CostService(scenario, housing_type, counties=alameda_county, rate_plans=rate_plans, input_dir=input_dir, output_dir=output_dir)
     cost_service.run()
     
     print("\nCost analysis completed successfully!")

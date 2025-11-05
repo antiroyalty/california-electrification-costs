@@ -14,7 +14,7 @@ import os
 import pandas as pd
 from typing import Dict, List, Tuple
 from dataclasses import dataclass
-from main_helpers import log, slugify_county_name, norcal_counties, socal_counties, central_counties
+from helpers.main_helpers import log, slugify_county_name, norcal_counties, socal_counties, central_counties
 from appliances.electric_base import IncentiveScenario
 from step14_build_capital_costs_lifetimes_incentives import process as get_capital_costs
 

@@ -28,7 +28,7 @@ Output:
 
 import os
 import pandas as pd
-from main_helpers import log, slugify_county_name, norcal_counties, socal_counties, central_counties, get_scenario_path
+from helpers.main_helpers import log, slugify_county_name, norcal_counties, socal_counties, central_counties, get_scenario_path
 from helpers.maps_helpers import get_latest_csv_file
 from helpers.utility_helpers import get_utility_for_county
 

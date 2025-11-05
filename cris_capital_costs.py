@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 import geopandas as gpd
-from main_helpers import norcal_counties, socal_counties, central_counties, log
+from helpers.main_helpers import norcal_counties, socal_counties, central_counties, log
 from helpers.capital_costs_helper import process_payback_analysis
 
 # CAPITAL_COSTS_CRIS - 2025 Capital Costs Data

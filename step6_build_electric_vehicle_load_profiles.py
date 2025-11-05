@@ -15,7 +15,7 @@ import requests
 import json
 from datetime import datetime
 import time
-from main_helpers import get_counties, get_scenario_path, log, slugify_county_name
+from helpers.main_helpers import get_counties, get_scenario_path, log, slugify_county_name
 
 def convert_excel_minute_to_hourly(excel_path):
     """

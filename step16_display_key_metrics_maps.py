@@ -27,7 +27,7 @@ from helpers.maps_helpers import (
     add_centroid_labels, add_map_title, export_geojson_and_html,
     get_latest_csv_file
 )
-from main_helpers import log, slugify_county_name, to_decimal_number, get_scenario_path, norcal_counties, central_counties, socal_counties
+from helpers.main_helpers import log, slugify_county_name, to_decimal_number, get_scenario_path, norcal_counties, central_counties, socal_counties
 from helpers.utility_helpers import get_utility_for_county
 
 
@@ -88,7 +88,7 @@ def load_solar_data(base_input_dir: str, scenario: str, housing_type: str, count
     """
     try:
         from helpers.capital_costs_helper import load_electrified_assets
-        from main_helpers import get_scenario_path, slugify_county_name
+        from helpers.main_helpers import get_scenario_path, slugify_county_name
         
         # Get the scenario path and load electrified assets
         scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)

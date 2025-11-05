@@ -8,7 +8,7 @@ a lifetime, and associated incentives at the state, federal, and utility level.
 
 import os
 import pandas as pd
-from main_helpers import log, slugify_county_name, get_scenario_path, norcal_counties, socal_counties, central_counties
+from helpers.main_helpers import log, slugify_county_name, get_scenario_path, norcal_counties, socal_counties, central_counties
 from helpers.capital_costs_helper import load_electrified_assets
 from scenarios import SCENARIOS
 from typing import Dict, Tuple

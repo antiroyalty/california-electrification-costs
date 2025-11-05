@@ -28,12 +28,12 @@ from typing import List
 
 import pandas as pd
 
-from plot_scenario_comparison_helper import (
+from helpers.plot_scenario_comparison_helper import (
     collect_eac_components,
     plot_eac_stacked_bar,
 )
 from scenarios import SCENARIOS
-from main_helpers import get_scenario_path
+from helpers.main_helpers import get_scenario_path
 
 
 def _git_short_sha() -> str:

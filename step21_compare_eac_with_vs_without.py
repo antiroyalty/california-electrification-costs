@@ -26,9 +26,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from scenarios import SCENARIOS
-from main_helpers import slugify_county_name, get_scenario_path
+from helpers.main_helpers import slugify_county_name, get_scenario_path
 
-from plot_scenario_comparison_helper import collect_eac_components
+from helpers.plot_scenario_comparison_helper import collect_eac_components
 from step20_no_solar_storage_electrification import collect_eac_no_pv
 
 
