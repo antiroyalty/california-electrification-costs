@@ -11,7 +11,7 @@ except Exception:
     sys.path.append(os.path.dirname(os.path.dirname(__file__)))
     from experiments.combined_sweep import run, CombinedSweepOptions  # type: ignore
 
-from main_helpers import norcal_counties, socal_counties, central_counties
+from helpers.main_helpers import norcal_counties, socal_counties, central_counties
 import step9_my_own_solar_storage as diy
 
 

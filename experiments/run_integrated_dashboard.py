@@ -22,13 +22,13 @@ import subprocess
 
 try:
     from scenarios import SCENARIOS
-    from main_helpers import norcal_counties, socal_counties, central_counties, slugify_county_name
+    from helpers.main_helpers import norcal_counties, socal_counties, central_counties, slugify_county_name
     import step9_my_own_solar_storage as diy
 except Exception:
     import sys as _sys, os as _os
     _sys.path.append(_os.path.dirname(_os.path.dirname(__file__)))
     from scenarios import SCENARIOS
-    from main_helpers import norcal_counties, socal_counties, central_counties, slugify_county_name
+    from helpers.main_helpers import norcal_counties, socal_counties, central_counties, slugify_county_name
     import step9_my_own_solar_storage as diy
 
 # Reuse sweep implementations and their option types

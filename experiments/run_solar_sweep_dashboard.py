@@ -31,7 +31,7 @@ except Exception:
     from experiments.solar_size_sweep import run, SweepOptions  # type: ignore
 
 from scenarios import SCENARIOS
-from main_helpers import norcal_counties, socal_counties, central_counties, slugify_county_name
+from helpers.main_helpers import norcal_counties, socal_counties, central_counties, slugify_county_name
 import step9_my_own_solar_storage as diy
 
 

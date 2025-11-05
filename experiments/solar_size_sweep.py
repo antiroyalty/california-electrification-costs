@@ -24,7 +24,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-from main_helpers import slugify_county_name, get_scenario_path, get_counties
+from helpers.main_helpers import slugify_county_name, get_scenario_path, get_counties
 
 # Reuse PV + dispatch implementation from Step 9 DIY
 import step9_my_own_solar_storage as diy
@@ -560,7 +560,7 @@ def run_for_county(
             totals_base = _compute_bill_for_fraction(exp_scen_root, scenario, housing_type, [county])
             # Read back the total annual bill if available
             try:
-                from plot_scenario_comparison_helper import (
+                from helpers.plot_scenario_comparison_helper import (
                     _latest_totals_csv,
                     _latest_electricity_csv,
                     _latest_gas_csv,
