@@ -6,7 +6,7 @@ to enable accurate cost calculations for ICE vehicles in different California co
 """
 
 from typing import Dict, Optional
-from main_helpers import slugify_county_name
+from helpers.main_helpers import slugify_county_name
 
 # County-specific gasoline costs in dollars per gallon
 # Data should be updated regularly to reflect current market conditions

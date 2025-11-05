@@ -1,5 +1,5 @@
 
-from main_helpers import slugify_county_name
+from helpers.main_helpers import slugify_county_name
 
 
 full_pge_counties = [ # https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_MAPS_Service%20Area%20Map.pdf

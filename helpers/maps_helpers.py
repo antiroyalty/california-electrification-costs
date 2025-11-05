@@ -6,7 +6,7 @@ from datetime import datetime
 import pandas as pd
 import folium
 from typing import List, Optional, Dict, Any
-from main_helpers import to_decimal_number, log
+from helpers.main_helpers import to_decimal_number, log
 
 def initialize_map():
     url = "https://www2.census.gov/geo/tiger/GENZ2018/shp/cb_2018_us_county_20m.zip"
