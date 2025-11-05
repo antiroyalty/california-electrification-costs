@@ -26,10 +26,12 @@ from main_helpers import norcal_counties, socal_counties, central_counties
 # Comparison + EAC helpers (Steps 18–21)
 from plot_scenario_comparison_helper import (
     collect_eac_components,
+    collect_eac_components_by_county,
     plot_eac_stacked_bar,
 )
 from step20_no_solar_storage_electrification import (
     collect_eac_no_pv,
+    collect_eac_no_pv_by_county,
     plot_eac_no_pv_stacked_bar,
 )
 from step21_compare_eac_with_vs_without import plot_grouped_eac
@@ -211,6 +213,29 @@ class CostService:
                 for _, r in top.iterrows():
                     print(f"  {r['scenario']}: ${r['total_eac']:.0f}/yr")
                 print(f"Saved EAC stacked bar: {os.path.abspath(png18)}")
+
+                # Save per-county tidy EAC tables for deeper analysis (NEM3 and retail).
+                plan_pref = list({v.get('electricity') for v in self.desired_rate_plans.values() if isinstance(v, dict) and v.get('electricity')})
+                by_cty_nem3 = collect_eac_components_by_county(
+                    base_input_dir,
+                    self.housing_type,
+                    scenarios_18,
+                    self.counties,
+                    incentive="full_incentives",
+                    electricity_plan_preference=plan_pref,
+                    electricity_variant="nem3",
+                )
+                by_cty_retail = collect_eac_components_by_county(
+                    base_input_dir,
+                    self.housing_type,
+                    scenarios_18,
+                    self.counties,
+                    incentive="full_incentives",
+                    electricity_plan_preference=plan_pref,
+                    electricity_variant="retail",
+                )
+                by_cty_nem3.to_csv(os.path.join(output_dir, f"step18_eac_by_county_nem3_g{sha}.csv"), index=False)
+                by_cty_retail.to_csv(os.path.join(output_dir, f"step18_eac_by_county_retail_g{sha}.csv"), index=False)
             else:
                 print("Cross-scenario EAC: no data available (skipping plot)")
         except Exception as err:
@@ -256,6 +281,29 @@ class CostService:
                     except Exception:
                         pass
                     print(f"Saved EV vs ICE EAC: {os.path.abspath(png19)}")
+
+                    # Per-county EV vs ICE deltas (NEM3 variant)
+                    plan_pref = list({v.get('electricity') for v in self.desired_rate_plans.values() if isinstance(v, dict) and v.get('electricity')})
+                    by_cty = collect_eac_components_by_county(
+                        base_input_dir,
+                        self.housing_type,
+                        pair,
+                        self.counties,
+                        incentive="full_incentives",
+                        electricity_plan_preference=plan_pref,
+                        electricity_variant="nem3",
+                    )
+                    if not by_cty.empty:
+                        by_cty = by_cty.copy()
+                        by_cty["total_eac"] = (
+                            by_cty[["capex_pv","capex_storage","capex_electric","capex_gas","vehicle_om"]].sum(axis=1)
+                            + by_cty["annual_bill_electric"].fillna(0) + by_cty["annual_bill_gas"].fillna(0)
+                        )
+                        a = by_cty[by_cty["scenario"] == pair[0]][["county_slug","total_eac"]].rename(columns={"total_eac": f"{pair[0]}_total"})
+                        b = by_cty[by_cty["scenario"] == pair[1]][["county_slug","total_eac"]].rename(columns={"total_eac": f"{pair[1]}_total"})
+                        m = a.merge(b, on="county_slug", how="inner")
+                        m["delta_ev_minus_ice"] = m[f"{pair[1]}_total"] - m[f"{pair[0]}_total"]
+                        m.to_csv(os.path.join(output_dir, f"step19_ev_vs_ice_by_county_g{sha}.csv"), index=False)
                 else:
                     print("Two-scenario EAC: no data available (skipping)")
             else:
@@ -362,6 +410,42 @@ class CostService:
                 verdict = "LOWER" if delta < 0 else "HIGHER"
                 print(f"With PV+storage total EAC is ${abs(delta):.0f}/yr ({abs(pct):.1f}%) {verdict} than electrification-only for {self.scenario}.")
                 print(f"Saved with-vs-without EAC: {os.path.abspath(png21)}")
+
+                # Per-county with-vs-without deltas for this scenario (tidy CSV)
+                plan_pref = list({v.get('electricity') for v in self.desired_rate_plans.values() if isinstance(v, dict) and v.get('electricity')})
+                with_by_cty = collect_eac_components_by_county(
+                    base_input_dir,
+                    self.housing_type,
+                    [self.scenario],
+                    self.counties,
+                    incentive="full_incentives",
+                    electricity_plan_preference=plan_pref,
+                    electricity_variant="nem3",
+                )
+                no_by_cty = collect_eac_no_pv_by_county(
+                    base_input_dir,
+                    self.housing_type,
+                    [self.scenario],
+                    self.counties,
+                    incentive="full_incentives",
+                    discount_rate=0.07,
+                )
+                if not with_by_cty.empty and not no_by_cty.empty:
+                    # Compute totals and deltas
+                    with_by_cty = with_by_cty.copy()
+                    with_by_cty["total_eac"] = (
+                        with_by_cty[["capex_pv","capex_storage","capex_electric","capex_gas","vehicle_om"]].sum(axis=1)
+                        + with_by_cty["annual_bill_electric"].fillna(0) + with_by_cty["annual_bill_gas"].fillna(0)
+                    )
+                    no_by_cty = no_by_cty.copy()
+                    no_by_cty["total_eac_no_pv"] = (
+                        no_by_cty[["capex_electric","capex_gas","vehicle_om"]].sum(axis=1)
+                        + no_by_cty["annual_bill_electric"].fillna(0) + no_by_cty["annual_bill_gas"].fillna(0)
+                    )
+                    merged_cty = with_by_cty.merge(no_by_cty[["scenario","county_slug","total_eac_no_pv"]], on=["scenario","county_slug"], how="inner")
+                    merged_cty["delta_with_minus_without"] = merged_cty["total_eac"] - merged_cty["total_eac_no_pv"]
+                    merged_cty["delta_pct"] = (merged_cty["delta_with_minus_without"] / merged_cty["total_eac_no_pv"]).replace([pd.NA, float('inf'), float('-inf')], 0.0) * 100.0
+                    merged_cty.to_csv(os.path.join(output_dir, f"step21_with_vs_without_by_county_g{sha}.csv"), index=False)
             else:
                 print("With-vs-Without EAC: insufficient data (skipping)")
         except Exception as err:

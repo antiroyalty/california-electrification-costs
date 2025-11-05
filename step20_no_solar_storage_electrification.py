@@ -196,6 +196,83 @@ def collect_eac_no_pv(
     return pd.DataFrame(out_rows)
 
 
+def collect_eac_no_pv_by_county(
+    base_input_dir: str,
+    housing_type: str,
+    scenarios: Iterable[str],
+    counties: Iterable[str],
+    *,
+    incentive: str = "full_incentives",
+    discount_rate: float = 0.07,
+) -> pd.DataFrame:
+    """Per-county EAC components WITHOUT PV/storage for each scenario.
+
+    Columns per row: scenario, county_slug, capex_electric, capex_gas, vehicle_om,
+                     annual_bill_electric, annual_bill_gas
+    """
+    inc = (incentive or "").lower()
+    county_slugs = [slugify_county_name(c) for c in counties]
+    rows: List[Dict] = []
+    for scen in scenarios:
+        ledger = _read_capital_ledger(base_input_dir, scen, housing_type)
+        for slug in county_slugs:
+            capex_electric = 0.0
+            capex_gas = 0.0
+            vehicle_om = 0.0
+            e_bill = 0.0
+            g_bill = 0.0
+
+            total_bill = _read_totals_cost_default(base_input_dir, scen, housing_type, slug)
+            util = get_utility_for_county(slug)
+            if util and str(util).upper() in ("PG&E", "PGE"):
+                e_bill, g_bill = total_bill, 0.0
+            else:
+                e_bill, g_bill = total_bill, 0.0
+
+            if ledger is not None and not ledger.empty:
+                df = ledger.copy()
+                if 'county_slug' in df.columns:
+                    df = df[df['county_slug'].str.lower() == slug]
+                if 'incentive_scenario' in df.columns:
+                    df['incentive_scenario'] = df['incentive_scenario'].str.lower()
+                    df = df[df['incentive_scenario'] == inc]
+                for _, r in df.iterrows():
+                    try:
+                        lt = float(r.get('lifetime_years', 15) or 15)
+                        c = _crf(discount_rate, lt)
+                        cat = r.get('appliance_category')
+                        typ = r.get('appliance_type')
+                        if cat == 'electric' and typ not in ('solar', 'storage'):
+                            capex_electric += float(r.get('net_cost', 0.0)) * c
+                        if cat == 'gas':
+                            capex_gas += float(r.get('base_cost', 0.0)) * c
+                    except Exception:
+                        continue
+                try:
+                    adders = vehicle_annual_adders_from_ledger(df)
+                    if slug in adders.index:
+                        ev_val = float(adders.loc[slug, 'ev_operating']) if 'ev_operating' in adders.columns else 0.0
+                        ice_val = float(adders.loc[slug, 'ice_operating']) if 'ice_operating' in adders.columns else 0.0
+                        scen_l = (scen or '').lower()
+                        if ('ev' in scen_l) or (ev_val > 0):
+                            vehicle_om += ev_val
+                        if ('ice' in scen_l) or (ice_val > 0 and 'ev' not in scen_l):
+                            vehicle_om += ice_val
+                except Exception:
+                    pass
+
+            rows.append({
+                'scenario': scen,
+                'county_slug': slug,
+                'capex_electric': capex_electric,
+                'capex_gas': capex_gas,
+                'vehicle_om': vehicle_om,
+                'annual_bill_electric': e_bill,
+                'annual_bill_gas': g_bill,
+            })
+    return pd.DataFrame(rows)
+
+
 def plot_eac_no_pv_stacked_bar(df: pd.DataFrame, scenario_order: Optional[List[str]] = None, title: str = "EAC (No Solar + Storage) by Scenario") -> plt.Figure:
     if df.empty:
         fig, ax = plt.subplots(figsize=(8, 4))
