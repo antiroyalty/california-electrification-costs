@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 
-from main_helpers import get_scenario_path, get_counties, log, to_number
+from helpers.main_helpers import get_scenario_path, get_counties, log, to_number
 
 # ResStock EULP timestamps are in fixed EST (UTC-5, no DST).
 TZ_SOURCE_FIXED_EST = 'Etc/GMT+5'            # POSIX sign: +5 == UTC-5

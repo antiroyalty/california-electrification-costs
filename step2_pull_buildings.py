@@ -3,7 +3,7 @@ import pandas as pd
 import boto3
 from botocore.client import Config
 from botocore import UNSIGNED
-from main_helpers import get_scenario_path, get_counties, log, norcal_counties, socal_counties, central_counties
+from helpers.main_helpers import get_scenario_path, get_counties, log, norcal_counties, socal_counties, central_counties
 
 s3 = boto3.client('s3', config=Config(signature_version=UNSIGNED))
 S3_PREFIX = "nrel-pds-building-stock/end-use-load-profiles-for-us-building-stock/2024/resstock_amy2018_release_2/timeseries_individual_buildings/by_state/upgrade=0/state=CA/"

@@ -40,7 +40,7 @@ import numpy as np
 import PySAM.Pvsamv1 as Pvsamv1
 import PySAM.ResourceTools as ResourceTools
 
-from main_helpers import (
+from helpers.main_helpers import (
     get_counties,
     get_scenario_path,
     log,
@@ -51,7 +51,7 @@ from main_helpers import (
     socal_counties,
 )
 from helpers import log_profiles
-from step9_plotting_helper import plot_first_weeks
+from helpers.step9_plotting_helper import plot_first_weeks
 
 
 # Input/output constants (kept consistent with other step9 files)

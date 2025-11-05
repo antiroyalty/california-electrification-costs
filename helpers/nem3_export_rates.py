@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 import os
 import pandas as pd
-from main_helpers import slugify_county_name
+from helpers.main_helpers import slugify_county_name
 
 
 def _zeros_table() -> Dict[int, List[float]]:

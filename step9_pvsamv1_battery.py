@@ -43,11 +43,11 @@ import subprocess
 
 import PySAM.Pvsamv1 as Pvsamv1
 import PySAM.ResourceTools as ResourceTools
-from step9_plotting_helper import plot_first_weeks
+from helpers.step9_plotting_helper import plot_first_weeks
 
 # Use project slug rules for county folder names
 try:
-    from main_helpers import slugify_county_name
+    from helpers.main_helpers import slugify_county_name
 except Exception:
     def slugify_county_name(name: str) -> str:
         return name.lower().replace("county", "").strip().replace(" ", "-")
@@ -2082,7 +2082,7 @@ def process(base_input_dir: str, base_output_dir: str, scenario: str, housing_ty
     
     # Import required helpers to get county list if needed
     try:
-        from main_helpers import get_counties, get_scenario_path
+        from helpers.main_helpers import get_counties, get_scenario_path
         
         # Get counties to process
         if counties is None:

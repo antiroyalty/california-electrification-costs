@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from main_helpers import slugify_county_name, get_scenario_path, get_counties
+from helpers.main_helpers import slugify_county_name, get_scenario_path, get_counties
 
 # Reuse Step 9 (DIY) PV + dispatch implementation
 import step9_my_own_solar_storage as diy
@@ -417,7 +417,7 @@ def run_for_county(
             _compute_bill(exp_scen_root, scenario, housing_type, [county])
             # Try to read the bill back into row (totals and split E/G)
             try:
-                from plot_scenario_comparison_helper import (
+                from helpers.plot_scenario_comparison_helper import (
                     _latest_totals_csv,
                     _latest_electricity_csv,
                     _latest_gas_csv,

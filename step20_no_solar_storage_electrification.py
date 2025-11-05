@@ -29,14 +29,14 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from main_helpers import slugify_county_name, get_scenario_path
+from helpers.main_helpers import slugify_county_name, get_scenario_path
 from capital_cost_map_builder import LIFETIMES
 from step15_payback_periods import vehicle_annual_adders_from_ledger
 from scenarios import SCENARIOS
 
 try:
     # Helper to find latest totals CSV per county
-    from plot_scenario_comparison_helper import _latest_totals_csv
+    from helpers.plot_scenario_comparison_helper import _latest_totals_csv
 except Exception:
     _latest_totals_csv = None
 
@@ -128,7 +128,7 @@ def collect_eac_no_pv(
             vehicle_om = 0.0
             # Split default (no PV/storage) bills into electric + gas
             try:
-                from plot_scenario_comparison_helper import _annual_bill_parts as _bill_parts  # reuse helper
+                from helpers.plot_scenario_comparison_helper import _annual_bill_parts as _bill_parts  # reuse helper
                 e_bill, g_bill = _bill_parts(base_input_dir, scen, housing_type, slug, with_solar=False)
             except Exception:
                 # Fallback to totals if helper import fails

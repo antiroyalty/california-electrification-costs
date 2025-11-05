@@ -28,7 +28,7 @@ from typing import List, Set
 
 import pandas as pd
 
-from plot_scenario_comparison_helper import (
+from helpers.plot_scenario_comparison_helper import (
     collect_payback_with_solar,
     plot_payback_dotline,
     collect_kwh_flows,
@@ -41,7 +41,7 @@ from plot_scenario_comparison_helper import (
     plot_pv_size_bar,
 )
 
-from main_helpers import get_scenario_path
+from helpers.main_helpers import get_scenario_path
 from scenarios import SCENARIOS
 
 

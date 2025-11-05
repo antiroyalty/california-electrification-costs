@@ -6,7 +6,7 @@ import pandas as pd
 import statistics
 import json
 
-from main_helpers import get_counties, get_scenario_path, log, format_load_profile, to_decimal_number, norcal_counties, central_counties, socal_counties
+from helpers.main_helpers import get_counties, get_scenario_path, log, format_load_profile, to_decimal_number, norcal_counties, central_counties, socal_counties
 
 # LOADPROFILE_FILE_PREFIX = "electricity_loads"
 LOADPROFILE_FILE_PREFIX = "combined_profiles"

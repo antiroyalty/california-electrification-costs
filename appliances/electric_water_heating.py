@@ -2,7 +2,7 @@ from typing import Dict, Optional
 import os
 import pandas as pd
 from appliances.electric_base import ElectricAppliance, IncentiveScenario
-from main_helpers import slugify_county_name
+from helpers.main_helpers import slugify_county_name
 
 class ElectricWaterHeatingAppliance(ElectricAppliance):
     """

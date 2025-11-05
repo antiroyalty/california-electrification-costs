@@ -1,4 +1,4 @@
-from main_helpers import slugify_county_name
+from helpers.main_helpers import slugify_county_name
 
 # from dataclasses import dataclass
 

@@ -5,7 +5,7 @@ import folium
 import numpy as np
 
 from helpers.maps_helpers import get_latest_csv_file, add_choropleth_layer, add_labels_and_title, load_cost_data
-from main_helpers import to_number, to_decimal_number
+from helpers.main_helpers import to_number, to_decimal_number
 from helpers.utility_helpers import get_utility_for_county
 
 LIFETIMES = {

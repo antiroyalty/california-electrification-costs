@@ -1,0 +1,32 @@
+{
+    "files.exclude": {
+        "**/data/**": true,
+        "**/visualizations/**": true,
+        "**/analysis_results/**": true,
+        "**/wip-outputs/**": true,
+        "**/nrel_tempo_ca_2024/**": true,
+        "**/cb_2018_us_county_20m/**": true,
+        "**/__pycache__/**": true,
+        "**/*.pyc": true,
+        "**/.ipynb_checkpoints/**": true
+    },
+    "search.exclude": {
+        "**/data/**": true,
+        "**/visualizations/**": true,
+        "**/analysis_results/**": true,
+        "**/wip-outputs/**": true,
+        "**/nrel_tempo_ca_2024/**": true,
+        "**/cb_2018_us_county_20m/**": true,
+        "**/__pycache__/**": true,
+        "**/*.pyc": true,
+        "**/.ipynb_checkpoints/**": true
+    },
+    "files.watcherExclude": {
+        "**/data/**": true,
+        "**/visualizations/**": true,
+        "**/analysis_results/**": true,
+        "**/wip-outputs/**": true,
+        "**/nrel_tempo_ca_2024/**": true,
+        "**/__pycache__/**": true
+    }
+}

@@ -3,7 +3,7 @@ import os
 import pandas as pd
 import numpy as np
 
-from main_helpers import get_counties, get_scenario_path, log, to_number
+from helpers.main_helpers import get_counties, get_scenario_path, log, to_number
 
 # TODO: Make this a Monte Carlo simulation, trying all values in range
 # TODO: Add climate-dependent (county-dependent?) COP values

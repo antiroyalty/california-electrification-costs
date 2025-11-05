@@ -5,7 +5,7 @@ from geopy.geocoders import Nominatim
 from dotenv import load_dotenv
 from io import StringIO
 
-from main_helpers import slugify_county_name, get_counties, get_scenario_path, log, norcal_counties, central_counties, socal_counties
+from helpers.main_helpers import slugify_county_name, get_counties, get_scenario_path, log, norcal_counties, central_counties, socal_counties
 
 FILE_PREFIX = "weather_TMY"
 NREL_BASE_URL = "https://developer.nrel.gov/api/solar/nsrdb_psm3_download.csv"
