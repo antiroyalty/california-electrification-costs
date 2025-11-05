@@ -148,11 +148,75 @@ def _read_first_numeric_for_row(path: Optional[str], row_name: str) -> float:
         return 0.0
 
 
-def _annual_bill_parts(base_input_dir: str, scenario: str, housing_type: str, county_slug: str, with_solar: bool, timestamp: Optional[str] = None) -> tuple[float, float]:
+def _read_row_value_for_plan(
+    path: Optional[str],
+    row_name: str,
+    *,
+    plan_preference: Optional[Iterable[str]] = None,
+    variant: Optional[str] = None,
+) -> float:
+    """Return a row value for a specific electricity plan/variant; fallback to first numeric.
+
+    - plan_preference: ordered sequence of substrings to match within the plan token.
+    - variant: 'nem3' selects columns ending with '_NEM3'; 'retail' selects columns without that suffix.
+    """
+    if not path or not os.path.exists(path):
+        return 0.0
+    try:
+        df = pd.read_csv(path, index_col="scenario")
+        row = df.iloc[0] if row_name not in df.index else df.loc[row_name]
+        # Electricity-only columns
+        cols = [c for c in row.index if str(c).startswith("electricity.")]
+        if not cols:
+            return _read_first_numeric_for_row(path, row_name)
+        # Filter by variant
+        if variant:
+            v = str(variant).lower()
+            if v == "nem3":
+                cols = [c for c in cols if str(c).endswith("_NEM3")]
+            elif v == "retail":
+                cols = [c for c in cols if not str(c).endswith("_NEM3")]
+        # Filter by plan preference
+        if plan_preference:
+            prefs = list(plan_preference)
+            for pref in prefs:
+                sub = [c for c in cols if str(pref).lower() in str(c).lower()]
+                if sub:
+                    val = pd.to_numeric(row[sub[0]], errors="coerce")
+                    if pd.notna(val):
+                        return float(val)
+        # Fallback: first numeric among considered columns
+        for c in cols:
+            val = pd.to_numeric(row[c], errors="coerce")
+            if pd.notna(val):
+                return float(val)
+        # Last resort: first numeric anywhere in row
+        ser = pd.to_numeric(row, errors="coerce").dropna()
+        return float(ser.iloc[0]) if not ser.empty else 0.0
+    except Exception:
+        return 0.0
+
+
+def _annual_bill_parts(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+    with_solar: bool,
+    timestamp: Optional[str] = None,
+    *,
+    electricity_plan_preference: Optional[Iterable[str]] = None,
+    electricity_variant: Optional[str] = None,
+) -> tuple[float, float]:
     row = f"{scenario}.solarstorage" if with_solar else scenario
     e_path = _latest_electricity_csv(base_input_dir, scenario, housing_type, county_slug, timestamp=timestamp)
     g_path = _latest_gas_csv(base_input_dir, scenario, housing_type, county_slug, timestamp=timestamp)
-    e_val = _read_first_numeric_for_row(e_path, row)
+    e_val = _read_row_value_for_plan(
+        e_path,
+        row,
+        plan_preference=electricity_plan_preference,
+        variant=electricity_variant,
+    )
     g_val = _read_first_numeric_for_row(g_path, row)
     return e_val, g_val
 
@@ -628,6 +692,8 @@ def collect_eac_components(
     discount_rate: float = 0.07,
     agg: str = "mean",
     timestamp: Optional[str] = None,
+    electricity_plan_preference: Optional[Iterable[str]] = None,
+    electricity_variant: Optional[str] = "nem3",
 ) -> pd.DataFrame:
     """Collect Equivalent Annual Cost components.
 
@@ -636,8 +702,14 @@ def collect_eac_components(
       - capex_storage (annualized)
       - capex_electric (annualized, excluding PV/storage)
       - capex_gas (annualized)
-      - annual_bill_with_solar
+      - annual_bill_with_solar (defaults to NEM 3.0 if available)
       - vehicle_om (ICE for baseline_ice_car; EV for full_electric_ev; else 0)
+
+    Parameters
+    - electricity_plan_preference: optional ordered list of plan tokens to match
+      (e.g., ["E-TOU-D", "TOU-D-4-9PM", "TOU-DR1"]).
+    - electricity_variant: billing variant for with-solar electricity bills.
+      Defaults to "nem3". Use "retail" to ignore export credits and use import-only.
     """
     inc = incentive.lower()
     county_slugs = [slugify_county_name(c) for c in counties]
@@ -654,7 +726,16 @@ def collect_eac_components(
             capex_gas = 0.0
             vehicle_om = 0.0
             # Bills split into electricity + gas under with-solar variant
-            e_bill, g_bill = _annual_bill_parts(base_input_dir, scen, housing_type, slug, with_solar=True, timestamp=timestamp)
+            e_bill, g_bill = _annual_bill_parts(
+                base_input_dir,
+                scen,
+                housing_type,
+                slug,
+                with_solar=True,
+                timestamp=timestamp,
+                electricity_plan_preference=electricity_plan_preference,
+                electricity_variant=electricity_variant,
+            )
 
             # From capital ledger (annualize per appliance)
             if ledger is not None and not ledger.empty:
@@ -742,6 +823,115 @@ def collect_eac_components(
         rows.append(agg_df.iloc[0].to_dict())
 
     return pd.DataFrame(rows)
+
+
+def collect_eac_components_by_county(
+    base_input_dir: str,
+    housing_type: str,
+    scenarios: Iterable[str],
+    counties: Iterable[str],
+    incentive: str = "full_incentives",
+    discount_rate: float = 0.07,
+    timestamp: Optional[str] = None,
+    electricity_plan_preference: Optional[Iterable[str]] = None,
+    electricity_variant: Optional[str] = "nem3",
+) -> pd.DataFrame:
+    """Return per-county Equivalent Annual Cost components for each scenario.
+
+    Columns:
+      scenario, county_slug, capex_pv, capex_storage, capex_electric, capex_gas,
+      annual_bill_electric, annual_bill_gas, vehicle_om
+
+    Notes
+      - Uses the same accounting as collect_eac_components but does not aggregate.
+      - electricity_variant defaults to 'nem3' for with-solar electricity bills.
+    """
+    inc = (incentive or "").lower()
+    county_slugs = [slugify_county_name(c) for c in counties]
+    out_rows: List[Dict] = []
+    for scen in scenarios:
+        ledger = _read_capital_ledger(base_input_dir, scen, housing_type)
+        pvsum = _read_capital_summary_with_pv(base_input_dir, scen, housing_type)
+        for slug in county_slugs:
+            capex_pv = 0.0
+            capex_storage = 0.0
+            capex_electric = 0.0
+            capex_gas = 0.0
+            vehicle_om = 0.0
+            e_bill, g_bill = _annual_bill_parts(
+                base_input_dir,
+                scen,
+                housing_type,
+                slug,
+                with_solar=True,
+                timestamp=timestamp,
+                electricity_plan_preference=electricity_plan_preference,
+                electricity_variant=electricity_variant,
+            )
+
+            if ledger is not None and not ledger.empty:
+                df = ledger.copy()
+                if 'county_slug' in df.columns:
+                    df = df[df['county_slug'].str.lower() == slug]
+                if 'incentive_scenario' in df.columns:
+                    df['incentive_scenario'] = df['incentive_scenario'].str.lower()
+                    df = df[df['incentive_scenario'] == inc]
+                if not df.empty:
+                    for _, r in df.iterrows():
+                        try:
+                            lt = float(r.get('lifetime_years', 15) or 15)
+                            c = _crf(discount_rate, lt)
+                            if r.get('appliance_category') == 'electric' and r.get('appliance_type') not in ('solar', 'storage'):
+                                capex_electric += float(r.get('net_cost', 0.0)) * c
+                            if r.get('appliance_category') == 'gas':
+                                capex_gas += float(r.get('base_cost', 0.0)) * c
+                        except Exception:
+                            continue
+                try:
+                    adders = vehicle_annual_adders_from_ledger(df)
+                    if slug in adders.index:
+                        ev_val = float(adders.loc[slug, 'ev_operating']) if 'ev_operating' in adders.columns else 0.0
+                        ice_val = float(adders.loc[slug, 'ice_operating']) if 'ice_operating' in adders.columns else 0.0
+                        scen_l = (scen or '').lower()
+                        if ('ev' in scen_l) or (ev_val > 0):
+                            vehicle_om += ev_val
+                        if ('ice' in scen_l) or (ice_val > 0 and 'ev' not in scen_l):
+                            vehicle_om += ice_val
+                except Exception:
+                    pass
+
+            if pvsum is not None and not pvsum.empty:
+                row = pvsum[pvsum['county_slug'].str.lower() == slug]
+                if not row.empty:
+                    pv_capex = float(row.iloc[0].get('pv_capex', 0.0))
+                    st_capex = float(row.iloc[0].get('storage_capex', 0.0))
+                    pv_inc_full = float(row.iloc[0].get('pv_incentives_full', 0.0)) if 'pv_incentives_full' in row.columns else 0.0
+                    st_inc_full = float(row.iloc[0].get('storage_incentives_full', 0.0)) if 'storage_incentives_full' in row.columns else 0.0
+                    if inc == 'full_incentives':
+                        pv_net = pv_capex - pv_inc_full
+                        st_net = st_capex - st_inc_full
+                    elif inc == 'half_incentives':
+                        pv_net = pv_capex - (pv_inc_full * 0.5)
+                        st_net = st_capex - (st_inc_full * 0.5)
+                    else:
+                        pv_net = pv_capex
+                        st_net = st_capex
+                    capex_pv += pv_net * _crf(discount_rate, LIFETIMES.get('solar', 25))
+                    capex_storage += st_net * _crf(discount_rate, LIFETIMES.get('storage', 15))
+
+            out_rows.append({
+                'scenario': scen,
+                'county_slug': slug,
+                'capex_pv': capex_pv,
+                'capex_storage': capex_storage,
+                'capex_electric': capex_electric,
+                'capex_gas': capex_gas,
+                'annual_bill_electric': e_bill,
+                'annual_bill_gas': g_bill,
+                'vehicle_om': vehicle_om,
+            })
+
+    return pd.DataFrame(out_rows)
 
 
 def plot_eac_stacked_bar(
