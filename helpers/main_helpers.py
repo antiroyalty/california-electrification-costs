@@ -1,6 +1,7 @@
 # helpers.py
 import os
 import pandas as pd
+import subprocess
 from datetime import datetime
 
 LOADPROFILES = "loadprofiles" # folder name where all load profiles are stored
@@ -138,6 +139,17 @@ def to_decimal_number(number):
         return f"{number:,.2f}"
     except (TypeError, ValueError):
         return "N/A"
+
+def git_short_sha() -> str:
+    """Return the short git SHA for this repo, or 'nogit' if unavailable."""
+    try:
+        sha = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"], 
+            stderr=subprocess.DEVNULL
+        ).decode().strip()
+        return sha or "nogit"
+    except Exception:
+        return "nogit"
 
 
 def format_load_profile(load_profile):
