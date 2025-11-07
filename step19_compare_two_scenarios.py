@@ -33,15 +33,9 @@ from helpers.plot_scenario_comparison_helper import (
     plot_eac_stacked_bar,
 )
 from scenarios import SCENARIOS
-from helpers.main_helpers import get_scenario_path
+from helpers.main_helpers import get_scenario_path, git_short_sha
 
 
-def _git_short_sha() -> str:
-    try:
-        sha = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL).decode().strip()
-        return sha or "nogit"
-    except Exception:
-        return "nogit"
 
 
 def _discover_counties(base_input_dir: str, housing_type: str, scenarios: List[str]) -> List[str]:
@@ -120,7 +114,7 @@ def main() -> None:
         )
 
     # Save summary CSV with a differences row
-    sha = _git_short_sha()
+    sha = git_short_sha()
     csv_path = os.path.join(output_dir, f"step19_eac_compare_{scenarios[0]}_vs_{scenarios[1]}_g{sha}.csv")
     if not eac_df.empty:
         diff_df = _differences_row(eac_df, scenarios[0], scenarios[1])
