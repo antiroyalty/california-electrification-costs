@@ -47,10 +47,20 @@ from helpers.step9_plotting_helper import plot_first_weeks
 
 # Use project slug rules for county folder names
 try:
-    from helpers.main_helpers import slugify_county_name
+    from helpers.main_helpers import slugify_county_name, git_short_sha
 except Exception:
     def slugify_county_name(name: str) -> str:
         return name.lower().replace("county", "").strip().replace(" ", "-")
+    def git_short_sha() -> str:
+        try:
+            import subprocess
+            sha = subprocess.check_output(
+                ["git", "rev-parse", "--short", "HEAD"],
+                stderr=subprocess.DEVNULL,
+            ).decode().strip()
+            return sha or "nogit"
+        except Exception:
+            return "nogit"
 
 MIN_SOC = 25
 MAX_SOC = 90
@@ -66,17 +76,7 @@ BATTERY_CAPACITY_KWH = 13.5
 
 # Timestamp suffix for plot files (consistent across this run)
 
-def _get_git_short_sha() -> str:
-    try:
-        sha = subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"],
-            stderr=subprocess.DEVNULL,
-        ).decode().strip()
-        return sha or "nogit"
-    except Exception:
-        return "nogit"
-
-GIT_SHORT_SHA = _get_git_short_sha()
+GIT_SHORT_SHA = git_short_sha()
 
 # PV sizing/model alignment constants (match DIY step assumptions)
 PV_SIZING_CELL_EFF = 0.206            # STC cell efficiency (fraction)
