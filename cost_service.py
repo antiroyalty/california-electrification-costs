@@ -17,7 +17,7 @@ import step8_get_weather_files as WeatherFiles
 # import step9_run_sam_model_for_solar_storage as RunSamModelForSolarStorage  # Pvwatts + Battwatts
 # import step9_pvsamv1_battery as RunSamModelForSolarStorage                 # Pvsamv1 integrated battery
 # import step9_solar_storage_custom_dispatch as RunSamModelForSolarStorage   # Pvsamv1 PV + custom dispatch
-import step9_my_own_solar_storage as RunSamModelForSolarStorage             # DIY PV + custom dispatch
+import step9_my_own_solar_storage as Step9MyOwnSolarStorage # DIY PV + custom dispatch
 
 import step10_get_loads_for_rates as GetLoadsForRates
 import step11_evaluate_gas_rates as EvaluateGasRates
@@ -33,13 +33,10 @@ from helpers.main_helpers import (
     central_counties,
     git_short_sha,
 )
-import step18_cross_scenario_comparisons as Step18
-import step19_compare_two_scenarios as Step19
-import step20_no_solar_storage_electrification as Step20
+import step18_cross_scenario_comparisons as Step18CrossScenarioComparisons
+import step19_compare_two_scenarios as Step19CompareTwoScenarios
+import step20_no_solar_storage_electrification as Step20NoSolarStorageElectrification
 import step21_compare_eac_with_vs_without as Step21
-
-import step9_my_own_solar_storage as Step9
-
 
 class CostService:
     def __init__(self, scenario, housing_type, counties, rate_plans, input_dir, output_dir):
@@ -68,12 +65,12 @@ class CostService:
         return [s for s in preferred if s in SCENARIOS]
 
     def _summarize_dispatch_and_sizing(self):
-        mode = "dynamic PV-only" if getattr(Step9, "USE_DYNAMIC_DISPATCH", False) else "classic 4–9pm"
+        mode = "dynamic PV-only" if getattr(Step9MyOwnSolarStorage, "USE_DYNAMIC_DISPATCH", False) else "classic 4–9pm"
         sizing = (
-            "EAC-optimal per county" if getattr(Step9, "USE_EAC_OPTIMAL_SIZING", False)
-            else f"fraction of annual-match (PV_SIZE_FRACTION={getattr(Step9, 'PV_SIZE_FRACTION', 'n/a')})"
+            "EAC-optimal per county" if getattr(Step9MyOwnSolarStorage, "USE_EAC_OPTIMAL_SIZING", False)
+            else f"fraction of annual-match (PV_SIZE_FRACTION={getattr(Step9MyOwnSolarStorage, 'PV_SIZE_FRACTION', 'n/a')})"
         )
-        batt = getattr(Step9, "BATTERY_CAPACITY_KWH", None)
+        batt = getattr(Step9MyOwnSolarStorage, "BATTERY_CAPACITY_KWH", None)
         batt_str = f", default battery ≈{batt} kWh" if batt else ""
         plans = sorted({v.get('electricity') for v in self.desired_rate_plans.values() if isinstance(v, dict) and v.get('electricity')})
         plan_str = f"; Electricity plan preference: {', '.join(plans)}" if plans else ""
@@ -106,7 +103,7 @@ class CostService:
         WeatherFiles.process("data/loadprofiles", "data/loadprofiles", self.scenario, [self.housing_type], 2018, self.counties)
 
         self.log_step(9)
-        RunSamModelForSolarStorage.process("data/loadprofiles", "data/loadprofiles", self.scenario, self.housing_type, self.counties, force_recompute=True)
+        Step9MyOwnSolarStorage.process("data/loadprofiles", "data/loadprofiles", self.scenario, self.housing_type, self.counties, force_recompute=True)
 
         self.log_step(10)
         GetLoadsForRates.process("data/loadprofiles", "data/loadprofiles", self.scenario, [self.housing_type], self.counties)
@@ -129,28 +126,70 @@ class CostService:
         self.log_step(16)
         # DisplayKeyMetricsMaps.process("data/loadprofiles", "data/loadprofiles", self.scenario, self.housing_type, self.counties, self.desired_rate_plans)
 
-        # Consolidated comparisons and EAC summaries (Steps 18–21)
-        base_input_dir = self.output_dir
-        output_dir = os.path.join("analysis_results")
-        os.makedirs(output_dir, exist_ok=True)
+        base_input_dir, output_dir = self._prepare_outputs()
+
+        # Assumptions + plan preferences
         print("\nAssumptions — " + self._summarize_dispatch_and_sizing())
         plan_pref = list({v.get('electricity') for v in self.desired_rate_plans.values() if isinstance(v, dict) and v.get('electricity')})
 
-        # Step 18 (delegate)
+        # Step 18 (cross-scenario EAC; NEM3 by default)
         self.log_step(18)
-        Step18.run_from_cost_service(base_input_dir, output_dir, self.housing_type, self._scenario_list_for_comparisons(), self.counties, plan_preference=plan_pref, electricity_variant="nem3")
+        Step18CrossScenarioComparisons.run_from_cost_service(
+            base_input_dir,
+            output_dir,
+            self.housing_type,
+            self._scenario_list_for_comparisons(),
+            self.counties,
+            plan_preference=plan_pref,
+            electricity_variant="nem3",
+        )
 
-        # Step 19 (delegate)
+        # Step 19 (EV vs ICE)
         self.log_step(19)
-        Step19.run_from_cost_service(base_input_dir, output_dir, self.housing_type, ["baseline_ice_car", "baseline_ev_car"], self.counties, plan_preference=plan_pref, electricity_variant="nem3")
+        Step19CompareTwoScenarios.run_from_cost_service(
+            base_input_dir,
+            output_dir,
+            self.housing_type,
+            ["baseline_ice_car", "baseline_ev_car"],
+            self.counties,
+            plan_preference=plan_pref,
+            electricity_variant="nem3",
+        )
 
-        # Step 20 (delegate)
+        # Step 20 (no-PV EAC)
         self.log_step(20)
-        Step20.run_from_cost_service(base_input_dir, output_dir, self.housing_type, [self.scenario], self.counties, incentive="full_incentives", discount_rate=0.07, agg="mean")
+        Step20NoSolarStorageElectrification.run_from_cost_service(
+            base_input_dir,
+            output_dir,
+            self.housing_type,
+            [self.scenario],
+            self.counties,
+            incentive="full_incentives",
+            discount_rate=0.07,
+            agg="mean",
+        )
 
-        # Step 21 (delegate)
+        # Step 21 (with vs without PV)
         self.log_step(21)
-        Step21.run_from_cost_service(base_input_dir, output_dir, self.housing_type, self.scenario, self.counties, plan_preference=plan_pref, electricity_variant="nem3", incentive="full_incentives", discount_rate=0.07, agg="mean")
+        Step21.run_from_cost_service(
+            base_input_dir,
+            output_dir,
+            self.housing_type,
+            self.scenario,
+            self.counties,
+            plan_preference=plan_pref,
+            electricity_variant="nem3",
+            incentive="full_incentives",
+            discount_rate=0.07,
+            agg="mean",
+        )
+
+    def _prepare_outputs(self) -> tuple[str, str]:
+        """Prepare and return (base_input_dir, output_dir). Keeps run() tidy."""
+        base_input_dir = self.output_dir
+        output_dir = os.path.join("analysis_results")
+        os.makedirs(output_dir, exist_ok=True)
+        return base_input_dir, output_dir
 
 
 def parse_arguments():
