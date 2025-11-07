@@ -25,7 +25,7 @@ import step12_evaluate_electricity_rates as EvaluateElectricityRates
 import step13_combine_total_annual_costs as CombineTotalAnnualCosts
 import step14_build_capital_costs_lifetimes_incentives as BuildCapitalCostsLifetimesIncentives
 import step15_payback_periods as PaybackPeriods
-import step16_display_key_metrics_maps as DisplayKeyMetricsMaps
+import step16_display_key_metrics_maps as DisplayCaliforniaDiagnosticMaps
 
 from helpers.main_helpers import (
     norcal_counties,
@@ -37,6 +37,7 @@ import step18_cross_scenario_comparisons as Step18CrossScenarioComparisons
 import step19_compare_two_scenarios as Step19CompareTwoScenarios
 import step20_no_solar_storage_electrification as Step20NoSolarStorageElectrification
 import step21_compare_eac_with_vs_without as Step21CompareEACWithVsWithout
+import step22_build_county_diagnostics as Step22BuildCountyDiagnostics
 
 class CostService:
     def __init__(self, scenario, housing_type, counties, rate_plans, input_dir, output_dir):
@@ -124,7 +125,7 @@ class CostService:
         PaybackPeriods.process("data/loadprofiles", self.scenario, self.housing_type, self.counties)
 
         self.log_step(16)
-        # DisplayKeyMetricsMaps.process("data/loadprofiles", "data/loadprofiles", self.scenario, self.housing_type, self.counties, self.desired_rate_plans)
+        # DisplayCaliforniaDiagnosticMaps.process("data/loadprofiles", "data/loadprofiles", self.scenario, self.housing_type, self.counties, self.desired_rate_plans)
 
         base_input_dir, output_dir = self._prepare_outputs()
 
@@ -182,6 +183,16 @@ class CostService:
             incentive="full_incentives",
             discount_rate=0.07,
             agg="mean",
+        )
+
+        # Step 22 (per-county diagnostics)
+        self.log_step(22)
+        Step22BuildCountyDiagnostics.process(
+            base_input_dir,
+            output_dir,
+            self.housing_type,
+            self.scenario,
+            self.counties,
         )
 
     def _prepare_outputs(self) -> tuple[str, str]:
