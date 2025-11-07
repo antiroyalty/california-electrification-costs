@@ -55,6 +55,7 @@ from helpers.main_helpers import (
     central_counties,
     socal_counties,
     slugify_county_name,
+    git_short_sha,
 )
 from helpers import log_profiles
 from helpers.step9_plotting_helper import plot_first_weeks
@@ -69,17 +70,7 @@ CAPITAL_COSTS_FOLDER_NAME = "CAPITAL_COSTS"
 
 # Shared run identifiers for repeatable, versioned outputs
 
-def _get_git_short_sha() -> str:
-    try:
-        sha = subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"],
-            stderr=subprocess.DEVNULL,
-        ).decode().strip()
-        return sha or "nogit"
-    except Exception:
-        return "nogit"
-
-GIT_SHORT_SHA = _get_git_short_sha()
+GIT_SHORT_SHA = git_short_sha()
 
 
 # Battery + dispatch constants
