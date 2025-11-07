@@ -22,13 +22,13 @@ import subprocess
 
 try:
     from scenarios import SCENARIOS
-    from helpers.main_helpers import norcal_counties, socal_counties, central_counties, slugify_county_name
+    from helpers.main_helpers import norcal_counties, socal_counties, central_counties, slugify_county_name, git_short_sha
     import step9_my_own_solar_storage as diy
 except Exception:
     import sys as _sys, os as _os
     _sys.path.append(_os.path.dirname(_os.path.dirname(__file__)))
     from scenarios import SCENARIOS
-    from helpers.main_helpers import norcal_counties, socal_counties, central_counties, slugify_county_name
+    from helpers.main_helpers import norcal_counties, socal_counties, central_counties, slugify_county_name, git_short_sha
     import step9_my_own_solar_storage as diy
 
 # Reuse sweep implementations and their option types
@@ -225,11 +225,7 @@ def main():
             run_combined(base_input, scen, housing, counties=counties, fractions=None, capacities_kwh=None, options=c_opts, experiments_root=combined_root)
 
     # Include current git short SHA in the dashboard filename for traceability
-    try:
-        sha = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL).decode().strip()
-        sha = sha or "nogit"
-    except Exception:
-        sha = "nogit"
+    sha = git_short_sha()
     out_html = os.path.join(eff_root, f"integrated_dashboard_g{sha}.html")
     _write_dashboard(
         out_html,
