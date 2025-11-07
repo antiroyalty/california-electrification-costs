@@ -28,6 +28,7 @@ from typing import List, Set
 
 import pandas as pd
 
+from helpers.main_helpers import git_short_sha
 from helpers.plot_scenario_comparison_helper import (
     collect_payback_with_solar,
     plot_payback_dotline,
@@ -45,12 +46,6 @@ from helpers.main_helpers import get_scenario_path
 from scenarios import SCENARIOS
 
 
-def _git_short_sha() -> str:
-    try:
-        sha = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL).decode().strip()
-        return sha or "nogit"
-    except Exception:
-        return "nogit"
 
 
 def _discover_counties(base_input_dir: str, housing_type: str, scenarios: List[str]) -> List[str]:
@@ -107,7 +102,7 @@ def main() -> None:
     else:
         counties = ["Alameda County"]
 
-    sha = _git_short_sha()
+    sha = git_short_sha()
 
     # 1) Payback (with solar)
     payback_df = collect_payback_with_solar(base_input_dir, housing_type, scenarios, counties, agg=args.agg)
