@@ -29,7 +29,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from helpers.main_helpers import slugify_county_name, get_scenario_path
+from helpers.main_helpers import slugify_county_name, get_scenario_path, git_short_sha
 from capital_cost_map_builder import LIFETIMES
 from step15_payback_periods import vehicle_annual_adders_from_ledger
 from scenarios import SCENARIOS
@@ -41,12 +41,6 @@ except Exception:
     _latest_totals_csv = None
 
 
-def _git_short_sha() -> str:
-    try:
-        sha = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL).decode().strip()
-        return sha or "nogit"
-    except Exception:
-        return "nogit"
 
 
 def _read_capital_ledger(base_input_dir: str, scenario: str, housing_type: str) -> Optional[pd.DataFrame]:
@@ -369,7 +363,7 @@ def main() -> None:
     os.makedirs(out_dir, exist_ok=True)
 
     df = collect_eac_no_pv(base, housing, scenarios, counties, incentive=args.incentive, discount_rate=args.discount_rate, agg=args.agg)
-    sha = _git_short_sha()
+    sha = git_short_sha()
     csv_path = os.path.join(out_dir, f"step20_eac_no_pv_summary_g{sha}.csv")
     if not df.empty:
         df.to_csv(csv_path, index=False)

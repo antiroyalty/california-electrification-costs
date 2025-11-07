@@ -21,7 +21,7 @@ import step13_combine_total_annual_costs as CombineTotalAnnualCosts
 import step14_build_capital_costs_lifetimes_incentives as BuildCapitalCostsLifetimesIncentives
 import step15_payback_periods as PaybackPeriods
 import step16_display_key_metrics_maps as DisplayKeyMetricsMaps
-from helpers.main_helpers import norcal_counties, socal_counties, central_counties
+from helpers.main_helpers import norcal_counties, socal_counties, central_counties, git_short_sha
 
 # Comparison + EAC helpers (Steps 18–21)
 from helpers.plot_scenario_comparison_helper import (
@@ -113,12 +113,6 @@ class CostService:
         # Additional consolidated comparisons and EAC summaries
         self._run_eac_and_comparisons()
 
-    def _git_short_sha(self) -> str:
-        try:
-            sha = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL).decode().strip()
-            return sha or "nogit"
-        except Exception:
-            return "nogit"
 
     def _scenario_list_for_comparisons(self):
         """Return an ordered scenario list for cross-scenario plots.
@@ -165,7 +159,7 @@ class CostService:
         base_input_dir = self.output_dir
         output_dir = os.path.join("analysis_results")
         os.makedirs(output_dir, exist_ok=True)
-        sha = self._git_short_sha()
+        sha = git_short_sha()
 
         # Print dispatch/sizing assumptions once for clarity
         ds = self._summarize_dispatch_and_sizing()

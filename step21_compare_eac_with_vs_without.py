@@ -26,18 +26,12 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from scenarios import SCENARIOS
-from helpers.main_helpers import slugify_county_name, get_scenario_path
+from helpers.main_helpers import slugify_county_name, get_scenario_path, git_short_sha
 
 from helpers.plot_scenario_comparison_helper import collect_eac_components
 from step20_no_solar_storage_electrification import collect_eac_no_pv
 
 
-def _git_short_sha() -> str:
-    try:
-        sha = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL).decode().strip()
-        return sha or "nogit"
-    except Exception:
-        return "nogit"
 
 
 def _discover_counties(base_input_dir: str, housing_type: str, scenarios: List[str]) -> List[str]:
@@ -178,7 +172,7 @@ def main() -> None:
     merged = _prepare_combined_df(df_with, df_no)
 
     # Save merged CSV
-    sha = _git_short_sha()
+    sha = git_short_sha()
     csv_path = os.path.join(out_dir, f"step21_eac_with_vs_without_g{sha}.csv")
     merged.to_csv(csv_path, index=False)
 

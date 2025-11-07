@@ -27,25 +27,14 @@ from helpers.maps_helpers import (
     add_centroid_labels, add_map_title, export_geojson_and_html,
     get_latest_csv_file
 )
-from helpers.main_helpers import log, slugify_county_name, to_decimal_number, get_scenario_path, norcal_counties, central_counties, socal_counties
+from helpers.main_helpers import log, slugify_county_name, to_decimal_number, get_scenario_path, norcal_counties, central_counties, socal_counties, git_short_sha
 from helpers.utility_helpers import get_utility_for_county
 
 
 # Shared run identifiers for repeatable, versioned outputs
 # No timestamp in filenames; use only git short SHA for versioning
 
-def _get_git_short_sha() -> str:
-    """Return the short git SHA for this repo, or 'nogit' if unavailable."""
-    try:
-        sha = subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"],
-            stderr=subprocess.DEVNULL,
-        ).decode().strip()
-        return sha or "nogit"
-    except Exception:
-        return "nogit"
-
-GIT_SHORT_SHA = _get_git_short_sha()
+GIT_SHORT_SHA = git_short_sha()
 
 
 def format_currency_with_sign(value: float) -> str:
