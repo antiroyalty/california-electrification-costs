@@ -387,7 +387,7 @@ if __name__ == "__main__":
     main()
 
 
-def run_from_cost_service(
+def process(
     base_input_dir: str,
     output_dir: str,
     housing_type: str,

@@ -36,7 +36,7 @@ from helpers.main_helpers import (
 import step18_cross_scenario_comparisons as Step18CrossScenarioComparisons
 import step19_compare_two_scenarios as Step19CompareTwoScenarios
 import step20_no_solar_storage_electrification as Step20NoSolarStorageElectrification
-import step21_compare_eac_with_vs_without as Step21
+import step21_compare_eac_with_vs_without as Step21CompareEACWithVsWithout
 
 class CostService:
     def __init__(self, scenario, housing_type, counties, rate_plans, input_dir, output_dir):
@@ -134,7 +134,7 @@ class CostService:
 
         # Step 18 (cross-scenario EAC; NEM3 by default)
         self.log_step(18)
-        Step18CrossScenarioComparisons.run_from_cost_service(
+        Step18CrossScenarioComparisons.process(
             base_input_dir,
             output_dir,
             self.housing_type,
@@ -146,7 +146,7 @@ class CostService:
 
         # Step 19 (EV vs ICE)
         self.log_step(19)
-        Step19CompareTwoScenarios.run_from_cost_service(
+        Step19CompareTwoScenarios.process(
             base_input_dir,
             output_dir,
             self.housing_type,
@@ -158,7 +158,7 @@ class CostService:
 
         # Step 20 (no-PV EAC)
         self.log_step(20)
-        Step20NoSolarStorageElectrification.run_from_cost_service(
+        Step20NoSolarStorageElectrification.process(
             base_input_dir,
             output_dir,
             self.housing_type,
@@ -171,7 +171,7 @@ class CostService:
 
         # Step 21 (with vs without PV)
         self.log_step(21)
-        Step21.run_from_cost_service(
+        Step21CompareEACWithVsWithout.process(
             base_input_dir,
             output_dir,
             self.housing_type,
