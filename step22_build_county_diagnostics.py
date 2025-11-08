@@ -375,6 +375,110 @@ def create_solar_storage_deployment_graph(
         return None
 
 
+# ---------- New metric cards ----------
+
+def create_solar_size_card(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+) -> str:
+    """Create a simple text card showing solar system size in kW."""
+    try:
+        county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+        sam_file = os.path.join(county_dir, f"sam_optimized_load_profiles_{county_slug}.csv")
+        
+        if not os.path.exists(sam_file):
+            return "<div class='metric-value'>N/A<br><small>No data available</small></div>"
+            
+        df = pd.read_csv(sam_file, nrows=1)  # Only need first row
+        
+        # Look for PV system size column
+        size_col = None
+        for col in df.columns:
+            if 'pv' in col.lower() and any(x in col.lower() for x in ['size', 'capacity', 'system']):
+                size_col = col
+                break
+        
+        if size_col and not df[size_col].isna().all():
+            size_kw = float(df[size_col].iloc[0])
+            return f"<div class='metric-value'>{size_kw:.1f} kW<br><small>System Size</small></div>"
+        else:
+            return "<div class='metric-value'>N/A<br><small>No PV system</small></div>"
+            
+    except Exception as e:
+        print(f"Warning: Error getting solar size for {county_slug}: {e}")
+        return "<div class='metric-value'>N/A<br><small>Error loading data</small></div>"
+
+
+def create_annual_load_card(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+) -> str:
+    """Create a simple text card showing total annual household load in kWh."""
+    try:
+        county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+        sam_file = os.path.join(county_dir, f"sam_optimized_load_profiles_{county_slug}.csv")
+        
+        if not os.path.exists(sam_file):
+            return "<div class='metric-value'>N/A<br><small>No data available</small></div>"
+            
+        df = pd.read_csv(sam_file)
+        
+        # Look for household load column
+        load_col = None
+        for col in df.columns:
+            if any(x in col.lower() for x in ['household_load', 'load', 'demand']):
+                load_col = col
+                break
+                
+        if load_col and not df[load_col].isna().all():
+            annual_kwh = float(df[load_col].sum())
+            return f"<div class='metric-value'>{annual_kwh:,.0f} kWh<br><small>Annual Household Load</small></div>"
+        else:
+            return "<div class='metric-value'>N/A<br><small>No load data</small></div>"
+            
+    except Exception as e:
+        print(f"Warning: Error getting annual load for {county_slug}: {e}")
+        return "<div class='metric-value'>N/A<br><small>Error loading data</small></div>"
+
+
+def create_grid_supply_card(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+) -> str:
+    """Create a simple text card showing annual load supplied by grid in kWh."""
+    try:
+        county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+        sam_file = os.path.join(county_dir, f"sam_optimized_load_profiles_{county_slug}.csv")
+        
+        if not os.path.exists(sam_file):
+            return "<div class='metric-value'>N/A<br><small>No data available</small></div>"
+            
+        df = pd.read_csv(sam_file)
+        
+        # Look for grid supply column
+        grid_col = None
+        for col in df.columns:
+            if 'grid' in col.lower() and any(x in col.lower() for x in ['load', 'supply', 'to_load']):
+                grid_col = col
+                break
+                
+        if grid_col and not df[grid_col].isna().all():
+            annual_grid_kwh = float(df[grid_col].sum())
+            return f"<div class='metric-value'>{annual_grid_kwh:,.0f} kWh<br><small>Grid Supply to Load</small></div>"
+        else:
+            return "<div class='metric-value'>N/A<br><small>No grid data</small></div>"
+            
+    except Exception as e:
+        print(f"Warning: Error getting grid supply for {county_slug}: {e}")
+        return "<div class='metric-value'>N/A<br><small>Error loading data</small></div>"
+
+
 # ---------- Weekly SAM and Battery SOC charts (moved from Step 16) ----------
 
 
@@ -681,6 +785,9 @@ def _dashboard_html(
     weekly_jan_b64: Optional[str],
     weekly_jul_b64: Optional[str],
     step18_images: Optional[dict] = None,
+    solar_size_html: Optional[str] = None,
+    annual_load_html: Optional[str] = None,
+    grid_supply_html: Optional[str] = None,
 ) -> str:
     scen_title = scenario.replace("_", " ").title()
     county_title = county_slug.replace("-", " ").title()
@@ -698,10 +805,13 @@ def _dashboard_html(
                 .header {{ background: white; padding: 16px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.08); margin-bottom: 18px; }}
                 .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(480px, 1fr)); gap: 16px; }}
                 .card {{ background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.08); padding: 12px; }}
+                .metric-card {{ background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.08); padding: 20px; text-align: center; }}
                 h1 {{ margin: 0 0 6px; }}
                 h2 {{ margin: 6px 0 12px; font-size: 18px; }}
                 .imgwrap img {{ width: 100%; height: auto; border-radius: 6px; }}
                 .muted {{ color: #666; font-size: 12px; }}
+                .metric-value {{ font-size: 24px; font-weight: bold; color: #2c5aa0; line-height: 1.2; }}
+                .metric-value small {{ font-size: 12px; color: #666; font-weight: normal; display: block; margin-top: 4px; }}
             </style>
         </head>
         <body>
@@ -713,18 +823,7 @@ def _dashboard_html(
         """
     )
 
-    # Card 1: Deployment figure
-    parts.append("<div class=\"card\">")
-    parts.append("<h2>Solar + Storage Deployment</h2>")
-    if deployment_b64:
-        parts.append(
-            f"<div class=\"imgwrap\"><img src=\"data:image/png;base64,{deployment_b64}\" alt=\"deployment\"></div>"
-        )
-    else:
-        parts.append("<div class=\"muted\">No deployment figure available</div>")
-    parts.append("</div>")
-
-    # Card 2: Appliance breakdown
+    # Card 1: Appliance breakdown (now first)
     parts.append("<div class=\"card\">")
     parts.append("<h2>Appliance Breakdown (Electric End‑Uses)</h2>")
     if appliance_b64:
@@ -735,7 +834,45 @@ def _dashboard_html(
         parts.append("<div class=\"muted\">No appliance chart available</div>")
     parts.append("</div>")
 
-    # Card 3: Weekly SAM chart — January
+    # Card 2: Solar system size
+    parts.append("<div class=\"metric-card\">")
+    parts.append("<h2>Solar System Size</h2>")
+    if solar_size_html:
+        parts.append(solar_size_html)
+    else:
+        parts.append("<div class=\"metric-value\">N/A<br><small>No data available</small></div>")
+    parts.append("</div>")
+
+    # Card 3: Annual household load
+    parts.append("<div class=\"metric-card\">")
+    parts.append("<h2>Annual Household Load</h2>")
+    if annual_load_html:
+        parts.append(annual_load_html)
+    else:
+        parts.append("<div class=\"metric-value\">N/A<br><small>No data available</small></div>")
+    parts.append("</div>")
+
+    # Card 4: Grid supply load
+    parts.append("<div class=\"metric-card\">")
+    parts.append("<h2>Grid Supply to Load</h2>")
+    if grid_supply_html:
+        parts.append(grid_supply_html)
+    else:
+        parts.append("<div class=\"metric-value\">N/A<br><small>No data available</small></div>")
+    parts.append("</div>")
+
+    # Card 5: Deployment figure
+    parts.append("<div class=\"card\">")
+    parts.append("<h2>Solar + Storage Deployment</h2>")
+    if deployment_b64:
+        parts.append(
+            f"<div class=\"imgwrap\"><img src=\"data:image/png;base64,{deployment_b64}\" alt=\"deployment\"></div>"
+        )
+    else:
+        parts.append("<div class=\"muted\">No deployment figure available</div>")
+    parts.append("</div>")
+
+    # Card 6: Weekly SAM chart — January
     parts.append("<div class=\"card\">")
     parts.append("<h2>Load & Solar — January (First Week)</h2>")
     if weekly_jan_b64:
@@ -746,7 +883,7 @@ def _dashboard_html(
         parts.append("<div class=\"muted\">No January weekly figure available</div>")
     parts.append("</div>")
 
-    # Card 4: Weekly SAM chart — July
+    # Card 7: Weekly SAM chart — July
     parts.append("<div class=\"card\">")
     parts.append("<h2>Load & Solar — July (First Week)</h2>")
     if weekly_jul_b64:
@@ -809,6 +946,16 @@ def process(
             weekly_jul_b64 = create_sam_weekly_chart_for_period(
                 base_input_dir, scenario, housing_type, county_slug, period="july"
             )
+            # New metric cards
+            solar_size_html = create_solar_size_card(
+                base_input_dir, scenario, housing_type, county_slug
+            )
+            annual_load_html = create_annual_load_card(
+                base_input_dir, scenario, housing_type, county_slug
+            )
+            grid_supply_html = create_grid_supply_card(
+                base_input_dir, scenario, housing_type, county_slug
+            )
             # Collect Step 18 cross-scenario plots
             step18 = _gather_step18_images(output_dir, sha)
             html = _dashboard_html(
@@ -820,6 +967,9 @@ def process(
                 weekly_jan_b64=weekly_jan_b64,
                 weekly_jul_b64=weekly_jul_b64,
                 step18_images=step18,
+                solar_size_html=solar_size_html,
+                annual_load_html=annual_load_html,
+                grid_supply_html=grid_supply_html,
             )
             out_path = os.path.join(
                 output_dir,
