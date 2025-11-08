@@ -399,7 +399,7 @@ def process(
     agg: str = "mean",
 ):
     os.makedirs(output_dir, exist_ok=True)
-    sha = _git_short_sha()
+    sha = git_short_sha()
     df = collect_eac_no_pv(base_input_dir, housing_type, scenarios, counties, incentive=incentive, discount_rate=discount_rate, agg=agg)
     if not df.empty:
         df.to_csv(os.path.join(output_dir, f"step20_eac_no_pv_summary_g{sha}.csv"), index=False)

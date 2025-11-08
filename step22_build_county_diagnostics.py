@@ -4,6 +4,8 @@ Step 22: Build County Diagnostics
 Creates per-county diagnostic dashboards that assemble:
 - Solar + storage deployment graph (from Step 9 outputs)
 - Appliance breakdown pie chart (moved from Step 16)
+- Weekly SAM charts for January and July (separate panels)
+- Cross‑scenario cards from Step 18 (EAC stacked bar, kWh flows, Savings & Bills, Payback, PV size)
 
 Outputs are saved under analysis_results/county_diagnostics/<scenario>/.
 
@@ -423,98 +425,6 @@ def load_battery_soc_data(
         print(f"Warning: Error reading SAM load profiles for {county_slug}: {e}")
         return None
 
-
-def create_battery_soc_chart(
-    base_input_dir: str,
-    scenario: str,
-    housing_type: str,
-    sample_counties: list = ["alameda", "los-angeles", "san-diego"],
-) -> str:
-    """Battery SOC panels for first Jan and Jul weeks for sample counties; returns base64 PNG."""
-    try:
-        import matplotlib.dates as mdates
-        fig, axes = plt.subplots(2, 3, figsize=(18, 12))
-        fig.suptitle(
-            f"Battery State of Charge (SOC) - {scenario.replace('_', ' ').title()} Scenario",
-            fontsize=16,
-            fontweight="bold",
-        )
-        periods = {
-            "January": ("2018-01-01", "2018-01-08"),
-            "July": ("2018-07-01", "2018-07-08"),
-        }
-        loaded = {slug: load_battery_soc_data(base_input_dir, scenario, housing_type, slug) for slug in sample_counties}
-        for r, (pname, (start_date, end_date)) in enumerate(periods.items()):
-            for c, slug in enumerate(sample_counties):
-                ax = axes[r, c]
-                df = loaded.get(slug)
-                title = f"{slug.replace('-', ' ').title()} - {pname}"
-                if df is None:
-                    ax.text(0.5, 0.5, "No battery data", ha="center", va="center", color="red")
-                    ax.set_title(title, fontsize=12, fontweight="bold")
-                    continue
-                try:
-                    week = df.loc[start_date:end_date]
-                    if week.empty:
-                        ax.text(0.5, 0.5, "No data for week", ha="center", va="center", color="red")
-                        ax.set_title(title, fontsize=12, fontweight="bold")
-                        continue
-                    ax.plot(week.index, week["Battery SOC"], linewidth=2, color="#2E86AB", alpha=0.8)
-                    ax.set_ylim(0, 100)
-                    ax.set_ylabel("SOC (%)", fontsize=10)
-                    ax.set_title(title, fontsize=12, fontweight="bold")
-                    ax.grid(True, alpha=0.3)
-                    ax.xaxis.set_major_locator(mdates.DayLocator())
-                    ax.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d"))
-                    ax.xaxis.set_minor_locator(mdates.HourLocator(interval=6))
-                    plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
-                    ax.axhline(y=20, color="red", linestyle="--", alpha=0.5, linewidth=1)
-                    ax.axhline(y=80, color="green", linestyle="--", alpha=0.5, linewidth=1)
-                    daily_min = week["Battery SOC"].groupby(week.index.date).min().mean()
-                    daily_max = week["Battery SOC"].groupby(week.index.date).max().mean()
-                    ax.text(
-                        0.02,
-                        0.98,
-                        f"Avg Daily Range:\n{daily_min:.1f}% - {daily_max:.1f}%",
-                        transform=ax.transAxes,
-                        fontsize=8,
-                        va="top",
-                        bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
-                    )
-                except Exception as e:
-                    print(f"Error plotting {slug} {pname}: {e}")
-                    ax.text(0.5, 0.5, "Error", ha="center", va="center", color="red")
-                    ax.set_title(title, fontsize=12, fontweight="bold")
-
-        fig.text(
-            0.5,
-            0.02,
-            "Red dashed: 20% | Green dashed: 80% | Daily SOC cycles",
-            ha="center",
-            fontsize=10,
-            style="italic",
-        )
-        plt.tight_layout()
-        plt.subplots_adjust(top=0.93, bottom=0.12)
-        buf = io.BytesIO()
-        plt.savefig(buf, format="png", dpi=150, bbox_inches="tight")
-        buf.seek(0)
-        b64 = base64.b64encode(buf.getvalue()).decode()
-        plt.close()
-        return b64
-    except Exception as e:
-        print(f"Error creating battery SOC chart: {e}")
-        fig, ax = plt.subplots(figsize=(6, 4))
-        ax.text(0.5, 0.5, "SOC chart unavailable", ha="center", va="center")
-        ax.axis("off")
-        buf = io.BytesIO()
-        plt.savefig(buf, format="png", dpi=120, bbox_inches="tight")
-        buf.seek(0)
-        b64 = base64.b64encode(buf.getvalue()).decode()
-        plt.close()
-        return b64
-
-
 def create_sam_weekly_chart(
     base_input_dir: str,
     scenario: str,
@@ -770,6 +680,7 @@ def _dashboard_html(
     appliance_b64: Optional[str],
     weekly_jan_b64: Optional[str],
     weekly_jul_b64: Optional[str],
+    step18_images: Optional[dict] = None,
 ) -> str:
     scen_title = scenario.replace("_", " ").title()
     county_title = county_slug.replace("-", " ").title()
@@ -846,6 +757,19 @@ def _dashboard_html(
         parts.append("<div class=\"muted\">No July weekly figure available</div>")
     parts.append("</div>")
 
+    # Step 18 cross-scenario comparison cards
+    if step18_images:
+        for title, b64 in step18_images.items():
+            parts.append("<div class=\"card\">")
+            parts.append(f"<h2>{title}</h2>")
+            if b64:
+                parts.append(
+                    f"<div class=\"imgwrap\"><img src=\"data:image/png;base64,{b64}\" alt=\"{title}\"></div>"
+                )
+            else:
+                parts.append("<div class=\"muted\">Not available</div>")
+            parts.append("</div>")
+
     parts.append("</div></body></html>")
     return "\n".join(parts)
 
@@ -885,6 +809,8 @@ def process(
             weekly_jul_b64 = create_sam_weekly_chart_for_period(
                 base_input_dir, scenario, housing_type, county_slug, period="july"
             )
+            # Collect Step 18 cross-scenario plots
+            step18 = _gather_step18_images(output_dir, sha)
             html = _dashboard_html(
                 scenario=scenario,
                 housing_type=housing_type,
@@ -893,6 +819,7 @@ def process(
                 appliance_b64=app_b64,
                 weekly_jan_b64=weekly_jan_b64,
                 weekly_jul_b64=weekly_jul_b64,
+                step18_images=step18,
             )
             out_path = os.path.join(
                 output_dir,
@@ -931,6 +858,35 @@ def main() -> None:
         scenario=args.scenario,
         counties=args.counties,
     )
+
+
+# ---------- Step 18 assets embedding ----------
+
+def _embed_png_as_b64(path: str) -> Optional[str]:
+    try:
+        if not os.path.exists(path):
+            return None
+        with open(path, "rb") as f:
+            return base64.b64encode(f.read()).decode()
+    except Exception:
+        return None
+
+
+def _gather_step18_images(output_dir: str, sha: str) -> dict:
+    """Return a dict of Step 18 chart title -> base64 image where available."""
+    files = {
+        "EAC by Scenario (Stacked)": os.path.join(output_dir, f"step18_eac_stacked_bar_g{sha}.png"),
+        "kWh Flows by Scenario": os.path.join(output_dir, f"step18_kwh_flows_dotline_g{sha}.png"),
+        "Savings & Bills (with Solar)": os.path.join(output_dir, f"step18_savings_bills_dotline_g{sha}.png"),
+        "Payback Periods (with Solar)": os.path.join(output_dir, f"step18_payback_with_solar_dotline_g{sha}.png"),
+        "PV Size by Scenario": os.path.join(output_dir, f"step18_pv_size_bar_g{sha}.png"),
+        "With vs Without Solar+Storage": os.path.join(output_dir, f"step21_eac_with_vs_without_g{sha}.png"),
+    }
+    out = {}
+    for title, path in files.items():
+        out[title] = _embed_png_as_b64(path)
+    # prune empty
+    return {k: v for k, v in out.items() if v}
 
 
 if __name__ == "__main__":
