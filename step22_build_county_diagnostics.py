@@ -534,16 +534,19 @@ def compute_key_metrics(
             if grid_to_load_col
             else None
         )
-        # PV size if available (capacity summary or per-county CSV header)
+        # PV and Battery sizes if available (capacity summary or per-county CSV header)
         pv_size_kw = _lookup_pv_size_kw(base_input_dir, scenario, housing_type, county_slug)
+        batt_kwh = _lookup_battery_capacity_kwh(base_input_dir, scenario, housing_type, county_slug)
         # Without solar+storage: PV size = 0; grid supplies all load
         without = {
             "solar_kw": 0.0 if annual_load_kwh is not None else None,
+            "battery_kwh": 0.0 if annual_load_kwh is not None else None,
             "annual_load_kwh": annual_load_kwh,
             "grid_to_load_kwh": annual_load_kwh,
         }
         with_vals = {
             "solar_kw": pv_size_kw,
+            "battery_kwh": batt_kwh,
             "annual_load_kwh": annual_load_kwh,
             "grid_to_load_kwh": grid_with_kwh,
         }
@@ -1182,6 +1185,65 @@ def _dashboard_html(
         parts.append("<div class=\"muted\">No appliance chart available</div>")
     parts.append("</div>")
 
+    
+
+    # Card 2: Key metrics — With vs Without Solar+Storage
+    parts.append("<div class=\"card\">")
+    parts.append("<h2>Key Metrics — With vs Without Solar+Storage</h2>")
+    if key_metrics:
+        w = key_metrics.get("with", {})
+        wo = key_metrics.get("without", {})
+        def fmt(val, unit=""):
+            try:
+                if val is None:
+                    return "N/A"
+                if unit == "kWh":
+                    return f"{float(val):,.0f}"
+                if unit == "kW":
+                    return f"{float(val):,.1f}"
+                return str(val)
+            except Exception:
+                return "N/A"
+        parts.append("<table class=\"kmtbl\">")
+        parts.append("<thead><tr><th>Metric</th><th>With Solar+Storage</th><th>Without Solar+Storage</th></tr></thead>")
+        parts.append("<tbody>")
+        # Solar size with formula
+        parts.append(
+            f"<tr><td>Solar System Size<div class=\"formula\">from Step 9 capacity: 'Solar Capacity (kW)'</div></td><td class=\"val\">{fmt(w.get('solar_kw'), 'kW')} kW</td><td class=\"val\">{fmt(wo.get('solar_kw'), 'kW')} kW</td></tr>"
+        )
+        # Battery capacity
+        parts.append(
+            f"<tr><td>Battery Capacity<div class=\"formula\">from Step 9 capacity: 'Battery Capacity (kWh)'</div></td><td class=\"val\">{fmt(w.get('battery_kwh'), 'kWh')} kWh</td><td class=\"val\">{fmt(wo.get('battery_kwh'), 'kWh')} kWh</td></tr>"
+        )
+        parts.append(
+            f"<tr><td>Annual Household Load</td><td class=\"val\">{fmt(w.get('annual_load_kwh'), 'kWh')} kWh</td><td class=\"val\">{fmt(wo.get('annual_load_kwh'), 'kWh')} kWh</td></tr>"
+        )
+        parts.append(
+            f"<tr><td>Grid Supply to Load</td><td class=\"val\">{fmt(w.get('grid_to_load_kwh'), 'kWh')} kWh</td><td class=\"val\">{fmt(wo.get('grid_to_load_kwh'), 'kWh')} kWh</td></tr>"
+        )
+        parts.append("</tbody></table>")
+        parts.append("<div class=\"muted\" style=\"margin-top:6px;\">Note: 'Without' assumes no PV or battery; grid serves entire load.</div>")
+    else:
+        # Fallback to prior single-metric layout if key metrics unavailable
+        parts.append("<div class=\"metrics-grid\">")
+        # Solar system size
+        parts.append("<div class=\"metric-block\">")
+        parts.append("<div class=\"muted\">Solar System Size</div>")
+        parts.append(solar_size_html or "<div class=\"metric-value\">N/A<br><small>No data</small></div>")
+        parts.append("</div>")
+        # Annual household load
+        parts.append("<div class=\"metric-block\">")
+        parts.append("<div class=\"muted\">Annual Household Load</div>")
+        parts.append(annual_load_html or "<div class=\"metric-value\">N/A<br><small>No data</small></div>")
+        parts.append("</div>")
+        # Grid supply to load
+        parts.append("<div class=\"metric-block\">")
+        parts.append("<div class=\"muted\">Grid Supply to Load</div>")
+        parts.append(grid_supply_html or "<div class=\"metric-value\">N/A<br><small>No data</small></div>")
+        parts.append("</div>")
+        parts.append("</div>")
+    parts.append("</div>")
+
     # Card 3: Detailed Energy Flows
     parts.append("<div class=\"card\">")
     parts.append("<h2>Detailed Energy Flows</h2>")
@@ -1203,10 +1265,7 @@ def _dashboard_html(
         parts.append("<table class=\"kmtbl\">")
         parts.append("<thead><tr><th>Metric</th><th>Value</th></tr></thead>")
         parts.append("<tbody>")
-        # Battery capacity
-        parts.append(
-            f"<tr><td>Battery Capacity<div class=\"formula\">from Step 9 capacity: 'Battery Capacity (kWh)'</div></td><td class=\"val\">{fmt(fm.get('battery_capacity_kwh'), 'kWh')} kWh</td></tr>"
-        )
+        
         # PV to Load
         parts.append(
             f"<tr><td>PV → Load<div class=\"formula\">sum('System to Load')</div></td><td class=\"val\">{fmt(fm.get('pv_to_load_kwh'), 'kWh')} kWh</td></tr>"
@@ -1248,58 +1307,6 @@ def _dashboard_html(
         parts.append("</tbody></table>")
     else:
         parts.append("<div class=\"muted\">No energy flows data available</div>")
-    parts.append("</div>")
-
-    # Card 2: Key metrics — With vs Without Solar+Storage
-    parts.append("<div class=\"card\">")
-    parts.append("<h2>Key Metrics — With vs Without Solar+Storage</h2>")
-    if key_metrics:
-        w = key_metrics.get("with", {})
-        wo = key_metrics.get("without", {})
-        def fmt(val, unit=""):
-            try:
-                if val is None:
-                    return "N/A"
-                if unit == "kWh":
-                    return f"{float(val):,.0f}"
-                if unit == "kW":
-                    return f"{float(val):,.1f}"
-                return str(val)
-            except Exception:
-                return "N/A"
-        parts.append("<table class=\"kmtbl\">")
-        parts.append("<thead><tr><th>Metric</th><th>With Solar+Storage</th><th>Without Solar+Storage</th></tr></thead>")
-        parts.append("<tbody>")
-        parts.append(
-            f"<tr><td>Solar System Size</td><td class=\"val\">{fmt(w.get('solar_kw'), 'kW')} kW</td><td class=\"val\">{fmt(wo.get('solar_kw'), 'kW')} kW</td></tr>"
-        )
-        parts.append(
-            f"<tr><td>Annual Household Load</td><td class=\"val\">{fmt(w.get('annual_load_kwh'), 'kWh')} kWh</td><td class=\"val\">{fmt(wo.get('annual_load_kwh'), 'kWh')} kWh</td></tr>"
-        )
-        parts.append(
-            f"<tr><td>Grid Supply to Load</td><td class=\"val\">{fmt(w.get('grid_to_load_kwh'), 'kWh')} kWh</td><td class=\"val\">{fmt(wo.get('grid_to_load_kwh'), 'kWh')} kWh</td></tr>"
-        )
-        parts.append("</tbody></table>")
-        parts.append("<div class=\"muted\" style=\"margin-top:6px;\">Note: 'Without' assumes no PV or battery; grid serves entire load.</div>")
-    else:
-        # Fallback to prior single-metric layout if key metrics unavailable
-        parts.append("<div class=\"metrics-grid\">")
-        # Solar system size
-        parts.append("<div class=\"metric-block\">")
-        parts.append("<div class=\"muted\">Solar System Size</div>")
-        parts.append(solar_size_html or "<div class=\"metric-value\">N/A<br><small>No data</small></div>")
-        parts.append("</div>")
-        # Annual household load
-        parts.append("<div class=\"metric-block\">")
-        parts.append("<div class=\"muted\">Annual Household Load</div>")
-        parts.append(annual_load_html or "<div class=\"metric-value\">N/A<br><small>No data</small></div>")
-        parts.append("</div>")
-        # Grid supply to load
-        parts.append("<div class=\"metric-block\">")
-        parts.append("<div class=\"muted\">Grid Supply to Load</div>")
-        parts.append(grid_supply_html or "<div class=\"metric-value\">N/A<br><small>No data</small></div>")
-        parts.append("</div>")
-        parts.append("</div>")
     parts.append("</div>")
 
     # Card 5: Deployment figure
