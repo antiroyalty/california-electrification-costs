@@ -533,18 +533,23 @@ def process(
             date_range = pd.date_range(start="2018-01-01", periods=8760, freq="H")
             # Compose standard columns
             system_to_load = [min(s, l) for s, l in zip(solar_gen, load_profile)]
+            # PV exports (no PV→Battery in this simplified custom dispatch)
+            system_to_grid = [max(s - sl, 0.0) for s, sl in zip(solar_gen, system_to_load)]
             batt_to_load = batt_discharge
             df = pd.DataFrame({
                 "Load Profile": load_profile,
                 "System to Load": system_to_load,
                 "Battery to Load": batt_to_load,
                 "Grid to Load": grid_to_load,
+                "System to Grid": system_to_grid,
+                "PV to Grid (kWh)": system_to_grid,
                 "Solar + Battery to Load": [a + b for a, b in zip(system_to_load, batt_to_load)],
                 "Total Supply": [a + b + c for a, b, c in zip(system_to_load, batt_to_load, grid_to_load)],
                 "Difference": [l - (a + b + c) for l, a, b, c in zip(load_profile, system_to_load, batt_to_load, grid_to_load)],
                 "System to Battery": [0.0] * 8760,
                 "Grid to Battery": grid_to_batt,
                 "Battery SOC": soc_percent,
+                "PV AC (kWh)": solar_gen,
             }, index=date_range)
             df.to_csv(output_file)
 

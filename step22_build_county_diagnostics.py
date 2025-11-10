@@ -377,6 +377,330 @@ def create_solar_storage_deployment_graph(
 
 # ---------- New metric cards ----------
 
+def _infer_pv_size_kw_from_csv(csv_path: str) -> Optional[float]:
+    """Try to infer PV system size (kW) from the SAM CSV header.
+
+    Returns None if a size column cannot be found.
+    """
+    try:
+        if not os.path.exists(csv_path):
+            return None
+        df_head = pd.read_csv(csv_path, nrows=1)
+        candidates = [
+            "pv system size",
+            "pv size",
+            "pv capacity",
+            "system size",
+            "pv_kw",
+            "pv kw",
+            "pv (kw)",
+            "system capacity",
+        ]
+        chosen = None
+        for col in df_head.columns:
+            low = str(col).lower()
+            if any(c in low for c in candidates):
+                chosen = col
+                break
+        if chosen is None:
+            return None
+        val = df_head.iloc[0][chosen]
+        try:
+            size_kw = float(val)
+            if size_kw >= 0:
+                return size_kw
+        except Exception:
+            return None
+    except Exception:
+        return None
+
+
+def _lookup_pv_size_kw(
+    base_input_dir: str, scenario: str, housing_type: str, county_slug: str
+) -> Optional[float]:
+    """Find PV size (kW) for a county from Step 9 capacity summary, falling back to CSV header.
+
+    1) Look for `{base_input_dir}/{scenario}/{housing_type}/CAPITAL_COSTS/electrified_assets.csv`
+       and read the row for `county_slug` (index or County col), using "Solar Capacity (kW)".
+    2) Fallback: `_infer_pv_size_kw_from_csv` on the per-county SAM CSV.
+    """
+    try:
+        cap_csv = os.path.join(
+            base_input_dir, scenario, housing_type, "CAPITAL_COSTS", "electrified_assets.csv"
+        )
+        if os.path.exists(cap_csv):
+            try:
+                df = pd.read_csv(cap_csv)
+                # Normalize county id
+                # accept either index name 'County' or a column
+                county_col = None
+                for c in df.columns:
+                    if str(c).strip().lower() in ("county", "county_slug"):
+                        county_col = c
+                        break
+                if county_col is not None:
+                    df_idx = df.set_index(county_col)
+                else:
+                    # maybe CSV saved with County as index; try to read the first column as index name
+                    # if not, create a slug from any existing column
+                    df_idx = df
+                # Normalize index to slugs for matching
+                def to_slug(x):
+                    try:
+                        return slugify_county_name(str(x))
+                    except Exception:
+                        return str(x)
+                df_idx = df_idx.copy()
+                df_idx["__slug__"] = [to_slug(x) for x in (df_idx.index if county_col is None else df_idx.index)]
+                if "__slug__" not in df_idx.columns:
+                    df_idx["__slug__"] = [to_slug(x) for x in df_idx.index]
+                # Try to locate the row
+                row = df_idx[df_idx["__slug__"] == county_slug]
+                if row.empty and county_col is not None:
+                    # try without slug normalization
+                    row = df[df[county_col] == county_slug]
+                if not row.empty:
+                    # Find the solar capacity column
+                    cap_col = None
+                    for c in row.columns:
+                        low = str(c).lower()
+                        if "solar capacity" in low and "kw" in low:
+                            cap_col = c
+                            break
+                        if low in ("solar capacity (kwh)"):
+                            # unlikely, but skip energy unit
+                            continue
+                    if cap_col is not None:
+                        val = float(row.iloc[0][cap_col])
+                        return val
+            except Exception:
+                pass
+        # Fallback to inspecting per-county SAM CSV header
+        county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+        sam_file = os.path.join(county_dir, f"sam_optimized_load_profiles_{county_slug}.csv")
+        if not os.path.exists(sam_file):
+            alt = os.path.join(county_dir, f"sam_optimized_load_profiles_{scenario}_{county_slug}.csv")
+            sam_file = alt if os.path.exists(alt) else sam_file
+        return _infer_pv_size_kw_from_csv(sam_file)
+    except Exception:
+        return None
+
+
+def compute_key_metrics(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+) -> Optional[dict]:
+    """Compute key metrics with and without solar+storage from SAM output.
+
+    Returns a dict with keys "with" and "without", each containing:
+      - solar_kw
+      - annual_load_kwh
+      - grid_to_load_kwh
+
+    If data is missing, returns None.
+    """
+    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+    sam_file = os.path.join(county_dir, f"sam_optimized_load_profiles_{county_slug}.csv")
+    if not os.path.exists(sam_file):
+        # Older naming variant
+        alt = os.path.join(county_dir, f"sam_optimized_load_profiles_{scenario}_{county_slug}.csv")
+        sam_file = alt if os.path.exists(alt) else sam_file
+    if not os.path.exists(sam_file):
+        return None
+    try:
+        df = pd.read_csv(sam_file)
+        # Required columns for robust computation
+        load_col = None
+        grid_to_load_col = None
+        for col in df.columns:
+            low = str(col).lower()
+            if load_col is None and "load profile" in low:
+                load_col = col
+            if grid_to_load_col is None and ("grid to load" in low or ("grid" in low and "load" in low)):
+                grid_to_load_col = col
+        if load_col is None:
+            # fallback: first numeric-looking column
+            for col in df.columns:
+                if pd.api.types.is_numeric_dtype(df[col]):
+                    load_col = col
+                    break
+        # Annual load
+        annual_load_kwh = float(pd.to_numeric(df[load_col], errors="coerce").fillna(0.0).sum()) if load_col else None
+        # Grid to load (with solar)
+        grid_with_kwh = (
+            float(pd.to_numeric(df[grid_to_load_col], errors="coerce").fillna(0.0).sum())
+            if grid_to_load_col
+            else None
+        )
+        # PV size if available (capacity summary or per-county CSV header)
+        pv_size_kw = _lookup_pv_size_kw(base_input_dir, scenario, housing_type, county_slug)
+        # Without solar+storage: PV size = 0; grid supplies all load
+        without = {
+            "solar_kw": 0.0 if annual_load_kwh is not None else None,
+            "annual_load_kwh": annual_load_kwh,
+            "grid_to_load_kwh": annual_load_kwh,
+        }
+        with_vals = {
+            "solar_kw": pv_size_kw,
+            "annual_load_kwh": annual_load_kwh,
+            "grid_to_load_kwh": grid_with_kwh,
+        }
+        return {"with": with_vals, "without": without}
+    except Exception:
+        return None
+
+
+def _lookup_battery_capacity_kwh(
+    base_input_dir: str, scenario: str, housing_type: str, county_slug: str
+) -> Optional[float]:
+    """Look up battery capacity (kWh) from the Step 9 capacity summary file.
+
+    Falls back to None if not found.
+    """
+    try:
+        cap_csv = os.path.join(
+            base_input_dir, scenario, housing_type, "CAPITAL_COSTS", "electrified_assets.csv"
+        )
+        if not os.path.exists(cap_csv):
+            return None
+        df = pd.read_csv(cap_csv)
+        county_col = None
+        for c in df.columns:
+            if str(c).strip().lower() in ("county", "county_slug"):
+                county_col = c
+                break
+        if county_col is not None:
+            df_idx = df.set_index(county_col)
+        else:
+            df_idx = df
+        # Normalize to slug
+        def to_slug(x):
+            try:
+                return slugify_county_name(str(x))
+            except Exception:
+                return str(x)
+        df_idx = df_idx.copy()
+        df_idx["__slug__"] = [to_slug(ix) for ix in (df_idx.index)]
+        row = df_idx[df_idx["__slug__"] == county_slug]
+        if row.empty:
+            return None
+        cap_col = None
+        for c in row.columns:
+            low = str(c).lower()
+            if "battery capacity" in low and "kwh" in low:
+                cap_col = c
+                break
+        if cap_col is None:
+            return None
+        return float(row.iloc[0][cap_col])
+    except Exception:
+        return None
+
+
+def compute_energy_flow_metrics(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+) -> Optional[dict]:
+    """Compute detailed energy flow metrics from Step 9 SAM CSV.
+
+    Returns dict with keys:
+      - battery_capacity_kwh
+      - pv_to_load_kwh
+      - batt_to_load_kwh
+      - grid_to_load_kwh
+      - pv_to_batt_kwh
+      - grid_to_batt_kwh
+      - pv_exports_kwh
+      - pv_exports_formula
+      - total_grid_purchases_kwh
+      - self_sufficiency_pct
+      - peak_net_load_kw
+    """
+    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+    sam_file = os.path.join(county_dir, f"sam_optimized_load_profiles_{county_slug}.csv")
+    if not os.path.exists(sam_file):
+        alt = os.path.join(county_dir, f"sam_optimized_load_profiles_{scenario}_{county_slug}.csv")
+        sam_file = alt if os.path.exists(alt) else sam_file
+    if not os.path.exists(sam_file):
+        return None
+    try:
+        df = pd.read_csv(sam_file)
+        def num(col: str) -> pd.Series:
+            if col not in df.columns:
+                return pd.Series([0.0] * len(df))
+            return pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+
+        load = num("Load Profile")
+        pv_to_load = num("System to Load")
+        batt_to_load = num("Battery to Load")
+        grid_to_load = num("Grid to Load")
+        pv_to_batt = num("System to Battery")
+        grid_to_batt = num("Grid to Battery")
+        # Optional columns that enable PV exports calc
+        system_to_grid = df["System to Grid"] if "System to Grid" in df.columns else None
+        pv_ac = df["PV AC (kWh)"] if "PV AC (kWh)" in df.columns else None
+
+        total_load_kwh = float(load.sum()) if len(load) else None
+        pv_to_load_kwh = float(pv_to_load.sum())
+        batt_to_load_kwh = float(batt_to_load.sum())
+        grid_to_load_kwh = float(grid_to_load.sum())
+        pv_to_batt_kwh = float(pv_to_batt.sum())
+        grid_to_batt_kwh = float(grid_to_batt.sum())
+        total_grid_purchases_kwh = grid_to_load_kwh + grid_to_batt_kwh
+
+        # PV exports (if available): prefer explicit 'System to Grid'; fallback to PV AC − PV→Load − PV→Batt
+        pv_exports_kwh = None
+        pv_exports_formula = None
+        try:
+            if system_to_grid is not None:
+                pv_exports_kwh = float(pd.to_numeric(system_to_grid, errors="coerce").fillna(0.0).sum())
+                pv_exports_formula = "sum('System to Grid')"
+            elif pv_ac is not None:
+                pv_exports_kwh = float(
+                    pd.to_numeric(pv_ac, errors="coerce").fillna(0.0).sum()
+                    - pv_to_load_kwh
+                    - pv_to_batt_kwh
+                )
+                # Guard against tiny negative due to rounding
+                if pv_exports_kwh < 0 and abs(pv_exports_kwh) < 1e-6:
+                    pv_exports_kwh = 0.0
+                pv_exports_formula = "sum('PV AC (kWh)') − sum('System to Load') − sum('System to Battery')"
+        except Exception:
+            pv_exports_kwh = None
+            pv_exports_formula = None
+
+        if total_load_kwh and total_load_kwh > 0:
+            self_sufficiency_pct = 100.0 * (1.0 - (grid_to_load_kwh / total_load_kwh))
+        else:
+            self_sufficiency_pct = None
+
+        net = load - pv_to_load - batt_to_load
+        peak_net_load_kw = float(net.max()) if len(net) else None
+
+        battery_capacity_kwh = _lookup_battery_capacity_kwh(
+            base_input_dir, scenario, housing_type, county_slug
+        )
+
+        return {
+            "battery_capacity_kwh": battery_capacity_kwh,
+            "pv_to_load_kwh": pv_to_load_kwh,
+            "batt_to_load_kwh": batt_to_load_kwh,
+            "grid_to_load_kwh": grid_to_load_kwh,
+            "pv_to_batt_kwh": pv_to_batt_kwh,
+            "grid_to_batt_kwh": grid_to_batt_kwh,
+            "pv_exports_kwh": pv_exports_kwh,
+            "pv_exports_formula": pv_exports_formula,
+            "total_grid_purchases_kwh": total_grid_purchases_kwh,
+            "self_sufficiency_pct": self_sufficiency_pct,
+            "peak_net_load_kw": peak_net_load_kw,
+        }
+    except Exception:
+        return None
+
 def create_solar_size_card(
     base_input_dir: str,
     scenario: str,
@@ -788,6 +1112,8 @@ def _dashboard_html(
     solar_size_html: Optional[str] = None,
     annual_load_html: Optional[str] = None,
     grid_supply_html: Optional[str] = None,
+    key_metrics: Optional[dict] = None,
+    flows_metrics: Optional[dict] = None,
 ) -> str:
     scen_title = scenario.replace("_", " ").title()
     county_title = county_slug.replace("-", " ").title()
@@ -826,6 +1152,14 @@ def _dashboard_html(
                     padding: 16px;
                     text-align: center;
                 }}
+                /* With-vs-Without table */
+                .kmtbl {{ width: 100%; border-collapse: collapse; }}
+                .kmtbl th, .kmtbl td {{ padding: 10px 12px; border-bottom: 1px solid #eee; }}
+                .kmtbl th {{ text-align: center; font-weight: 600; color: #2c3e50; }}
+                .kmtbl td {{ text-align: center; }}
+                .kmtbl td:first-child {{ text-align: left; color: #666; width: 40%; }}
+                .val {{ font-weight: 700; color: #2c5aa0; }}
+                .formula {{ color: #888; font-size: 11px; margin-top: 2px; }}
             </style>
         </head>
         <body>
@@ -848,36 +1182,125 @@ def _dashboard_html(
         parts.append("<div class=\"muted\">No appliance chart available</div>")
     parts.append("</div>")
 
-    # Card 2: Key metrics panel (combined)
+    # Card 3: Detailed Energy Flows
     parts.append("<div class=\"card\">")
-    parts.append("<h2>Key Metrics</h2>")
-    parts.append("<div class=\"metrics-grid\">")
-    # Metric: Solar system size
-    parts.append("<div class=\"metric-block\">")
-    parts.append("<div class=\"muted\">Solar System Size</div>")
-    if solar_size_html:
-        parts.append(solar_size_html)
+    parts.append("<h2>Detailed Energy Flows</h2>")
+    if flows_metrics:
+        fm = flows_metrics
+        def fmt(val, unit=""):
+            try:
+                if val is None:
+                    return "N/A"
+                if unit == "kWh":
+                    return f"{float(val):,.0f}"
+                if unit == "kW":
+                    return f"{float(val):,.1f}"
+                if unit == "%":
+                    return f"{float(val):.1f}%"
+                return str(val)
+            except Exception:
+                return "N/A"
+        parts.append("<table class=\"kmtbl\">")
+        parts.append("<thead><tr><th>Metric</th><th>Value</th></tr></thead>")
+        parts.append("<tbody>")
+        # Battery capacity
+        parts.append(
+            f"<tr><td>Battery Capacity<div class=\"formula\">from Step 9 capacity: 'Battery Capacity (kWh)'</div></td><td class=\"val\">{fmt(fm.get('battery_capacity_kwh'), 'kWh')} kWh</td></tr>"
+        )
+        # PV to Load
+        parts.append(
+            f"<tr><td>PV → Load<div class=\"formula\">sum('System to Load')</div></td><td class=\"val\">{fmt(fm.get('pv_to_load_kwh'), 'kWh')} kWh</td></tr>"
+        )
+        # Battery to Load
+        parts.append(
+            f"<tr><td>Battery → Load<div class=\"formula\">sum('Battery to Load')</div></td><td class=\"val\">{fmt(fm.get('batt_to_load_kwh'), 'kWh')} kWh</td></tr>"
+        )
+        # Grid to Load
+        parts.append(
+            f"<tr><td>Grid → Load<div class=\"formula\">sum('Grid to Load')</div></td><td class=\"val\">{fmt(fm.get('grid_to_load_kwh'), 'kWh')} kWh</td></tr>"
+        )
+        # PV to Battery
+        parts.append(
+            f"<tr><td>PV → Battery<div class=\"formula\">sum('System to Battery')</div></td><td class=\"val\">{fmt(fm.get('pv_to_batt_kwh'), 'kWh')} kWh</td></tr>"
+        )
+        # Grid to Battery
+        parts.append(
+            f"<tr><td>Grid → Battery<div class=\"formula\">sum('Grid to Battery')</div></td><td class=\"val\">{fmt(fm.get('grid_to_batt_kwh'), 'kWh')} kWh</td></tr>"
+        )
+        # PV Exports (PV → Grid)
+        pv_exp_val = fm.get('pv_exports_kwh')
+        pv_exp_formula = fm.get('pv_exports_formula') or "sum('System to Grid') or sum('PV AC (kWh)') − sum('System to Load') − sum('System to Battery')"
+        parts.append(
+            f"<tr><td>PV → Grid (Exports)<div class=\"formula\">{pv_exp_formula}</div></td><td class=\"val\">{fmt(pv_exp_val, 'kWh')} kWh</td></tr>"
+        )
+        # Total Grid Purchases
+        parts.append(
+            f"<tr><td>Total Grid Purchases<div class=\"formula\">sum('Grid to Load') + sum('Grid to Battery')</div></td><td class=\"val\">{fmt(fm.get('total_grid_purchases_kwh'), 'kWh')} kWh</td></tr>"
+        )
+        # Self-sufficiency
+        parts.append(
+            f"<tr><td>Self‑sufficiency<div class=\"formula\">1 − sum('Grid to Load') / sum('Load Profile')</div></td><td class=\"val\">{fmt(fm.get('self_sufficiency_pct'), '%')}</td></tr>"
+        )
+        # Peak Net Load
+        parts.append(
+            f"<tr><td>Peak Net Load<div class=\"formula\">max('Load Profile' − 'System to Load' − 'Battery to Load')</div></td><td class=\"val\">{fmt(fm.get('peak_net_load_kw'), 'kW')} kW</td></tr>"
+        )
+        parts.append("</tbody></table>")
     else:
-        parts.append("<div class=\"metric-value\">N/A<br><small>No data available</small></div>")
+        parts.append("<div class=\"muted\">No energy flows data available</div>")
     parts.append("</div>")
-    # Metric: Annual household load
-    parts.append("<div class=\"metric-block\">")
-    parts.append("<div class=\"muted\">Annual Household Load</div>")
-    if annual_load_html:
-        parts.append(annual_load_html)
+
+    # Card 2: Key metrics — With vs Without Solar+Storage
+    parts.append("<div class=\"card\">")
+    parts.append("<h2>Key Metrics — With vs Without Solar+Storage</h2>")
+    if key_metrics:
+        w = key_metrics.get("with", {})
+        wo = key_metrics.get("without", {})
+        def fmt(val, unit=""):
+            try:
+                if val is None:
+                    return "N/A"
+                if unit == "kWh":
+                    return f"{float(val):,.0f}"
+                if unit == "kW":
+                    return f"{float(val):,.1f}"
+                return str(val)
+            except Exception:
+                return "N/A"
+        parts.append("<table class=\"kmtbl\">")
+        parts.append("<thead><tr><th>Metric</th><th>With Solar+Storage</th><th>Without Solar+Storage</th></tr></thead>")
+        parts.append("<tbody>")
+        parts.append(
+            f"<tr><td>Solar System Size</td><td class=\"val\">{fmt(w.get('solar_kw'), 'kW')} kW</td><td class=\"val\">{fmt(wo.get('solar_kw'), 'kW')} kW</td></tr>"
+        )
+        parts.append(
+            f"<tr><td>Annual Household Load</td><td class=\"val\">{fmt(w.get('annual_load_kwh'), 'kWh')} kWh</td><td class=\"val\">{fmt(wo.get('annual_load_kwh'), 'kWh')} kWh</td></tr>"
+        )
+        parts.append(
+            f"<tr><td>Grid Supply to Load</td><td class=\"val\">{fmt(w.get('grid_to_load_kwh'), 'kWh')} kWh</td><td class=\"val\">{fmt(wo.get('grid_to_load_kwh'), 'kWh')} kWh</td></tr>"
+        )
+        parts.append("</tbody></table>")
+        parts.append("<div class=\"muted\" style=\"margin-top:6px;\">Note: 'Without' assumes no PV or battery; grid serves entire load.</div>")
     else:
-        parts.append("<div class=\"metric-value\">N/A<br><small>No data available</small></div>")
+        # Fallback to prior single-metric layout if key metrics unavailable
+        parts.append("<div class=\"metrics-grid\">")
+        # Solar system size
+        parts.append("<div class=\"metric-block\">")
+        parts.append("<div class=\"muted\">Solar System Size</div>")
+        parts.append(solar_size_html or "<div class=\"metric-value\">N/A<br><small>No data</small></div>")
+        parts.append("</div>")
+        # Annual household load
+        parts.append("<div class=\"metric-block\">")
+        parts.append("<div class=\"muted\">Annual Household Load</div>")
+        parts.append(annual_load_html or "<div class=\"metric-value\">N/A<br><small>No data</small></div>")
+        parts.append("</div>")
+        # Grid supply to load
+        parts.append("<div class=\"metric-block\">")
+        parts.append("<div class=\"muted\">Grid Supply to Load</div>")
+        parts.append(grid_supply_html or "<div class=\"metric-value\">N/A<br><small>No data</small></div>")
+        parts.append("</div>")
+        parts.append("</div>")
     parts.append("</div>")
-    # Metric: Grid supply to load
-    parts.append("<div class=\"metric-block\">")
-    parts.append("<div class=\"muted\">Grid Supply to Load</div>")
-    if grid_supply_html:
-        parts.append(grid_supply_html)
-    else:
-        parts.append("<div class=\"metric-value\">N/A<br><small>No data available</small></div>")
-    parts.append("</div>")
-    parts.append("</div>")  # end metrics-grid
-    parts.append("</div>")  # end card
 
     # Card 5: Deployment figure
     parts.append("<div class=\"card\">")
@@ -974,6 +1397,14 @@ def process(
             grid_supply_html = create_grid_supply_card(
                 base_input_dir, scenario, housing_type, county_slug
             )
+            # With vs Without key metrics
+            key_metrics = compute_key_metrics(
+                base_input_dir, scenario, housing_type, county_slug
+            )
+            # Detailed energy flows
+            flows_metrics = compute_energy_flow_metrics(
+                base_input_dir, scenario, housing_type, county_slug
+            )
             # Collect Step 18 cross-scenario plots
             step18 = _gather_step18_images(output_dir, sha)
             html = _dashboard_html(
@@ -988,6 +1419,8 @@ def process(
                 solar_size_html=solar_size_html,
                 annual_load_html=annual_load_html,
                 grid_supply_html=grid_supply_html,
+                key_metrics=key_metrics,
+                flows_metrics=flows_metrics,
             )
             out_path = os.path.join(
                 output_dir,
@@ -1013,19 +1446,35 @@ def main() -> None:
     parser.add_argument("--housing-type", default="single-family-detached")
     parser.add_argument("--scenario", required=True)
     parser.add_argument("--counties", nargs="*", help="County slugs (e.g., alameda san-diego)")
+    parser.add_argument(
+        "--no-open",
+        action="store_true",
+        help="Do not automatically open the generated dashboard in a browser",
+    )
     args = parser.parse_args()
 
     if not args.counties:
         # Fallback to a single representative county if none specified
         args.counties = ["alameda"]
 
-    process(
+    written = process(
         base_input_dir=args.base_input_dir,
         output_dir=args.output_dir,
         housing_type=args.housing_type,
         scenario=args.scenario,
         counties=args.counties,
     )
+    # Auto-open the first generated dashboard unless disabled
+    try:
+        if not args.no_open and written:
+            import webbrowser
+            from pathlib import Path
+
+            first = Path(written[0]).resolve().as_uri()
+            print(f"Opening dashboard in browser: {first}")
+            webbrowser.open_new_tab(first)
+    except Exception as e:
+        print(f"Warning: Could not open dashboard automatically: {e}")
 
 
 # ---------- Step 18 assets embedding ----------

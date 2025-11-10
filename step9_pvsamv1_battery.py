@@ -1866,18 +1866,28 @@ def save_sam_results(county: str, outputs: SimulationSeries, pv: Pvsamv1.Pvsamv1
         if len(data) != 8760:
             raise ValueError(f"Data length mismatch in {county}: {name} has {len(data)} elements (expected 8760)")
     
-    # Create DataFrame with the exact columns expected by step10
+    # Derive PV AC and PV exports (System to Grid)
+    try:
+        pv_ac_series = list(outputs.solar_ac_power_series_kw)
+    except Exception:
+        pv_ac_series = [0.0] * 8760
+    system_to_grid = [max(pa - sl - sb, 0.0) for pa, sl, sb in zip(pv_ac_series, pv_to_load, pv_to_batt_list)]
+
+    # Create DataFrame with the exact columns expected by step10 (plus PV AC and System to Grid)
     df = pd.DataFrame({
         'Load Profile': outputs.load_series_kw,
         'System to Load': pv_to_load,
         'Battery to Load': batt_to_load,
         'Grid to Load': grid_to_load,
+        'System to Grid': system_to_grid,
+        'PV to Grid (kWh)': system_to_grid,
         'Solar + Battery to Load': solar_battery_to_load,
         'Total Supply': total_supply,
         'Difference': difference,
         'System to Battery': pv_to_batt_list,
         'Grid to Battery': grid_to_batt_list,
         'Battery SOC': outputs.state_of_charge_series_percent,
+        'PV AC (kWh)': pv_ac_series,
     }, index=date_range)
     
     # Summaries for diagnostics (helps compare with DIY PV)
