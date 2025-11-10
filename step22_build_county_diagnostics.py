@@ -812,6 +812,20 @@ def _dashboard_html(
                 .muted {{ color: #666; font-size: 12px; }}
                 .metric-value {{ font-size: 24px; font-weight: bold; color: #2c5aa0; line-height: 1.2; }}
                 .metric-value small {{ font-size: 12px; color: #666; font-weight: normal; display: block; margin-top: 4px; }}
+                /* New: lay out multiple metrics in a single panel */
+                .metrics-grid {{
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+                    gap: 12px;
+                    align-items: stretch;
+                }}
+                .metric-block {{
+                    background: #fbfbfb;
+                    border: 1px solid #eee;
+                    border-radius: 8px;
+                    padding: 16px;
+                    text-align: center;
+                }}
             </style>
         </head>
         <body>
@@ -834,32 +848,36 @@ def _dashboard_html(
         parts.append("<div class=\"muted\">No appliance chart available</div>")
     parts.append("</div>")
 
-    # Card 2: Solar system size
-    parts.append("<div class=\"metric-card\">")
-    parts.append("<h2>Solar System Size</h2>")
+    # Card 2: Key metrics panel (combined)
+    parts.append("<div class=\"card\">")
+    parts.append("<h2>Key Metrics</h2>")
+    parts.append("<div class=\"metrics-grid\">")
+    # Metric: Solar system size
+    parts.append("<div class=\"metric-block\">")
+    parts.append("<div class=\"muted\">Solar System Size</div>")
     if solar_size_html:
         parts.append(solar_size_html)
     else:
         parts.append("<div class=\"metric-value\">N/A<br><small>No data available</small></div>")
     parts.append("</div>")
-
-    # Card 3: Annual household load
-    parts.append("<div class=\"metric-card\">")
-    parts.append("<h2>Annual Household Load</h2>")
+    # Metric: Annual household load
+    parts.append("<div class=\"metric-block\">")
+    parts.append("<div class=\"muted\">Annual Household Load</div>")
     if annual_load_html:
         parts.append(annual_load_html)
     else:
         parts.append("<div class=\"metric-value\">N/A<br><small>No data available</small></div>")
     parts.append("</div>")
-
-    # Card 4: Grid supply load
-    parts.append("<div class=\"metric-card\">")
-    parts.append("<h2>Grid Supply to Load</h2>")
+    # Metric: Grid supply to load
+    parts.append("<div class=\"metric-block\">")
+    parts.append("<div class=\"muted\">Grid Supply to Load</div>")
     if grid_supply_html:
         parts.append(grid_supply_html)
     else:
         parts.append("<div class=\"metric-value\">N/A<br><small>No data available</small></div>")
     parts.append("</div>")
+    parts.append("</div>")  # end metrics-grid
+    parts.append("</div>")  # end card
 
     # Card 5: Deployment figure
     parts.append("<div class=\"card\">")
