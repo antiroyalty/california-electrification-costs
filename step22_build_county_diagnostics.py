@@ -1408,11 +1408,12 @@ def _dashboard_html(
         parts.append("</div>")
     parts.append("</div>")
 
-    # Card 3: Energy Flows — Before Solar+Storage
+    # Card 3: Energy Flows — With vs Without Solar+Storage
     parts.append("<div class=\"card\">")
-    parts.append("<h2>Energy Flows — Before Solar+Storage</h2>")
-    if flows_without:
-        fm = flows_without
+    parts.append("<h2>Energy Flows — With vs Without Solar+Storage</h2>")
+    if flows_with or flows_without:
+        fw = flows_with or {}
+        fwo = flows_without or {}
         def fmt(val, unit=""):
             try:
                 if val is None:
@@ -1426,113 +1427,34 @@ def _dashboard_html(
                 return str(val)
             except Exception:
                 return "N/A"
-        parts.append("<table class=\"kmtbl\">")
-        parts.append("<thead><tr><th>Metric</th><th>Value</th></tr></thead>")
-        parts.append("<tbody>")
-        
-        # PV to Load
-        parts.append(
-            f"<tr><td>PV → Load<div class=\"formula\">sum('System to Load')</div></td><td class=\"val\">{fmt(fm.get('pv_to_load_kwh'), 'kWh')} kWh</td></tr>"
-        )
-        # Battery to Load
-        parts.append(
-            f"<tr><td>Battery → Load<div class=\"formula\">sum('Battery to Load')</div></td><td class=\"val\">{fmt(fm.get('batt_to_load_kwh'), 'kWh')} kWh</td></tr>"
-        )
-        # Grid to Load
-        parts.append(
-            f"<tr><td>Grid → Load<div class=\"formula\">sum('Grid to Load')</div></td><td class=\"val\">{fmt(fm.get('grid_to_load_kwh'), 'kWh')} kWh</td></tr>"
-        )
-        # PV to Battery
-        parts.append(
-            f"<tr><td>PV → Battery<div class=\"formula\">sum('System to Battery')</div></td><td class=\"val\">{fmt(fm.get('pv_to_batt_kwh'), 'kWh')} kWh</td></tr>"
-        )
-        # Grid to Battery
-        parts.append(
-            f"<tr><td>Grid → Battery<div class=\"formula\">sum('Grid to Battery')</div></td><td class=\"val\">{fmt(fm.get('grid_to_batt_kwh'), 'kWh')} kWh</td></tr>"
-        )
-        # PV Exports (PV → Grid)
-        pv_exp_val = fm.get('pv_exports_kwh')
-        pv_exp_formula = fm.get('pv_exports_formula') or "sum('System to Grid') or sum('PV AC (kWh)') − sum('System to Load') − sum('System to Battery')"
-        parts.append(
-            f"<tr><td>PV → Grid (Exports)<div class=\"formula\">{pv_exp_formula}</div></td><td class=\"val\">{fmt(pv_exp_val, 'kWh')} kWh</td></tr>"
-        )
-        # Total Grid Purchases
-        parts.append(
-            f"<tr><td>Total Grid Purchases<div class=\"formula\">sum('Grid to Load') + sum('Grid to Battery')</div></td><td class=\"val\">{fmt(fm.get('total_grid_purchases_kwh'), 'kWh')} kWh</td></tr>"
-        )
-        # Self-sufficiency
-        parts.append(
-            f"<tr><td>Self‑sufficiency<div class=\"formula\">1 − sum('Grid to Load') / sum('Load Profile')</div></td><td class=\"val\">{fmt(fm.get('self_sufficiency_pct'), '%')}</td></tr>"
-        )
-        # Peak Net Load
-        parts.append(
-            f"<tr><td>Peak Net Load<div class=\"formula\">max('Load Profile' − 'System to Load' − 'Battery to Load')</div></td><td class=\"val\">{fmt(fm.get('peak_net_load_kw'), 'kW')} kW</td></tr>"
-        )
+        parts.append("<table class=\"kmtbl\"><thead><tr><th>Metric</th><th>With Solar+Storage</th><th>Without Solar+Storage</th></tr></thead><tbody>")
+        rows = [
+            ("PV → Load", fw.get('pv_to_load_kwh'), fwo.get('pv_to_load_kwh'), "sum('System to Load')"),
+            ("Battery → Load", fw.get('batt_to_load_kwh'), fwo.get('batt_to_load_kwh'), "sum('Battery to Load')"),
+            ("Grid → Load", fw.get('grid_to_load_kwh'), fwo.get('grid_to_load_kwh'), "sum('Grid to Load')"),
+            ("PV → Battery", fw.get('pv_to_batt_kwh'), fwo.get('pv_to_batt_kwh'), "sum('System to Battery')"),
+            ("Grid → Battery", fw.get('grid_to_batt_kwh'), fwo.get('grid_to_batt_kwh'), "sum('Grid to Battery')"),
+            (
+                "PV → Grid (Exports)",
+                fw.get('pv_exports_kwh'),
+                fwo.get('pv_exports_kwh'),
+                fw.get('pv_exports_formula') or "sum('System to Grid') or sum('PV AC (kWh)') − sum('System to Load') − sum('System to Battery')",
+            ),
+            ("Total Grid Purchases", fw.get('total_grid_purchases_kwh'), fwo.get('total_grid_purchases_kwh'), "sum('Grid to Load') + sum('Grid to Battery')"),
+            ("Self‑sufficiency", fw.get('self_sufficiency_pct'), fwo.get('self_sufficiency_pct'), "1 − sum('Grid to Load') / sum('Load Profile')"),
+            ("Peak Net Load", fw.get('peak_net_load_kw'), fwo.get('peak_net_load_kw'), "max('Load Profile' − 'System to Load' − 'Battery to Load')"),
+        ]
+        for label, wval, oval, formula in rows:
+            unit = '%' if 'Self' in label else ('kW' if 'Peak' in label else 'kWh')
+            html_row = (
+                f'<tr><td>{label}<div class="formula">{formula}</div></td>'
+                f'<td class="val">{fmt(wval, unit)}{(" "+unit) if unit!="%" else ""}</td>'
+                f'<td class="val">{fmt(oval, unit)}{(" "+unit) if unit!="%" else ""}</td></tr>'
+            )
+            parts.append(html_row)
         parts.append("</tbody></table>")
     else:
-        parts.append("<div class=\"muted\">No energy flows available for 'before'</div>")
-    parts.append("</div>")
-
-    # Card 4: Energy Flows — With Solar+Storage
-    parts.append("<div class=\"card\">")
-    parts.append("<h2>Energy Flows — With Solar+Storage</h2>")
-    if flows_with:
-        fm = flows_with
-        def fmt(val, unit=""):
-            try:
-                if val is None:
-                    return "N/A"
-                if unit == "kWh":
-                    return f"{float(val):,.0f}"
-                if unit == "kW":
-                    return f"{float(val):,.1f}"
-                if unit == "%":
-                    return f"{float(val):.1f}%"
-                return str(val)
-            except Exception:
-                return "N/A"
-        parts.append("<table class=\"kmtbl\"><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>")
-        # PV to Load
-        parts.append(
-            f"<tr><td>PV → Load<div class=\"formula\">sum('System to Load')</div></td><td class=\"val\">{fmt(fm.get('pv_to_load_kwh'), 'kWh')} kWh</td></tr>"
-        )
-        # Battery to Load
-        parts.append(
-            f"<tr><td>Battery → Load<div class=\"formula\">sum('Battery to Load')</div></td><td class=\"val\">{fmt(fm.get('batt_to_load_kwh'), 'kWh')} kWh</td></tr>"
-        )
-        # Grid to Load
-        parts.append(
-            f"<tr><td>Grid → Load<div class=\"formula\">sum('Grid to Load')</div></td><td class=\"val\">{fmt(fm.get('grid_to_load_kwh'), 'kWh')} kWh</td></tr>"
-        )
-        # PV to Battery
-        parts.append(
-            f"<tr><td>PV → Battery<div class=\"formula\">sum('System to Battery')</div></td><td class=\"val\">{fmt(fm.get('pv_to_batt_kwh'), 'kWh')} kWh</td></tr>"
-        )
-        # Grid to Battery
-        parts.append(
-            f"<tr><td>Grid → Battery<div class=\"formula\">sum('Grid to Battery')</div></td><td class=\"val\">{fmt(fm.get('grid_to_batt_kwh'), 'kWh')} kWh</td></tr>"
-        )
-        # PV Exports (PV → Grid)
-        pv_exp_val = fm.get('pv_exports_kwh')
-        pv_exp_formula = fm.get('pv_exports_formula') or "sum('System to Grid') or sum('PV AC (kWh)') − sum('System to Load') − sum('System to Battery')"
-        parts.append(
-            f"<tr><td>PV → Grid (Exports)<div class=\"formula\">{pv_exp_formula}</div></td><td class=\"val\">{fmt(pv_exp_val, 'kWh')} kWh</td></tr>"
-        )
-        # Total Grid Purchases
-        parts.append(
-            f"<tr><td>Total Grid Purchases<div class=\"formula\">sum('Grid to Load') + sum('Grid to Battery')</div></td><td class=\"val\">{fmt(fm.get('total_grid_purchases_kwh'), 'kWh')} kWh</td></tr>"
-        )
-        # Self-sufficiency
-        parts.append(
-            f"<tr><td>Self‑sufficiency<div class=\"formula\">1 − sum('Grid to Load') / sum('Load Profile')</div></td><td class=\"val\">{fmt(fm.get('self_sufficiency_pct'), '%')}</td></tr>"
-        )
-        # Peak Net Load
-        parts.append(
-            f"<tr><td>Peak Net Load<div class=\"formula\">max('Load Profile' − 'System to Load' − 'Battery to Load')</div></td><td class=\"val\">{fmt(fm.get('peak_net_load_kw'), 'kW')} kW</td></tr>"
-        )
-        parts.append("</tbody></table>")
-    else:
-        parts.append("<div class=\"muted\">No energy flows available for 'with'</div>")
+        parts.append("<div class=\"muted\">No energy flow data available</div>")
     parts.append("</div>")
 
     # Card 4: Annual Energy Cost — Electricity vs Gas
@@ -1788,6 +1710,7 @@ def _gather_step18_images(output_dir: str, sha: str) -> dict:
         "Payback Periods (with Solar)": os.path.join(output_dir, f"step18_payback_with_solar_dotline_g{sha}.png"),
         "PV Size by Scenario": os.path.join(output_dir, f"step18_pv_size_bar_g{sha}.png"),
         "With vs Without Solar+Storage": os.path.join(output_dir, f"step21_eac_with_vs_without_g{sha}.png"),
+        "Annualized Cost — No Solar+Storage": os.path.join(output_dir, f"step20_eac_no_pv_stacked_bar_g{sha}.png"),
     }
     out = {}
     for title, path in files.items():
