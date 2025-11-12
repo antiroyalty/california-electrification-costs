@@ -317,6 +317,8 @@ def validate_and_save_results(county, load_profile, system_to_load, batt_to_load
         'System to Load': system_to_load,
         'Battery to Load': batt_to_load,
         'Grid to Load': grid_to_load,
+        'System to Grid': system_to_grid,
+        'PV to Grid (kWh)': system_to_grid,
         'Solar + Battery to Load': solar_battery_to_load,
         'Total Supply': total_supply,
         'Difference': difference,

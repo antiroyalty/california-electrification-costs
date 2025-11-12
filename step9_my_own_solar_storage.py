@@ -664,6 +664,7 @@ def process(
                 "System to Load": system_to_load,
                 "Battery to Load": batt_to_load,
                 "Grid to Load": grid_to_load,
+                "System to Grid": pv_to_grid,
                 "Solar + Battery to Load": [a + b for a, b in zip(system_to_load, batt_to_load)],
                 "Total Supply": [a + b + c for a, b, c in zip(system_to_load, batt_to_load, grid_to_load)],
                 "Difference": [l - (a + b + c) for l, a, b, c in zip(load_profile, system_to_load, batt_to_load, grid_to_load)],

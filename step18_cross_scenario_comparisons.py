@@ -167,3 +167,68 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def process(
+    base_input_dir: str,
+    output_dir: str,
+    housing_type: str,
+    scenarios: List[str],
+    counties: List[str],
+    *,
+    plan_preference: List[str] | None = None,
+    electricity_variant: str = "nem3",
+    agg: str = "mean",
+    run_timestamp: str | None = None,
+):
+    os.makedirs(output_dir, exist_ok=True)
+    sha = git_short_sha()
+
+    # EAC summary and plot
+    eac_df = collect_eac_components(
+        base_input_dir,
+        housing_type,
+        scenarios,
+        counties,
+        incentive='full_incentives',
+        agg=agg,
+        timestamp=run_timestamp,
+        electricity_plan_preference=plan_preference,
+        electricity_variant=electricity_variant,
+    )
+    if not eac_df.empty:
+        # compute total for ranking/plot
+        if 'annual_bill_electric' in eac_df.columns and 'annual_bill_gas' in eac_df.columns:
+            bill_col = eac_df['annual_bill_electric'].fillna(0) + eac_df['annual_bill_gas'].fillna(0)
+        else:
+            bill_col = eac_df.get('annual_bill_with_solar', pd.Series([0] * len(eac_df)))
+        comp = ['capex_pv', 'capex_storage', 'capex_electric', 'capex_gas', 'vehicle_om']
+        eac_df['total_eac'] = eac_df[comp].sum(axis=1) + bill_col
+        eac_df.to_csv(os.path.join(output_dir, f"step18_eac_summary_g{sha}.csv"), index=False)
+        fig = plot_eac_stacked_bar(eac_df, scenario_order=scenarios)
+        fig.savefig(os.path.join(output_dir, f"step18_eac_stacked_bar_g{sha}.png"), dpi=150, bbox_inches='tight')
+
+    # Per-county exports (NEM3 and retail)
+    from helpers.plot_scenario_comparison_helper import collect_eac_components_by_county
+    by_cty_nem3 = collect_eac_components_by_county(
+        base_input_dir,
+        housing_type,
+        scenarios,
+        counties,
+        incentive='full_incentives',
+        electricity_plan_preference=plan_preference,
+        electricity_variant='nem3',
+    )
+    by_cty_retail = collect_eac_components_by_county(
+        base_input_dir,
+        housing_type,
+        scenarios,
+        counties,
+        incentive='full_incentives',
+        electricity_plan_preference=plan_preference,
+        electricity_variant='retail',
+    )
+    by_cty_nem3.to_csv(os.path.join(output_dir, f"step18_eac_by_county_nem3_g{sha}.csv"), index=False)
+    by_cty_retail.to_csv(os.path.join(output_dir, f"step18_eac_by_county_retail_g{sha}.csv"), index=False)
+
+    return eac_df

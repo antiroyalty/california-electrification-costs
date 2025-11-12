@@ -191,3 +191,85 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def process(
+    base_input_dir: str,
+    output_dir: str,
+    housing_type: str,
+    scenario: str,
+    counties: List[str],
+    *,
+    plan_preference: List[str] | None = None,
+    electricity_variant: str = "nem3",
+    incentive: str = "full_incentives",
+    discount_rate: float = 0.07,
+    agg: str = "mean",
+):
+    os.makedirs(output_dir, exist_ok=True)
+    sha = git_short_sha()
+
+    df_with = collect_eac_components(
+        base_input_dir,
+        housing_type,
+        [scenario],
+        counties,
+        incentive=incentive,
+        agg=agg,
+        electricity_plan_preference=plan_preference,
+        electricity_variant=electricity_variant,
+    )
+    df_no = collect_eac_no_pv(
+        base_input_dir,
+        housing_type,
+        [scenario],
+        counties,
+        incentive=incentive,
+        discount_rate=discount_rate,
+        agg=agg,
+    )
+    merged = _prepare_combined_df(df_with, df_no)
+    merged.to_csv(os.path.join(output_dir, f"step21_eac_with_vs_without_g{sha}.csv"), index=False)
+    fig = plot_grouped_eac(merged, scenario_order=[scenario], county_label="All Counties")
+    fig.savefig(os.path.join(output_dir, f"step21_eac_with_vs_without_g{sha}.png"), dpi=150, bbox_inches='tight')
+
+    # Per-county delta export
+    try:
+        from helpers.plot_scenario_comparison_helper import collect_eac_components_by_county
+        from step20_no_solar_storage_electrification import collect_eac_no_pv_by_county
+        with_by_cty = collect_eac_components_by_county(
+            base_input_dir,
+            housing_type,
+            [scenario],
+            counties,
+            incentive=incentive,
+            electricity_plan_preference=plan_preference,
+            electricity_variant=electricity_variant,
+        )
+        no_by_cty = collect_eac_no_pv_by_county(
+            base_input_dir,
+            housing_type,
+            [scenario],
+            counties,
+            incentive=incentive,
+            discount_rate=discount_rate,
+        )
+        if not with_by_cty.empty and not no_by_cty.empty:
+            with_by_cty = with_by_cty.copy()
+            with_by_cty['total_eac'] = (
+                with_by_cty[['capex_pv','capex_storage','capex_electric','capex_gas','vehicle_om']].sum(axis=1)
+                + with_by_cty['annual_bill_electric'].fillna(0) + with_by_cty['annual_bill_gas'].fillna(0)
+            )
+            no_by_cty = no_by_cty.copy()
+            no_by_cty['total_eac_no_pv'] = (
+                no_by_cty[['capex_electric','capex_gas','vehicle_om']].sum(axis=1)
+                + no_by_cty['annual_bill_electric'].fillna(0) + no_by_cty['annual_bill_gas'].fillna(0)
+            )
+            merged_cty = with_by_cty.merge(no_by_cty[['scenario','county_slug','total_eac_no_pv']], on=['scenario','county_slug'], how='inner')
+            merged_cty['delta_with_minus_without'] = merged_cty['total_eac'] - merged_cty['total_eac_no_pv']
+            merged_cty['delta_pct'] = (merged_cty['delta_with_minus_without'] / merged_cty['total_eac_no_pv']).replace([pd.NA, float('inf'), float('-inf')], 0.0) * 100.0
+            merged_cty.to_csv(os.path.join(output_dir, f"step21_with_vs_without_by_county_g{sha}.csv"), index=False)
+    except Exception:
+        pass
+
+    return merged

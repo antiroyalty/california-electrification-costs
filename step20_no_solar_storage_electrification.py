@@ -385,3 +385,24 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def process(
+    base_input_dir: str,
+    output_dir: str,
+    housing_type: str,
+    scenarios: List[str],
+    counties: List[str],
+    *,
+    incentive: str = "full_incentives",
+    discount_rate: float = 0.07,
+    agg: str = "mean",
+):
+    os.makedirs(output_dir, exist_ok=True)
+    sha = git_short_sha()
+    df = collect_eac_no_pv(base_input_dir, housing_type, scenarios, counties, incentive=incentive, discount_rate=discount_rate, agg=agg)
+    if not df.empty:
+        df.to_csv(os.path.join(output_dir, f"step20_eac_no_pv_summary_g{sha}.csv"), index=False)
+    fig = plot_eac_no_pv_stacked_bar(df, scenario_order=scenarios, title=f"All-in Annualized Cost (No Solar + Storage)")
+    fig.savefig(os.path.join(output_dir, f"step20_eac_no_pv_stacked_bar_g{sha}.png"), dpi=150, bbox_inches="tight")
+    return df

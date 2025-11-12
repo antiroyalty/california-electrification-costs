@@ -136,3 +136,63 @@ def main() -> None:
 if __name__ == "__main__":
     main()
 
+
+def process(
+    base_input_dir: str,
+    output_dir: str,
+    housing_type: str,
+    pair: List[str],
+    counties: List[str],
+    *,
+    plan_preference: List[str] | None = None,
+    electricity_variant: str = "nem3",
+    agg: str = "mean",
+):
+    os.makedirs(output_dir, exist_ok=True)
+    sha = git_short_sha()
+    eac19 = collect_eac_components(
+        base_input_dir,
+        housing_type,
+        pair,
+        counties,
+        incentive='full_incentives',
+        agg=agg,
+        electricity_plan_preference=plan_preference,
+        electricity_variant=electricity_variant,
+    )
+    if 'annual_bill_electric' in eac19.columns and 'annual_bill_gas' in eac19.columns:
+        eac19['total_eac'] = (
+            eac19[['capex_pv','capex_storage','capex_electric','capex_gas','vehicle_om']].sum(axis=1)
+            + eac19['annual_bill_electric'].fillna(0) + eac19['annual_bill_gas'].fillna(0)
+        )
+    else:
+        eac19['total_eac'] = (
+            eac19[['capex_pv','capex_storage','capex_electric','capex_gas','vehicle_om','annual_bill_with_solar']].sum(axis=1)
+        )
+    fig = plot_eac_stacked_bar(eac19, scenario_order=pair, title=f"All-in Annualized Cost — {pair[0]} vs {pair[1]}")
+    fig.savefig(os.path.join(output_dir, f"step19_eac_stacked_bar_{pair[0]}_vs_{pair[1]}_g{sha}.png"), dpi=150, bbox_inches='tight')
+
+    # Per-county delta
+    from helpers.plot_scenario_comparison_helper import collect_eac_components_by_county
+    by_cty = collect_eac_components_by_county(
+        base_input_dir,
+        housing_type,
+        pair,
+        counties,
+        incentive='full_incentives',
+        electricity_plan_preference=plan_preference,
+        electricity_variant=electricity_variant,
+    )
+    if not by_cty.empty:
+        by_cty = by_cty.copy()
+        by_cty['total_eac'] = (
+            by_cty[['capex_pv','capex_storage','capex_electric','capex_gas','vehicle_om']].sum(axis=1)
+            + by_cty['annual_bill_electric'].fillna(0) + by_cty['annual_bill_gas'].fillna(0)
+        )
+        a = by_cty[by_cty['scenario'] == pair[0]][['county_slug','total_eac']].rename(columns={'total_eac': f'{pair[0]}_total'})
+        b = by_cty[by_cty['scenario'] == pair[1]][['county_slug','total_eac']].rename(columns={'total_eac': f'{pair[1]}_total'})
+        m = a.merge(b, on='county_slug', how='inner')
+        m['delta_ev_minus_ice'] = m[f'{pair[1]}_total'] - m[f'{pair[0]}_total']
+        m.to_csv(os.path.join(output_dir, f"step19_ev_vs_ice_by_county_g{sha}.csv"), index=False)
+
+    return eac19
