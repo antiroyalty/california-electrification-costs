@@ -4,7 +4,7 @@ Step 22: Build County Diagnostics
 Creates per-county diagnostic dashboards that assemble:
 - Solar + storage deployment graph (from Step 9 outputs)
 - Appliance breakdown pie chart (moved from Step 16)
-- Weekly SAM charts for January and July (separate panels)
+ - Weekly charts for January and July (separate panels)
 - Cross‑scenario cards from Step 18 (EAC stacked bar, kWh flows, Savings & Bills, Payback, PV size)
 
 Outputs are saved under analysis_results/county_diagnostics/<scenario>/.
@@ -379,7 +379,7 @@ def create_solar_storage_deployment_graph(
 # ---------- New metric cards ----------
 
 def _infer_pv_size_kw_from_csv(csv_path: str) -> Optional[float]:
-    """Try to infer PV system size (kW) from the SAM CSV header.
+    """Try to infer PV system size (kW) from the solar+storage CSV header.
 
     Returns None if a size column cannot be found.
     """
@@ -423,7 +423,7 @@ def _lookup_pv_size_kw(
 
     1) Look for `{base_input_dir}/{scenario}/{housing_type}/CAPITAL_COSTS/electrified_assets.csv`
        and read the row for `county_slug` (index or County col), using "Solar Capacity (kW)".
-    2) Fallback: `_infer_pv_size_kw_from_csv` on the per-county SAM CSV.
+    2) Fallback: `_infer_pv_size_kw_from_csv` on the per-county solar+storage CSV.
     """
     try:
         cap_csv = os.path.join(
@@ -476,7 +476,7 @@ def _lookup_pv_size_kw(
                         return val
             except Exception:
                 pass
-        # Fallback to inspecting per-county SAM CSV header
+        # Fallback to inspecting per-county solar+storage CSV header
         county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
         sam_file = os.path.join(county_dir, f"sam_optimized_load_profiles_{county_slug}.csv")
         if not os.path.exists(sam_file):
@@ -493,7 +493,7 @@ def compute_key_metrics(
     housing_type: str,
     county_slug: str,
 ) -> Optional[dict]:
-    """Compute key metrics with and without solar+storage from SAM output.
+    """Compute key metrics with and without solar+storage from Step 9 output.
 
     Returns a dict with keys "with" and "without", each containing:
       - solar_kw
@@ -609,7 +609,7 @@ def compute_energy_flow_metrics(
     housing_type: str,
     county_slug: str,
 ) -> Optional[dict]:
-    """Compute detailed energy flow metrics from Step 9 SAM CSV.
+    """Compute detailed energy flow metrics from Step 9 solar+storage CSV.
 
     Returns dict with keys:
       - battery_capacity_kwh
@@ -967,10 +967,10 @@ def create_grid_supply_card(
         return "<div class='metric-value'>N/A<br><small>Error loading data</small></div>"
 
 
-# ---------- Weekly SAM and Battery SOC charts (moved from Step 16) ----------
+# ---------- Weekly charts (load and solar) and Battery SOC ----------
 
 
-def load_sam_weekly_data(
+def load_weekly_data(
     base_input_dir: str,
     scenario: str,
     housing_type: str,
@@ -1017,24 +1017,24 @@ def load_battery_soc_data(
         print(f"Warning: Error reading solar+storage load profiles for {county_slug}: {e}")
         return None
 
-def create_sam_weekly_chart(
+def create_weekly_chart(
     base_input_dir: str,
     scenario: str,
     housing_type: str,
     county_slug: str,
 ) -> str:
-    """Weekly charts for SAM metrics (load breakdown and solar power) for Jan/Jul; returns base64 PNG."""
+    """Weekly charts for load breakdown and solar power for Jan/Jul; returns base64 PNG."""
     try:
         import matplotlib.dates as mdates
         sam_metrics = ["Load Profile", "System to Load", "Battery to Load", "Grid to Load"]
         solar_metrics = ["System to Load", "System to Battery"]
         all_metrics = list(dict.fromkeys(sam_metrics + solar_metrics))
-        sam_df = load_sam_weekly_data(base_input_dir, scenario, housing_type, county_slug, all_metrics)
-        if sam_df is None:
+        weekly_df = load_weekly_data(base_input_dir, scenario, housing_type, county_slug, all_metrics)
+        if weekly_df is None:
             return ""
         fig, axes = plt.subplots(4, 1, figsize=(16, 20))
         fig.suptitle(
-            f"SAM Load Profile and Solar Power Analysis - Weekly Comparison\n{county_slug.replace('-', ' ').title()} County - {scenario.replace('_', ' ').title()} Scenario",
+            f"Load Profile and Solar Power — Weekly Comparison\n{county_slug.replace('-', ' ').title()} County — {scenario.replace('_', ' ').title()} Scenario",
             fontsize=16,
             fontweight="bold",
         )
@@ -1051,7 +1051,7 @@ def create_sam_weekly_chart(
             ax_load = axes[idx]
             ax_sol = axes[idx + 2]
             try:
-                week = sam_df.loc[start:end]
+                week = weekly_df.loc[start:end]
                 if week.empty:
                     for ax in (ax_load, ax_sol):
                         ax.text(0.5, 0.5, f"No data for {pname}", ha="center", va="center", color="red")
@@ -1128,9 +1128,9 @@ def create_sam_weekly_chart(
         plt.close()
         return b64
     except Exception as e:
-        print(f"Error creating SAM weekly chart: {e}")
+        print(f"Error creating weekly chart: {e}")
         fig, ax = plt.subplots(figsize=(6, 4))
-        ax.text(0.5, 0.5, "SAM chart unavailable", ha="center", va="center")
+        ax.text(0.5, 0.5, "Weekly chart unavailable", ha="center", va="center")
         ax.axis("off")
         buf = io.BytesIO()
         plt.savefig(buf, format="png", dpi=120, bbox_inches="tight")
@@ -1140,7 +1140,7 @@ def create_sam_weekly_chart(
         return b64
 
 
-def create_sam_weekly_chart_for_period(
+def create_weekly_chart_for_period(
     base_input_dir: str,
     scenario: str,
     housing_type: str,
@@ -1154,8 +1154,8 @@ def create_sam_weekly_chart_for_period(
         sam_metrics = ["Load Profile", "System to Load", "Battery to Load", "Grid to Load"]
         solar_metrics = ["System to Load", "System to Battery"]
         all_metrics = list(dict.fromkeys(sam_metrics + solar_metrics))
-        sam_df = load_sam_weekly_data(base_input_dir, scenario, housing_type, county_slug, all_metrics)
-        if sam_df is None:
+        weekly_df = load_weekly_data(base_input_dir, scenario, housing_type, county_slug, all_metrics)
+        if weekly_df is None:
             return ""
         periods = {
             "january": ("January (Winter)", ("2018-01-01", "2018-01-08")),
@@ -1179,7 +1179,7 @@ def create_sam_weekly_chart_for_period(
             "Solar + Battery to Load": "#F26419",
             "System to Battery": "#8B5A2B",
         }
-        week = sam_df.loc[start:end]
+        week = weekly_df.loc[start:end]
         if week.empty:
             for ax in (ax_load, ax_sol):
                 ax.text(0.5, 0.5, f"No data for {title_suffix}", ha="center", va="center", color="red")
@@ -1249,9 +1249,9 @@ def create_sam_weekly_chart_for_period(
         plt.close()
         return out
     except Exception as e:
-        print(f"Error creating SAM weekly single-period chart: {e}")
+        print(f"Error creating weekly single-period chart: {e}")
         fig, ax = plt.subplots(figsize=(6, 4))
-        ax.text(0.5, 0.5, "SAM chart unavailable", ha="center", va="center")
+        ax.text(0.5, 0.5, "Weekly chart unavailable", ha="center", va="center")
         ax.axis("off")
         buf = io.BytesIO()
         plt.savefig(buf, format="png", dpi=120, bbox_inches="tight")
@@ -1594,23 +1594,23 @@ def _dashboard_html(
         parts.append("<div class=\"muted\">No deployment figure available</div>")
     parts.append("</div>")
 
-    # Card 6: Weekly SAM chart — January
+    # Card 6: Weekly chart — January
     parts.append("<div class=\"card\">")
     parts.append("<h2>Load & Solar — January (First Week)</h2>")
     if weekly_jan_b64:
         parts.append(
-            f"<div class=\"imgwrap\"><img src=\"data:image/png;base64,{weekly_jan_b64}\" alt=\"sam weekly january\"></div>"
+            f"<div class=\"imgwrap\"><img src=\"data:image/png;base64,{weekly_jan_b64}\" alt=\"weekly january\"></div>"
         )
     else:
         parts.append("<div class=\"muted\">No January weekly figure available</div>")
     parts.append("</div>")
 
-    # Card 7: Weekly SAM chart — July
+    # Card 7: Weekly chart — July
     parts.append("<div class=\"card\">")
     parts.append("<h2>Load & Solar — July (First Week)</h2>")
     if weekly_jul_b64:
         parts.append(
-            f"<div class=\"imgwrap\"><img src=\"data:image/png;base64,{weekly_jul_b64}\" alt=\"sam weekly july\"></div>"
+            f"<div class=\"imgwrap\"><img src=\"data:image/png;base64,{weekly_jul_b64}\" alt=\"weekly july\"></div>"
         )
     else:
         parts.append("<div class=\"muted\">No July weekly figure available</div>")
@@ -1661,11 +1661,11 @@ def process(
             app_b64 = create_appliance_breakdown_chart(
                 base_input_dir, scenario, housing_type, county_slug
             )
-            # Weekly SAM, split per period
-            weekly_jan_b64 = create_sam_weekly_chart_for_period(
+            # Weekly charts, split per period
+            weekly_jan_b64 = create_weekly_chart_for_period(
                 base_input_dir, scenario, housing_type, county_slug, period="january"
             )
-            weekly_jul_b64 = create_sam_weekly_chart_for_period(
+            weekly_jul_b64 = create_weekly_chart_for_period(
                 base_input_dir, scenario, housing_type, county_slug, period="july"
             )
             # New metric cards
