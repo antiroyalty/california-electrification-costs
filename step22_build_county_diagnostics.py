@@ -899,6 +899,203 @@ def create_solar_size_card(
         return "<div class='metric-value'>N/A<br><small>Error loading data</small></div>"
 
 
+# ---------- End‑use breakdown weekly charts (Jan & Jul; real vs simulated) ----------
+
+def _load_real_enduse_timeseries(
+    base_input_dir: str,
+    housing_type: str,
+    county_slug: str,
+) -> Optional[pd.DataFrame]:
+    """Load 'real' electricity end‑use timeseries from baseline electricity_loads CSV.
+
+    Returns a DataFrame indexed by timestamp with columns for each end‑use category.
+    """
+    baseline_dir = os.path.join(base_input_dir, "baseline", housing_type, county_slug)
+    path = os.path.join(baseline_dir, f"electricity_loads_{county_slug}.csv")
+    if not os.path.exists(path):
+        return None
+    try:
+        df = pd.read_csv(path, parse_dates=["timestamp"]).set_index("timestamp").sort_index()
+        categories = {
+            "Cooling": ["ceiling_fan"],
+            "Appliances": ["clothes_dryer", "dishwasher", "freezer", "refrigerator"],
+            "Lighting": ["lighting_garage", "lighting_interior"],
+            "Plug Loads": ["plug_loads"],
+            "Pool/Spa": ["permanent_spa_heat", "permanent_spa_pump", "pool_heater", "pool_pump"],
+            "Other Electric": ["mech_vent"],
+        }
+        out = pd.DataFrame(index=df.index)
+        for cat, apps in categories.items():
+            series = pd.Series(0.0, index=df.index)
+            for a in apps:
+                col = f"out.electricity.{a}.energy_consumption"
+                if col in df.columns:
+                    series = series.add(pd.to_numeric(df[col], errors="coerce").fillna(0.0), fill_value=0.0)
+            if float(series.sum()) > 0:
+                out[cat] = series
+        return out if not out.empty else None
+    except Exception:
+        return None
+
+
+def _load_sim_enduse_timeseries(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+) -> Optional[pd.DataFrame]:
+    """Load simulated electrified appliance timeseries (heat pump, induction, hot water)."""
+    def find_path(scen: str) -> Optional[str]:
+        d = os.path.join(base_input_dir, scen, housing_type, county_slug)
+        p = os.path.join(d, f"electricity_loads_simulated_{county_slug}.csv")
+        return p if os.path.exists(p) else None
+    path = find_path(scenario) or find_path("baseline")
+    if not path:
+        return None
+    try:
+        df = pd.read_csv(path, parse_dates=["timestamp"]).set_index("timestamp").sort_index()
+        sim_map = {
+            "Heat Pump": "simulated.electricity.heat_pump.energy_consumption.electricity.kwh",
+            "Induction Cooking": "simulated.electricity.induction_stove.energy_consumption.electricity.kwh",
+            "Electric Hot Water": "simulated.electricity.hot_water.energy_consumption.electricity.kwh",
+        }
+        out = pd.DataFrame(index=df.index)
+        for label, col in sim_map.items():
+            if col in df.columns:
+                out[label] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+        return out if not out.empty else None
+    except Exception:
+        return None
+
+
+def _slice_week(df: pd.DataFrame, period: str) -> pd.DataFrame:
+    periods = {
+        "january": ("2018-01-01", "2018-01-08"),
+        "july": ("2018-07-01", "2018-07-08"),
+    }
+    key = period.lower()
+    start, end = periods.get(key, periods["january"])  # default jan
+    return df.loc[start:end]
+
+
+def create_enduse_breakdown_weekly(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+) -> Optional[str]:
+    """Create a 2x2 stacked area chart: Jan and Jul, Real and Simulated end‑uses.
+
+    Returns base64 PNG.
+    """
+    real = _load_real_enduse_timeseries(base_input_dir, housing_type, county_slug)
+    sim = _load_sim_enduse_timeseries(base_input_dir, scenario, housing_type, county_slug)
+    if real is None and sim is None:
+        return None
+    try:
+        import matplotlib.dates as mdates
+        fig, axes = plt.subplots(1, 2, figsize=(18, 6), sharex=False)
+        color_map = {
+            "Cooling": "#4ECDC4",
+            "Appliances": "#FD79A8",
+            "Lighting": "#FDCB6E",
+            "Plug Loads": "#6C5CE7",
+            "Pool/Spa": "#00B894",
+            "Other Electric": "#A29BFE",
+            "Heat Pump": "#FF8E53",
+            "Induction Cooking": "#DDA0DD",
+            "Electric Hot Water": "#96CEB4",
+        }
+        def plot_both_enduse(ax, real_week: Optional[pd.DataFrame], sim_week: Optional[pd.DataFrame], title: str, y_max: Optional[float] = None):
+            # Build combined categories (distinct) with labels indicating Real/Sim
+            series_list = []
+            labels = []
+            colors = []
+            # Use union of indices for full x axis
+            if real_week is not None and not real_week.empty:
+                x_index = real_week.index
+            elif sim_week is not None and not sim_week.empty:
+                x_index = sim_week.index
+            else:
+                ax.text(0.5, 0.5, f"No data for {title}", ha="center", va="center", color="red")
+                ax.axis("off")
+                return
+            # Real categories
+            if real_week is not None and not real_week.empty:
+                for c in real_week.columns:
+                    if real_week[c].sum() > 0:
+                        labels.append(f"{c} (Real)")
+                        colors.append(color_map.get(c, None))
+                        series_list.append(real_week[c].reindex(x_index).astype(float).values)
+            # Simulated categories
+            if sim_week is not None and not sim_week.empty:
+                sim_colors = {
+                    "Heat Pump": "#FF8E53",
+                    "Induction Cooking": "#DDA0DD",
+                    "Electric Hot Water": "#96CEB4",
+                }
+                for c in sim_week.columns:
+                    if sim_week[c].sum() > 0:
+                        labels.append(f"{c} (Sim)")
+                        colors.append(sim_colors.get(c, "#999999"))
+                        series_list.append(sim_week[c].reindex(x_index).astype(float).values)
+            if not series_list:
+                ax.text(0.5, 0.5, f"No data for {title}", ha="center", va="center", color="red")
+                ax.axis("off")
+                return
+            ax.stackplot(x_index, *series_list, labels=labels, colors=colors, alpha=0.85)
+            ax.set_title(title, fontsize=13, fontweight="bold")
+            ax.set_ylabel("kWh per interval")
+            ax.grid(True, alpha=0.3)
+            if y_max is not None and y_max > 0:
+                ax.set_ylim(0, y_max * 1.05)
+            ax.xaxis.set_major_locator(mdates.DayLocator())
+            ax.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d"))
+            ax.xaxis.set_minor_locator(mdates.HourLocator(interval=6))
+            ax.legend(loc="upper right", fontsize=9, ncol=2)
+
+        # Jan / Jul weekly slices
+        real_jan = _slice_week(real, "january") if real is not None else None
+        sim_jan = _slice_week(sim, "january") if sim is not None else None
+        def stack_max(df: Optional[pd.DataFrame]) -> float:
+            if df is None or df.empty:
+                return 0.0
+            try:
+                return float(df.sum(axis=1).max())
+            except Exception:
+                return 0.0
+        real_jul = _slice_week(real, "july") if real is not None else None
+        sim_jul = _slice_week(sim, "july") if sim is not None else None
+        # Global y-axis across both months, combined totals (real + sim)
+        def combined_max(r: Optional[pd.DataFrame], s: Optional[pd.DataFrame]) -> float:
+            if (r is None or r.empty) and (s is None or s.empty):
+                return 0.0
+            try:
+                idx = None
+                if r is not None and not r.empty:
+                    idx = r.index
+                if idx is None and s is not None and not s.empty:
+                    idx = s.index
+                rsum = r.reindex(idx).sum(axis=1) if r is not None and not r.empty else pd.Series(0.0, index=idx)
+                ssum = s.reindex(idx).sum(axis=1) if s is not None and not s.empty else pd.Series(0.0, index=idx)
+                return float((rsum + ssum).max())
+            except Exception:
+                return 0.0
+        y_max_global = max(combined_max(real_jan, sim_jan), combined_max(real_jul, sim_jul))
+        plot_both_enduse(axes[0], real_jan, sim_jan, "January — Real + Simulated End‑Uses", y_max=y_max_global)
+        plot_both_enduse(axes[1], real_jul, sim_jul, "July — Real + Simulated End‑Uses", y_max=y_max_global)
+        plt.tight_layout()
+        buf = io.BytesIO()
+        plt.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+        buf.seek(0)
+        b64 = base64.b64encode(buf.getvalue()).decode()
+        plt.close()
+        return b64
+    except Exception as e:
+        print(f"Error creating end‑use weekly charts: {e}")
+        return None
+
+
 def create_annual_load_card(
     base_input_dir: str,
     scenario: str,
@@ -1272,6 +1469,7 @@ def _dashboard_html(
     appliance_b64: Optional[str],
     weekly_jan_b64: Optional[str],
     weekly_jul_b64: Optional[str],
+    enduse_weekly_b64: Optional[str],
     step18_images: Optional[dict] = None,
     solar_size_html: Optional[str] = None,
     annual_load_html: Optional[str] = None,
@@ -1300,7 +1498,7 @@ def _dashboard_html(
                 .metric-card {{ background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.08); padding: 20px; text-align: center; }}
                 h1 {{ margin: 0 0 6px; }}
                 h2 {{ margin: 6px 0 12px; font-size: 18px; }}
-                .imgwrap img {{ width: 100%; height: auto; border-radius: 6px; }}
+                .imgwrap img {{ width: 100%; height: auto; border-radius: 6px; cursor: zoom-in; }}
                 .muted {{ color: #666; font-size: 12px; }}
                 .metric-value {{ font-size: 24px; font-weight: bold; color: #2c5aa0; line-height: 1.2; }}
                 .metric-value small {{ font-size: 12px; color: #666; font-weight: normal; display: block; margin-top: 4px; }}
@@ -1343,7 +1541,7 @@ def _dashboard_html(
     parts.append("<h2>Appliance Breakdown (Electric End‑Uses)</h2>")
     if appliance_b64:
         parts.append(
-            f"<div class=\"imgwrap\"><img src=\"data:image/png;base64,{appliance_b64}\" alt=\"appliance breakdown\"></div>"
+            f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{appliance_b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{appliance_b64}\" alt=\"appliance breakdown\"/></a></div>"
         )
     else:
         parts.append("<div class=\"muted\">No appliance chart available</div>")
@@ -1492,7 +1690,13 @@ def _dashboard_html(
                 return f"${float(x):,.0f}"
             except Exception:
                 return "N/A"
-        parts.append("<table class=\"kmtbl\"><thead><tr><th>Plan</th><th>Retail</th><th>NEM3</th></tr></thead><tbody>")
+        parts.append(
+            "<table class=\"kmtbl\"><thead><tr>"
+            "<th>Plan</th>"
+            "<th>Retail (imports only)</th>"
+            "<th>NEM3 (imports on plan + ACC credits)</th>"
+            "</tr></thead><tbody>"
+        )
         for p in all_plans:
             r = retail.get(p)
             n = nem3.get(p)
@@ -1510,7 +1714,7 @@ def _dashboard_html(
     parts.append("<h2>Solar + Storage Deployment</h2>")
     if deployment_b64:
         parts.append(
-            f"<div class=\"imgwrap\"><img src=\"data:image/png;base64,{deployment_b64}\" alt=\"deployment\"></div>"
+            f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{deployment_b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{deployment_b64}\" alt=\"deployment\"/></a></div>"
         )
     else:
         parts.append("<div class=\"muted\">No deployment figure available</div>")
@@ -1521,7 +1725,7 @@ def _dashboard_html(
     parts.append("<h2>Load & Solar — January (First Week)</h2>")
     if weekly_jan_b64:
         parts.append(
-            f"<div class=\"imgwrap\"><img src=\"data:image/png;base64,{weekly_jan_b64}\" alt=\"weekly january\"></div>"
+            f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{weekly_jan_b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{weekly_jan_b64}\" alt=\"weekly january\"/></a></div>"
         )
     else:
         parts.append("<div class=\"muted\">No January weekly figure available</div>")
@@ -1532,10 +1736,22 @@ def _dashboard_html(
     parts.append("<h2>Load & Solar — July (First Week)</h2>")
     if weekly_jul_b64:
         parts.append(
-            f"<div class=\"imgwrap\"><img src=\"data:image/png;base64,{weekly_jul_b64}\" alt=\"weekly july\"></div>"
+            f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{weekly_jul_b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{weekly_jul_b64}\" alt=\"weekly july\"/></a></div>"
         )
     else:
         parts.append("<div class=\"muted\">No July weekly figure available</div>")
+    parts.append("</div>")
+
+    # Card 8: Electric Load by End‑Use — Real vs Simulated (Jan/Jul)
+    parts.append("<div class=\"card\">")
+    parts.append("<h2>Electric Load by End‑Use — Real vs Simulated (First Week Jan & Jul)</h2>")
+    if enduse_weekly_b64:
+        parts.append(
+            f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{enduse_weekly_b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{enduse_weekly_b64}\" alt=\"enduse weekly jan+jul\"/></a></div>"
+        )
+        parts.append("<div class=\"muted\">Granularity: 15‑minute if available, else hourly.</div>")
+    else:
+        parts.append("<div class=\"muted\">No end‑use breakdown data available</div>")
     parts.append("</div>")
 
     # Step 18 cross-scenario comparison cards
@@ -1545,7 +1761,7 @@ def _dashboard_html(
             parts.append(f"<h2>{title}</h2>")
             if b64:
                 parts.append(
-                    f"<div class=\"imgwrap\"><img src=\"data:image/png;base64,{b64}\" alt=\"{title}\"></div>"
+                    f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{b64}\" alt=\"{title}\"/></a></div>"
                 )
             else:
                 parts.append("<div class=\"muted\">Not available</div>")
@@ -1590,6 +1806,10 @@ def process(
             weekly_jul_b64 = create_weekly_chart_for_period(
                 base_input_dir, scenario, housing_type, county_slug, period="july"
             )
+            # End‑use breakdown charts (real vs simulated, Jan & Jul)
+            enduse_weekly_b64 = create_enduse_breakdown_weekly(
+                base_input_dir, scenario, housing_type, county_slug
+            )
             # New metric cards
             solar_size_html = create_solar_size_card(
                 base_input_dir, scenario, housing_type, county_slug
@@ -1625,6 +1845,7 @@ def process(
                 appliance_b64=app_b64,
                 weekly_jan_b64=weekly_jan_b64,
                 weekly_jul_b64=weekly_jul_b64,
+                enduse_weekly_b64=enduse_weekly_b64,
                 step18_images=step18,
                 solar_size_html=solar_size_html,
                 annual_load_html=annual_load_html,
