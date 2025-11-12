@@ -37,6 +37,7 @@ from helpers.main_helpers import (
     git_short_sha,
     slugify_county_name,
 )
+from helpers.maps_helpers import get_latest_csv_file
 
 
 # ---------- Appliance breakdown (moved from Step 16) ----------
@@ -630,6 +631,127 @@ def compute_energy_flow_metrics(
         sam_file = alt if os.path.exists(alt) else sam_file
     if not os.path.exists(sam_file):
         return None
+
+
+# ---------- Annual cost breakdown helpers (electricity vs gas) ----------
+
+def _latest_results_csv_path(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+    *,
+    kind: str,  # 'electricity' or 'gas'
+) -> Optional[str]:
+    try:
+        base = get_scenario_path(base_input_dir, scenario, housing_type)
+        res_dir = os.path.join(base, county_slug, "results", kind)
+        if not os.path.isdir(res_dir):
+            return None
+        prefix = f"RESULTS_{kind}_annual_costs_{county_slug}_"
+        return get_latest_csv_file(res_dir, prefix)
+    except Exception:
+        return None
+
+
+def _parse_electricity_results(path: str, scenario: str) -> tuple[dict, dict]:
+    """Return two dicts keyed by plan token -> dollars for (retail, nem3) for scenario.solarstorage row.
+
+    If the NEM3 column is missing for a plan, the nem3 dict omits that key.
+    """
+    retail: dict[str, float] = {}
+    nem3: dict[str, float] = {}
+    if not path or not os.path.exists(path):
+        return retail, nem3
+    try:
+        df = pd.read_csv(path, index_col="scenario")
+        row_name = f"{scenario}.solarstorage" if f"{scenario}.solarstorage" in df.index else scenario
+        row = df.loc[row_name] if row_name in df.index else df.iloc[0]
+        for c in row.index:
+            s = str(c)
+            if not s.startswith("electricity."):
+                continue
+            val = pd.to_numeric(row[c], errors="coerce")
+            if pd.isna(val):
+                continue
+            # token: electricity.<utility>.<plan>[ _NEM3]
+            is_nem3 = s.endswith("_NEM3")
+            plan_token = s.split(".")[-1].replace("_NEM3", "")
+            if is_nem3:
+                nem3[plan_token] = float(val)
+            else:
+                retail[plan_token] = float(val)
+        return retail, nem3
+    except Exception:
+        return retail, nem3
+
+
+def _parse_gas_results(path: str, scenario: str) -> dict:
+    """Return dict plan -> dollars for scenario.solarstorage row."""
+    out: dict[str, float] = {}
+    if not path or not os.path.exists(path):
+        return out
+    try:
+        df = pd.read_csv(path, index_col="scenario")
+        row_name = f"{scenario}.solarstorage" if f"{scenario}.solarstorage" in df.index else scenario
+        row = df.loc[row_name] if row_name in df.index else df.iloc[0]
+        for c in row.index:
+            s = str(c)
+            if not s.startswith("gas."):
+                continue
+            val = pd.to_numeric(row[c], errors="coerce")
+            if pd.isna(val):
+                continue
+            plan_token = s.split(".")[-1]
+            out[plan_token] = float(val)
+        return out
+    except Exception:
+        return out
+
+
+def compute_cost_breakdowns(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+) -> dict:
+    """Return structured totals and per-plan electricity/gas annual costs.
+
+    Structure:
+      {
+        'electricity': { 'retail': {plan: $, ...}, 'nem3': {plan: $, ...} },
+        'gas': { plan: $ },
+        'totals': {
+            'electricity_best_retail': (plan, $),
+            'electricity_best_nem3': (plan, $),
+            'gas_best': (plan, $),
+        }
+      }
+    """
+    e_path = _latest_results_csv_path(base_input_dir, scenario, housing_type, county_slug, kind="electricity")
+    g_path = _latest_results_csv_path(base_input_dir, scenario, housing_type, county_slug, kind="gas")
+    retail, nem3 = _parse_electricity_results(e_path, scenario)
+    gas = _parse_gas_results(g_path, scenario)
+
+    def best(d: dict) -> tuple[str, float] | tuple[None, None]:
+        if not d:
+            return (None, None)
+        k = min(d, key=lambda k: d[k])
+        return (k, float(d[k]))
+
+    eb_retail = best(retail)
+    eb_nem3 = best(nem3)
+    gb = best(gas)
+
+    return {
+        "electricity": {"retail": retail, "nem3": nem3},
+        "gas": gas,
+        "totals": {
+            "electricity_best_retail": eb_retail,
+            "electricity_best_nem3": eb_nem3,
+            "gas_best": gb,
+        },
+    }
     try:
         df = pd.read_csv(sam_file)
         def num(col: str) -> pd.Series:
@@ -1117,6 +1239,7 @@ def _dashboard_html(
     grid_supply_html: Optional[str] = None,
     key_metrics: Optional[dict] = None,
     flows_metrics: Optional[dict] = None,
+    cost_breakdowns: Optional[dict] = None,
 ) -> str:
     scen_title = scenario.replace("_", " ").title()
     county_title = county_slug.replace("-", " ").title()
@@ -1163,6 +1286,7 @@ def _dashboard_html(
                 .kmtbl td:first-child {{ text-align: left; color: #666; width: 40%; }}
                 .val {{ font-weight: 700; color: #2c5aa0; }}
                 .formula {{ color: #888; font-size: 11px; margin-top: 2px; }}
+                .money {{ color: #1a5; font-weight: 700; }}
             </style>
         </head>
         <body>
@@ -1309,6 +1433,54 @@ def _dashboard_html(
         parts.append("<div class=\"muted\">No energy flows data available</div>")
     parts.append("</div>")
 
+    # Card 4: Annual Energy Cost — Electricity vs Gas
+    parts.append("<div class=\"card\">")
+    parts.append("<h2>Annual Energy Cost — Electricity vs Gas</h2>")
+    if cost_breakdowns and cost_breakdowns.get("totals"):
+        t = cost_breakdowns["totals"]
+        def fmt_money(x):
+            try:
+                return f"${float(x):,.0f}"
+            except Exception:
+                return "N/A"
+        e_plan, e_val = t.get("electricity_best_nem3") or (None, None)
+        if e_val is None:
+            e_plan, e_val = t.get("electricity_best_retail") or (None, None)
+        g_plan, g_val = t.get("gas_best") or (None, None)
+        parts.append("<table class=\"kmtbl\"><thead><tr><th>Category</th><th>Annual Cost</th><th>Plan</th></tr></thead><tbody>")
+        parts.append(f"<tr><td>Electricity</td><td class=\"money\">{fmt_money(e_val)}</td><td>{e_plan or '—'}</td></tr>")
+        parts.append(f"<tr><td>Gas</td><td class=\"money\">{fmt_money(g_val)}</td><td>{g_plan or '—'}</td></tr>")
+        parts.append("</tbody></table>")
+    else:
+        parts.append("<div class=\"muted\">No cost results available</div>")
+    parts.append("</div>")
+
+    # Card 5: Electricity Annual Cost by Rate Plan
+    parts.append("<div class=\"card\">")
+    parts.append("<h2>Electricity Annual Cost by Rate Plan</h2>")
+    if cost_breakdowns and cost_breakdowns.get("electricity"):
+        e = cost_breakdowns["electricity"]
+        retail = e.get("retail", {})
+        nem3 = e.get("nem3", {})
+        all_plans = sorted(set(list(retail.keys()) + list(nem3.keys())))
+        def fmt_money(x):
+            try:
+                return f"${float(x):,.0f}"
+            except Exception:
+                return "N/A"
+        parts.append("<table class=\"kmtbl\"><thead><tr><th>Plan</th><th>Retail</th><th>NEM3</th></tr></thead><tbody>")
+        for p in all_plans:
+            r = retail.get(p)
+            n = nem3.get(p)
+            parts.append(
+                f"<tr><td>{p}</td><td class=\"money\">{fmt_money(r) if r is not None else '—'}</td><td class=\"money\">{fmt_money(n) if n is not None else '—'}</td></tr>"
+            )
+        parts.append("</tbody></table>")
+        parts.append("<div class=\"muted\" style=\"margin-top:6px;\">NEM3 applies export credits at ACC; retail shows import-only bill.</div>")
+    else:
+        parts.append("<div class=\"muted\">No electricity plan data available</div>")
+    parts.append("</div>")
+
     # Card 5: Deployment figure
     parts.append("<div class=\"card\">")
     parts.append("<h2>Solar + Storage Deployment</h2>")
@@ -1412,6 +1584,10 @@ def process(
             flows_metrics = compute_energy_flow_metrics(
                 base_input_dir, scenario, housing_type, county_slug
             )
+            # Annual cost breakdowns (electricity vs gas, and plans)
+            cost_breakdowns = compute_cost_breakdowns(
+                base_input_dir, scenario, housing_type, county_slug
+            )
             # Collect Step 18 cross-scenario plots
             step18 = _gather_step18_images(output_dir, sha)
             html = _dashboard_html(
@@ -1428,6 +1604,7 @@ def process(
                 grid_supply_html=grid_supply_html,
                 key_metrics=key_metrics,
                 flows_metrics=flows_metrics,
+                cost_breakdowns=cost_breakdowns,
             )
             out_path = os.path.join(
                 output_dir,
