@@ -654,6 +654,45 @@ def _latest_results_csv_path(
         return None
 
 
+def compute_energy_flow_metrics_without(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+) -> Optional[dict]:
+    """Compute no-PV/battery flows using Step 7 combined profiles (default scenario loads).
+
+    Returns the same keys used by the 'with' flows metrics for easy rendering, with PV/battery flows set to zero.
+    """
+    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+    combined = os.path.join(county_dir, f"combined_profiles_{scenario}_{county_slug}.csv")
+    if not os.path.exists(combined):
+        return None
+    try:
+        df = pd.read_csv(combined)
+        col = "electricity.real_and_simulated.for_typical_county_home.kwh"
+        if col not in df.columns:
+            return None
+        load = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+        total_load_kwh = float(load.sum())
+        peak_net_load_kw = float(load.max())
+        return {
+            "battery_capacity_kwh": 0.0,
+            "pv_to_load_kwh": 0.0,
+            "batt_to_load_kwh": 0.0,
+            "grid_to_load_kwh": total_load_kwh,
+            "pv_to_batt_kwh": 0.0,
+            "grid_to_batt_kwh": 0.0,
+            "pv_exports_kwh": 0.0,
+            "pv_exports_formula": "N/A (no PV)",
+            "total_grid_purchases_kwh": total_load_kwh,
+            "self_sufficiency_pct": 0.0,
+            "peak_net_load_kw": peak_net_load_kw,
+        }
+    except Exception:
+        return None
+
+
 def _parse_electricity_results(path: str, scenario: str) -> tuple[dict, dict]:
     """Return two dicts keyed by plan token -> dollars for (retail, nem3) for scenario.solarstorage row.
 
@@ -941,7 +980,7 @@ def load_sam_weekly_data(
     county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
     sam_file = os.path.join(county_dir, f"sam_optimized_load_profiles_{county_slug}.csv")
     if not os.path.exists(sam_file):
-        print(f"Warning: SAM load profiles file not found: {sam_file}")
+        print(f"Warning: Solar+storage load profiles file not found: {sam_file}")
         return None
     try:
         df = pd.read_csv(sam_file, parse_dates=[0], index_col=0)
@@ -952,7 +991,7 @@ def load_sam_weekly_data(
             return None
         return df[metric_columns]
     except Exception as e:
-        print(f"Warning: Error reading SAM load profiles for {county_slug}: {e}")
+        print(f"Warning: Error reading solar+storage load profiles for {county_slug}: {e}")
         return None
 
 
@@ -965,7 +1004,7 @@ def load_battery_soc_data(
     county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
     sam_file = os.path.join(county_dir, f"sam_optimized_load_profiles_{county_slug}.csv")
     if not os.path.exists(sam_file):
-        print(f"Warning: SAM load profiles file not found: {sam_file}")
+        print(f"Warning: Solar+storage load profiles file not found: {sam_file}")
         return None
     try:
         df = pd.read_csv(sam_file, parse_dates=[0], index_col=0)
@@ -975,7 +1014,7 @@ def load_battery_soc_data(
             return None
         return df[["Battery SOC"]]
     except Exception as e:
-        print(f"Warning: Error reading SAM load profiles for {county_slug}: {e}")
+        print(f"Warning: Error reading solar+storage load profiles for {county_slug}: {e}")
         return None
 
 def create_sam_weekly_chart(
@@ -1128,7 +1167,7 @@ def create_sam_weekly_chart_for_period(
         title_suffix, (start, end) = periods[key]
         fig, (ax_load, ax_sol) = plt.subplots(2, 1, figsize=(16, 10))
         fig.suptitle(
-            f"SAM Load & Solar — {title_suffix}\n{county_slug.replace('-', ' ').title()} County — {scenario.replace('_', ' ').title()} Scenario",
+            f"Load & Solar — {title_suffix}\n{county_slug.replace('-', ' ').title()} County — {scenario.replace('_', ' ').title()} Scenario",
             fontsize=16,
             fontweight="bold",
         )
@@ -1238,7 +1277,8 @@ def _dashboard_html(
     annual_load_html: Optional[str] = None,
     grid_supply_html: Optional[str] = None,
     key_metrics: Optional[dict] = None,
-    flows_metrics: Optional[dict] = None,
+    flows_without: Optional[dict] = None,
+    flows_with: Optional[dict] = None,
     cost_breakdowns: Optional[dict] = None,
 ) -> str:
     scen_title = scenario.replace("_", " ").title()
@@ -1368,11 +1408,11 @@ def _dashboard_html(
         parts.append("</div>")
     parts.append("</div>")
 
-    # Card 3: Detailed Energy Flows
+    # Card 3: Energy Flows — Before Solar+Storage
     parts.append("<div class=\"card\">")
-    parts.append("<h2>Detailed Energy Flows</h2>")
-    if flows_metrics:
-        fm = flows_metrics
+    parts.append("<h2>Energy Flows — Before Solar+Storage</h2>")
+    if flows_without:
+        fm = flows_without
         def fmt(val, unit=""):
             try:
                 if val is None:
@@ -1430,7 +1470,69 @@ def _dashboard_html(
         )
         parts.append("</tbody></table>")
     else:
-        parts.append("<div class=\"muted\">No energy flows data available</div>")
+        parts.append("<div class=\"muted\">No energy flows available for 'before'</div>")
+    parts.append("</div>")
+
+    # Card 4: Energy Flows — With Solar+Storage
+    parts.append("<div class=\"card\">")
+    parts.append("<h2>Energy Flows — With Solar+Storage</h2>")
+    if flows_with:
+        fm = flows_with
+        def fmt(val, unit=""):
+            try:
+                if val is None:
+                    return "N/A"
+                if unit == "kWh":
+                    return f"{float(val):,.0f}"
+                if unit == "kW":
+                    return f"{float(val):,.1f}"
+                if unit == "%":
+                    return f"{float(val):.1f}%"
+                return str(val)
+            except Exception:
+                return "N/A"
+        parts.append("<table class=\"kmtbl\"><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>")
+        # PV to Load
+        parts.append(
+            f"<tr><td>PV → Load<div class=\"formula\">sum('System to Load')</div></td><td class=\"val\">{fmt(fm.get('pv_to_load_kwh'), 'kWh')} kWh</td></tr>"
+        )
+        # Battery to Load
+        parts.append(
+            f"<tr><td>Battery → Load<div class=\"formula\">sum('Battery to Load')</div></td><td class=\"val\">{fmt(fm.get('batt_to_load_kwh'), 'kWh')} kWh</td></tr>"
+        )
+        # Grid to Load
+        parts.append(
+            f"<tr><td>Grid → Load<div class=\"formula\">sum('Grid to Load')</div></td><td class=\"val\">{fmt(fm.get('grid_to_load_kwh'), 'kWh')} kWh</td></tr>"
+        )
+        # PV to Battery
+        parts.append(
+            f"<tr><td>PV → Battery<div class=\"formula\">sum('System to Battery')</div></td><td class=\"val\">{fmt(fm.get('pv_to_batt_kwh'), 'kWh')} kWh</td></tr>"
+        )
+        # Grid to Battery
+        parts.append(
+            f"<tr><td>Grid → Battery<div class=\"formula\">sum('Grid to Battery')</div></td><td class=\"val\">{fmt(fm.get('grid_to_batt_kwh'), 'kWh')} kWh</td></tr>"
+        )
+        # PV Exports (PV → Grid)
+        pv_exp_val = fm.get('pv_exports_kwh')
+        pv_exp_formula = fm.get('pv_exports_formula') or "sum('System to Grid') or sum('PV AC (kWh)') − sum('System to Load') − sum('System to Battery')"
+        parts.append(
+            f"<tr><td>PV → Grid (Exports)<div class=\"formula\">{pv_exp_formula}</div></td><td class=\"val\">{fmt(pv_exp_val, 'kWh')} kWh</td></tr>"
+        )
+        # Total Grid Purchases
+        parts.append(
+            f"<tr><td>Total Grid Purchases<div class=\"formula\">sum('Grid to Load') + sum('Grid to Battery')</div></td><td class=\"val\">{fmt(fm.get('total_grid_purchases_kwh'), 'kWh')} kWh</td></tr>"
+        )
+        # Self-sufficiency
+        parts.append(
+            f"<tr><td>Self‑sufficiency<div class=\"formula\">1 − sum('Grid to Load') / sum('Load Profile')</div></td><td class=\"val\">{fmt(fm.get('self_sufficiency_pct'), '%')}</td></tr>"
+        )
+        # Peak Net Load
+        parts.append(
+            f"<tr><td>Peak Net Load<div class=\"formula\">max('Load Profile' − 'System to Load' − 'Battery to Load')</div></td><td class=\"val\">{fmt(fm.get('peak_net_load_kw'), 'kW')} kW</td></tr>"
+        )
+        parts.append("</tbody></table>")
+    else:
+        parts.append("<div class=\"muted\">No energy flows available for 'with'</div>")
     parts.append("</div>")
 
     # Card 4: Annual Energy Cost — Electricity vs Gas
@@ -1580,8 +1682,11 @@ def process(
             key_metrics = compute_key_metrics(
                 base_input_dir, scenario, housing_type, county_slug
             )
-            # Detailed energy flows
-            flows_metrics = compute_energy_flow_metrics(
+            # Detailed energy flows (before/with)
+            flows_with = compute_energy_flow_metrics(
+                base_input_dir, scenario, housing_type, county_slug
+            )
+            flows_without = compute_energy_flow_metrics_without(
                 base_input_dir, scenario, housing_type, county_slug
             )
             # Annual cost breakdowns (electricity vs gas, and plans)
@@ -1603,7 +1708,8 @@ def process(
                 annual_load_html=annual_load_html,
                 grid_supply_html=grid_supply_html,
                 key_metrics=key_metrics,
-                flows_metrics=flows_metrics,
+                flows_without=flows_without,
+                flows_with=flows_with,
                 cost_breakdowns=cost_breakdowns,
             )
             out_path = os.path.join(
