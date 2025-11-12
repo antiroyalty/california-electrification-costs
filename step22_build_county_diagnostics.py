@@ -29,6 +29,7 @@ import base64
 import io
 import os
 from typing import Iterable, List, Optional, Tuple
+from datetime import datetime
 
 import pandas as pd
 
@@ -632,6 +633,83 @@ def compute_energy_flow_metrics(
     if not os.path.exists(sam_file):
         return None
 
+    try:
+        df = pd.read_csv(sam_file)
+        def num(col: str) -> pd.Series:
+            if col not in df.columns:
+                return pd.Series([0.0] * len(df))
+            return pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+
+        load = num("Load Profile")
+        pv_to_load = num("System to Load")
+        batt_to_load = num("Battery to Load")
+        grid_to_load = num("Grid to Load")
+        pv_to_batt = num("System to Battery")
+        grid_to_batt = num("Grid to Battery")
+        # Optional columns that enable PV exports calc
+        system_to_grid = df["System to Grid"] if "System to Grid" in df.columns else None
+        pv_to_grid = df["PV to Grid (kWh)"] if "PV to Grid (kWh)" in df.columns else None
+        pv_ac = df["PV AC (kWh)"] if "PV AC (kWh)" in df.columns else None
+
+        total_load_kwh = float(load.sum()) if len(load) else None
+        pv_to_load_kwh = float(pv_to_load.sum())
+        batt_to_load_kwh = float(batt_to_load.sum())
+        grid_to_load_kwh = float(grid_to_load.sum())
+        pv_to_batt_kwh = float(pv_to_batt.sum())
+        grid_to_batt_kwh = float(grid_to_batt.sum())
+        total_grid_purchases_kwh = grid_to_load_kwh + grid_to_batt_kwh
+
+        # PV exports: prefer explicit PV to Grid, then System to Grid, then PV AC minus uses
+        pv_exports_kwh = None
+        pv_exports_formula = None
+        try:
+            if pv_to_grid is not None:
+                pv_exports_kwh = float(pd.to_numeric(pv_to_grid, errors="coerce").fillna(0.0).sum())
+                pv_exports_formula = "sum('PV to Grid (kWh)')"
+            elif system_to_grid is not None:
+                pv_exports_kwh = float(pd.to_numeric(system_to_grid, errors="coerce").fillna(0.0).sum())
+                pv_exports_formula = "sum('System to Grid')"
+            elif pv_ac is not None:
+                pv_exports_kwh = float(
+                    pd.to_numeric(pv_ac, errors="coerce").fillna(0.0).sum()
+                    - pv_to_load_kwh
+                    - pv_to_batt_kwh
+                )
+                if pv_exports_kwh < 0 and abs(pv_exports_kwh) < 1e-6:
+                    pv_exports_kwh = 0.0
+                pv_exports_formula = "sum('PV AC (kWh)') − sum('System to Load') − sum('System to Battery')"
+        except Exception:
+            pv_exports_kwh = None
+            pv_exports_formula = None
+
+        if total_load_kwh and total_load_kwh > 0:
+            self_sufficiency_pct = 100.0 * (1.0 - (grid_to_load_kwh / total_load_kwh))
+        else:
+            self_sufficiency_pct = None
+
+        net = load - pv_to_load - batt_to_load
+        peak_net_load_kw = float(net.max()) if len(net) else None
+
+        battery_capacity_kwh = _lookup_battery_capacity_kwh(
+            base_input_dir, scenario, housing_type, county_slug
+        )
+
+        return {
+            "battery_capacity_kwh": battery_capacity_kwh,
+            "pv_to_load_kwh": pv_to_load_kwh,
+            "batt_to_load_kwh": batt_to_load_kwh,
+            "grid_to_load_kwh": grid_to_load_kwh,
+            "pv_to_batt_kwh": pv_to_batt_kwh,
+            "grid_to_batt_kwh": grid_to_batt_kwh,
+            "pv_exports_kwh": pv_exports_kwh,
+            "pv_exports_formula": pv_exports_formula,
+            "total_grid_purchases_kwh": total_grid_purchases_kwh,
+            "self_sufficiency_pct": self_sufficiency_pct,
+            "peak_net_load_kw": peak_net_load_kw,
+        }
+    except Exception:
+        return None
+
 
 # ---------- Annual cost breakdown helpers (electricity vs gas) ----------
 
@@ -791,77 +869,77 @@ def compute_cost_breakdowns(
             "gas_best": gb,
         },
     }
+
+
+def compute_assets_info(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+) -> Optional[dict]:
+    """Read PV and battery capacities for a county from electrified_assets.csv.
+
+    Returns a dict like {"Solar Capacity (kW)": float|None, "Battery Capacity (kWh)": float|None}
+    or None if the file is absent.
+    """
+    cap_csv = os.path.join(
+        base_input_dir, scenario, housing_type, "CAPITAL_COSTS", "electrified_assets.csv"
+    )
+    if not os.path.exists(cap_csv):
+        return None
     try:
-        df = pd.read_csv(sam_file)
-        def num(col: str) -> pd.Series:
-            if col not in df.columns:
-                return pd.Series([0.0] * len(df))
-            return pd.to_numeric(df[col], errors="coerce").fillna(0.0)
-
-        load = num("Load Profile")
-        pv_to_load = num("System to Load")
-        batt_to_load = num("Battery to Load")
-        grid_to_load = num("Grid to Load")
-        pv_to_batt = num("System to Battery")
-        grid_to_batt = num("Grid to Battery")
-        # Optional columns that enable PV exports calc
-        system_to_grid = df["System to Grid"] if "System to Grid" in df.columns else None
-        pv_ac = df["PV AC (kWh)"] if "PV AC (kWh)" in df.columns else None
-
-        total_load_kwh = float(load.sum()) if len(load) else None
-        pv_to_load_kwh = float(pv_to_load.sum())
-        batt_to_load_kwh = float(batt_to_load.sum())
-        grid_to_load_kwh = float(grid_to_load.sum())
-        pv_to_batt_kwh = float(pv_to_batt.sum())
-        grid_to_batt_kwh = float(grid_to_batt.sum())
-        total_grid_purchases_kwh = grid_to_load_kwh + grid_to_batt_kwh
-
-        # PV exports (if available): prefer explicit 'System to Grid'; fallback to PV AC − PV→Load − PV→Batt
-        pv_exports_kwh = None
-        pv_exports_formula = None
-        try:
-            if system_to_grid is not None:
-                pv_exports_kwh = float(pd.to_numeric(system_to_grid, errors="coerce").fillna(0.0).sum())
-                pv_exports_formula = "sum('System to Grid')"
-            elif pv_ac is not None:
-                pv_exports_kwh = float(
-                    pd.to_numeric(pv_ac, errors="coerce").fillna(0.0).sum()
-                    - pv_to_load_kwh
-                    - pv_to_batt_kwh
-                )
-                # Guard against tiny negative due to rounding
-                if pv_exports_kwh < 0 and abs(pv_exports_kwh) < 1e-6:
-                    pv_exports_kwh = 0.0
-                pv_exports_formula = "sum('PV AC (kWh)') − sum('System to Load') − sum('System to Battery')"
-        except Exception:
-            pv_exports_kwh = None
-            pv_exports_formula = None
-
-        if total_load_kwh and total_load_kwh > 0:
-            self_sufficiency_pct = 100.0 * (1.0 - (grid_to_load_kwh / total_load_kwh))
+        df = pd.read_csv(cap_csv)
+        county_col = None
+        for c in df.columns:
+            if str(c).strip().lower() in ("county", "county_slug"):
+                county_col = c
+                break
+        if county_col is not None:
+            df_idx = df.set_index(county_col)
         else:
-            self_sufficiency_pct = None
-
-        net = load - pv_to_load - batt_to_load
-        peak_net_load_kw = float(net.max()) if len(net) else None
-
-        battery_capacity_kwh = _lookup_battery_capacity_kwh(
-            base_input_dir, scenario, housing_type, county_slug
-        )
-
-        return {
-            "battery_capacity_kwh": battery_capacity_kwh,
-            "pv_to_load_kwh": pv_to_load_kwh,
-            "batt_to_load_kwh": batt_to_load_kwh,
-            "grid_to_load_kwh": grid_to_load_kwh,
-            "pv_to_batt_kwh": pv_to_batt_kwh,
-            "grid_to_batt_kwh": grid_to_batt_kwh,
-            "pv_exports_kwh": pv_exports_kwh,
-            "pv_exports_formula": pv_exports_formula,
-            "total_grid_purchases_kwh": total_grid_purchases_kwh,
-            "self_sufficiency_pct": self_sufficiency_pct,
-            "peak_net_load_kw": peak_net_load_kw,
+            df_idx = df
+        # Normalize index to slug
+        def to_slug(x):
+            try:
+                return slugify_county_name(str(x))
+            except Exception:
+                return str(x)
+        df_idx = df_idx.copy()
+        # Try index slug match
+        if df_idx.index.name is None or any(isinstance(i, (int, float)) for i in df_idx.index):
+            # ensure we have a slug column to match against
+            df_idx["__slug__"] = [to_slug(x) for x in range(len(df_idx))]
+        # Better: try to find a slug either in index or in County column
+        # Iterate rows to find matching slug
+        match_row = None
+        for _, r in df.iterrows():
+            nm = r.get("County") or r.get(county_col) or ""
+            if slugify_county_name(str(nm)) == county_slug:
+                match_row = r
+                break
+        if match_row is None and not df.empty:
+            # last resort: first row
+            match_row = df.iloc[0]
+        out = {
+            "Solar Capacity (kW)": None,
+            "Battery Capacity (kWh)": None,
         }
+        if match_row is not None:
+            for key in out.keys():
+                if key in match_row.index:
+                    try:
+                        out[key] = float(match_row[key])
+                    except Exception:
+                        out[key] = None
+        # Add source path and last modified timestamp
+        try:
+            mtime = os.path.getmtime(cap_csv)
+            out["CSV Path"] = cap_csv
+            out["Last Modified"] = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            out["CSV Path"] = cap_csv
+            out["Last Modified"] = None
+        return out
     except Exception:
         return None
 
@@ -1478,6 +1556,7 @@ def _dashboard_html(
     flows_without: Optional[dict] = None,
     flows_with: Optional[dict] = None,
     cost_breakdowns: Optional[dict] = None,
+    assets_info: Optional[dict] = None,
 ) -> str:
     scen_title = scenario.replace("_", " ").title()
     county_title = county_slug.replace("-", " ").title()
@@ -1655,7 +1734,25 @@ def _dashboard_html(
         parts.append("<div class=\"muted\">No energy flow data available</div>")
     parts.append("</div>")
 
-    # Card 4: Annual Energy Cost — Electricity vs Gas
+    # Card 4: PV & Storage Capacities
+    parts.append("<div class=\"card\">")
+    parts.append("<h2>PV & Storage Capacities</h2>")
+    if assets_info:
+        sc = assets_info.get("Solar Capacity (kW)")
+        bc = assets_info.get("Battery Capacity (kWh)")
+        parts.append("<table class=\"kmtbl\"><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>")
+        parts.append(f"<tr><td>Solar Capacity (kW)</td><td class=\"val\">{sc if sc is not None else 'N/A'}</td></tr>")
+        parts.append(f"<tr><td>Battery Capacity (kWh)</td><td class=\"val\">{bc if bc is not None else 'N/A'}</td></tr>")
+        parts.append("</tbody></table>")
+        # Footnote with source CSV and timestamp
+        src = assets_info.get("CSV Path") or "(path unavailable)"
+        ts = assets_info.get("Last Modified") or "(unknown time)"
+        parts.append(f"<div class=\"muted\" style=\"margin-top:6px;\">Source: {src}<br/>Last modified: {ts}</div>")
+    else:
+        parts.append("<div class=\"muted\">No capacities found (electrified_assets.csv missing)</div>")
+    parts.append("</div>")
+
+    # Card 5: Annual Energy Cost — Electricity vs Gas
     parts.append("<div class=\"card\">")
     parts.append("<h2>Annual Energy Cost — Electricity vs Gas</h2>")
     if cost_breakdowns and cost_breakdowns.get("totals"):
@@ -1677,7 +1774,7 @@ def _dashboard_html(
         parts.append("<div class=\"muted\">No cost results available</div>")
     parts.append("</div>")
 
-    # Card 5: Electricity Annual Cost by Rate Plan
+    # Card 6: Electricity Annual Cost by Rate Plan
     parts.append("<div class=\"card\">")
     parts.append("<h2>Electricity Annual Cost by Rate Plan</h2>")
     if cost_breakdowns and cost_breakdowns.get("electricity"):
@@ -1709,7 +1806,7 @@ def _dashboard_html(
         parts.append("<div class=\"muted\">No electricity plan data available</div>")
     parts.append("</div>")
 
-    # Card 5: Deployment figure
+    # Card 7: Deployment figure
     parts.append("<div class=\"card\">")
     parts.append("<h2>Solar + Storage Deployment</h2>")
     if deployment_b64:
@@ -1720,7 +1817,7 @@ def _dashboard_html(
         parts.append("<div class=\"muted\">No deployment figure available</div>")
     parts.append("</div>")
 
-    # Card 6: Weekly chart — January
+    # Card 8: Weekly chart — January
     parts.append("<div class=\"card\">")
     parts.append("<h2>Load & Solar — January (First Week)</h2>")
     if weekly_jan_b64:
@@ -1731,7 +1828,7 @@ def _dashboard_html(
         parts.append("<div class=\"muted\">No January weekly figure available</div>")
     parts.append("</div>")
 
-    # Card 7: Weekly chart — July
+    # Card 9: Weekly chart — July
     parts.append("<div class=\"card\">")
     parts.append("<h2>Load & Solar — July (First Week)</h2>")
     if weekly_jul_b64:
@@ -1742,9 +1839,9 @@ def _dashboard_html(
         parts.append("<div class=\"muted\">No July weekly figure available</div>")
     parts.append("</div>")
 
-    # Card 8: Electric Load by End‑Use — Real vs Simulated (Jan/Jul)
+    # Card 10: Electric Load by End‑Use — Real + Simulated (Jan/Jul)
     parts.append("<div class=\"card\">")
-    parts.append("<h2>Electric Load by End‑Use — Real vs Simulated (First Week Jan & Jul)</h2>")
+    parts.append("<h2>Electric Load by End‑Use — Real + Simulated (First Week Jan & Jul)</h2>")
     if enduse_weekly_b64:
         parts.append(
             f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{enduse_weekly_b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{enduse_weekly_b64}\" alt=\"enduse weekly jan+jul\"/></a></div>"
@@ -1835,6 +1932,10 @@ def process(
             cost_breakdowns = compute_cost_breakdowns(
                 base_input_dir, scenario, housing_type, county_slug
             )
+            # PV & Storage capacities from electrified_assets.csv
+            assets_info = compute_assets_info(
+                base_input_dir, scenario, housing_type, county_slug
+            )
             # Collect Step 18 cross-scenario plots
             step18 = _gather_step18_images(output_dir, sha)
             html = _dashboard_html(
@@ -1854,6 +1955,7 @@ def process(
                 flows_without=flows_without,
                 flows_with=flows_with,
                 cost_breakdowns=cost_breakdowns,
+                assets_info=assets_info,
             )
             out_path = os.path.join(
                 output_dir,
