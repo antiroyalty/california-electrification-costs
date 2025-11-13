@@ -439,6 +439,23 @@ def _ensure_length(values: Optional[List[float]], n: int = 8760, fill: float = 0
     return vals + [fill] * (n - len(vals))
 
 
+def compute_excess_solar_exports(
+    pv_ac_kwh: Optional[List[float]],
+    system_to_load: Optional[List[float]],
+    system_to_battery: Optional[List[float]],
+) -> List[float]:
+    """Compute hourly excess solar that can be exported to the grid.
+
+    Formula: PV to Grid = max(0, PV AC − PV→Load − PV→Battery), applied per hour.
+    Accepts None inputs and returns an all-zero series in that case.
+    """
+    n = 8760
+    pv = _ensure_length(pv_ac_kwh, n, 0.0)
+    stl = _ensure_length(system_to_load, n, 0.0)
+    stb = _ensure_length(system_to_battery, n, 0.0)
+    return [max(0.0, float(p) - float(a) - float(b)) for p, a, b in zip(pv, stl, stb)]
+
+
 def prepare_export_enabled_outputs(
     load_profile: Optional[List[float]] = None,
     pv_ac_kwh: Optional[List[float]] = None,
@@ -449,6 +466,7 @@ def prepare_export_enabled_outputs(
     grid_to_battery: Optional[List[float]] = None,
     battery_soc_percent: Optional[List[float]] = None,
     battery_to_grid_kwh: Optional[List[float]] = None,
+    pv_to_grid_kwh: Optional[List[float]] = None,
     start_timestamp: str = "2018-01-01",
 ) -> pd.DataFrame:
     """Build a DataFrame capturing all fields needed for export modeling.
@@ -491,8 +509,11 @@ def prepare_export_enabled_outputs(
     if system_to_load is None and pv_ac_kwh is not None and load_profile is not None:
         stl = [min(p, l) for p, l in zip(pv, load)]
 
-    # PV to grid = PV AC − PV→Load − PV→Battery, clipped at 0
-    pv_to_grid = [max(0.0, float(p) - float(a) - float(b)) for p, a, b in zip(pv, stl, stb)]
+    # PV to grid: prefer provided override; otherwise derive from inputs
+    if pv_to_grid_kwh is not None:
+        pv_to_grid = _ensure_length(pv_to_grid_kwh, n, 0.0)
+    else:
+        pv_to_grid = [max(0.0, float(p) - float(a) - float(b)) for p, a, b in zip(pv, stl, stb)]
     exports = [float(pg) + float(bg) for pg, bg in zip(pv_to_grid, btg)]
     solar_plus_batt_to_load = [float(a) + float(b) for a, b in zip(stl, btl)]
     total_supply = [float(a) + float(b) + float(c) for a, b, c in zip(stl, btl, gtl)]
@@ -678,6 +699,13 @@ def process(
                 f"{OUTPUT_EXPORT_LOADPROFILE_FILE_PREFIX}_{county}.csv",
             )
             try:
+                # Compute explicit PV export series via dedicated function
+                pv_exports = compute_excess_solar_exports(
+                    pv_ac_kwh=solar_gen,
+                    system_to_load=system_to_load,
+                    system_to_battery=pv_to_batt,
+                )
+
                 export_df = prepare_export_enabled_outputs(
                     load_profile=load_profile,
                     pv_ac_kwh=solar_gen,
@@ -689,6 +717,7 @@ def process(
                     battery_soc_percent=soc_percent,
                     # We do not currently model battery exports; provide zeros for schema stability
                     battery_to_grid_kwh=None,
+                    pv_to_grid_kwh=pv_exports,
                     start_timestamp="2018-01-01",
                 )
                 export_df.to_csv(export_output_file)
