@@ -31,6 +31,7 @@ Files:
 - Reads weather: data/loadprofiles/<scenario>/<housing_type>/<county>/weather_TMY_<county>.csv
 - Reads load:   data/loadprofiles/<scenario>/<housing_type>/<county>/combined_profiles_<scenario>_<county}.csv
 - Writes:       data/loadprofiles/<scenario>/<housing_type>/<county>/sam_optimized_load_profiles_<county>.csv
+                data/loadprofiles/<scenario>/<housing_type>/<county>/sam_optimized_load_profiles_with_exports_<county>.csv
 
 """
 
@@ -65,6 +66,8 @@ from helpers.step9_plotting_helper import plot_first_weeks
 LOADPROFILE_FILE_PREFIX = "combined_profiles"
 TOTAL_LOAD_COLUMN_NAME = "electricity.real_and_simulated.for_typical_county_home.kwh"
 OUTPUT_LOADPROFILE_FILE_PREFIX = "sam_optimized_load_profiles"
+# New: export-enabled companion file prefix (will not overwrite the non-export file)
+OUTPUT_EXPORT_LOADPROFILE_FILE_PREFIX = "sam_optimized_load_profiles_with_exports"
 SOLAR_STORAGE_CAPACITY_PREFIX = "electrified_assets"
 CAPITAL_COSTS_FOLDER_NAME = "CAPITAL_COSTS"
 
@@ -533,6 +536,105 @@ def _validate_lengths(*series_lists: List[List[float]]) -> None:
                 raise ValueError("All output series must be 8760 elements long.")
 
 
+def _ensure_length(values: Optional[List[float]], n: int = 8760, fill: float = 0.0) -> List[float]:
+    """Return a list of length n, padding with `fill` or truncating as needed.
+
+    Accepts None and returns an all-`fill` list.
+    """
+    if values is None:
+        return [fill] * n
+    vals = list(map(float, values))
+    if len(vals) >= n:
+        return vals[:n]
+    return vals + [fill] * (n - len(vals))
+
+
+def prepare_export_enabled_outputs(
+    load_profile: Optional[List[float]] = None,
+    pv_ac_kwh: Optional[List[float]] = None,
+    system_to_load: Optional[List[float]] = None,
+    battery_to_load: Optional[List[float]] = None,
+    grid_to_load: Optional[List[float]] = None,
+    system_to_battery: Optional[List[float]] = None,
+    grid_to_battery: Optional[List[float]] = None,
+    battery_soc_percent: Optional[List[float]] = None,
+    battery_to_grid_kwh: Optional[List[float]] = None,
+    start_timestamp: str = "2018-01-01",
+) -> pd.DataFrame:
+    """Build a DataFrame capturing all fields needed for export modeling.
+
+    This function is resilient: if any inputs are not yet computed upstream, it
+    fills them with zeros so the CSV schema remains stable. This allows us to
+    ship an "export-enabled" file without requiring dispatch changes first.
+
+    Columns provided:
+    - Load Profile
+    - System to Load (PV→Load)
+    - Battery to Load
+    - Grid to Load
+    - System to Battery (PV→Battery)
+    - Grid to Battery
+    - Battery SOC
+    - PV AC (kWh)
+    - PV to Grid (kWh)
+    - Battery to Grid (kWh)  [defaults to 0 if not modeled]
+    - Exports to Grid (kWh)  [PV to Grid + Battery to Grid]
+    - System to Grid         [alias = PV to Grid, for continuity]
+    - Solar + Battery to Load
+    - Total Supply
+    - Difference (Load − Total Supply)
+    - Net Grid Import (kWh)  [Grid to Load + Grid to Battery − Exports]
+    """
+    n = 8760
+
+    load = _ensure_length(load_profile, n, 0.0)
+    pv = _ensure_length(pv_ac_kwh, n, 0.0)
+    stl = _ensure_length(system_to_load, n, None if (load_profile and pv_ac_kwh) else 0.0)
+    btl = _ensure_length(battery_to_load, n, 0.0)
+    gtl = _ensure_length(grid_to_load, n, 0.0)
+    stb = _ensure_length(system_to_battery, n, 0.0)
+    gtb = _ensure_length(grid_to_battery, n, 0.0)
+    soc = _ensure_length(battery_soc_percent, n, 0.0)
+    btg = _ensure_length(battery_to_grid_kwh, n, 0.0)
+
+    # If System to Load wasn't provided but both load and PV are, derive it.
+    if system_to_load is None and pv_ac_kwh is not None and load_profile is not None:
+        stl = [min(p, l) for p, l in zip(pv, load)]
+
+    # PV to grid = PV AC − PV→Load − PV→Battery, clipped at 0
+    pv_to_grid = [max(0.0, float(p) - float(a) - float(b)) for p, a, b in zip(pv, stl, stb)]
+    exports = [float(pg) + float(bg) for pg, bg in zip(pv_to_grid, btg)]
+    solar_plus_batt_to_load = [float(a) + float(b) for a, b in zip(stl, btl)]
+    total_supply = [float(a) + float(b) + float(c) for a, b, c in zip(stl, btl, gtl)]
+    diff = [float(l) - float(ts) for l, ts in zip(load, total_supply)]
+    net_grid_import = [float(gtl_h) + float(gtb_h) - float(exp_h) for gtl_h, gtb_h, exp_h in zip(gtl, gtb, exports)]
+
+    date_range = pd.date_range(start=start_timestamp, periods=n, freq="H")
+    df = pd.DataFrame(
+        {
+            "Load Profile": load,
+            "System to Load": stl,
+            "Battery to Load": btl,
+            "Grid to Load": gtl,
+            "System to Battery": stb,
+            "Grid to Battery": gtb,
+            "Battery SOC": soc,
+            "PV AC (kWh)": pv,
+            "PV to Grid (kWh)": pv_to_grid,
+            "Battery to Grid (kWh)": btg,
+            "Exports to Grid (kWh)": exports,
+            # Keep "System to Grid" for backward compatibility (alias PV to Grid)
+            "System to Grid": pv_to_grid,
+            "Solar + Battery to Load": solar_plus_batt_to_load,
+            "Total Supply": total_supply,
+            "Difference": diff,
+            "Net Grid Import (kWh)": net_grid_import,
+        },
+        index=date_range,
+    )
+    return df
+
+
 def process(
     base_input_dir: str,
     base_output_dir: str,
@@ -676,6 +778,32 @@ def process(
                 "PV to Grid (kWh)": pv_to_grid,
             }, index=date_range)
             df.to_csv(output_file)
+
+            # Also write a companion export-enabled file that carries explicit export fields
+            export_output_file = os.path.join(
+                base_output_dir,
+                scenario,
+                housing_type,
+                county,
+                f"{OUTPUT_EXPORT_LOADPROFILE_FILE_PREFIX}_{county}.csv",
+            )
+            try:
+                export_df = prepare_export_enabled_outputs(
+                    load_profile=load_profile,
+                    pv_ac_kwh=solar_gen,
+                    system_to_load=system_to_load,
+                    battery_to_load=batt_to_load,
+                    grid_to_load=grid_to_load,
+                    system_to_battery=pv_to_batt,
+                    grid_to_battery=grid_to_batt,
+                    battery_soc_percent=soc_percent,
+                    # We do not currently model battery exports; provide zeros for schema stability
+                    battery_to_grid_kwh=None,
+                    start_timestamp="2018-01-01",
+                )
+                export_df.to_csv(export_output_file)
+            except Exception as export_err:
+                print(f"Export-enabled output generation failed for {county}: {export_err}")
 
             # Create and save Jan/Jul plots
             plots_path = os.path.join(
