@@ -1,9 +1,9 @@
 """
-Step 9 (DIY): PV + simple battery dispatch without PySAM
+Step 9 (DIY): PV + dynamic battery dispatch without PySAM
 
-Implements the same battery outputs as step9_solar_storage_custom_dispatch.py,
-but computes the PV AC generation time series directly from the weather CSV
-instead of using Pvsamv1.
+Computes PV AC generation directly from the weather CSV (simple PVWatts‑style)
+and applies a single dispatch strategy: dynamic PV‑only charging with an evening
+discharge window. Grid charging is never used.
 
 PV model (simplified PVWatts‑style):
 - AC_kW[h] = system_capacity_kW * (GHI[h] / 1000) * PR_base * temp_derate[h]
@@ -12,17 +12,12 @@ PV model (simplified PVWatts‑style):
   where NOCT = 46°C, PR_base = 0.85, gamma_pdc = −0.00280 / °C
 - Clip at zero; no inverter clipping modeled (kept simple to match DIY intent).
 
-Battery dispatch:
+Battery dispatch (dynamic only):
 - Capacity 13.5 kWh, round‑trip eff 96% as symmetric sqrt(RTE), 3 kW charge/discharge
 - Min SOC 20%, max SOC 90%
-- Classic strategy (default):
-  • Discharge window 16:00–21:00 (up to residual load, subject to power/SOC). 
-  • PV surplus can charge any hour (default ON).
-  • Optional grid top‑up 14:00–16:00 (default OFF).
-- Dynamic strategy (opt‑in via USE_DYNAMIC_DISPATCH=True):
-  • PV‑only charging; at 16:00 if PV<load, discharge until min SOC or first hour PV≥load next day.
+- PV‑only charging; at 16:00 if PV<load, discharge until min SOC or first hour PV≥load next day.
 
-Outputs (identical columns used downstream by step10):
+Outputs (columns used downstream by step10):
 - "Load Profile", "System to Load", "Battery to Load", "Grid to Load",
   "Solar + Battery to Load", "Total Supply", "Difference",
   "System to Battery", "Grid to Battery", "Battery SOC"
@@ -77,11 +72,6 @@ GIT_SHORT_SHA = git_short_sha()
 
 
 # Battery + dispatch constants
-# Dispatch strategy selector:
-#   - False: classic windowed discharge (16–21), optional PV surplus charge, optional grid top-up
-#   - True:  dynamic PV-only strategy (PV charges; discharge from 16:00 until PV≥load next day)
-USE_DYNAMIC_DISPATCH = True
-
 # Toggle: default PV→Battery surplus charging (applied when function arg is None)
 ENABLE_PV_SURPLUS_TO_BATTERY = True
 BATTERY_CAPACITY_KWH = 13.5
@@ -90,24 +80,10 @@ ETA_CHARGE = sqrt(ROUND_TRIP_EFFICIENCY)
 ETA_DISCHARGE = sqrt(ROUND_TRIP_EFFICIENCY)
 P_CHARGE_MAX_KW = 3.0
 P_DISCHARGE_MAX_KW = 3.0
-# Grid top‑up window (2–4pm local)
-CHARGE_START_HOUR = 14
-CHARGE_END_HOUR = 16
 DISCHARGE_START_HOUR = 16
 DISCHARGE_END_HOUR = 21
 MIN_SOC_FRAC = 0.20
 MAX_SOC_FRAC = 0.90
-
-# Default grid-charging toggle (applied when function arg is None)
-GRID_CHARGING_ENABLED = False
-
-def _resolve_flag(user_value: Optional[bool], default_value: bool) -> bool:
-    """Return a concrete boolean for tri-state toggles.
-
-    If the caller passes None, fall back to the module-level default. Otherwise
-    coerce the provided value to bool. Keeps all call sites consistent.
-    """
-    return default_value if user_value is None else bool(user_value)
 
 
 # PV model constants (simple PVWatts‑like), aligned to PySAM preset assumptions
@@ -132,9 +108,9 @@ PV_SIZE_FRACTION = 1
 # fails (no fallback to other sources or default sizing).
 USE_EAC_OPTIMAL_SIZING = False
 
-# Deterministic source root for min‑EAC results (integrated dashboard),
-# keyed by the local dispatch mode.
-DISPATCH_LABEL = "dispatch_dynamic" if USE_DYNAMIC_DISPATCH else "dispatch_classic"
+# Deterministic source root for min‑EAC results (integrated dashboard)
+# Dynamic dispatch is the only mode supported here.
+DISPATCH_LABEL = "dispatch_dynamic"
 EAC_DYNAMIC_RESULTS_ROOT = os.path.join(
     "data", "experiments", "integrated_dashboard", DISPATCH_LABEL, "combined"
 )
@@ -376,81 +352,6 @@ def _pv_timeseries_ac_kwh(weather_df: pd.DataFrame, system_capacity_kw: float) -
 
 # --- Battery dispatch implementations ---
 
-def _battery_dispatch_classic(
-    load_kwh: List[float],
-    solar_kwh: List[float],
-) -> Tuple[
-    List[float], List[float], List[float], List[float], List[float], List[float], List[float]
-]:
-    """Classic windowed discharge (16–21), optional PV surplus charge, optional grid charge 14–16.
-    Default grid charging is disabled via GRID_CHARGING_ENABLED.
-    """
-    assert len(load_kwh) == 8760 and len(solar_kwh) == 8760
-    soc_kwh = BATTERY_CAPACITY_KWH * MIN_SOC_FRAC
-    min_soc_kwh = BATTERY_CAPACITY_KWH * MIN_SOC_FRAC
-    max_soc_kwh = BATTERY_CAPACITY_KWH * MAX_SOC_FRAC
-    grid_demand = [0.0] * 8760
-    batt_charge = [0.0] * 8760
-    batt_discharge = [0.0] * 8760
-    grid_to_load = [0.0] * 8760
-    grid_to_batt = [0.0] * 8760
-    # Explicit channels for PV→Battery and Grid→Battery
-    pv_to_batt = [0.0] * 8760
-    soc_percent = [0.0] * 8760
-
-    # Resolve toggles: PV surplus via module constant; grid charging via module constant only
-    pv_surplus_flag = ENABLE_PV_SURPLUS_TO_BATTERY
-    grid_charge_flag = GRID_CHARGING_ENABLED
-
-    for h in range(8760):
-        hod = h % 24
-        # Solar offsets household load immediately
-        net_after_solar = max(load_kwh[h] - solar_kwh[h], 0.0)
-        # PV surplus available after serving load
-        pv_surplus = max(solar_kwh[h] - load_kwh[h], 0.0)
-
-        # Discharge to cover peak window residual load
-        if DISCHARGE_START_HOUR <= hod < DISCHARGE_END_HOUR and net_after_solar > 0 and soc_kwh > min_soc_kwh:
-            desired_to_load = min(P_DISCHARGE_MAX_KW, net_after_solar)
-            available_discharge_energy = max(soc_kwh - min_soc_kwh, 0.0)
-            energy_from_batt = min(available_discharge_energy, desired_to_load / ETA_DISCHARGE)
-            delivered = energy_from_batt * ETA_DISCHARGE
-            soc_kwh -= energy_from_batt
-            batt_discharge[h] = delivered
-            net_after_solar -= delivered
-
-        # First: charge from PV surplus (any hour), obeying power cap and headroom
-        pv_input_energy_used = 0.0
-        if pv_surplus_flag and pv_surplus > 0 and soc_kwh < max_soc_kwh:
-            remaining_input_headroom = max((max_soc_kwh - soc_kwh) / ETA_CHARGE, 0.0)
-            # Limit by battery charge power
-            pv_input_energy = min(pv_surplus, P_CHARGE_MAX_KW, remaining_input_headroom)
-            if pv_input_energy > 0:
-                stored_pv = pv_input_energy * ETA_CHARGE
-                soc_kwh += stored_pv
-                batt_charge[h] += stored_pv
-                pv_to_batt[h] = pv_input_energy
-                pv_input_energy_used = pv_input_energy
-
-        # Then: optionally top-up from grid during 14:00–16:00, obeying remaining power and headroom
-        if grid_charge_flag and CHARGE_START_HOUR <= hod < CHARGE_END_HOUR and soc_kwh < max_soc_kwh:
-            remaining_input_headroom = max((max_soc_kwh - soc_kwh) / ETA_CHARGE, 0.0)
-            # Respect charge power cap; subtract PV portion already used this hour
-            remaining_power_cap = max(P_CHARGE_MAX_KW - pv_input_energy_used, 0.0)
-            max_grid_energy = min(remaining_power_cap, remaining_input_headroom)
-            if max_grid_energy > 0:
-                stored_grid = max_grid_energy * ETA_CHARGE
-                soc_kwh += stored_grid
-                batt_charge[h] += stored_grid
-                grid_to_batt[h] = max_grid_energy
-
-        grid_to_load[h] = max(net_after_solar, 0.0)
-        grid_demand[h] = grid_to_load[h] + grid_to_batt[h]
-        soc_percent[h] = (soc_kwh / BATTERY_CAPACITY_KWH) * 100.0
-
-    return grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt, pv_to_batt, soc_percent
-
-
 def _battery_dispatch_dynamic(
     load_kwh: List[float],
     solar_kwh: List[float],
@@ -515,18 +416,7 @@ def _battery_dispatch_dynamic(
     return grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt, pv_to_batt, soc_percent
 
 
-def _simple_battery_dispatch(
-    load_kwh: List[float],
-    solar_kwh: List[float],
-) -> Tuple[
-    List[float], List[float], List[float], List[float], List[float], List[float], List[float]
-]:
-    """Dispatch wrapper that selects between classic and dynamic strategies.
-    Toggle with USE_DYNAMIC_DISPATCH at the top of this file.
-    """
-    if USE_DYNAMIC_DISPATCH:
-        return _battery_dispatch_dynamic(load_kwh, solar_kwh)
-    return _battery_dispatch_classic(load_kwh, solar_kwh)
+# Only dynamic dispatch is supported.
 
 
 def _validate_lengths(*series_lists: List[List[float]]) -> None:
@@ -684,14 +574,14 @@ def process(
             # Compute PV hourly AC (kWh)
             solar_gen = _pv_timeseries_ac_kwh(weather_df, system_capacity_kW)
 
-            # Battery (grid-only charge, PV immediate offset)
+            # Battery dispatch (dynamic only; PV-only charging, evening discharge)
             if selected_batt_kwh is not None:
                 with _temp_battery_capacity_kwh(selected_batt_kwh):
-                    grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt, pv_to_batt, soc_percent = _simple_battery_dispatch(
+                    grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt, pv_to_batt, soc_percent = _battery_dispatch_dynamic(
                         load_profile, solar_gen
                     )
             else:
-                grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt, pv_to_batt, soc_percent = _simple_battery_dispatch(
+                grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt, pv_to_batt, soc_percent = _battery_dispatch_dynamic(
                     load_profile, solar_gen
                 )
             _validate_lengths([solar_gen, grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt, pv_to_batt, soc_percent])
