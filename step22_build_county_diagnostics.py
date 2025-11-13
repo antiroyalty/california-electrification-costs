@@ -536,9 +536,10 @@ def compute_key_metrics(
             if grid_to_load_col
             else None
         )
-        # PV and Battery sizes if available (capacity summary or per-county CSV header)
-        pv_size_kw = _lookup_pv_size_kw(base_input_dir, scenario, housing_type, county_slug)
-        batt_kwh = _lookup_battery_capacity_kwh(base_input_dir, scenario, housing_type, county_slug)
+        # PV and Battery sizes: read from the same source as the capacities card (electrified_assets.csv)
+        assets = compute_assets_info(base_input_dir, scenario, housing_type, county_slug) or {}
+        pv_size_kw = assets.get("Solar Capacity (kW)")
+        batt_kwh = assets.get("Battery Capacity (kWh)")
         # Without solar+storage: PV size = 0; grid supplies all load
         without = {
             "solar_kw": 0.0 if annual_load_kwh is not None else None,
@@ -927,10 +928,12 @@ def compute_assets_info(
         if match_row is not None:
             for key in out.keys():
                 if key in match_row.index:
-                    try:
-                        out[key] = float(match_row[key])
-                    except Exception:
+                    val = match_row[key]
+                    if pd.isna(val):
                         out[key] = None
+                    else:
+                        # Preserve raw as text exactly as in CSV
+                        out[key] = str(val)
         # Add source path and last modified timestamp
         try:
             mtime = os.path.getmtime(cap_csv)
@@ -1648,13 +1651,23 @@ def _dashboard_html(
         parts.append("<table class=\"kmtbl\">")
         parts.append("<thead><tr><th>Metric</th><th>With Solar+Storage</th><th>Without Solar+Storage</th></tr></thead>")
         parts.append("<tbody>")
-        # Solar size with formula
+        # Solar size with formula (raw values from electrified_assets.csv)
+        if assets_info:
+            with_solar_kw = assets_info.get('Solar Capacity (kW)')
+        else:
+            with_solar_kw = w.get('solar_kw')
         parts.append(
-            f"<tr><td>Solar System Size<div class=\"formula\">from Step 9 capacity: 'Solar Capacity (kW)'</div></td><td class=\"val\">{fmt(w.get('solar_kw'), 'kW')} kW</td><td class=\"val\">{fmt(wo.get('solar_kw'), 'kW')} kW</td></tr>"
+            f"<tr><td>Solar System Size<div class=\"formula\">from Step 9 capacity: 'Solar Capacity (kW)'</div></td><td class=\"val\">{with_solar_kw if with_solar_kw is not None else 'N/A'} kW</td><td class=\"val\">0 kW</td></tr>"
         )
-        # Battery capacity
+        # Battery capacity (raw values from electrified_assets.csv)
+        if assets_info:
+            print("A")
+            with_batt_kwh = assets_info.get('Battery Capacity (kWh)')
+        else:
+            print("B")
+            with_batt_kwh = w.get('battery_kwh')
         parts.append(
-            f"<tr><td>Battery Capacity<div class=\"formula\">from Step 9 capacity: 'Battery Capacity (kWh)'</div></td><td class=\"val\">{fmt(w.get('battery_kwh'), 'kWh')} kWh</td><td class=\"val\">{fmt(wo.get('battery_kwh'), 'kWh')} kWh</td></tr>"
+            f"<tr><td>Battery Capacity<div class=\"formula\">from Step 9 capacity: 'Battery Capacity (kWh)'</div></td><td class=\"val\">{with_batt_kwh if with_batt_kwh is not None else 'N/A'} kWh</td><td class=\"val\">0 kWh</td></tr>"
         )
         parts.append(
             f"<tr><td>Annual Household Load</td><td class=\"val\">{fmt(w.get('annual_load_kwh'), 'kWh')} kWh</td><td class=\"val\">{fmt(wo.get('annual_load_kwh'), 'kWh')} kWh</td></tr>"
@@ -1732,24 +1745,6 @@ def _dashboard_html(
         parts.append("</tbody></table>")
     else:
         parts.append("<div class=\"muted\">No energy flow data available</div>")
-    parts.append("</div>")
-
-    # Card 4: PV & Storage Capacities
-    parts.append("<div class=\"card\">")
-    parts.append("<h2>PV & Storage Capacities</h2>")
-    if assets_info:
-        sc = assets_info.get("Solar Capacity (kW)")
-        bc = assets_info.get("Battery Capacity (kWh)")
-        parts.append("<table class=\"kmtbl\"><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>")
-        parts.append(f"<tr><td>Solar Capacity (kW)</td><td class=\"val\">{sc if sc is not None else 'N/A'}</td></tr>")
-        parts.append(f"<tr><td>Battery Capacity (kWh)</td><td class=\"val\">{bc if bc is not None else 'N/A'}</td></tr>")
-        parts.append("</tbody></table>")
-        # Footnote with source CSV and timestamp
-        src = assets_info.get("CSV Path") or "(path unavailable)"
-        ts = assets_info.get("Last Modified") or "(unknown time)"
-        parts.append(f"<div class=\"muted\" style=\"margin-top:6px;\">Source: {src}<br/>Last modified: {ts}</div>")
-    else:
-        parts.append("<div class=\"muted\">No capacities found (electrified_assets.csv missing)</div>")
     parts.append("</div>")
 
     # Card 5: Annual Energy Cost — Electricity vs Gas
