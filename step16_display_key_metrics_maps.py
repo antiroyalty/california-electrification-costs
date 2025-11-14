@@ -1388,31 +1388,7 @@ def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: 
                 display: flex;
                 justify-content: center;
             }}
-            .charts-section {{
-                margin-top: 40px;
-                background-color: white;
-                border-radius: 8px;
-                padding: 20px;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            }}
-            .charts-grid {{
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
-                gap: 20px;
-                margin-top: 20px;
-            }}
-            .chart-container {{
-                background-color: #f8f9fa;
-                border-radius: 8px;
-                padding: 15px;
-                text-align: center;
-            }}
-            .chart-title {{
-                font-size: 14px;
-                font-weight: bold;
-                margin-bottom: 10px;
-                color: #333;
-            }}
+            /* Pruned unused chart styles (appliance, SOC, SAM weekly) */
         </style>
     </head>
     <body>
