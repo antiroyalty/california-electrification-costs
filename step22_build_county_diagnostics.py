@@ -1607,6 +1607,8 @@ def _dashboard_html(
                 .val {{ font-weight: 700; color: #2c5aa0; }}
                 .formula {{ color: #888; font-size: 11px; margin-top: 2px; }}
                 .money {{ color: #1a5; font-weight: 700; }}
+                /* Highlight for minimum cost cell in plan table */
+                .highlight-min {{ background: #eaffea; }}
             </style>
         </head>
         <body>
@@ -1747,31 +1749,9 @@ def _dashboard_html(
         parts.append("<div class=\"muted\">No energy flow data available</div>")
     parts.append("</div>")
 
-    # Card 5: Annual Energy Cost — Electricity vs Gas
+    # Card 5: Annual Costs by Rate Plan (Electricity + Gas)
     parts.append("<div class=\"card\">")
-    parts.append("<h2>Annual Energy Cost — Electricity vs Gas</h2>")
-    if cost_breakdowns and cost_breakdowns.get("totals"):
-        t = cost_breakdowns["totals"]
-        def fmt_money(x):
-            try:
-                return f"${float(x):,.0f}"
-            except Exception:
-                return "N/A"
-        e_plan, e_val = t.get("electricity_best_nem3") or (None, None)
-        if e_val is None:
-            e_plan, e_val = t.get("electricity_best_retail") or (None, None)
-        g_plan, g_val = t.get("gas_best") or (None, None)
-        parts.append("<table class=\"kmtbl\"><thead><tr><th>Category</th><th>Annual Cost</th><th>Plan</th></tr></thead><tbody>")
-        parts.append(f"<tr><td>Electricity</td><td class=\"money\">{fmt_money(e_val)}</td><td>{e_plan or '—'}</td></tr>")
-        parts.append(f"<tr><td>Gas</td><td class=\"money\">{fmt_money(g_val)}</td><td>{g_plan or '—'}</td></tr>")
-        parts.append("</tbody></table>")
-    else:
-        parts.append("<div class=\"muted\">No cost results available</div>")
-    parts.append("</div>")
-
-    # Card 6: Electricity Annual Cost by Rate Plan
-    parts.append("<div class=\"card\">")
-    parts.append("<h2>Electricity Annual Cost by Rate Plan</h2>")
+    parts.append("<h2>Annual Costs by Rate Plan</h2>")
     if cost_breakdowns and cost_breakdowns.get("electricity"):
         e = cost_breakdowns["electricity"]
         retail = e.get("retail", {})
@@ -1782,6 +1762,19 @@ def _dashboard_html(
                 return f"${float(x):,.0f}"
             except Exception:
                 return "N/A"
+        # Determine which electricity column to highlight: prefer NEM3; fallback to Retail if NEM3 empty
+        min_nem3_plan = None
+        min_retail_plan = None
+        if nem3:
+            try:
+                min_nem3_plan = min(nem3, key=lambda k: nem3[k])
+            except Exception:
+                min_nem3_plan = None
+        if retail:
+            try:
+                min_retail_plan = min(retail, key=lambda k: retail[k])
+            except Exception:
+                min_retail_plan = None
         parts.append(
             "<table class=\"kmtbl\"><thead><tr>"
             "<th>Plan</th>"
@@ -1792,13 +1785,48 @@ def _dashboard_html(
         for p in all_plans:
             r = retail.get(p)
             n = nem3.get(p)
+            retail_classes = ["money"]
+            nem3_classes = ["money"]
+            # Highlight logic: prefer highlighting NEM3 minimum; if NEM3 absent, highlight Retail minimum
+            if min_nem3_plan and p == min_nem3_plan:
+                nem3_classes.append("highlight-min")
+            elif not min_nem3_plan and min_retail_plan and p == min_retail_plan:
+                retail_classes.append("highlight-min")
             parts.append(
-                f"<tr><td>{p}</td><td class=\"money\">{fmt_money(r) if r is not None else '—'}</td><td class=\"money\">{fmt_money(n) if n is not None else '—'}</td></tr>"
+                f"<tr><td>{p}</td>"
+                f"<td class=\"{' '.join(retail_classes)}\">{fmt_money(r) if r is not None else '—'}</td>"
+                f"<td class=\"{' '.join(nem3_classes)}\">{fmt_money(n) if n is not None else '—'}</td></tr>"
             )
         parts.append("</tbody></table>")
         parts.append("<div class=\"muted\" style=\"margin-top:6px;\">NEM3 applies export credits at ACC; retail shows import-only bill.</div>")
     else:
         parts.append("<div class=\"muted\">No electricity plan data available</div>")
+    # Gas section — its own table with G-1 entry
+    gas = (cost_breakdowns or {}).get("gas", {})
+    # Try to locate a key that corresponds to 'G-1' robustly
+    g1_key = None
+    for k in gas.keys():
+        try:
+            if str(k).lower().replace("_", "-") == "g-1":
+                g1_key = k
+                break
+        except Exception:
+            continue
+    parts.append("<div class=\"muted\" style=\"margin-top:12px; font-weight:600;\">Gas</div>")
+    parts.append("<table class=\"kmtbl\"><thead><tr><th>Plan</th><th>Annual Cost</th></tr></thead><tbody>")
+    def fmt_money_local(x):
+        try:
+            return f"${float(x):,.0f}"
+        except Exception:
+            return "N/A"
+    if gas:
+        val = gas.get(g1_key) if g1_key is not None else None
+        parts.append(
+            f"<tr><td>G-1</td><td class=\"money\">{fmt_money_local(val) if val is not None else '—'}</td></tr>"
+        )
+    else:
+        parts.append("<tr><td colspan=2 class=\"muted\">No gas plan data available</td></tr>")
+    parts.append("</tbody></table>")
     parts.append("</div>")
 
     # Card 7: Deployment figure
