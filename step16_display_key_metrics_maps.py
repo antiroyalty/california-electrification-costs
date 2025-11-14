@@ -30,8 +30,8 @@ from helpers.maps_helpers import (
 from helpers.main_helpers import log, slugify_county_name, to_decimal_number, get_scenario_path, norcal_counties, central_counties, socal_counties, git_short_sha
 from helpers.utility_helpers import get_utility_for_county
 
-# Moved chart builders shared with county diagnostics (Step 22)
-from step22_build_county_diagnostics import (
+# Chart builders live in helpers to keep the pipeline strictly linear
+from helpers.diagnostics_helpers import (
     load_appliance_breakdown_data,
     create_appliance_breakdown_chart,
     load_battery_soc_data,
@@ -723,7 +723,7 @@ def load_sam_metric_data(
     return 0.0
 
 
-# (appliance breakdown and weekly/SOC chart helpers moved to Step 22)
+# Appliance breakdown and weekly/SOC chart helpers are provided via helpers
 
 
 def create_appliance_html_table(appliance_data: dict, county_slug: str, scenario: str) -> str:
@@ -808,7 +808,7 @@ def load_sam_metric_data(base_input_dir: str, scenario: str, housing_type: str, 
         return 0.0
 
 
-# (weekly SAM and battery SOC chart functions moved to Step 22)
+# Weekly SAM and battery SOC chart functions are provided via helpers
 
 
 def create_single_map(base_input_dir: str, scenario: str, housing_type: str, counties: list, 
