@@ -1,11 +1,9 @@
-import os
 import pandas as pd
-import geopandas as gpd
 import folium
 import numpy as np
 
-from helpers.maps_helpers import get_latest_csv_file, add_choropleth_layer, add_labels_and_title, load_cost_data
-from helpers.main_helpers import to_number, to_decimal_number
+from helpers.maps_helpers import add_choropleth_layer, add_labels_and_title
+from helpers.main_helpers import to_decimal_number
 from helpers.utility_helpers import get_utility_for_county
 
 LIFETIMES = {
@@ -21,7 +19,7 @@ FIXED_BINS = {
     "Annual Savings": [-600, -450, -300, -150, 0, 0.1, 250, 500, 750, 1000, 1250, 1500, 1750, 2000, 2500, 3000, 3500],
     "Total Cost": [0, 5000, 10000, 15000, 20000, 25000, 30000, 35000, 40000, 45000, 50000],
     "Annual Savings % Change": [-200, -100, -50, -25, 0, 0.001, 25, 50, 100, 200],
-    "Solar Size (kW)": [-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]   # kW buckets
+    "Solar Size (kW)": [-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]   # kW buckets
 }
 
 COLOR_SCHEMES = {
@@ -31,8 +29,10 @@ COLOR_SCHEMES = {
     "Solar Size (kW)": {"default": "YlOrBr"}
 }
 
-# load_cost_data function moved to helpers/maps_helpers.py for reusability
-    
+"""Capital cost map helpers (bins, colors, and map assembly)."""
+
+# load_cost_data function lives in helpers/maps_helpers.py for reusability.
+
 def style_function(feature):
     utility = feature["properties"].get("Utility", "")
     if utility == "PG&E":
@@ -79,7 +79,7 @@ def prepare_data_columns(merged_gdf, desired_rate_plans, metric, variant, title_
         "Annual Savings": f"Annual Savings {suffix}",
         "Total Cost": f"Total Cost {suffix}",
         "Solar Size (kW)": "Solar Size (kW)",
-        # "Annual Savings % Change": "Annual Savings % Change",
+        "Annual Savings % Change": "Annual Savings % Change",
     }
 
     data_column = col_map[metric]
@@ -101,8 +101,6 @@ def prepare_data_columns(merged_gdf, desired_rate_plans, metric, variant, title_
     return data_column, label_field, legend_name, title_text, suffix
 
 def build_capital_cost_map(merged_gdf, desired_rate_plans, metric, variant, title_prefix=""):
-    print("*******")
-    print(metric)
     data_column, label_field, legend_name, title_text, suffix = prepare_data_columns(merged_gdf, desired_rate_plans, metric, variant, title_prefix)
 
     m = folium.Map(
@@ -113,19 +111,7 @@ def build_capital_cost_map(merged_gdf, desired_rate_plans, metric, variant, titl
         height="700px",     # or "60vh"
     )
 
-    css = f"""
-        <style>
-        /* #{m.get_name()} is the map’s <div> */
-        #{m.get_name()} {{
-            margin: 0 auto;         /* left & right auto = centred */
-        }}
-        </style>
-        """
-    m.get_root().html.add_child(folium.Element(css))
-
-    m.get_root().html.add_child(folium.Element(
-        '<style>.leaflet-control-layers{display:none !important;}</style>'
-    ))
+    # Intentionally minimal UI; omit layer control to reduce clutter
 
     # Split into positive/negative if metric allows
     values = merged_gdf[data_column]
@@ -173,9 +159,6 @@ def build_capital_cost_map(merged_gdf, desired_rate_plans, metric, variant, titl
     geojson_layer.add_to(m)
 
     add_labels_and_title(m, merged_gdf, label_field, title_text)
-    m.get_root().html.add_child(folium.Element(
-        "<style>.leaflet-control-color-scale{display:none!important;}</style>"
-    ))
 
     # ------------- Statistics panel
     stats_series = merged_gdf[data_column].dropna()
@@ -200,6 +183,4 @@ def build_capital_cost_map(merged_gdf, desired_rate_plans, metric, variant, titl
 
         m.get_root().html.add_child(folium.Element(stats_html))
 
-    folium.LayerControl().add_to(m)
     return m
-

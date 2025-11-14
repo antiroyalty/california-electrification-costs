@@ -1,9 +1,9 @@
 """
-Step 9 (DIY): PV + simple battery dispatch without PySAM
+Step 9 (DIY): PV + dynamic battery dispatch without PySAM
 
-Implements the same battery outputs as step9_solar_storage_custom_dispatch.py,
-but computes the PV AC generation time series directly from the weather CSV
-instead of using Pvsamv1.
+Computes PV AC generation directly from the weather CSV (simple PVWatts‑style)
+and applies a single dispatch strategy: dynamic PV‑only charging with an evening
+discharge window. Grid charging is never used.
 
 PV model (simplified PVWatts‑style):
 - AC_kW[h] = system_capacity_kW * (GHI[h] / 1000) * PR_base * temp_derate[h]
@@ -12,17 +12,12 @@ PV model (simplified PVWatts‑style):
   where NOCT = 46°C, PR_base = 0.85, gamma_pdc = −0.00280 / °C
 - Clip at zero; no inverter clipping modeled (kept simple to match DIY intent).
 
-Battery dispatch:
+Battery dispatch (dynamic only):
 - Capacity 13.5 kWh, round‑trip eff 96% as symmetric sqrt(RTE), 3 kW charge/discharge
 - Min SOC 20%, max SOC 90%
-- Classic strategy (default):
-  • Discharge window 16:00–21:00 (up to residual load, subject to power/SOC). 
-  • PV surplus can charge any hour (default ON).
-  • Optional grid top‑up 14:00–16:00 (default OFF).
-- Dynamic strategy (opt‑in via USE_DYNAMIC_DISPATCH=True):
-  • PV‑only charging; at 16:00 if PV<load, discharge until min SOC or first hour PV≥load next day.
+- PV‑only charging; at 16:00 if PV<load, discharge until min SOC or first hour PV≥load next day.
 
-Outputs (identical columns used downstream by step10):
+Outputs (columns used downstream by step10):
 - "Load Profile", "System to Load", "Battery to Load", "Grid to Load",
   "Solar + Battery to Load", "Total Supply", "Difference",
   "System to Battery", "Grid to Battery", "Battery SOC"
@@ -31,6 +26,7 @@ Files:
 - Reads weather: data/loadprofiles/<scenario>/<housing_type>/<county>/weather_TMY_<county>.csv
 - Reads load:   data/loadprofiles/<scenario>/<housing_type>/<county>/combined_profiles_<scenario>_<county}.csv
 - Writes:       data/loadprofiles/<scenario>/<housing_type>/<county>/sam_optimized_load_profiles_<county>.csv
+                data/loadprofiles/<scenario>/<housing_type>/<county>/sam_optimized_load_profiles_with_exports_<county>.csv
 
 """
 
@@ -65,6 +61,8 @@ from helpers.step9_plotting_helper import plot_first_weeks
 LOADPROFILE_FILE_PREFIX = "combined_profiles"
 TOTAL_LOAD_COLUMN_NAME = "electricity.real_and_simulated.for_typical_county_home.kwh"
 OUTPUT_LOADPROFILE_FILE_PREFIX = "sam_optimized_load_profiles"
+# New: export-enabled companion file prefix (will not overwrite the non-export file)
+OUTPUT_EXPORT_LOADPROFILE_FILE_PREFIX = "sam_optimized_load_profiles_with_exports"
 SOLAR_STORAGE_CAPACITY_PREFIX = "electrified_assets"
 CAPITAL_COSTS_FOLDER_NAME = "CAPITAL_COSTS"
 
@@ -74,11 +72,6 @@ GIT_SHORT_SHA = git_short_sha()
 
 
 # Battery + dispatch constants
-# Dispatch strategy selector:
-#   - False: classic windowed discharge (16–21), optional PV surplus charge, optional grid top-up
-#   - True:  dynamic PV-only strategy (PV charges; discharge from 16:00 until PV≥load next day)
-USE_DYNAMIC_DISPATCH = True
-
 # Toggle: default PV→Battery surplus charging (applied when function arg is None)
 ENABLE_PV_SURPLUS_TO_BATTERY = True
 BATTERY_CAPACITY_KWH = 13.5
@@ -87,24 +80,10 @@ ETA_CHARGE = sqrt(ROUND_TRIP_EFFICIENCY)
 ETA_DISCHARGE = sqrt(ROUND_TRIP_EFFICIENCY)
 P_CHARGE_MAX_KW = 3.0
 P_DISCHARGE_MAX_KW = 3.0
-# Grid top‑up window (2–4pm local)
-CHARGE_START_HOUR = 14
-CHARGE_END_HOUR = 16
 DISCHARGE_START_HOUR = 16
 DISCHARGE_END_HOUR = 21
 MIN_SOC_FRAC = 0.20
 MAX_SOC_FRAC = 0.90
-
-# Default grid-charging toggle (applied when function arg is None)
-GRID_CHARGING_ENABLED = False
-
-def _resolve_flag(user_value: Optional[bool], default_value: bool) -> bool:
-    """Return a concrete boolean for tri-state toggles.
-
-    If the caller passes None, fall back to the module-level default. Otherwise
-    coerce the provided value to bool. Keeps all call sites consistent.
-    """
-    return default_value if user_value is None else bool(user_value)
 
 
 # PV model constants (simple PVWatts‑like), aligned to PySAM preset assumptions
@@ -129,9 +108,9 @@ PV_SIZE_FRACTION = 1
 # fails (no fallback to other sources or default sizing).
 USE_EAC_OPTIMAL_SIZING = False
 
-# Deterministic source root for min‑EAC results (integrated dashboard),
-# keyed by the local dispatch mode.
-DISPATCH_LABEL = "dispatch_dynamic" if USE_DYNAMIC_DISPATCH else "dispatch_classic"
+# Deterministic source root for min‑EAC results (integrated dashboard)
+# Dynamic dispatch is the only mode supported here.
+DISPATCH_LABEL = "dispatch_dynamic"
 EAC_DYNAMIC_RESULTS_ROOT = os.path.join(
     "data", "experiments", "integrated_dashboard", DISPATCH_LABEL, "combined"
 )
@@ -373,81 +352,6 @@ def _pv_timeseries_ac_kwh(weather_df: pd.DataFrame, system_capacity_kw: float) -
 
 # --- Battery dispatch implementations ---
 
-def _battery_dispatch_classic(
-    load_kwh: List[float],
-    solar_kwh: List[float],
-) -> Tuple[
-    List[float], List[float], List[float], List[float], List[float], List[float], List[float]
-]:
-    """Classic windowed discharge (16–21), optional PV surplus charge, optional grid charge 14–16.
-    Default grid charging is disabled via GRID_CHARGING_ENABLED.
-    """
-    assert len(load_kwh) == 8760 and len(solar_kwh) == 8760
-    soc_kwh = BATTERY_CAPACITY_KWH * MIN_SOC_FRAC
-    min_soc_kwh = BATTERY_CAPACITY_KWH * MIN_SOC_FRAC
-    max_soc_kwh = BATTERY_CAPACITY_KWH * MAX_SOC_FRAC
-    grid_demand = [0.0] * 8760
-    batt_charge = [0.0] * 8760
-    batt_discharge = [0.0] * 8760
-    grid_to_load = [0.0] * 8760
-    grid_to_batt = [0.0] * 8760
-    # Explicit channels for PV→Battery and Grid→Battery
-    pv_to_batt = [0.0] * 8760
-    soc_percent = [0.0] * 8760
-
-    # Resolve toggles: PV surplus via module constant; grid charging via module constant only
-    pv_surplus_flag = ENABLE_PV_SURPLUS_TO_BATTERY
-    grid_charge_flag = GRID_CHARGING_ENABLED
-
-    for h in range(8760):
-        hod = h % 24
-        # Solar offsets household load immediately
-        net_after_solar = max(load_kwh[h] - solar_kwh[h], 0.0)
-        # PV surplus available after serving load
-        pv_surplus = max(solar_kwh[h] - load_kwh[h], 0.0)
-
-        # Discharge to cover peak window residual load
-        if DISCHARGE_START_HOUR <= hod < DISCHARGE_END_HOUR and net_after_solar > 0 and soc_kwh > min_soc_kwh:
-            desired_to_load = min(P_DISCHARGE_MAX_KW, net_after_solar)
-            available_discharge_energy = max(soc_kwh - min_soc_kwh, 0.0)
-            energy_from_batt = min(available_discharge_energy, desired_to_load / ETA_DISCHARGE)
-            delivered = energy_from_batt * ETA_DISCHARGE
-            soc_kwh -= energy_from_batt
-            batt_discharge[h] = delivered
-            net_after_solar -= delivered
-
-        # First: charge from PV surplus (any hour), obeying power cap and headroom
-        pv_input_energy_used = 0.0
-        if pv_surplus_flag and pv_surplus > 0 and soc_kwh < max_soc_kwh:
-            remaining_input_headroom = max((max_soc_kwh - soc_kwh) / ETA_CHARGE, 0.0)
-            # Limit by battery charge power
-            pv_input_energy = min(pv_surplus, P_CHARGE_MAX_KW, remaining_input_headroom)
-            if pv_input_energy > 0:
-                stored_pv = pv_input_energy * ETA_CHARGE
-                soc_kwh += stored_pv
-                batt_charge[h] += stored_pv
-                pv_to_batt[h] = pv_input_energy
-                pv_input_energy_used = pv_input_energy
-
-        # Then: optionally top-up from grid during 14:00–16:00, obeying remaining power and headroom
-        if grid_charge_flag and CHARGE_START_HOUR <= hod < CHARGE_END_HOUR and soc_kwh < max_soc_kwh:
-            remaining_input_headroom = max((max_soc_kwh - soc_kwh) / ETA_CHARGE, 0.0)
-            # Respect charge power cap; subtract PV portion already used this hour
-            remaining_power_cap = max(P_CHARGE_MAX_KW - pv_input_energy_used, 0.0)
-            max_grid_energy = min(remaining_power_cap, remaining_input_headroom)
-            if max_grid_energy > 0:
-                stored_grid = max_grid_energy * ETA_CHARGE
-                soc_kwh += stored_grid
-                batt_charge[h] += stored_grid
-                grid_to_batt[h] = max_grid_energy
-
-        grid_to_load[h] = max(net_after_solar, 0.0)
-        grid_demand[h] = grid_to_load[h] + grid_to_batt[h]
-        soc_percent[h] = (soc_kwh / BATTERY_CAPACITY_KWH) * 100.0
-
-    return grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt, pv_to_batt, soc_percent
-
-
 def _battery_dispatch_dynamic(
     load_kwh: List[float],
     solar_kwh: List[float],
@@ -512,18 +416,7 @@ def _battery_dispatch_dynamic(
     return grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt, pv_to_batt, soc_percent
 
 
-def _simple_battery_dispatch(
-    load_kwh: List[float],
-    solar_kwh: List[float],
-) -> Tuple[
-    List[float], List[float], List[float], List[float], List[float], List[float], List[float]
-]:
-    """Dispatch wrapper that selects between classic and dynamic strategies.
-    Toggle with USE_DYNAMIC_DISPATCH at the top of this file.
-    """
-    if USE_DYNAMIC_DISPATCH:
-        return _battery_dispatch_dynamic(load_kwh, solar_kwh)
-    return _battery_dispatch_classic(load_kwh, solar_kwh)
+# Only dynamic dispatch is supported.
 
 
 def _validate_lengths(*series_lists: List[List[float]]) -> None:
@@ -531,6 +424,126 @@ def _validate_lengths(*series_lists: List[List[float]]) -> None:
         for arr in s:
             if len(arr) != 8760:
                 raise ValueError("All output series must be 8760 elements long.")
+
+
+def _ensure_length(values: Optional[List[float]], n: int = 8760, fill: float = 0.0) -> List[float]:
+    """Return a list of length n, padding with `fill` or truncating as needed.
+
+    Accepts None and returns an all-`fill` list.
+    """
+    if values is None:
+        return [fill] * n
+    vals = list(map(float, values))
+    if len(vals) >= n:
+        return vals[:n]
+    return vals + [fill] * (n - len(vals))
+
+
+def compute_excess_solar_exports(
+    pv_ac_kwh: Optional[List[float]],
+    system_to_load: Optional[List[float]],
+    system_to_battery: Optional[List[float]],
+) -> List[float]:
+    """Compute hourly excess solar that can be exported to the grid.
+
+    Formula: PV to Grid = max(0, PV AC − PV→Load − PV→Battery), applied per hour.
+    Accepts None inputs and returns an all-zero series in that case.
+    """
+    n = 8760
+    pv = _ensure_length(pv_ac_kwh, n, 0.0)
+    stl = _ensure_length(system_to_load, n, 0.0)
+    stb = _ensure_length(system_to_battery, n, 0.0)
+    return [max(0.0, float(p) - float(a) - float(b)) for p, a, b in zip(pv, stl, stb)]
+
+
+def prepare_export_enabled_outputs(
+    load_profile: Optional[List[float]] = None,
+    pv_ac_kwh: Optional[List[float]] = None,
+    system_to_load: Optional[List[float]] = None,
+    battery_to_load: Optional[List[float]] = None,
+    grid_to_load: Optional[List[float]] = None,
+    system_to_battery: Optional[List[float]] = None,
+    grid_to_battery: Optional[List[float]] = None,
+    battery_soc_percent: Optional[List[float]] = None,
+    battery_to_grid_kwh: Optional[List[float]] = None,
+    pv_to_grid_kwh: Optional[List[float]] = None,
+    start_timestamp: str = "2018-01-01",
+) -> pd.DataFrame:
+    """Build a DataFrame capturing all fields needed for export modeling.
+
+    This function is resilient: if any inputs are not yet computed upstream, it
+    fills them with zeros so the CSV schema remains stable. This allows us to
+    ship an "export-enabled" file without requiring dispatch changes first.
+
+    Columns provided:
+    - Load Profile
+    - System to Load (PV→Load)
+    - Battery to Load
+    - Grid to Load
+    - System to Battery (PV→Battery)
+    - Grid to Battery
+    - Battery SOC
+    - PV AC (kWh)
+    - PV to Grid (kWh)
+    - Battery to Grid (kWh)  [defaults to 0 if not modeled]
+    - Exports to Grid (kWh)  [PV to Grid + Battery to Grid]
+    - System to Grid         [alias = PV to Grid, for continuity]
+    - Solar + Battery to Load
+    - Total Supply
+    - Difference (Load − Total Supply)
+    - Net Grid Import (kWh)  [Grid to Load + Grid to Battery − Exports]
+    """
+    n = 8760
+
+    load = _ensure_length(load_profile, n, 0.0)
+    pv = _ensure_length(pv_ac_kwh, n, 0.0)
+    stl = _ensure_length(system_to_load, n, None if (load_profile and pv_ac_kwh) else 0.0)
+    btl = _ensure_length(battery_to_load, n, 0.0)
+    gtl = _ensure_length(grid_to_load, n, 0.0)
+    stb = _ensure_length(system_to_battery, n, 0.0)
+    gtb = _ensure_length(grid_to_battery, n, 0.0)
+    soc = _ensure_length(battery_soc_percent, n, 0.0)
+    btg = _ensure_length(battery_to_grid_kwh, n, 0.0)
+
+    # If System to Load wasn't provided but both load and PV are, derive it.
+    if system_to_load is None and pv_ac_kwh is not None and load_profile is not None:
+        stl = [min(p, l) for p, l in zip(pv, load)]
+
+    # PV to grid: prefer provided override; otherwise derive from inputs
+    if pv_to_grid_kwh is not None:
+        pv_to_grid = _ensure_length(pv_to_grid_kwh, n, 0.0)
+    else:
+        pv_to_grid = [max(0.0, float(p) - float(a) - float(b)) for p, a, b in zip(pv, stl, stb)]
+    exports = [float(pg) + float(bg) for pg, bg in zip(pv_to_grid, btg)]
+    solar_plus_batt_to_load = [float(a) + float(b) for a, b in zip(stl, btl)]
+    total_supply = [float(a) + float(b) + float(c) for a, b, c in zip(stl, btl, gtl)]
+    diff = [float(l) - float(ts) for l, ts in zip(load, total_supply)]
+    net_grid_import = [float(gtl_h) + float(gtb_h) - float(exp_h) for gtl_h, gtb_h, exp_h in zip(gtl, gtb, exports)]
+
+    date_range = pd.date_range(start=start_timestamp, periods=n, freq="H")
+    df = pd.DataFrame(
+        {
+            "Load Profile": load,
+            "System to Load": stl,
+            "Battery to Load": btl,
+            "Grid to Load": gtl,
+            "System to Battery": stb,
+            "Grid to Battery": gtb,
+            "Battery SOC": soc,
+            "PV AC (kWh)": pv,
+            "PV to Grid (kWh)": pv_to_grid,
+            "Battery to Grid (kWh)": btg,
+            "Exports to Grid (kWh)": exports,
+            # Keep "System to Grid" for backward compatibility (alias PV to Grid)
+            "System to Grid": pv_to_grid,
+            "Solar + Battery to Load": solar_plus_batt_to_load,
+            "Total Supply": total_supply,
+            "Difference": diff,
+            "Net Grid Import (kWh)": net_grid_import,
+        },
+        index=date_range,
+    )
+    return df
 
 
 def process(
@@ -582,14 +595,14 @@ def process(
             # Compute PV hourly AC (kWh)
             solar_gen = _pv_timeseries_ac_kwh(weather_df, system_capacity_kW)
 
-            # Battery (grid-only charge, PV immediate offset)
+            # Battery dispatch (dynamic only; PV-only charging, evening discharge)
             if selected_batt_kwh is not None:
                 with _temp_battery_capacity_kwh(selected_batt_kwh):
-                    grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt, pv_to_batt, soc_percent = _simple_battery_dispatch(
+                    grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt, pv_to_batt, soc_percent = _battery_dispatch_dynamic(
                         load_profile, solar_gen
                     )
             else:
-                grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt, pv_to_batt, soc_percent = _simple_battery_dispatch(
+                grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt, pv_to_batt, soc_percent = _battery_dispatch_dynamic(
                     load_profile, solar_gen
                 )
             _validate_lengths([solar_gen, grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt, pv_to_batt, soc_percent])
@@ -676,6 +689,40 @@ def process(
                 "PV to Grid (kWh)": pv_to_grid,
             }, index=date_range)
             df.to_csv(output_file)
+
+            # Also write a companion export-enabled file that carries explicit export fields
+            export_output_file = os.path.join(
+                base_output_dir,
+                scenario,
+                housing_type,
+                county,
+                f"{OUTPUT_EXPORT_LOADPROFILE_FILE_PREFIX}_{county}.csv",
+            )
+            try:
+                # Compute explicit PV export series via dedicated function
+                pv_exports = compute_excess_solar_exports(
+                    pv_ac_kwh=solar_gen,
+                    system_to_load=system_to_load,
+                    system_to_battery=pv_to_batt,
+                )
+
+                export_df = prepare_export_enabled_outputs(
+                    load_profile=load_profile,
+                    pv_ac_kwh=solar_gen,
+                    system_to_load=system_to_load,
+                    battery_to_load=batt_to_load,
+                    grid_to_load=grid_to_load,
+                    system_to_battery=pv_to_batt,
+                    grid_to_battery=grid_to_batt,
+                    battery_soc_percent=soc_percent,
+                    # We do not currently model battery exports; provide zeros for schema stability
+                    battery_to_grid_kwh=None,
+                    pv_to_grid_kwh=pv_exports,
+                    start_timestamp="2018-01-01",
+                )
+                export_df.to_csv(export_output_file)
+            except Exception as export_err:
+                print(f"Export-enabled output generation failed for {county}: {export_err}")
 
             # Create and save Jan/Jul plots
             plots_path = os.path.join(

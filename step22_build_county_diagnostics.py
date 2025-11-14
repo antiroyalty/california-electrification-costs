@@ -29,6 +29,7 @@ import base64
 import io
 import os
 from typing import Iterable, List, Optional, Tuple
+from datetime import datetime
 
 import pandas as pd
 
@@ -38,222 +39,18 @@ from helpers.main_helpers import (
     slugify_county_name,
 )
 from helpers.maps_helpers import get_latest_csv_file
+from helpers.diagnostics_helpers import (
+    load_appliance_breakdown_data,
+    create_appliance_breakdown_chart,
+    load_battery_soc_data,
+    create_battery_soc_chart,
+    load_sam_weekly_data,
+    create_sam_weekly_chart,
+    _slice_week,
+)
 
-
-# ---------- Appliance breakdown (moved from Step 16) ----------
 
 import matplotlib.pyplot as plt
-
-
-def load_appliance_breakdown_data(
-    base_input_dir: str,
-    scenario: str,
-    housing_type: str,
-    county_slug: str,
-) -> dict:
-    """
-    Load appliance breakdown data by end-use category with proper time series handling.
-
-    IMPORTANT: Only loads ELECTRIFIED end-uses for pie charts:
-    - For baseline: Shows only electricity end-uses (lighting, appliances, cooling, etc.) - NO gas appliances
-    - For electrified scenarios: Shows electricity end-uses + electrified appliances (Heat Pump, Induction, etc.)
-
-    Returns dictionary with appliance categories and their annual kWh consumption.
-    """
-    import os
-
-    appliance_data: dict[str, float] = {}
-
-    electricity_categories = {
-        "Cooling": ["ceiling_fan"],
-        "Appliances": ["clothes_dryer", "dishwasher", "freezer", "refrigerator"],
-        "Lighting": ["lighting_garage", "lighting_interior"],
-        "Plug Loads": ["plug_loads"],
-        "Pool/Spa": ["permanent_spa_heat", "permanent_spa_pump", "pool_heater", "pool_pump"],
-        "Other Electric": ["mech_vent"],
-    }
-
-    # For electricity loads, ALWAYS use baseline data (individual appliance breakdown only exists in baseline)
-    baseline_electricity_dir = os.path.join(base_input_dir, "baseline", housing_type, county_slug)
-    electricity_file = os.path.join(baseline_electricity_dir, f"electricity_loads_{county_slug}.csv")
-
-    if os.path.exists(electricity_file):
-        try:
-            df = pd.read_csv(electricity_file, parse_dates=["timestamp"]).set_index("timestamp")
-            for category, appliances in electricity_categories.items():
-                series = pd.Series(0.0, index=df.index)
-                for appliance in appliances:
-                    col = f"out.electricity.{appliance}.energy_consumption"
-                    if col in df.columns:
-                        series = series.add(df[col], fill_value=0.0)
-                if float(series.sum()) > 0:
-                    appliance_data[category] = float(series.sum())
-        except Exception as e:
-            print(f"Warning: Error reading baseline electricity loads for {county_slug}: {e}")
-    else:
-        print(f"Warning: Baseline electricity loads file not found: {electricity_file}")
-
-    # For pie charts: exclude gas appliances; focus on electrified end-uses
-    print(
-        f"Note: Excluding gas appliances from pie chart for {scenario} - showing only electrified end-uses"
-    )
-
-    # Load simulated electric appliances for electrified scenarios
-    if not scenario.startswith("baseline"):
-        scen_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
-        simulated_file = os.path.join(scen_dir, f"electricity_loads_simulated_{county_slug}.csv")
-        if not os.path.exists(simulated_file):
-            scen_dir = os.path.join(base_input_dir, "baseline", housing_type, county_slug)
-            simulated_file = os.path.join(scen_dir, f"electricity_loads_simulated_{county_slug}.csv")
-        if os.path.exists(simulated_file):
-            try:
-                df = pd.read_csv(simulated_file, parse_dates=["timestamp"]).set_index("timestamp")
-                df = df.resample("H").sum()  # resample 15‑min to hourly
-                sim_map = {
-                    "Heat Pump": "simulated.electricity.heat_pump.energy_consumption.electricity.kwh",
-                    "Induction Cooking": "simulated.electricity.induction_stove.energy_consumption.electricity.kwh",
-                    "Electric Hot Water": "simulated.electricity.hot_water.energy_consumption.electricity.kwh",
-                }
-                for label, col in sim_map.items():
-                    if col in df.columns:
-                        val = float(df[col].sum())
-                        if val > 0:
-                            if (
-                                label == "Heat Pump"
-                                and scenario
-                                in [
-                                    "heat_pump",
-                                    "heat_pump_and_induction_stove",
-                                    "heat_pump_and_induction_stove_and_water_heating",
-                                    "full_electric_ev",
-                                ]
-                            ):
-                                appliance_data["Heat Pump"] = val
-                            elif (
-                                label == "Induction Cooking"
-                                and scenario
-                                in [
-                                    "induction_stove",
-                                    "heat_pump_and_induction_stove",
-                                    "heat_pump_and_induction_stove_and_water_heating",
-                                    "full_electric_ev",
-                                ]
-                            ):
-                                appliance_data["Induction Cooking"] = val
-                            elif (
-                                label == "Electric Hot Water"
-                                and scenario in [
-                                    "water_heating",
-                                    "heat_pump_and_induction_stove_and_water_heating",
-                                    "full_electric_ev",
-                                ]
-                            ):
-                                appliance_data["Electric Hot Water"] = val
-            except Exception as e:
-                print(f"Warning: Error reading simulated loads for {county_slug}: {e}")
-
-    if not appliance_data:
-        print(f"Warning: No appliance data found for {county_slug}. Using placeholder data.")
-        appliance_data = {"Data Not Available": 1.0}
-
-    return appliance_data
-
-
-def create_appliance_breakdown_chart(
-    base_input_dir: str,
-    scenario: str,
-    housing_type: str,
-    county_slug: str,
-) -> str:
-    """
-    Create a pie chart showing appliance breakdown by end‑use category.
-    Returns base64 encoded PNG image string or HTML table if matplotlib is unavailable.
-    """
-    import io
-
-    data = load_appliance_breakdown_data(base_input_dir, scenario, housing_type, county_slug)
-    try:
-        if not data or "Data Not Available" in data:
-            fig, ax = plt.subplots(figsize=(8, 6))
-            ax.text(
-                0.5,
-                0.5,
-                "No appliance data available",
-                ha="center",
-                va="center",
-                fontsize=14,
-            )
-            ax.set_xlim(0, 1)
-            ax.set_ylim(0, 1)
-            ax.axis("off")
-        else:
-            fig, ax = plt.subplots(figsize=(10, 8))
-            categories = list(data.keys())
-            values = list(data.values())
-            color_map = {
-                "Heating": "#FF6B6B",
-                "Heat Pump": "#FF8E53",
-                "Cooling": "#4ECDC4",
-                "Hot Water": "#45B7D1",
-                "Electric Hot Water": "#96CEB4",
-                "Cooking": "#FFEAA7",
-                "Induction Cooking": "#DDA0DD",
-                "Appliances": "#FD79A8",
-                "Lighting": "#FDCB6E",
-                "Plug Loads": "#6C5CE7",
-                "Pool/Spa": "#00B894",
-                "Other Electric": "#A29BFE",
-                "Other Gas": "#E17055",
-            }
-            colors = [color_map.get(cat, "#BDC3C7") for cat in categories]
-            wedges, texts, autotexts = ax.pie(
-                values,
-                labels=categories,
-                colors=colors,
-                autopct="%1.1f%%",
-                startangle=90,
-                textprops={"fontsize": 10},
-            )
-            for autotext in autotexts:
-                autotext.set_color("white")
-                autotext.set_fontweight("bold")
-            county_name = county_slug.replace("-", " ").title()
-            scenario_name = scenario.replace("_", " ").title()
-            ax.set_title(
-                f"Annual Electricity Consumption by End‑Use\n{county_name} County - {scenario_name} Scenario\n(Electrified End‑Uses Only)",
-                fontsize=14,
-                fontweight="bold",
-                pad=20,
-            )
-            total_kwh = sum(values)
-            ax.text(
-                0,
-                -1.3,
-                f"Total: {total_kwh:,.0f} kWh/year",
-                ha="center",
-                fontsize=12,
-                fontweight="bold",
-            )
-
-        buf = io.BytesIO()
-        plt.tight_layout()
-        plt.savefig(buf, format="png", dpi=150, bbox_inches="tight")
-        buf.seek(0)
-        image_b64 = base64.b64encode(buf.getvalue()).decode()
-        plt.close()
-        return image_b64
-    except Exception as e:
-        print(f"Error creating appliance breakdown chart for {county_slug}: {e}")
-        # simple text placeholder as base64 PNG
-        fig, ax = plt.subplots(figsize=(6, 4))
-        ax.text(0.5, 0.5, "Chart unavailable", ha="center", va="center")
-        ax.axis("off")
-        buf = io.BytesIO()
-        plt.savefig(buf, format="png", dpi=120, bbox_inches="tight")
-        buf.seek(0)
-        image_b64 = base64.b64encode(buf.getvalue()).decode()
-        plt.close()
-        return image_b64
 
 
 # ---------- Solar + storage deployment figure (from Step 9 outputs) ----------
@@ -535,9 +332,10 @@ def compute_key_metrics(
             if grid_to_load_col
             else None
         )
-        # PV and Battery sizes if available (capacity summary or per-county CSV header)
-        pv_size_kw = _lookup_pv_size_kw(base_input_dir, scenario, housing_type, county_slug)
-        batt_kwh = _lookup_battery_capacity_kwh(base_input_dir, scenario, housing_type, county_slug)
+        # PV and Battery sizes: read from the same source as the capacities card (electrified_assets.csv)
+        assets = compute_assets_info(base_input_dir, scenario, housing_type, county_slug) or {}
+        pv_size_kw = assets.get("Solar Capacity (kW)")
+        batt_kwh = assets.get("Battery Capacity (kWh)")
         # Without solar+storage: PV size = 0; grid supplies all load
         without = {
             "solar_kw": 0.0 if annual_load_kwh is not None else None,
@@ -630,6 +428,83 @@ def compute_energy_flow_metrics(
         alt = os.path.join(county_dir, f"sam_optimized_load_profiles_{scenario}_{county_slug}.csv")
         sam_file = alt if os.path.exists(alt) else sam_file
     if not os.path.exists(sam_file):
+        return None
+
+    try:
+        df = pd.read_csv(sam_file)
+        def num(col: str) -> pd.Series:
+            if col not in df.columns:
+                return pd.Series([0.0] * len(df))
+            return pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+
+        load = num("Load Profile")
+        pv_to_load = num("System to Load")
+        batt_to_load = num("Battery to Load")
+        grid_to_load = num("Grid to Load")
+        pv_to_batt = num("System to Battery")
+        grid_to_batt = num("Grid to Battery")
+        # Optional columns that enable PV exports calc
+        system_to_grid = df["System to Grid"] if "System to Grid" in df.columns else None
+        pv_to_grid = df["PV to Grid (kWh)"] if "PV to Grid (kWh)" in df.columns else None
+        pv_ac = df["PV AC (kWh)"] if "PV AC (kWh)" in df.columns else None
+
+        total_load_kwh = float(load.sum()) if len(load) else None
+        pv_to_load_kwh = float(pv_to_load.sum())
+        batt_to_load_kwh = float(batt_to_load.sum())
+        grid_to_load_kwh = float(grid_to_load.sum())
+        pv_to_batt_kwh = float(pv_to_batt.sum())
+        grid_to_batt_kwh = float(grid_to_batt.sum())
+        total_grid_purchases_kwh = grid_to_load_kwh + grid_to_batt_kwh
+
+        # PV exports: prefer explicit PV to Grid, then System to Grid, then PV AC minus uses
+        pv_exports_kwh = None
+        pv_exports_formula = None
+        try:
+            if pv_to_grid is not None:
+                pv_exports_kwh = float(pd.to_numeric(pv_to_grid, errors="coerce").fillna(0.0).sum())
+                pv_exports_formula = "sum('PV to Grid (kWh)')"
+            elif system_to_grid is not None:
+                pv_exports_kwh = float(pd.to_numeric(system_to_grid, errors="coerce").fillna(0.0).sum())
+                pv_exports_formula = "sum('System to Grid')"
+            elif pv_ac is not None:
+                pv_exports_kwh = float(
+                    pd.to_numeric(pv_ac, errors="coerce").fillna(0.0).sum()
+                    - pv_to_load_kwh
+                    - pv_to_batt_kwh
+                )
+                if pv_exports_kwh < 0 and abs(pv_exports_kwh) < 1e-6:
+                    pv_exports_kwh = 0.0
+                pv_exports_formula = "sum('PV AC (kWh)') − sum('System to Load') − sum('System to Battery')"
+        except Exception:
+            pv_exports_kwh = None
+            pv_exports_formula = None
+
+        if total_load_kwh and total_load_kwh > 0:
+            self_sufficiency_pct = 100.0 * (1.0 - (grid_to_load_kwh / total_load_kwh))
+        else:
+            self_sufficiency_pct = None
+
+        net = load - pv_to_load - batt_to_load
+        peak_net_load_kw = float(net.max()) if len(net) else None
+
+        battery_capacity_kwh = _lookup_battery_capacity_kwh(
+            base_input_dir, scenario, housing_type, county_slug
+        )
+
+        return {
+            "battery_capacity_kwh": battery_capacity_kwh,
+            "pv_to_load_kwh": pv_to_load_kwh,
+            "batt_to_load_kwh": batt_to_load_kwh,
+            "grid_to_load_kwh": grid_to_load_kwh,
+            "pv_to_batt_kwh": pv_to_batt_kwh,
+            "grid_to_batt_kwh": grid_to_batt_kwh,
+            "pv_exports_kwh": pv_exports_kwh,
+            "pv_exports_formula": pv_exports_formula,
+            "total_grid_purchases_kwh": total_grid_purchases_kwh,
+            "self_sufficiency_pct": self_sufficiency_pct,
+            "peak_net_load_kw": peak_net_load_kw,
+        }
+    except Exception:
         return None
 
 
@@ -791,77 +666,79 @@ def compute_cost_breakdowns(
             "gas_best": gb,
         },
     }
+
+
+def compute_assets_info(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+) -> Optional[dict]:
+    """Read PV and battery capacities for a county from electrified_assets.csv.
+
+    Returns a dict like {"Solar Capacity (kW)": float|None, "Battery Capacity (kWh)": float|None}
+    or None if the file is absent.
+    """
+    cap_csv = os.path.join(
+        base_input_dir, scenario, housing_type, "CAPITAL_COSTS", "electrified_assets.csv"
+    )
+    if not os.path.exists(cap_csv):
+        return None
     try:
-        df = pd.read_csv(sam_file)
-        def num(col: str) -> pd.Series:
-            if col not in df.columns:
-                return pd.Series([0.0] * len(df))
-            return pd.to_numeric(df[col], errors="coerce").fillna(0.0)
-
-        load = num("Load Profile")
-        pv_to_load = num("System to Load")
-        batt_to_load = num("Battery to Load")
-        grid_to_load = num("Grid to Load")
-        pv_to_batt = num("System to Battery")
-        grid_to_batt = num("Grid to Battery")
-        # Optional columns that enable PV exports calc
-        system_to_grid = df["System to Grid"] if "System to Grid" in df.columns else None
-        pv_ac = df["PV AC (kWh)"] if "PV AC (kWh)" in df.columns else None
-
-        total_load_kwh = float(load.sum()) if len(load) else None
-        pv_to_load_kwh = float(pv_to_load.sum())
-        batt_to_load_kwh = float(batt_to_load.sum())
-        grid_to_load_kwh = float(grid_to_load.sum())
-        pv_to_batt_kwh = float(pv_to_batt.sum())
-        grid_to_batt_kwh = float(grid_to_batt.sum())
-        total_grid_purchases_kwh = grid_to_load_kwh + grid_to_batt_kwh
-
-        # PV exports (if available): prefer explicit 'System to Grid'; fallback to PV AC − PV→Load − PV→Batt
-        pv_exports_kwh = None
-        pv_exports_formula = None
-        try:
-            if system_to_grid is not None:
-                pv_exports_kwh = float(pd.to_numeric(system_to_grid, errors="coerce").fillna(0.0).sum())
-                pv_exports_formula = "sum('System to Grid')"
-            elif pv_ac is not None:
-                pv_exports_kwh = float(
-                    pd.to_numeric(pv_ac, errors="coerce").fillna(0.0).sum()
-                    - pv_to_load_kwh
-                    - pv_to_batt_kwh
-                )
-                # Guard against tiny negative due to rounding
-                if pv_exports_kwh < 0 and abs(pv_exports_kwh) < 1e-6:
-                    pv_exports_kwh = 0.0
-                pv_exports_formula = "sum('PV AC (kWh)') − sum('System to Load') − sum('System to Battery')"
-        except Exception:
-            pv_exports_kwh = None
-            pv_exports_formula = None
-
-        if total_load_kwh and total_load_kwh > 0:
-            self_sufficiency_pct = 100.0 * (1.0 - (grid_to_load_kwh / total_load_kwh))
+        df = pd.read_csv(cap_csv)
+        county_col = None
+        for c in df.columns:
+            if str(c).strip().lower() in ("county", "county_slug"):
+                county_col = c
+                break
+        if county_col is not None:
+            df_idx = df.set_index(county_col)
         else:
-            self_sufficiency_pct = None
-
-        net = load - pv_to_load - batt_to_load
-        peak_net_load_kw = float(net.max()) if len(net) else None
-
-        battery_capacity_kwh = _lookup_battery_capacity_kwh(
-            base_input_dir, scenario, housing_type, county_slug
-        )
-
-        return {
-            "battery_capacity_kwh": battery_capacity_kwh,
-            "pv_to_load_kwh": pv_to_load_kwh,
-            "batt_to_load_kwh": batt_to_load_kwh,
-            "grid_to_load_kwh": grid_to_load_kwh,
-            "pv_to_batt_kwh": pv_to_batt_kwh,
-            "grid_to_batt_kwh": grid_to_batt_kwh,
-            "pv_exports_kwh": pv_exports_kwh,
-            "pv_exports_formula": pv_exports_formula,
-            "total_grid_purchases_kwh": total_grid_purchases_kwh,
-            "self_sufficiency_pct": self_sufficiency_pct,
-            "peak_net_load_kw": peak_net_load_kw,
+            df_idx = df
+        # Normalize index to slug
+        def to_slug(x):
+            try:
+                return slugify_county_name(str(x))
+            except Exception:
+                return str(x)
+        df_idx = df_idx.copy()
+        # Try index slug match
+        if df_idx.index.name is None or any(isinstance(i, (int, float)) for i in df_idx.index):
+            # ensure we have a slug column to match against
+            df_idx["__slug__"] = [to_slug(x) for x in range(len(df_idx))]
+        # Better: try to find a slug either in index or in County column
+        # Iterate rows to find matching slug
+        match_row = None
+        for _, r in df.iterrows():
+            nm = r.get("County") or r.get(county_col) or ""
+            if slugify_county_name(str(nm)) == county_slug:
+                match_row = r
+                break
+        if match_row is None and not df.empty:
+            # last resort: first row
+            match_row = df.iloc[0]
+        out = {
+            "Solar Capacity (kW)": None,
+            "Battery Capacity (kWh)": None,
         }
+        if match_row is not None:
+            for key in out.keys():
+                if key in match_row.index:
+                    val = match_row[key]
+                    if pd.isna(val):
+                        out[key] = None
+                    else:
+                        # Preserve raw as text exactly as in CSV
+                        out[key] = str(val)
+        # Add source path and last modified timestamp
+        try:
+            mtime = os.path.getmtime(cap_csv)
+            out["CSV Path"] = cap_csv
+            out["Last Modified"] = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            out["CSV Path"] = cap_csv
+            out["Last Modified"] = None
+        return out
     except Exception:
         return None
 
@@ -967,15 +844,6 @@ def _load_sim_enduse_timeseries(
     except Exception:
         return None
 
-
-def _slice_week(df: pd.DataFrame, period: str) -> pd.DataFrame:
-    periods = {
-        "january": ("2018-01-01", "2018-01-08"),
-        "july": ("2018-07-01", "2018-07-08"),
-    }
-    key = period.lower()
-    start, end = periods.get(key, periods["january"])  # default jan
-    return df.loc[start:end]
 
 
 def create_enduse_breakdown_weekly(
@@ -1165,54 +1033,7 @@ def create_grid_supply_card(
 
 
 # ---------- Weekly charts (load and solar) and Battery SOC ----------
-
-
-def load_weekly_data(
-    base_input_dir: str,
-    scenario: str,
-    housing_type: str,
-    county_slug: str,
-    metric_columns: list,
-) -> Optional[pd.DataFrame]:
-    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
-    sam_file = os.path.join(county_dir, f"sam_optimized_load_profiles_{county_slug}.csv")
-    if not os.path.exists(sam_file):
-        print(f"Warning: Solar+storage load profiles file not found: {sam_file}")
-        return None
-    try:
-        df = pd.read_csv(sam_file, parse_dates=[0], index_col=0)
-        missing = [c for c in metric_columns if c not in df.columns]
-        if missing:
-            print(f"Warning: Missing columns in {sam_file}: {missing}")
-            print(f"Available columns: {list(df.columns)}")
-            return None
-        return df[metric_columns]
-    except Exception as e:
-        print(f"Warning: Error reading solar+storage load profiles for {county_slug}: {e}")
-        return None
-
-
-def load_battery_soc_data(
-    base_input_dir: str,
-    scenario: str,
-    housing_type: str,
-    county_slug: str,
-) -> Optional[pd.DataFrame]:
-    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
-    sam_file = os.path.join(county_dir, f"sam_optimized_load_profiles_{county_slug}.csv")
-    if not os.path.exists(sam_file):
-        print(f"Warning: Solar+storage load profiles file not found: {sam_file}")
-        return None
-    try:
-        df = pd.read_csv(sam_file, parse_dates=[0], index_col=0)
-        if "Battery SOC" not in df.columns:
-            print(f"Warning: Battery SOC column not found in {sam_file}")
-            print(f"Available columns: {list(df.columns)}")
-            return None
-        return df[["Battery SOC"]]
-    except Exception as e:
-        print(f"Warning: Error reading solar+storage load profiles for {county_slug}: {e}")
-        return None
+    
 
 def create_weekly_chart(
     base_input_dir: str,
@@ -1226,7 +1047,7 @@ def create_weekly_chart(
         sam_metrics = ["Load Profile", "System to Load", "Battery to Load", "Grid to Load"]
         solar_metrics = ["System to Load", "System to Battery"]
         all_metrics = list(dict.fromkeys(sam_metrics + solar_metrics))
-        weekly_df = load_weekly_data(base_input_dir, scenario, housing_type, county_slug, all_metrics)
+        weekly_df = load_sam_weekly_data(base_input_dir, scenario, housing_type, county_slug, all_metrics)
         if weekly_df is None:
             return ""
         fig, axes = plt.subplots(4, 1, figsize=(16, 20))
@@ -1351,7 +1172,7 @@ def create_weekly_chart_for_period(
         sam_metrics = ["Load Profile", "System to Load", "Battery to Load", "Grid to Load"]
         solar_metrics = ["System to Load", "System to Battery"]
         all_metrics = list(dict.fromkeys(sam_metrics + solar_metrics))
-        weekly_df = load_weekly_data(base_input_dir, scenario, housing_type, county_slug, all_metrics)
+        weekly_df = load_sam_weekly_data(base_input_dir, scenario, housing_type, county_slug, all_metrics)
         if weekly_df is None:
             return ""
         periods = {
@@ -1478,6 +1299,7 @@ def _dashboard_html(
     flows_without: Optional[dict] = None,
     flows_with: Optional[dict] = None,
     cost_breakdowns: Optional[dict] = None,
+    assets_info: Optional[dict] = None,
 ) -> str:
     scen_title = scenario.replace("_", " ").title()
     county_title = county_slug.replace("-", " ").title()
@@ -1525,6 +1347,8 @@ def _dashboard_html(
                 .val {{ font-weight: 700; color: #2c5aa0; }}
                 .formula {{ color: #888; font-size: 11px; margin-top: 2px; }}
                 .money {{ color: #1a5; font-weight: 700; }}
+                /* Highlight for minimum cost cell in plan table */
+                .highlight-min {{ background: #eaffea; }}
             </style>
         </head>
         <body>
@@ -1569,13 +1393,23 @@ def _dashboard_html(
         parts.append("<table class=\"kmtbl\">")
         parts.append("<thead><tr><th>Metric</th><th>With Solar+Storage</th><th>Without Solar+Storage</th></tr></thead>")
         parts.append("<tbody>")
-        # Solar size with formula
+        # Solar size with formula (raw values from electrified_assets.csv)
+        if assets_info:
+            with_solar_kw = assets_info.get('Solar Capacity (kW)')
+        else:
+            with_solar_kw = w.get('solar_kw')
         parts.append(
-            f"<tr><td>Solar System Size<div class=\"formula\">from Step 9 capacity: 'Solar Capacity (kW)'</div></td><td class=\"val\">{fmt(w.get('solar_kw'), 'kW')} kW</td><td class=\"val\">{fmt(wo.get('solar_kw'), 'kW')} kW</td></tr>"
+            f"<tr><td>Solar System Size<div class=\"formula\">from Step 9 capacity: 'Solar Capacity (kW)'</div></td><td class=\"val\">{with_solar_kw if with_solar_kw is not None else 'N/A'} kW</td><td class=\"val\">0 kW</td></tr>"
         )
-        # Battery capacity
+        # Battery capacity (raw values from electrified_assets.csv)
+        if assets_info:
+            print("A")
+            with_batt_kwh = assets_info.get('Battery Capacity (kWh)')
+        else:
+            print("B")
+            with_batt_kwh = w.get('battery_kwh')
         parts.append(
-            f"<tr><td>Battery Capacity<div class=\"formula\">from Step 9 capacity: 'Battery Capacity (kWh)'</div></td><td class=\"val\">{fmt(w.get('battery_kwh'), 'kWh')} kWh</td><td class=\"val\">{fmt(wo.get('battery_kwh'), 'kWh')} kWh</td></tr>"
+            f"<tr><td>Battery Capacity<div class=\"formula\">from Step 9 capacity: 'Battery Capacity (kWh)'</div></td><td class=\"val\">{with_batt_kwh if with_batt_kwh is not None else 'N/A'} kWh</td><td class=\"val\">0 kWh</td></tr>"
         )
         parts.append(
             f"<tr><td>Annual Household Load</td><td class=\"val\">{fmt(w.get('annual_load_kwh'), 'kWh')} kWh</td><td class=\"val\">{fmt(wo.get('annual_load_kwh'), 'kWh')} kWh</td></tr>"
@@ -1655,31 +1489,9 @@ def _dashboard_html(
         parts.append("<div class=\"muted\">No energy flow data available</div>")
     parts.append("</div>")
 
-    # Card 4: Annual Energy Cost — Electricity vs Gas
+    # Card 5: Annual Costs by Rate Plan (Electricity + Gas)
     parts.append("<div class=\"card\">")
-    parts.append("<h2>Annual Energy Cost — Electricity vs Gas</h2>")
-    if cost_breakdowns and cost_breakdowns.get("totals"):
-        t = cost_breakdowns["totals"]
-        def fmt_money(x):
-            try:
-                return f"${float(x):,.0f}"
-            except Exception:
-                return "N/A"
-        e_plan, e_val = t.get("electricity_best_nem3") or (None, None)
-        if e_val is None:
-            e_plan, e_val = t.get("electricity_best_retail") or (None, None)
-        g_plan, g_val = t.get("gas_best") or (None, None)
-        parts.append("<table class=\"kmtbl\"><thead><tr><th>Category</th><th>Annual Cost</th><th>Plan</th></tr></thead><tbody>")
-        parts.append(f"<tr><td>Electricity</td><td class=\"money\">{fmt_money(e_val)}</td><td>{e_plan or '—'}</td></tr>")
-        parts.append(f"<tr><td>Gas</td><td class=\"money\">{fmt_money(g_val)}</td><td>{g_plan or '—'}</td></tr>")
-        parts.append("</tbody></table>")
-    else:
-        parts.append("<div class=\"muted\">No cost results available</div>")
-    parts.append("</div>")
-
-    # Card 5: Electricity Annual Cost by Rate Plan
-    parts.append("<div class=\"card\">")
-    parts.append("<h2>Electricity Annual Cost by Rate Plan</h2>")
+    parts.append("<h2>Annual Costs by Rate Plan</h2>")
     if cost_breakdowns and cost_breakdowns.get("electricity"):
         e = cost_breakdowns["electricity"]
         retail = e.get("retail", {})
@@ -1690,6 +1502,19 @@ def _dashboard_html(
                 return f"${float(x):,.0f}"
             except Exception:
                 return "N/A"
+        # Determine which electricity column to highlight: prefer NEM3; fallback to Retail if NEM3 empty
+        min_nem3_plan = None
+        min_retail_plan = None
+        if nem3:
+            try:
+                min_nem3_plan = min(nem3, key=lambda k: nem3[k])
+            except Exception:
+                min_nem3_plan = None
+        if retail:
+            try:
+                min_retail_plan = min(retail, key=lambda k: retail[k])
+            except Exception:
+                min_retail_plan = None
         parts.append(
             "<table class=\"kmtbl\"><thead><tr>"
             "<th>Plan</th>"
@@ -1700,16 +1525,51 @@ def _dashboard_html(
         for p in all_plans:
             r = retail.get(p)
             n = nem3.get(p)
+            retail_classes = ["money"]
+            nem3_classes = ["money"]
+            # Highlight logic: prefer highlighting NEM3 minimum; if NEM3 absent, highlight Retail minimum
+            if min_nem3_plan and p == min_nem3_plan:
+                nem3_classes.append("highlight-min")
+            elif not min_nem3_plan and min_retail_plan and p == min_retail_plan:
+                retail_classes.append("highlight-min")
             parts.append(
-                f"<tr><td>{p}</td><td class=\"money\">{fmt_money(r) if r is not None else '—'}</td><td class=\"money\">{fmt_money(n) if n is not None else '—'}</td></tr>"
+                f"<tr><td>{p}</td>"
+                f"<td class=\"{' '.join(retail_classes)}\">{fmt_money(r) if r is not None else '—'}</td>"
+                f"<td class=\"{' '.join(nem3_classes)}\">{fmt_money(n) if n is not None else '—'}</td></tr>"
             )
         parts.append("</tbody></table>")
         parts.append("<div class=\"muted\" style=\"margin-top:6px;\">NEM3 applies export credits at ACC; retail shows import-only bill.</div>")
     else:
         parts.append("<div class=\"muted\">No electricity plan data available</div>")
+    # Gas section — its own table with G-1 entry
+    gas = (cost_breakdowns or {}).get("gas", {})
+    # Try to locate a key that corresponds to 'G-1' robustly
+    g1_key = None
+    for k in gas.keys():
+        try:
+            if str(k).lower().replace("_", "-") == "g-1":
+                g1_key = k
+                break
+        except Exception:
+            continue
+    parts.append("<div class=\"muted\" style=\"margin-top:12px; font-weight:600;\">Gas</div>")
+    parts.append("<table class=\"kmtbl\"><thead><tr><th>Plan</th><th>Annual Cost</th></tr></thead><tbody>")
+    def fmt_money_local(x):
+        try:
+            return f"${float(x):,.0f}"
+        except Exception:
+            return "N/A"
+    if gas:
+        val = gas.get(g1_key) if g1_key is not None else None
+        parts.append(
+            f"<tr><td>G-1</td><td class=\"money\">{fmt_money_local(val) if val is not None else '—'}</td></tr>"
+        )
+    else:
+        parts.append("<tr><td colspan=2 class=\"muted\">No gas plan data available</td></tr>")
+    parts.append("</tbody></table>")
     parts.append("</div>")
 
-    # Card 5: Deployment figure
+    # Card 7: Deployment figure
     parts.append("<div class=\"card\">")
     parts.append("<h2>Solar + Storage Deployment</h2>")
     if deployment_b64:
@@ -1720,7 +1580,7 @@ def _dashboard_html(
         parts.append("<div class=\"muted\">No deployment figure available</div>")
     parts.append("</div>")
 
-    # Card 6: Weekly chart — January
+    # Card 8: Weekly chart — January
     parts.append("<div class=\"card\">")
     parts.append("<h2>Load & Solar — January (First Week)</h2>")
     if weekly_jan_b64:
@@ -1731,7 +1591,7 @@ def _dashboard_html(
         parts.append("<div class=\"muted\">No January weekly figure available</div>")
     parts.append("</div>")
 
-    # Card 7: Weekly chart — July
+    # Card 9: Weekly chart — July
     parts.append("<div class=\"card\">")
     parts.append("<h2>Load & Solar — July (First Week)</h2>")
     if weekly_jul_b64:
@@ -1742,9 +1602,9 @@ def _dashboard_html(
         parts.append("<div class=\"muted\">No July weekly figure available</div>")
     parts.append("</div>")
 
-    # Card 8: Electric Load by End‑Use — Real vs Simulated (Jan/Jul)
+    # Card 10: Electric Load by End‑Use — Real + Simulated (Jan/Jul)
     parts.append("<div class=\"card\">")
-    parts.append("<h2>Electric Load by End‑Use — Real vs Simulated (First Week Jan & Jul)</h2>")
+    parts.append("<h2>Electric Load by End‑Use — Real + Simulated (First Week Jan & Jul)</h2>")
     if enduse_weekly_b64:
         parts.append(
             f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{enduse_weekly_b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{enduse_weekly_b64}\" alt=\"enduse weekly jan+jul\"/></a></div>"
@@ -1835,6 +1695,10 @@ def process(
             cost_breakdowns = compute_cost_breakdowns(
                 base_input_dir, scenario, housing_type, county_slug
             )
+            # PV & Storage capacities from electrified_assets.csv
+            assets_info = compute_assets_info(
+                base_input_dir, scenario, housing_type, county_slug
+            )
             # Collect Step 18 cross-scenario plots
             step18 = _gather_step18_images(output_dir, sha)
             html = _dashboard_html(
@@ -1854,6 +1718,7 @@ def process(
                 flows_without=flows_without,
                 flows_with=flows_with,
                 cost_breakdowns=cost_breakdowns,
+                assets_info=assets_info,
             )
             out_path = os.path.join(
                 output_dir,

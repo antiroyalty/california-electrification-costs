@@ -14,30 +14,20 @@ Display diagnostic maps for key metrics in a single HTML file:
 """
 
 import os
-import subprocess
 import pandas as pd
 import folium
-from folium import plugins
-import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
-import io
-import base64
 from helpers.maps_helpers import (
     initialize_map, load_cost_data, add_choropleth_layer, 
-    add_centroid_labels, add_map_title, export_geojson_and_html,
+    add_centroid_labels,
     get_latest_csv_file
 )
 from helpers.main_helpers import log, slugify_county_name, to_decimal_number, get_scenario_path, norcal_counties, central_counties, socal_counties, git_short_sha
 from helpers.utility_helpers import get_utility_for_county
 
-# Moved chart builders shared with county diagnostics (Step 22)
-from step22_build_county_diagnostics import (
+# Chart builders live in helpers to keep the pipeline strictly linear
+from helpers.diagnostics_helpers import (
     load_appliance_breakdown_data,
     create_appliance_breakdown_chart,
-    load_battery_soc_data,
-    create_battery_soc_chart,
-    load_sam_weekly_data,
-    create_sam_weekly_chart,
 )
 
 
@@ -68,7 +58,7 @@ def format_payback_period(years: float) -> str:
 
 
 # Bin ranges for map visualizations
-SOLAR_SIZE_BINS = [0, 2, 4, 6, 8, 10, 12, 15, 20]
+SOLAR_SIZE_BINS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 ENERGY_CONSUMPTION_BINS = [0, 2500, 5000, 7500, 10000, 12500, 15000, 17500, 200000]
 ELECTRICITY_BILL_BINS = [0, 1000, 2000, 3000, 4000, 5000, 6000, 8000, 10000]
 GAS_BILL_BINS = [0, 500, 1000, 1500, 2000, 2500, 3000, 4000]
@@ -723,7 +713,7 @@ def load_sam_metric_data(
     return 0.0
 
 
-# (appliance breakdown and weekly/SOC chart helpers moved to Step 22)
+# Appliance breakdown and weekly/SOC chart helpers are provided via helpers
 
 
 def create_appliance_html_table(appliance_data: dict, county_slug: str, scenario: str) -> str:
@@ -808,7 +798,7 @@ def load_sam_metric_data(base_input_dir: str, scenario: str, housing_type: str, 
         return 0.0
 
 
-# (weekly SAM and battery SOC chart functions moved to Step 22)
+# Weekly SAM and battery SOC chart functions are provided via helpers
 
 
 def create_single_map(base_input_dir: str, scenario: str, housing_type: str, counties: list, 
@@ -1392,31 +1382,7 @@ def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: 
                 display: flex;
                 justify-content: center;
             }}
-            .charts-section {{
-                margin-top: 40px;
-                background-color: white;
-                border-radius: 8px;
-                padding: 20px;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            }}
-            .charts-grid {{
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
-                gap: 20px;
-                margin-top: 20px;
-            }}
-            .chart-container {{
-                background-color: #f8f9fa;
-                border-radius: 8px;
-                padding: 15px;
-                text-align: center;
-            }}
-            .chart-title {{
-                font-size: 14px;
-                font-weight: bold;
-                margin-bottom: 10px;
-                color: #333;
-            }}
+            /* Pruned unused chart styles (appliance, SOC, SAM weekly) */
         </style>
     </head>
     <body>
@@ -1441,106 +1407,8 @@ def create_combined_dashboard(base_input_dir: str, scenario: str, housing_type: 
             </div>
         """
     
+    # Close out the dashboard without additional chart sections; those live in Step 22 county dashboards
     html_content += """
-        </div>
-        
-        <div class="charts-section">
-            <h2>Appliance Energy Consumption Breakdown</h2>
-            <p>Annual energy consumption by end-use category for selected counties</p>
-            <div class="charts-grid">
-    """
-    
-    # Generate appliance breakdown charts for a few representative counties
-    sample_counties = ["Alameda", "Los Angeles", "San Diego", "Fresno"]
-    for county_name in sample_counties:
-        county_slug = slugify_county_name(f"{county_name} County")
-        
-        try:
-            chart_data = create_appliance_breakdown_chart(base_input_dir, scenario, housing_type, county_slug)
-            
-            # Check if it's base64 image data or HTML table
-            if chart_data.startswith('<div'):
-                # It's an HTML table
-                html_content += f"""
-                    <div class="chart-container">
-                        {chart_data}
-                    </div>
-                """
-            else:
-                # It's base64 image data
-                html_content += f"""
-                    <div class="chart-container">
-                        <div class="chart-title">{county_name} County</div>
-                        <img src="data:image/png;base64,{chart_data}" alt="Appliance breakdown for {county_name}" style="max-width: 100%; height: auto;">
-                    </div>
-                """
-        except Exception as e:
-            print(f"Error creating appliance chart for {county_name}: {e}")
-            html_content += f"""
-                <div class="chart-container">
-                    <div class="chart-title">{county_name} County</div>
-                    <p>Chart unavailable for this county</p>
-                </div>
-            """
-    
-    html_content += """
-            </div>
-        </div>
-        
-        <div class="charts-section">
-            <h2>Battery SOC Analysis</h2>
-            <p>Battery charging and discharging patterns during the first week of January and July for selected counties</p>
-            <div class="chart-container">
-    """
-    
-    # Generate battery SOC chart for scenarios with solar+storage
-    if not scenario.startswith("baseline"):
-        try:
-            battery_chart_b64 = create_battery_soc_chart(base_input_dir, scenario, housing_type)
-            if isinstance(battery_chart_b64, str) and battery_chart_b64.startswith('<div'):
-                # HTML fallback
-                html_content += battery_chart_b64
-            else:
-                # Base64 image
-                html_content += f"""
-                    <img src="data:image/png;base64,{battery_chart_b64}" alt="Battery SOC patterns" style="max-width: 100%; height: auto;">
-                """
-        except Exception as e:
-            print(f"Error creating battery SOC chart: {e}")
-            html_content += "<p>Battery SOC chart unavailable for this scenario</p>"
-    else:
-        html_content += "<p>Battery SOC analysis not applicable for baseline scenario (no battery storage)</p>"
-    
-    html_content += """
-            </div>
-        </div>
-        
-        <div class="charts-section">
-            <h2>SAM Load Profile Metrics Analysis</h2>
-            <p>Weekly analysis of SAM load profile metrics during the first week of January and July for Alameda County</p>
-            <div class="chart-container">
-    """
-    
-    # Generate SAM weekly chart for scenarios with solar+storage
-    if not scenario.startswith("baseline"):
-        try:
-            sam_chart_b64 = create_sam_weekly_chart(base_input_dir, scenario, housing_type, "marin")
-            if isinstance(sam_chart_b64, str) and sam_chart_b64.startswith('<div'):
-                # HTML fallback
-                html_content += sam_chart_b64
-            else:
-                # Base64 image
-                html_content += f"""
-                    <img src="data:image/png;base64,{sam_chart_b64}" alt="SAM load profile metrics" style="max-width: 100%; height: auto;">
-                """
-        except Exception as e:
-            print(f"Error creating SAM weekly chart: {e}")
-            html_content += "<p>SAM weekly analysis chart unavailable for this scenario</p>"
-    else:
-        html_content += "<p>SAM load profile analysis not applicable for baseline scenario (no solar+storage system)</p>"
-    
-    html_content += """
-            </div>
         </div>
     </body>
     </html>
