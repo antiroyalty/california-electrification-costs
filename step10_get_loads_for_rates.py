@@ -251,15 +251,7 @@ def read_load_profile(file_path, column_name):
     except Exception as e:
         raise RuntimeError(f"Error reading file {file_path}: {e}")
 
-def read_optional_load_profile(file_path, column_name, fallback_series=None):
-    """Read a column if present; otherwise return the fallback series or a zero series of len 8760."""
-    try:
-        df = pd.read_csv(file_path)
-        if column_name in df.columns:
-            return df[column_name]
-        return fallback_series if fallback_series is not None else pd.Series([0.0] * 8760)
-    except Exception:
-        return fallback_series if fallback_series is not None else pd.Series([0.0] * 8760)
+## Optional-profile reading has been removed on purpose to ensure failures surface early.
 
 def prepare_for_rates_analysis(base_input_dir, base_output_dir, housing_type, scenario, county):
     directory = SCENARIO_DATA_MAP.get(scenario, {})
@@ -281,17 +273,10 @@ def prepare_for_rates_analysis(base_input_dir, base_output_dir, housing_type, sc
     gas_default_hourly = aggregate_to_hourly(gas_default_file, directory["default"]["gas"]["column"])
     gas_solar_storage_hourly = aggregate_to_hourly(gas_solar_storage_file, directory["solar_storage"]["gas"]["column"])
 
-    # NEM3 exports: prefer the dedicated column from Step 9 if available; otherwise derive a conservative fallback
-    # Fallback derivation (if needed): PV export = max(0, PV AC - PV→Load - PV→Battery)
-    try:
-        pv_ac = read_optional_load_profile(electricity_solar_storage_file, "PV AC (kWh)")
-        pv_to_load = read_optional_load_profile(electricity_solar_storage_file, "System to Load")
-        pv_to_batt = read_optional_load_profile(electricity_solar_storage_file, "System to Battery")
-        fallback_export = (pv_ac.astype(float) - pv_to_load.astype(float) - pv_to_batt.astype(float)).clip(lower=0.0)
-    except Exception:
-        fallback_export = pd.Series([0.0] * len(electricity_solar_storage))
-    electricity_solar_storage_export = read_optional_load_profile(
-        electricity_solar_storage_file, "PV to Grid (kWh)", fallback_series=fallback_export
+    # NEM3 exports: strictly require the dedicated Step 9 column.
+    # If missing or unreadable, raise immediately to interrupt execution.
+    electricity_solar_storage_export = read_load_profile(
+        electricity_solar_storage_file, "PV to Grid (kWh)"
     )
 
     combined_df = pd.DataFrame({
