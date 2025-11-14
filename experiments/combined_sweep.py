@@ -26,7 +26,7 @@ from helpers.main_helpers import slugify_county_name, get_scenario_path, get_cou
 
 # Reuse Step 9 (DIY) PV + dispatch implementation
 import step9_my_own_solar_storage as diy
-from capital_cost_map_builder import LIFETIMES
+from helpers.capital_cost_map_builder import LIFETIMES
 from appliances.battery_storage import BatteryStorageAppliance
 from appliances.electric_base import IncentiveScenario
 from step15_payback_periods import vehicle_annual_adders_from_ledger
