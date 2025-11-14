@@ -1,4 +1,4 @@
-step16_display_key_metrics_maps.py"""
+"""
 Step 16: Display Key Metrics Maps
 
 Display diagnostic maps for key metrics in a single HTML file:
@@ -14,17 +14,11 @@ Display diagnostic maps for key metrics in a single HTML file:
 """
 
 import os
-import subprocess
 import pandas as pd
 import folium
-from folium import plugins
-import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
-import io
-import base64
 from helpers.maps_helpers import (
     initialize_map, load_cost_data, add_choropleth_layer, 
-    add_centroid_labels, add_map_title, export_geojson_and_html,
+    add_centroid_labels,
     get_latest_csv_file
 )
 from helpers.main_helpers import log, slugify_county_name, to_decimal_number, get_scenario_path, norcal_counties, central_counties, socal_counties, git_short_sha
