@@ -467,6 +467,10 @@ def prepare_export_enabled_outputs(
     battery_soc_percent: Optional[List[float]] = None,
     battery_to_grid_kwh: Optional[List[float]] = None,
     pv_to_grid_kwh: Optional[List[float]] = None,
+    # Additional optional channels/aliases for richer exports-only CSV
+    battery_charge_stored_kwh: Optional[List[float]] = None,
+    grid_demand_kwh: Optional[List[float]] = None,
+    pv_used_onsite_kwh: Optional[List[float]] = None,
     start_timestamp: str = "2018-01-01",
 ) -> pd.DataFrame:
     """Build a DataFrame capturing all fields needed for export modeling.
@@ -478,16 +482,22 @@ def prepare_export_enabled_outputs(
     Columns provided:
     - Load Profile
     - System to Load (PV→Load)
+    - Solar to Load (kWh) [alias of System to Load]
     - Battery to Load
     - Grid to Load
     - System to Battery (PV→Battery)
+    - Solar to Battery (kWh) [alias of System to Battery]
     - Grid to Battery
     - Battery SOC
     - PV AC (kWh)
     - PV to Grid (kWh)
+    - Solar to Grid (kWh) [alias of PV to Grid]
     - Battery to Grid (kWh)  [defaults to 0 if not modeled]
     - Exports to Grid (kWh)  [PV to Grid + Battery to Grid]
     - System to Grid         [alias = PV to Grid, for continuity]
+    - PV Used Onsite (kWh)   [System to Load + System to Battery]
+    - Grid Demand (kWh)      [Grid to Load + Grid to Battery]
+    - Battery Charge Stored (kWh) [post-efficiency stored energy]
     - Solar + Battery to Load
     - Total Supply
     - Difference (Load − Total Supply)
@@ -520,22 +530,33 @@ def prepare_export_enabled_outputs(
     diff = [float(l) - float(ts) for l, ts in zip(load, total_supply)]
     net_grid_import = [float(gtl_h) + float(gtb_h) - float(exp_h) for gtl_h, gtb_h, exp_h in zip(gtl, gtb, exports)]
 
+    # Optional channels and convenient aliases
+    grid_demand = _ensure_length(grid_demand_kwh, n, None) if grid_demand_kwh is not None else [float(a) + float(b) for a, b in zip(gtl, gtb)]
+    pv_used_onsite = _ensure_length(pv_used_onsite_kwh, n, None) if pv_used_onsite_kwh is not None else [float(a) + float(b) for a, b in zip(stl, stb)]
+    batt_charge_stored = _ensure_length(battery_charge_stored_kwh, n, 0.0)
+
     date_range = pd.date_range(start=start_timestamp, periods=n, freq="H")
     df = pd.DataFrame(
         {
             "Load Profile": load,
             "System to Load": stl,
+            "Solar to Load (kWh)": stl,
             "Battery to Load": btl,
             "Grid to Load": gtl,
             "System to Battery": stb,
+            "Solar to Battery (kWh)": stb,
             "Grid to Battery": gtb,
             "Battery SOC": soc,
             "PV AC (kWh)": pv,
             "PV to Grid (kWh)": pv_to_grid,
+            "Solar to Grid (kWh)": pv_to_grid,
             "Battery to Grid (kWh)": btg,
             "Exports to Grid (kWh)": exports,
             # Keep "System to Grid" for backward compatibility (alias PV to Grid)
             "System to Grid": pv_to_grid,
+            "PV Used Onsite (kWh)": pv_used_onsite,
+            "Grid Demand (kWh)": grid_demand,
+            "Battery Charge Stored (kWh)": batt_charge_stored,
             "Solar + Battery to Load": solar_plus_batt_to_load,
             "Total Supply": total_supply,
             "Difference": diff,
@@ -717,6 +738,8 @@ def process(
                     battery_soc_percent=soc_percent,
                     # We do not currently model battery exports; provide zeros for schema stability
                     battery_to_grid_kwh=None,
+                    battery_charge_stored_kwh=batt_charge,
+                    grid_demand_kwh=grid_demand,
                     pv_to_grid_kwh=pv_exports,
                     start_timestamp="2018-01-01",
                 )
