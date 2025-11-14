@@ -39,222 +39,18 @@ from helpers.main_helpers import (
     slugify_county_name,
 )
 from helpers.maps_helpers import get_latest_csv_file
+from helpers.diagnostics_helpers import (
+    load_appliance_breakdown_data,
+    create_appliance_breakdown_chart,
+    load_battery_soc_data,
+    create_battery_soc_chart,
+    load_sam_weekly_data,
+    create_sam_weekly_chart,
+    _slice_week,
+)
 
-
-# ---------- Appliance breakdown (moved from Step 16) ----------
 
 import matplotlib.pyplot as plt
-
-
-def load_appliance_breakdown_data(
-    base_input_dir: str,
-    scenario: str,
-    housing_type: str,
-    county_slug: str,
-) -> dict:
-    """
-    Load appliance breakdown data by end-use category with proper time series handling.
-
-    IMPORTANT: Only loads ELECTRIFIED end-uses for pie charts:
-    - For baseline: Shows only electricity end-uses (lighting, appliances, cooling, etc.) - NO gas appliances
-    - For electrified scenarios: Shows electricity end-uses + electrified appliances (Heat Pump, Induction, etc.)
-
-    Returns dictionary with appliance categories and their annual kWh consumption.
-    """
-    import os
-
-    appliance_data: dict[str, float] = {}
-
-    electricity_categories = {
-        "Cooling": ["ceiling_fan"],
-        "Appliances": ["clothes_dryer", "dishwasher", "freezer", "refrigerator"],
-        "Lighting": ["lighting_garage", "lighting_interior"],
-        "Plug Loads": ["plug_loads"],
-        "Pool/Spa": ["permanent_spa_heat", "permanent_spa_pump", "pool_heater", "pool_pump"],
-        "Other Electric": ["mech_vent"],
-    }
-
-    # For electricity loads, ALWAYS use baseline data (individual appliance breakdown only exists in baseline)
-    baseline_electricity_dir = os.path.join(base_input_dir, "baseline", housing_type, county_slug)
-    electricity_file = os.path.join(baseline_electricity_dir, f"electricity_loads_{county_slug}.csv")
-
-    if os.path.exists(electricity_file):
-        try:
-            df = pd.read_csv(electricity_file, parse_dates=["timestamp"]).set_index("timestamp")
-            for category, appliances in electricity_categories.items():
-                series = pd.Series(0.0, index=df.index)
-                for appliance in appliances:
-                    col = f"out.electricity.{appliance}.energy_consumption"
-                    if col in df.columns:
-                        series = series.add(df[col], fill_value=0.0)
-                if float(series.sum()) > 0:
-                    appliance_data[category] = float(series.sum())
-        except Exception as e:
-            print(f"Warning: Error reading baseline electricity loads for {county_slug}: {e}")
-    else:
-        print(f"Warning: Baseline electricity loads file not found: {electricity_file}")
-
-    # For pie charts: exclude gas appliances; focus on electrified end-uses
-    print(
-        f"Note: Excluding gas appliances from pie chart for {scenario} - showing only electrified end-uses"
-    )
-
-    # Load simulated electric appliances for electrified scenarios
-    if not scenario.startswith("baseline"):
-        scen_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
-        simulated_file = os.path.join(scen_dir, f"electricity_loads_simulated_{county_slug}.csv")
-        if not os.path.exists(simulated_file):
-            scen_dir = os.path.join(base_input_dir, "baseline", housing_type, county_slug)
-            simulated_file = os.path.join(scen_dir, f"electricity_loads_simulated_{county_slug}.csv")
-        if os.path.exists(simulated_file):
-            try:
-                df = pd.read_csv(simulated_file, parse_dates=["timestamp"]).set_index("timestamp")
-                df = df.resample("H").sum()  # resample 15‑min to hourly
-                sim_map = {
-                    "Heat Pump": "simulated.electricity.heat_pump.energy_consumption.electricity.kwh",
-                    "Induction Cooking": "simulated.electricity.induction_stove.energy_consumption.electricity.kwh",
-                    "Electric Hot Water": "simulated.electricity.hot_water.energy_consumption.electricity.kwh",
-                }
-                for label, col in sim_map.items():
-                    if col in df.columns:
-                        val = float(df[col].sum())
-                        if val > 0:
-                            if (
-                                label == "Heat Pump"
-                                and scenario
-                                in [
-                                    "heat_pump",
-                                    "heat_pump_and_induction_stove",
-                                    "heat_pump_and_induction_stove_and_water_heating",
-                                    "full_electric_ev",
-                                ]
-                            ):
-                                appliance_data["Heat Pump"] = val
-                            elif (
-                                label == "Induction Cooking"
-                                and scenario
-                                in [
-                                    "induction_stove",
-                                    "heat_pump_and_induction_stove",
-                                    "heat_pump_and_induction_stove_and_water_heating",
-                                    "full_electric_ev",
-                                ]
-                            ):
-                                appliance_data["Induction Cooking"] = val
-                            elif (
-                                label == "Electric Hot Water"
-                                and scenario in [
-                                    "water_heating",
-                                    "heat_pump_and_induction_stove_and_water_heating",
-                                    "full_electric_ev",
-                                ]
-                            ):
-                                appliance_data["Electric Hot Water"] = val
-            except Exception as e:
-                print(f"Warning: Error reading simulated loads for {county_slug}: {e}")
-
-    if not appliance_data:
-        print(f"Warning: No appliance data found for {county_slug}. Using placeholder data.")
-        appliance_data = {"Data Not Available": 1.0}
-
-    return appliance_data
-
-
-def create_appliance_breakdown_chart(
-    base_input_dir: str,
-    scenario: str,
-    housing_type: str,
-    county_slug: str,
-) -> str:
-    """
-    Create a pie chart showing appliance breakdown by end‑use category.
-    Returns base64 encoded PNG image string or HTML table if matplotlib is unavailable.
-    """
-    import io
-
-    data = load_appliance_breakdown_data(base_input_dir, scenario, housing_type, county_slug)
-    try:
-        if not data or "Data Not Available" in data:
-            fig, ax = plt.subplots(figsize=(8, 6))
-            ax.text(
-                0.5,
-                0.5,
-                "No appliance data available",
-                ha="center",
-                va="center",
-                fontsize=14,
-            )
-            ax.set_xlim(0, 1)
-            ax.set_ylim(0, 1)
-            ax.axis("off")
-        else:
-            fig, ax = plt.subplots(figsize=(10, 8))
-            categories = list(data.keys())
-            values = list(data.values())
-            color_map = {
-                "Heating": "#FF6B6B",
-                "Heat Pump": "#FF8E53",
-                "Cooling": "#4ECDC4",
-                "Hot Water": "#45B7D1",
-                "Electric Hot Water": "#96CEB4",
-                "Cooking": "#FFEAA7",
-                "Induction Cooking": "#DDA0DD",
-                "Appliances": "#FD79A8",
-                "Lighting": "#FDCB6E",
-                "Plug Loads": "#6C5CE7",
-                "Pool/Spa": "#00B894",
-                "Other Electric": "#A29BFE",
-                "Other Gas": "#E17055",
-            }
-            colors = [color_map.get(cat, "#BDC3C7") for cat in categories]
-            wedges, texts, autotexts = ax.pie(
-                values,
-                labels=categories,
-                colors=colors,
-                autopct="%1.1f%%",
-                startangle=90,
-                textprops={"fontsize": 10},
-            )
-            for autotext in autotexts:
-                autotext.set_color("white")
-                autotext.set_fontweight("bold")
-            county_name = county_slug.replace("-", " ").title()
-            scenario_name = scenario.replace("_", " ").title()
-            ax.set_title(
-                f"Annual Electricity Consumption by End‑Use\n{county_name} County - {scenario_name} Scenario\n(Electrified End‑Uses Only)",
-                fontsize=14,
-                fontweight="bold",
-                pad=20,
-            )
-            total_kwh = sum(values)
-            ax.text(
-                0,
-                -1.3,
-                f"Total: {total_kwh:,.0f} kWh/year",
-                ha="center",
-                fontsize=12,
-                fontweight="bold",
-            )
-
-        buf = io.BytesIO()
-        plt.tight_layout()
-        plt.savefig(buf, format="png", dpi=150, bbox_inches="tight")
-        buf.seek(0)
-        image_b64 = base64.b64encode(buf.getvalue()).decode()
-        plt.close()
-        return image_b64
-    except Exception as e:
-        print(f"Error creating appliance breakdown chart for {county_slug}: {e}")
-        # simple text placeholder as base64 PNG
-        fig, ax = plt.subplots(figsize=(6, 4))
-        ax.text(0.5, 0.5, "Chart unavailable", ha="center", va="center")
-        ax.axis("off")
-        buf = io.BytesIO()
-        plt.savefig(buf, format="png", dpi=120, bbox_inches="tight")
-        buf.seek(0)
-        image_b64 = base64.b64encode(buf.getvalue()).decode()
-        plt.close()
-        return image_b64
 
 
 # ---------- Solar + storage deployment figure (from Step 9 outputs) ----------
@@ -1049,15 +845,6 @@ def _load_sim_enduse_timeseries(
         return None
 
 
-def _slice_week(df: pd.DataFrame, period: str) -> pd.DataFrame:
-    periods = {
-        "january": ("2018-01-01", "2018-01-08"),
-        "july": ("2018-07-01", "2018-07-08"),
-    }
-    key = period.lower()
-    start, end = periods.get(key, periods["january"])  # default jan
-    return df.loc[start:end]
-
 
 def create_enduse_breakdown_weekly(
     base_input_dir: str,
@@ -1246,54 +1033,7 @@ def create_grid_supply_card(
 
 
 # ---------- Weekly charts (load and solar) and Battery SOC ----------
-
-
-def load_weekly_data(
-    base_input_dir: str,
-    scenario: str,
-    housing_type: str,
-    county_slug: str,
-    metric_columns: list,
-) -> Optional[pd.DataFrame]:
-    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
-    sam_file = os.path.join(county_dir, f"sam_optimized_load_profiles_{county_slug}.csv")
-    if not os.path.exists(sam_file):
-        print(f"Warning: Solar+storage load profiles file not found: {sam_file}")
-        return None
-    try:
-        df = pd.read_csv(sam_file, parse_dates=[0], index_col=0)
-        missing = [c for c in metric_columns if c not in df.columns]
-        if missing:
-            print(f"Warning: Missing columns in {sam_file}: {missing}")
-            print(f"Available columns: {list(df.columns)}")
-            return None
-        return df[metric_columns]
-    except Exception as e:
-        print(f"Warning: Error reading solar+storage load profiles for {county_slug}: {e}")
-        return None
-
-
-def load_battery_soc_data(
-    base_input_dir: str,
-    scenario: str,
-    housing_type: str,
-    county_slug: str,
-) -> Optional[pd.DataFrame]:
-    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
-    sam_file = os.path.join(county_dir, f"sam_optimized_load_profiles_{county_slug}.csv")
-    if not os.path.exists(sam_file):
-        print(f"Warning: Solar+storage load profiles file not found: {sam_file}")
-        return None
-    try:
-        df = pd.read_csv(sam_file, parse_dates=[0], index_col=0)
-        if "Battery SOC" not in df.columns:
-            print(f"Warning: Battery SOC column not found in {sam_file}")
-            print(f"Available columns: {list(df.columns)}")
-            return None
-        return df[["Battery SOC"]]
-    except Exception as e:
-        print(f"Warning: Error reading solar+storage load profiles for {county_slug}: {e}")
-        return None
+    
 
 def create_weekly_chart(
     base_input_dir: str,
@@ -1307,7 +1047,7 @@ def create_weekly_chart(
         sam_metrics = ["Load Profile", "System to Load", "Battery to Load", "Grid to Load"]
         solar_metrics = ["System to Load", "System to Battery"]
         all_metrics = list(dict.fromkeys(sam_metrics + solar_metrics))
-        weekly_df = load_weekly_data(base_input_dir, scenario, housing_type, county_slug, all_metrics)
+        weekly_df = load_sam_weekly_data(base_input_dir, scenario, housing_type, county_slug, all_metrics)
         if weekly_df is None:
             return ""
         fig, axes = plt.subplots(4, 1, figsize=(16, 20))
@@ -1432,7 +1172,7 @@ def create_weekly_chart_for_period(
         sam_metrics = ["Load Profile", "System to Load", "Battery to Load", "Grid to Load"]
         solar_metrics = ["System to Load", "System to Battery"]
         all_metrics = list(dict.fromkeys(sam_metrics + solar_metrics))
-        weekly_df = load_weekly_data(base_input_dir, scenario, housing_type, county_slug, all_metrics)
+        weekly_df = load_sam_weekly_data(base_input_dir, scenario, housing_type, county_slug, all_metrics)
         if weekly_df is None:
             return ""
         periods = {
