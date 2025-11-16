@@ -33,13 +33,9 @@ Files:
 from __future__ import annotations
 
 import os
-import csv
-from math import sqrt
 from typing import Dict, List, Optional, Tuple
-import contextlib
 
 import pandas as pd
-import subprocess
 
 from helpers.main_helpers import (
     get_counties,
@@ -47,14 +43,27 @@ from helpers.main_helpers import (
     log,
     format_load_profile,
     to_decimal_number,
-    norcal_counties,
-    central_counties,
-    socal_counties,
     slugify_county_name,
     git_short_sha,
 )
 from helpers import log_profiles
 from helpers.step9_plotting_helper import plot_first_weeks
+from step9_solar_storage_dispatch_core import (
+    PR_BASE,
+    NOCT_C,
+    GAMMA_PDC,
+    WEATHER_SHIFT_HOURS,
+    BATTERY_CAPACITY_KWH,
+    prepare_weather_and_load,
+    compute_system_capacity_kW,
+    pv_timeseries_ac_kwh,
+    battery_dispatch_dynamic,
+    temp_battery_capacity_kwh,
+)
+from step9_exports import (
+    compute_excess_solar_exports,
+    prepare_export_enabled_outputs,
+)
 
 
 # I/O constants
@@ -71,32 +80,7 @@ CAPITAL_COSTS_FOLDER_NAME = "CAPITAL_COSTS"
 GIT_SHORT_SHA = git_short_sha()
 
 
-# Battery + dispatch constants
-# Toggle: default PV→Battery surplus charging (applied when function arg is None)
-ENABLE_PV_SURPLUS_TO_BATTERY = True
-BATTERY_CAPACITY_KWH = 13.5
-ROUND_TRIP_EFFICIENCY = 0.96
-ETA_CHARGE = sqrt(ROUND_TRIP_EFFICIENCY)
-ETA_DISCHARGE = sqrt(ROUND_TRIP_EFFICIENCY)
-P_CHARGE_MAX_KW = 3.0
-P_DISCHARGE_MAX_KW = 3.0
-DISCHARGE_START_HOUR = 16
-DISCHARGE_END_HOUR = 21
-MIN_SOC_FRAC = 0.20
-MAX_SOC_FRAC = 0.90
-
-
-# PV model constants (simple PVWatts‑like), aligned to PySAM preset assumptions
-# Loss stack / PR approximates detailed model losses (soiling/mismatch/wiring/inverter/availability)
-PR_BASE = 0.80               # base performance ratio
-NOCT_C = 45.0                # Nominal Operating Cell Temp (°C)
-G_REF = 1000.0               # reference irradiance (W/m^2)
-G_NOCT = 800.0               # NOCT reference irradiance (W/m^2)
-GAMMA_PDC = -0.00337         # DC power temp coeff per °C (−0.337%/°C)
-
-# Weather alignment
-WEATHER_SHIFT_HOURS = 8      # Fixed shift (hours) to align weather to local load
-# 8 hours is the most correct timeshift for the custom solar / storage -- the sun really does go down before 4pm in January, and after 6pm in July. 
+## Constants moved to step9_solar_storage_dispatch_core
 
 # Sizing fraction relative to the "annual-energy match" anchor (1.0 = match).
 # Pipeline default: 0.5 (50% of annual-load match). Change this constant to adjust.
@@ -116,148 +100,7 @@ EAC_DYNAMIC_RESULTS_ROOT = os.path.join(
 )
 
 
-def _find_header_row(path: str) -> int:
-    """Find the zero‑based index of the header row containing 'Year' in NSRDB CSV."""
-    with open(path, 'r', newline='') as f:
-        for idx, line in enumerate(f):
-            if 'Year' in line and ',' in line:
-                return idx
-    return 0
-
-
-def _read_weather_csv(path: str) -> pd.DataFrame:
-    """Read NSRDB CSV (TMY) and return a DataFrame with at least GHI and ambient temp."""
-    header_idx = _find_header_row(path)
-    df = pd.read_csv(path, skiprows=header_idx)
-    # Normalize column names
-    cols = {c: c.strip().lower() for c in df.columns}
-    df.rename(columns=cols, inplace=True)
-
-    # Candidate columns
-    def get_col(*candidates: str) -> Optional[str]:
-        for c in candidates:
-            if c.lower() in df.columns:
-                return c.lower()
-        return None
-
-    ghi_col = get_col('ghi', 'global horizontal irradiance', 'gh')
-    temp_col = get_col('temp', 'temperature', 'tdry', 't_dry', 'ambient temperature', 'tamb')
-    if not ghi_col:
-        raise ValueError(f"Weather CSV missing GHI column: {path}")
-    if not temp_col:
-        # fallback: synthesize temp 20C if missing
-        df['__temp_fallback'] = 20.0
-        temp_col = '__temp_fallback'
-
-    # Ensure numeric and length
-    ghi = pd.to_numeric(df[ghi_col], errors='coerce').fillna(0.0)
-    tamb = pd.to_numeric(df[temp_col], errors='coerce').fillna(20.0)
-    out = pd.DataFrame({'ghi': ghi, 'tamb': tamb})
-
-    # Keep exactly 8760 values
-    if len(out) > 8760:
-        out = out.iloc[:8760].reset_index(drop=True)
-    elif len(out) < 8760:
-        # tile if an exact divisor; else pad with zeros
-        if 8760 % len(out) == 0 and len(out) > 0:
-            reps = 8760 // len(out)
-            out = pd.concat([out] * reps, ignore_index=True).iloc[:8760]
-        else:
-            pad = pd.DataFrame({'ghi': [0.0] * (8760 - len(out)), 'tamb': [20.0] * (8760 - len(out))})
-            out = pd.concat([out, pad], ignore_index=True)
-    return out
-
-
-def _apply_weather_shift(df: pd.DataFrame) -> pd.DataFrame:
-    """Rotate weather series by fixed WEATHER_SHIFT_HOURS constant."""
-    shift = WEATHER_SHIFT_HOURS
-    if shift % 8760 == 0:
-        return df
-    out = df.copy()
-    for col in out.columns:
-        vals = out[col].tolist()
-        # left‑rotation by shift
-        n = shift % len(vals)
-        out[col] = vals[n:] + vals[:n]
-    print(f"[Weather] Applied fixed shift={shift}h for weather (no tz override)")
-    return out
-
-
-def _aggregate_to_hourly(series: List[float], expected_length: int = 8760) -> List[float]:
-    n = len(series)
-    if n == expected_length:
-        return list(series)
-    if n % expected_length != 0 or n == 0:
-        return list(series[:expected_length]) + [0.0] * max(0, expected_length - n)
-    factor = n // expected_length
-    hourly = []
-    for i in range(expected_length):
-        s = i * factor
-        e = s + factor
-        hourly.append(float(pd.Series(series[s:e]).mean()))
-    return hourly
-
-
-def _prepare_weather_and_load(weather_file: str, load_file: str) -> Tuple[pd.DataFrame, List[float]]:
-    # Weather
-    w = _read_weather_csv(weather_file)
-    w = _apply_weather_shift(w)
-
-    # Load profile and align to Jan 1 00:00 if timestamp present
-    load_df = pd.read_csv(load_file)
-
-    def _roll_left(vals: List[float], n: int) -> List[float]:
-        if not vals:
-            return vals
-        n = n % len(vals)
-        return vals[n:] + vals[:n]
-
-    vals = load_df[TOTAL_LOAD_COLUMN_NAME].astype(float).tolist()
-    ts_col_candidates = ["timestamp", "Timestamp", "datetime", "date", "time"]
-    ts_col = next((c for c in ts_col_candidates if c in load_df.columns), None)
-    shifted = False
-    if ts_col is not None:
-        try:
-            ts = pd.to_datetime(load_df[ts_col], errors="coerce")
-            midnight_idx = ts[(ts.dt.month == 1) & (ts.dt.day == 1) & (ts.dt.hour == 0)].index
-            if len(midnight_idx) > 0:
-                i0 = int(midnight_idx[0])
-                if i0 != 0:
-                    vals = _roll_left(vals, i0)
-                    shifted = True
-                    log(load_timezone_shift_hours=i0, load_timezone_shift_method="timestamp_detected_midnight")
-        except Exception:
-            pass
-    if not shifted:
-        env_shift = os.getenv("LOAD_TZ_SHIFT_HOURS")
-        if env_shift:
-            try:
-                shift_h = int(env_shift)
-                if shift_h != 0:
-                    vals = _roll_left(vals, shift_h)
-                    log(load_timezone_shift_hours=shift_h, load_timezone_shift_method="env_LOAD_TZ_SHIFT_HOURS")
-            except Exception:
-                pass
-    if len(vals) != 8760:
-        vals = _aggregate_to_hourly(vals, 8760)
-
-    return w, vals
-
-
-@contextlib.contextmanager
-def _temp_battery_capacity_kwh(kwh: float):
-    """Temporarily override BATTERY_CAPACITY_KWH within this module.
-
-    This keeps the change scoped to a single county iteration without
-    refactoring dispatch signatures. Restores the previous value on exit.
-    """
-    global BATTERY_CAPACITY_KWH
-    prev = BATTERY_CAPACITY_KWH
-    try:
-        BATTERY_CAPACITY_KWH = float(kwh)
-        yield
-    finally:
-        BATTERY_CAPACITY_KWH = prev
+## Weather/load helpers moved to step9_solar_storage_dispatch_core
 
 
 def _find_eac_min_sizes(
@@ -312,111 +155,15 @@ def _find_eac_min_sizes(
     return (float(solar_kw), float(batt_kwh))
 
 
-def _compute_system_capacity_kW(weather_df: pd.DataFrame, load_profile: List[float]) -> float:
-    # Sizing mirrors earlier heuristic: annual irradiance → energy per m^2 → DC capacity
-    mean_ghi = float(weather_df['ghi'].mean())  # W/m²
-    daily_irr_kwh_per_m2 = mean_ghi * 24.0 / 1000.0
-    annual_irr_kwh_per_m2 = daily_irr_kwh_per_m2 * 365.0
-    # Align sizing with PySAM step (efficiency and PR)
-    pv_cell_eff = 0.206
-    system_pr = PR_BASE   # 0.80
-    annual_elec_per_m2 = annual_irr_kwh_per_m2 * pv_cell_eff * system_pr
-    # Power density at STC ≈ 0.193 kW/m² used in the SAM-based step
-    panel_power_density_kw_per_m2 = 0.193
-
-    annual_load_kwh = sum(load_profile)
-    required_panel_area_m2 = (annual_load_kwh / annual_elec_per_m2) if annual_elec_per_m2 > 0 else 0.0
-    required_dc_capacity_kw = required_panel_area_m2 * panel_power_density_kw_per_m2
-    log(debug_required_panel_area_m2=required_panel_area_m2, debug_required_dc_capacity_kW=required_dc_capacity_kw)
-    return required_dc_capacity_kw
+## PV sizing moved to step9_solar_storage_dispatch_core
 
 
-def _pv_timeseries_ac_kwh(weather_df: pd.DataFrame, system_capacity_kw: float) -> List[float]:
-    """Compute hourly PV AC energy using simple PVWatts‑style model."""
-    ghi = weather_df['ghi'].astype(float).values
-    tamb = weather_df['tamb'].astype(float).values
-    # Cell temperature estimate
-    tcell = tamb + ((NOCT_C - 20.0) / G_NOCT) * ghi
-    temp_derate = 1.0 + GAMMA_PDC * (tcell - 25.0)
-    temp_derate = pd.Series(temp_derate).clip(lower=0.0, upper=1.5).values
-    # AC power as hourly average power (kW), so equals kWh per hour
-    pac = system_capacity_kw * (ghi / G_REF) * PR_BASE * temp_derate
-    pac = pd.Series(pac).clip(lower=0.0).values
-    # Ensure 8760 values
-    if len(pac) != 8760:
-        pac = _aggregate_to_hourly(list(map(float, pac)), 8760)
-    else:
-        pac = list(map(float, pac))
-    return pac
+## PV model moved to step9_solar_storage_dispatch_core
 
 
 # --- Battery dispatch implementations ---
 
-def _battery_dispatch_dynamic(
-    load_kwh: List[float],
-    solar_kwh: List[float],
-) -> Tuple[
-    List[float], List[float], List[float], List[float], List[float], List[float], List[float]
-]:
-    """Dynamic PV-only dispatch:
-    - Charge from PV surplus only (no grid→battery), any hour.
-    - At 16:00, if PV < load, enter discharge mode and continue discharging up to residual
-      (respecting power/SOC limits) until min SOC or first hour PV ≥ load.
-    """
-    assert len(load_kwh) == 8760 and len(solar_kwh) == 8760
-    soc_kwh = BATTERY_CAPACITY_KWH * MIN_SOC_FRAC
-    min_soc_kwh = BATTERY_CAPACITY_KWH * MIN_SOC_FRAC
-    max_soc_kwh = BATTERY_CAPACITY_KWH * MAX_SOC_FRAC
-    grid_demand = [0.0] * 8760
-    batt_charge = [0.0] * 8760
-    batt_discharge = [0.0] * 8760
-    grid_to_load = [0.0] * 8760
-    grid_to_batt = [0.0] * 8760
-    pv_to_batt = [0.0] * 8760
-    soc_percent = [0.0] * 8760
-
-    pv_surplus_flag = ENABLE_PV_SURPLUS_TO_BATTERY
-    discharge_mode = False
-
-    for h in range(8760):
-        hod = h % 24
-        load_h = float(load_kwh[h])
-        pv_h = float(solar_kwh[h])
-        net_after_pv = max(load_h - pv_h, 0.0)
-        pv_surplus = max(pv_h - load_h, 0.0)
-
-        if (hod >= DISCHARGE_START_HOUR or discharge_mode) and net_after_pv > 0.0: # decide whether we should be in discharge mode this hour
-            discharge_mode = True
-        if pv_surplus > 0.0: # stop discharging once PV >= load (first hour surplus)
-            discharge_mode = False
-
-        if discharge_mode and net_after_pv > 0.0 and soc_kwh > min_soc_kwh:
-            desired = min(P_DISCHARGE_MAX_KW, net_after_pv)
-            available_discharge_energy = max(soc_kwh - min_soc_kwh, 0.0)
-            energy_from_batt = min(available_discharge_energy, desired / ETA_DISCHARGE)
-            delivered = energy_from_batt * ETA_DISCHARGE
-            if delivered > 0:
-                soc_kwh -= energy_from_batt
-                batt_discharge[h] = delivered
-                net_after_pv -= delivered
-
-        if pv_surplus_flag and pv_surplus > 0.0 and soc_kwh < max_soc_kwh:
-            remaining_input_headroom = max((max_soc_kwh - soc_kwh) / ETA_CHARGE, 0.0)
-            pv_input_energy = min(pv_surplus, P_CHARGE_MAX_KW, remaining_input_headroom)
-            if pv_input_energy > 0:
-                stored_pv = pv_input_energy * ETA_CHARGE
-                soc_kwh += stored_pv
-                batt_charge[h] += stored_pv
-                pv_to_batt[h] = pv_input_energy
-
-        grid_to_load[h] = max(net_after_pv, 0.0)
-        grid_demand[h] = grid_to_load[h]
-        soc_percent[h] = (soc_kwh / BATTERY_CAPACITY_KWH) * 100.0
-
-    return grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt, pv_to_batt, soc_percent
-
-
-# Only dynamic dispatch is supported.
+## Dynamic dispatch moved to step9_solar_storage_dispatch_core
 
 
 def _validate_lengths(*series_lists: List[List[float]]) -> None:
@@ -426,145 +173,7 @@ def _validate_lengths(*series_lists: List[List[float]]) -> None:
                 raise ValueError("All output series must be 8760 elements long.")
 
 
-def _ensure_length(values: Optional[List[float]], n: int = 8760, fill: float = 0.0) -> List[float]:
-    """Return a list of length n, padding with `fill` or truncating as needed.
-
-    Accepts None and returns an all-`fill` list.
-    """
-    if values is None:
-        return [fill] * n
-    vals = list(map(float, values))
-    if len(vals) >= n:
-        return vals[:n]
-    return vals + [fill] * (n - len(vals))
-
-
-def compute_excess_solar_exports(
-    pv_ac_kwh: Optional[List[float]],
-    system_to_load: Optional[List[float]],
-    system_to_battery: Optional[List[float]],
-) -> List[float]:
-    """Compute hourly excess solar that can be exported to the grid.
-
-    Formula: PV to Grid = max(0, PV AC − PV→Load − PV→Battery), applied per hour.
-    Accepts None inputs and returns an all-zero series in that case.
-    """
-    n = 8760
-    pv = _ensure_length(pv_ac_kwh, n, 0.0)
-    stl = _ensure_length(system_to_load, n, 0.0)
-    stb = _ensure_length(system_to_battery, n, 0.0)
-    return [max(0.0, float(p) - float(a) - float(b)) for p, a, b in zip(pv, stl, stb)]
-
-
-def prepare_export_enabled_outputs(
-    load_profile: Optional[List[float]] = None,
-    pv_ac_kwh: Optional[List[float]] = None,
-    system_to_load: Optional[List[float]] = None,
-    battery_to_load: Optional[List[float]] = None,
-    grid_to_load: Optional[List[float]] = None,
-    system_to_battery: Optional[List[float]] = None,
-    grid_to_battery: Optional[List[float]] = None,
-    battery_soc_percent: Optional[List[float]] = None,
-    battery_to_grid_kwh: Optional[List[float]] = None,
-    pv_to_grid_kwh: Optional[List[float]] = None,
-    # Additional optional channels/aliases for richer exports-only CSV
-    battery_charge_stored_kwh: Optional[List[float]] = None,
-    grid_demand_kwh: Optional[List[float]] = None,
-    pv_used_onsite_kwh: Optional[List[float]] = None,
-    start_timestamp: str = "2018-01-01",
-) -> pd.DataFrame:
-    """Build a DataFrame capturing all fields needed for export modeling.
-
-    This function is resilient: if any inputs are not yet computed upstream, it
-    fills them with zeros so the CSV schema remains stable. This allows us to
-    ship an "export-enabled" file without requiring dispatch changes first.
-
-    Columns provided:
-    - Load Profile
-    - System to Load (PV→Load)
-    - Solar to Load (kWh) [alias of System to Load]
-    - Battery to Load
-    - Grid to Load
-    - System to Battery (PV→Battery)
-    - Solar to Battery (kWh) [alias of System to Battery]
-    - Grid to Battery
-    - Battery SOC
-    - PV AC (kWh)
-    - PV to Grid (kWh)
-    - Solar to Grid (kWh) [alias of PV to Grid]
-    - Battery to Grid (kWh)  [defaults to 0 if not modeled]
-    - Exports to Grid (kWh)  [PV to Grid + Battery to Grid]
-    - System to Grid         [alias = PV to Grid, for continuity]
-    - PV Used Onsite (kWh)   [System to Load + System to Battery]
-    - Grid Demand (kWh)      [Grid to Load + Grid to Battery]
-    - Battery Charge Stored (kWh) [post-efficiency stored energy]
-    - Solar + Battery to Load
-    - Total Supply
-    - Difference (Load − Total Supply)
-    - Net Grid Import (kWh)  [Grid to Load + Grid to Battery − Exports]
-    """
-    n = 8760
-
-    load = _ensure_length(load_profile, n, 0.0)
-    pv = _ensure_length(pv_ac_kwh, n, 0.0)
-    stl = _ensure_length(system_to_load, n, None if (load_profile and pv_ac_kwh) else 0.0)
-    btl = _ensure_length(battery_to_load, n, 0.0)
-    gtl = _ensure_length(grid_to_load, n, 0.0)
-    stb = _ensure_length(system_to_battery, n, 0.0)
-    gtb = _ensure_length(grid_to_battery, n, 0.0)
-    soc = _ensure_length(battery_soc_percent, n, 0.0)
-    btg = _ensure_length(battery_to_grid_kwh, n, 0.0)
-
-    # If System to Load wasn't provided but both load and PV are, derive it.
-    if system_to_load is None and pv_ac_kwh is not None and load_profile is not None:
-        stl = [min(p, l) for p, l in zip(pv, load)]
-
-    # PV to grid: prefer provided override; otherwise derive from inputs
-    if pv_to_grid_kwh is not None:
-        pv_to_grid = _ensure_length(pv_to_grid_kwh, n, 0.0)
-    else:
-        pv_to_grid = [max(0.0, float(p) - float(a) - float(b)) for p, a, b in zip(pv, stl, stb)]
-    exports = [float(pg) + float(bg) for pg, bg in zip(pv_to_grid, btg)]
-    solar_plus_batt_to_load = [float(a) + float(b) for a, b in zip(stl, btl)]
-    total_supply = [float(a) + float(b) + float(c) for a, b, c in zip(stl, btl, gtl)]
-    diff = [float(l) - float(ts) for l, ts in zip(load, total_supply)]
-    net_grid_import = [float(gtl_h) + float(gtb_h) - float(exp_h) for gtl_h, gtb_h, exp_h in zip(gtl, gtb, exports)]
-
-    # Optional channels and convenient aliases
-    grid_demand = _ensure_length(grid_demand_kwh, n, None) if grid_demand_kwh is not None else [float(a) + float(b) for a, b in zip(gtl, gtb)]
-    pv_used_onsite = _ensure_length(pv_used_onsite_kwh, n, None) if pv_used_onsite_kwh is not None else [float(a) + float(b) for a, b in zip(stl, stb)]
-    batt_charge_stored = _ensure_length(battery_charge_stored_kwh, n, 0.0)
-
-    date_range = pd.date_range(start=start_timestamp, periods=n, freq="H")
-    df = pd.DataFrame(
-        {
-            "Load Profile": load,
-            "System to Load": stl,
-            "Solar to Load (kWh)": stl,
-            "Battery to Load": btl,
-            "Grid to Load": gtl,
-            "System to Battery": stb,
-            "Solar to Battery (kWh)": stb,
-            "Grid to Battery": gtb,
-            "Battery SOC": soc,
-            "PV AC (kWh)": pv,
-            "PV to Grid (kWh)": pv_to_grid,
-            "Solar to Grid (kWh)": pv_to_grid,
-            "Battery to Grid (kWh)": btg,
-            "Exports to Grid (kWh)": exports,
-            # Keep "System to Grid" for backward compatibility (alias PV to Grid)
-            "System to Grid": pv_to_grid,
-            "PV Used Onsite (kWh)": pv_used_onsite,
-            "Grid Demand (kWh)": grid_demand,
-            "Battery Charge Stored (kWh)": batt_charge_stored,
-            "Solar + Battery to Load": solar_plus_batt_to_load,
-            "Total Supply": total_supply,
-            "Difference": diff,
-            "Net Grid Import (kWh)": net_grid_import,
-        },
-        index=date_range,
-    )
-    return df
+# Export helpers now live in step9_exports
 
 
 def process(
@@ -598,9 +207,9 @@ def process(
                 continue
 
             # Weather + load
-            weather_df, load_profile = _prepare_weather_and_load(weather_file, load_file)
+            weather_df, load_profile = prepare_weather_and_load(weather_file, load_file, TOTAL_LOAD_COLUMN_NAME)
             # Decide sizing approach
-            base_capacity_kw = _compute_system_capacity_kW(weather_df, load_profile)
+            base_capacity_kw = compute_system_capacity_kW(weather_df, load_profile)
             system_capacity_kW = base_capacity_kw * PV_SIZE_FRACTION
             selected_batt_kwh: Optional[float] = None
             if USE_EAC_OPTIMAL_SIZING:
@@ -614,16 +223,16 @@ def process(
             log(at="step9_sizing", county=county, solar_capacity_kw_used=system_capacity_kW, battery_capacity_kwh_used=used_batt_kwh)
 
             # Compute PV hourly AC (kWh)
-            solar_gen = _pv_timeseries_ac_kwh(weather_df, system_capacity_kW)
+            solar_gen = pv_timeseries_ac_kwh(weather_df, system_capacity_kW)
 
             # Battery dispatch (dynamic only; PV-only charging, evening discharge)
             if selected_batt_kwh is not None:
-                with _temp_battery_capacity_kwh(selected_batt_kwh):
-                    grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt, pv_to_batt, soc_percent = _battery_dispatch_dynamic(
+                with temp_battery_capacity_kwh(selected_batt_kwh):
+                    grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt, pv_to_batt, soc_percent = battery_dispatch_dynamic(
                         load_profile, solar_gen
                     )
             else:
-                grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt, pv_to_batt, soc_percent = _battery_dispatch_dynamic(
+                grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt, pv_to_batt, soc_percent = battery_dispatch_dynamic(
                     load_profile, solar_gen
                 )
             _validate_lengths([solar_gen, grid_demand, batt_charge, batt_discharge, grid_to_load, grid_to_batt, pv_to_batt, soc_percent])
