@@ -224,54 +224,43 @@ def calculate_nem3_annual_costs(
     annual_costs[rate_plan_name] = annual_total
     return annual_costs
     
-def process_county_scenario(file_path, county, utility, selected_rate_plan, load_type):
+def process_county_scenario_from_series(file_path, county, utility, selected_rate_plan, column_name):
+    """Read a specific aggregator column and compute retail annual cost for the given plan."""
     file = os.path.join(file_path, county, f"{INPUT_FILE_NAME}_{county}.csv")
-
     if not os.path.exists(file):
         raise FileNotFoundError(f"File not found: {file}")
-
-    column_name = f"{load_type}{LOAD_FOR_RATE_ELECTRICITY_COLUMN}"
     df = pd.read_csv(file, usecols=[column_name])
-
-    load_profile = df[column_name].tolist()
-
+    load_profile = df[column_name].astype(float).tolist()
     return calculate_annual_costs_electricity(load_profile, utility, selected_rate_plan)
 
 
 def process_county_scenario_nem3(file_path, county, utility, selected_rate_plan):
-    """Compute default imports at retail, and solarstorage with NEM 3.0 credits."""
-    # Inputs file
+    """Compute NEM3 bill using Aggregator columns: nem3.imports.kwh and nem3.exports.kwh."""
     file = os.path.join(file_path, county, f"{INPUT_FILE_NAME}_{county}.csv")
     if not os.path.exists(file):
         raise FileNotFoundError(f"File not found: {file}")
 
-    # Columns
     df = pd.read_csv(file)
     ts = pd.to_datetime(df['timestamp']) if 'timestamp' in df.columns else pd.date_range('2018-01-01', periods=len(df), freq='H')
-    default_col = f"default{LOAD_FOR_RATE_ELECTRICITY_COLUMN}"
-    solar_col = f"solarstorage{LOAD_FOR_RATE_ELECTRICITY_COLUMN}"
-    export_col = "solarstorage.electricity.export.kwh"
 
-    # Default (retail-only) annual cost by plan (reuse existing per-hour retail calc)
-    annual_default = calculate_annual_costs_electricity(df[default_col].tolist(), utility, selected_rate_plan)
+    imports_col = "nem3.imports.kwh"
+    exports_col = "nem3.exports.kwh"
 
-    # Solar+storage with NEM3 (imports at retail + exports credited at ACC)
     opts = default_options_for_utility(utility)
-    # Load county-specific ACC export table from data/NEM3 only (explicit location).
     base_dir = os.path.join("data", "NEM3")
     export_table = get_export_rate_table_for_county(base_dir=base_dir, utility=utility, county_name_or_slug=county)
 
     annual_solar_nem3 = calculate_nem3_annual_costs(
         ts,
-        df[solar_col].tolist(),
-        (df[export_col].tolist() if export_col in df.columns else [0.0] * len(df)),
+        df[imports_col].astype(float).tolist(),
+        df[exports_col].astype(float).tolist(),
         utility,
         selected_rate_plan,
         options=opts,
         export_table=export_table,
     )
 
-    return annual_default, annual_solar_nem3
+    return annual_solar_nem3
 
 def build_results_df_with_variants(scenario: str, utility: str, *, retail_default: dict, retail_solar: dict, nem3_solar: dict | None = None) -> pd.DataFrame:
     """Return DataFrame with two rows (<scenario>, <scenario>.solarstorage) and columns per plan variant.
@@ -367,14 +356,16 @@ def process(base_input_dir, base_output_dir, scenario, housing_type, counties, u
         
         log_kwargs = {}
         for rate_plan in rate_plans:
-            # Always compute retail import-only costs for baseline and solarstorage
-            retail_default = process_county_scenario(scenario_path, county, utility, rate_plan, "default")
-            retail_solar = process_county_scenario(scenario_path, county, utility, rate_plan, "solarstorage")
+            # Retail import-only costs
+            retail_default = process_county_scenario_from_series(
+                scenario_path, county, utility, rate_plan, "default.electricity.kwh"
+            )
+            retail_solar = process_county_scenario_from_series(
+                scenario_path, county, utility, rate_plan, "retail.imports.kwh"
+            )
 
-            # Compute NEM3 overlay for solarstorage (exports credited at ACC, NBCs applied)
-            # Note: This is computed regardless of 'use_nem3' so that we always emit a variant for comparison.
-            # The 'use_nem3' flag remains for CLI compatibility and can be used for logging/UI.
-            _, solar_nem3 = process_county_scenario_nem3(scenario_path, county, utility, rate_plan)
+            # NEM3 overlay for solarstorage (exports credited at ACC, NBCs applied)
+            solar_nem3 = process_county_scenario_nem3(scenario_path, county, utility, rate_plan)
 
             annual_costs_results = build_results_df_with_variants(
                 scenario,
@@ -397,7 +388,7 @@ def process(base_input_dir, base_output_dir, scenario, housing_type, counties, u
         combined_df.to_csv(output_file_path, index_label="scenario")
 
         log(
-            at="step11_evaluate_electricity_rates",
+            at="step12_evaluate_electricity_rates",
             county=county,
             utility=utility,
             **log_kwargs,
