@@ -223,8 +223,13 @@ OUTPUT_COLUMNS = [
     "timestamp",
     "default.electricity.kwh",
     "default.gas.therms",
-    "solarstorage.electricity.kwh",
-    "solarstorage.electricity.export.kwh",
+    # Retail (no feedback to grid)
+    "retail.imports.kwh",
+    "retail.exports.kwh",
+    # NEM3 (imports on plan, ACC credits for exports)
+    "nem3.imports.kwh",
+    "nem3.exports.kwh",
+    # Gas (unchanged by PV/storage)
     "solarstorage.gas.therms",
 ]
 
@@ -253,6 +258,37 @@ def read_load_profile(file_path, column_name):
 
 ## Optional-profile reading has been removed on purpose to ensure failures surface early.
 
+def _read_step9_imports(series_path: str) -> pd.Series:
+    """Read hourly imports from Step 9 base CSV. Imports = Grid to Load + (Grid to Battery if present)."""
+    df = pd.read_csv(series_path)
+    if "Grid to Load" not in df.columns:
+        raise RuntimeError(f"Column 'Grid to Load' not found in file: {series_path}")
+    imports = df["Grid to Load"].astype(float)
+    if "Grid to Battery" in df.columns:
+        imports = imports + df["Grid to Battery"].astype(float)
+    return imports
+
+
+def _read_step9_exports(base_path: str, exports_path: str) -> pd.Series:
+    """Read hourly exports, preferring the exports-only CSV; fall back to base PV to Grid.
+
+    Preferred: 'Exports to Grid (kWh)' from sam_optimized_load_profiles_with_exports_ file.
+    Fallback:  'PV to Grid (kWh)' from sam_optimized_load_profiles_ base file.
+    """
+    if os.path.exists(exports_path):
+        df_exp = pd.read_csv(exports_path)
+        if "Exports to Grid (kWh)" in df_exp.columns:
+            return df_exp["Exports to Grid (kWh)"].astype(float)
+        raise RuntimeError(f"Column 'Exports to Grid (kWh)' not found in file: {exports_path}")
+    # Fallback to base file
+    df_base = pd.read_csv(base_path)
+    if "PV to Grid (kWh)" not in df_base.columns:
+        raise RuntimeError(
+            "Missing exports. Provide either 'Exports to Grid (kWh)' in the exports CSV or 'PV to Grid (kWh)' in the base CSV."
+        )
+    return df_base["PV to Grid (kWh)"].astype(float)
+
+
 def prepare_for_rates_analysis(base_input_dir, base_output_dir, housing_type, scenario, county):
     directory = SCENARIO_DATA_MAP.get(scenario, {})
     county = slugify_county_name(county)
@@ -262,42 +298,51 @@ def prepare_for_rates_analysis(base_input_dir, base_output_dir, housing_type, sc
 
     electricity_default_file = get_file_path(path, county, directory["default"]["electricity"]["file_prefix"])
     gas_default_file = get_file_path(path, county, directory["default"]["gas"]["file_prefix"])
-    electricity_solar_storage_file = get_file_path(path, county, directory["solar_storage"]["electricity"]["file_prefix"])
+    # Step 9 base and exports files
+    step9_base_electric_file = get_file_path(path, county, directory["solar_storage"]["electricity"]["file_prefix"])  # sam_optimized_load_profiles_
+    step9_exports_electric_file = get_file_path(
+        path,
+        county,
+        directory["solar_storage"]["electricity"]["file_prefix"].replace("sam_optimized_load_profiles_", "sam_optimized_load_profiles_with_exports_")
+    )
     gas_solar_storage_file = get_file_path(path, county, directory["solar_storage"]["gas"]["file_prefix"])
 
     timestamp = read_load_profile(electricity_default_file, "timestamp")
-    electricity_default = read_load_profile(electricity_default_file, directory["default"]["electricity"]["column"])
-    electricity_solar_storage = read_load_profile(
-        electricity_solar_storage_file, directory["solar_storage"]["electricity"]["column"]
-    )
+    electricity_default = read_load_profile(
+        electricity_default_file, directory["default"]["electricity"]["column"]
+    ).astype(float)
+    # Imports for both Retail and NEM3 (identical imports)
+    retail_imports = _read_step9_imports(step9_base_electric_file)
+    nem3_imports = retail_imports.copy()
     gas_default_hourly = aggregate_to_hourly(gas_default_file, directory["default"]["gas"]["column"])
     gas_solar_storage_hourly = aggregate_to_hourly(gas_solar_storage_file, directory["solar_storage"]["gas"]["column"])
 
-    # NEM3 exports: strictly require the dedicated Step 9 column.
-    # If missing or unreadable, raise immediately to interrupt execution.
-    electricity_solar_storage_export = read_load_profile(
-        electricity_solar_storage_file, "PV to Grid (kWh)"
-    )
+    # NEM3 exports: prefer the exports-only CSV, fallback to base PV→Grid
+    nem3_exports = _read_step9_exports(step9_base_electric_file, step9_exports_electric_file)
+    # Retail exports are zero (no feedback to grid)
+    retail_exports = pd.Series([0.0] * len(nem3_exports))
 
-    combined_df = pd.DataFrame({
-        "timestamp": timestamp,
-        "default.electricity.kwh": electricity_default,
-        "default.gas.therms": gas_default_hourly,
-        # Imports (Grid→Load) for solar+storage
-        "solarstorage.electricity.kwh": electricity_solar_storage,
-        # Exports (PV→Grid [+ Battery→Grid if enabled]; currently PV→Grid only)
-        "solarstorage.electricity.export.kwh": electricity_solar_storage_export,
-        "solarstorage.gas.therms": gas_solar_storage_hourly,
-    }).dropna()
+    combined_df = pd.DataFrame(
+        {
+            "timestamp": timestamp,
+            "default.electricity.kwh": electricity_default,
+            "default.gas.therms": gas_default_hourly,
+            # Retail view (no feedback to grid)
+            "retail.imports.kwh": retail_imports,
+            "retail.exports.kwh": retail_exports,
+            # NEM3 view (imports − ACC credits)
+            "nem3.imports.kwh": nem3_imports,
+            "nem3.exports.kwh": nem3_exports,
+            # Gas (unchanged by PV/storage)
+            "solarstorage.gas.therms": gas_solar_storage_hourly,
+        }
+    ).dropna()
 
     output_file_path = os.path.join(base_output_dir, scenario, housing_type, county, f"{OUTPUT_FILE_NAME}_{county}.csv")
     os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
     combined_df.to_csv(output_file_path, index=False)
     
-    log(
-        at="step9_get_loads_for_rates",
-        saved_to=output_file_path,
-    )
+    log(at="step10_aggregator", saved_to=output_file_path)
 
 def process(base_input_dir, base_output_dir, scenario, housing_types, counties=None):
     for housing_type in housing_types:
