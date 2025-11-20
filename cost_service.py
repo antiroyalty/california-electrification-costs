@@ -1,8 +1,15 @@
+
 import sys
 import argparse
 import os
 
 from scenarios import SCENARIOS
+
+from helpers.main_helpers import (
+    norcal_counties,
+    socal_counties,
+    central_counties,
+)
 
 import step1_identify_suitable_buildings as IdentifySuitableBuildings
 import step2_pull_buildings as PullBuildings
@@ -12,13 +19,7 @@ import step5_convert_gas_appliances_to_electrical_appliances as ConvertGasToElec
 import step6_build_electric_vehicle_load_profiles as BuildElectricVehicleLoadProfiles
 import step7_combine_real_and_simulated_electricity_loads as CombineRealAndSimulatedProfiles
 import step8_get_weather_files as WeatherFiles
-
-# Historical step 9 implementations (toggle as needed):
-# import step9_run_sam_model_for_solar_storage as RunSamModelForSolarStorage  # Pvwatts + Battwatts
-# import step9_pvsamv1_battery as RunSamModelForSolarStorage                 # Pvsamv1 integrated battery
-# import step9_solar_storage_custom_dispatch as RunSamModelForSolarStorage   # Pvsamv1 PV + custom dispatch
-import step9_my_own_solar_storage as Step9MyOwnSolarStorage # DIY PV + custom dispatch
-
+import step9_my_own_solar_storage as Step9MyOwnSolarStorage
 import step10_get_loads_for_rates as GetLoadsForRates
 import step11_evaluate_gas_rates as EvaluateGasRates
 import step12_evaluate_electricity_rates as EvaluateElectricityRates
@@ -26,13 +27,6 @@ import step13_combine_total_annual_costs as CombineTotalAnnualCosts
 import step14_build_capital_costs_lifetimes_incentives as BuildCapitalCostsLifetimesIncentives
 import step15_payback_periods as PaybackPeriods
 import step16_display_key_metrics_maps as DisplayCaliforniaDiagnosticMaps
-
-from helpers.main_helpers import (
-    norcal_counties,
-    socal_counties,
-    central_counties,
-    git_short_sha,
-)
 import step18_cross_scenario_comparisons as Step18CrossScenarioComparisons
 import step19_compare_two_scenarios as Step19CompareTwoScenarios
 import step20_no_solar_storage_electrification as Step20NoSolarStorageElectrification
@@ -78,7 +72,6 @@ class CostService:
         return f"Dispatch: {mode}; Sizing: {sizing}{batt_str}{plan_str}; Billing variant: NEM3 for with-solar"
 
     def run(self):
-        # Core pipeline
         self.log_step(1)
         IdentifySuitableBuildings.process(self.scenario, self.housing_type, output_base_dir="data", target_counties=self.counties, force_recompute=False)
 
