@@ -1291,6 +1291,7 @@ def _dashboard_html(
     weekly_jan_b64: Optional[str],
     weekly_jul_b64: Optional[str],
     enduse_weekly_b64: Optional[str],
+    nem3_exports_b64: Optional[str] = None,
     step18_images: Optional[dict] = None,
     solar_size_html: Optional[str] = None,
     annual_load_html: Optional[str] = None,
@@ -1614,6 +1615,18 @@ def _dashboard_html(
         parts.append("<div class=\"muted\">No end‑use breakdown data available</div>")
     parts.append("</div>")
 
+    # Card 11: Exports to Grid (NEM3)
+    parts.append("<div class=\"card\">")
+    parts.append("<h2>Exports to Grid (NEM3)</h2>")
+    if nem3_exports_b64:
+        parts.append(
+            f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{nem3_exports_b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{nem3_exports_b64}\" alt=\"NEM3 exports\"/></a></div>"
+        )
+        parts.append("<div class=\"muted\">Top: daily exports; Bottom: monthly totals.</div>")
+    else:
+        parts.append("<div class=\"muted\">No exports data available</div>")
+    parts.append("</div>")
+
     # Step 18 cross-scenario comparison cards
     if step18_images:
         for title, b64 in step18_images.items():
@@ -1670,6 +1683,10 @@ def process(
             enduse_weekly_b64 = create_enduse_breakdown_weekly(
                 base_input_dir, scenario, housing_type, county_slug
             )
+            # NEM3 exports plot
+            nem3_exports_b64 = create_nem3_exports_plot(
+                base_input_dir, scenario, housing_type, county_slug
+            )
             # New metric cards
             solar_size_html = create_solar_size_card(
                 base_input_dir, scenario, housing_type, county_slug
@@ -1710,6 +1727,7 @@ def process(
                 weekly_jan_b64=weekly_jan_b64,
                 weekly_jul_b64=weekly_jul_b64,
                 enduse_weekly_b64=enduse_weekly_b64,
+                nem3_exports_b64=nem3_exports_b64,
                 step18_images=step18,
                 solar_size_html=solar_size_html,
                 annual_load_html=annual_load_html,
@@ -1807,3 +1825,110 @@ def _gather_step18_images(output_dir: str, sha: str) -> dict:
 
 if __name__ == "__main__":
     main()
+# ---------- NEM3 exports plot (new card) ----------
+
+def _load_exports_timeseries(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+) -> Optional[pd.DataFrame]:
+    """Load hourly exports to grid for NEM3 plotting.
+
+    Preference order:
+    1) Step 10 Aggregator: nem3.exports.kwh with timestamp
+    2) Step 9 exports CSV: Exports to Grid (kWh)
+    3) Step 9 base CSV: PV to Grid (kWh)
+    """
+    try:
+        # 1) Aggregator file with explicit nem3 exports
+        agg_path = os.path.join(
+            base_input_dir, scenario, housing_type, county_slug, f"loadprofiles_for_rates_{county_slug}.csv"
+        )
+        if os.path.exists(agg_path):
+            try:
+                df = pd.read_csv(agg_path)
+                ts = pd.to_datetime(df["timestamp"]) if "timestamp" in df.columns else None
+                if "nem3.exports.kwh" in df.columns:
+                    exp = pd.to_numeric(df["nem3.exports.kwh"], errors="coerce").fillna(0.0)
+                    if ts is None:
+                        ts = pd.date_range(start="2018-01-01", periods=len(exp), freq="H")
+                    return pd.DataFrame({"exports": exp.values}, index=ts)
+            except Exception:
+                pass
+        # 2) Step 9 exports-enabled CSV
+        s9_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+        s9_exp = os.path.join(s9_dir, f"sam_optimized_load_profiles_with_exports_{county_slug}.csv")
+        if os.path.exists(s9_exp):
+            try:
+                df = pd.read_csv(s9_exp)
+                col = "Exports to Grid (kWh)" if "Exports to Grid (kWh)" in df.columns else None
+                if col:
+                    exp = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+                    ts = pd.date_range(start="2018-01-01", periods=len(exp), freq="H")
+                    return pd.DataFrame({"exports": exp.values}, index=ts)
+            except Exception:
+                pass
+        # 3) Step 9 base CSV fallback (PV-only exports)
+        s9_base = os.path.join(s9_dir, f"sam_optimized_load_profiles_{county_slug}.csv")
+        if not os.path.exists(s9_base):
+            alt = os.path.join(s9_dir, f"sam_optimized_load_profiles_{scenario}_{county_slug}.csv")
+            s9_base = alt if os.path.exists(alt) else s9_base
+        if os.path.exists(s9_base):
+            try:
+                df = pd.read_csv(s9_base)
+                if "PV to Grid (kWh)" in df.columns:
+                    exp = pd.to_numeric(df["PV to Grid (kWh)"], errors="coerce").fillna(0.0)
+                    ts = pd.date_range(start="2018-01-01", periods=len(exp), freq="H")
+                    return pd.DataFrame({"exports": exp.values}, index=ts)
+            except Exception:
+                pass
+        return None
+    except Exception:
+        return None
+
+
+def create_nem3_exports_plot(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+) -> Optional[str]:
+    """Create a plot showing exports to grid (NEM3) as daily totals and monthly summary.
+
+    Returns base64-encoded PNG or None if data unavailable.
+    """
+    df = _load_exports_timeseries(base_input_dir, scenario, housing_type, county_slug)
+    if df is None or df.empty:
+        return None
+    try:
+        s = pd.to_numeric(df["exports"], errors="coerce").fillna(0.0)
+        # Prepare aggregations
+        daily = s.resample("D").sum()
+        monthly = s.resample("M").sum()
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(16, 9))
+        fig.suptitle(
+            f"Exports to Grid (NEM3) — {county_slug.replace('-', ' ').title()} County — {scenario.replace('_', ' ').title()}",
+            fontsize=16,
+            fontweight="bold",
+        )
+        # Daily line
+        ax1.plot(daily.index, daily.values, color="#1f77b4", linewidth=1.5)
+        ax1.set_ylabel("kWh/day")
+        ax1.set_title("Daily Exported Energy")
+        ax1.grid(True, alpha=0.3)
+        # Monthly bars
+        ax2.bar(monthly.index.strftime("%b"), monthly.values, color="#ff7f0e")
+        ax2.set_ylabel("kWh/month")
+        ax2.set_title("Monthly Exported Energy (Sum)")
+        ax2.grid(True, axis="y", alpha=0.3)
+        plt.tight_layout()
+        buf = io.BytesIO()
+        plt.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+        buf.seek(0)
+        b64 = base64.b64encode(buf.getvalue()).decode()
+        plt.close()
+        return b64
+    except Exception as e:
+        print(f"Error creating NEM3 exports plot for {county_slug}: {e}")
+        return None
