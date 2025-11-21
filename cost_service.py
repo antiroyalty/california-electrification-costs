@@ -245,7 +245,7 @@ if __name__ == "__main__":
     cost_service = CostService(
         scenario,
         housing_type,
-        counties=all_counties,
+        counties=["Alameda County"],
         rate_plans=rate_plans,
         input_dir=input_dir,
         output_dir=output_dir,
