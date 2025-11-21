@@ -8,8 +8,27 @@ For each county and utility, enumerate import plans and solve a 2D continuous
 optimization problem over (solar_kw, battery_kwh). Use SciPy if available;
 otherwise fall back to a simple coordinate-descent with golden-section search.
 
-Outputs per county: data/loadprofiles/<scenario>/<housing_type>/<county>/
-  optimized_sizes_<county>.csv with best plan and per-plan results.
+Inputs
+- CLI args
+  - --base-input-dir: root for load/weather and outputs (default data/loadprofiles)
+  - --base-output-dir: kept for symmetry; writes occur alongside inputs
+  - --scenario: e.g., baseline
+  - --housing-type: e.g., single-family-detached
+  - --counties: list of names/slugs (optional; defaults to all counties in scenario path)
+  - Financial params (optional): --discount-rate, --pv-capex-per-kw, --batt-capex-per-kwh,
+    --pv-oam-per-kw, --batt-oam-per-kwh, --pv-incentive, --batt-incentive, --pv-life, --batt-life
+  - Bounds (optional): --pv-kw-max-multiplier (applied to PV-match size), --batt-kwh-max
+- Required per-county data on disk
+  - Weather: data/loadprofiles/<scenario>/<housing_type>/<county_slug>/weather_TMY_<county_slug>.csv
+  - Load:    data/loadprofiles/<scenario>/<housing_type>/<county_slug>/combined_profiles_<scenario>_<county_slug>.csv
+- Helpers (no user action): utility → plans, NEM3 ACC export rates, NEM3 options
+- Optional libraries: SciPy (if installed) for differential_evolution + Powell; falls back to pure-Python search otherwise.
+
+Outputs
+- Per-county CSV written to: data/loadprofiles/<scenario>/<housing_type>/<county_slug>/optimized_sizes_<county_slug>.csv
+  - Rows: one per eligible import plan
+  - Columns: plan, solar_kw, battery_kwh, eac_total, bill_nem3, capex_annual_pv, capex_annual_batt, best (bool)
+  - Programmatic return: process(...) returns list of written file paths
 """
 
 from __future__ import annotations
@@ -379,4 +398,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
