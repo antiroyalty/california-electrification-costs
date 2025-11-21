@@ -212,3 +212,43 @@ External libraries
 - Demand charges: if any plans include demand components, extend Step 12 to include demand windows in `_hourly_import_rate` and monthly max kW tracking.
 - Robustness: include soft penalties or clipping if dispatch results violate bounds; ensure all series are 8760 hourly points.
 
+## Inputs and Outputs (Step 9 Optimizer)
+
+Inputs
+- CLI arguments
+  - `--base-input-dir` (default `data/loadprofiles`)
+  - `--base-output-dir` (present for symmetry; writes occur next to inputs)
+  - `--scenario` (e.g., `baseline`)
+  - `--housing-type` (e.g., `single-family-detached`)
+  - `--counties` (optional list; defaults to all counties in scenario path)
+  - Financial parameters (optional; defaults provided)
+    - `--discount-rate`, `--pv-capex-per-kw`, `--batt-capex-per-kwh`
+    - `--pv-oam-per-kw`, `--batt-oam-per-kwh`
+    - `--pv-incentive`, `--batt-incentive`
+    - `--pv-life`, `--batt-life`
+  - Bounds
+    - `--pv-kw-max-multiplier` → PV upper bound = multiplier × PV-match size
+    - `--batt-kwh-max` → battery upper bound in kWh
+- Required data files
+  - Weather (per county): `data/loadprofiles/<scenario>/<housing_type>/<county_slug>/weather_TMY_<county_slug>.csv`
+  - Load (per county):    `data/loadprofiles/<scenario>/<housing_type>/<county_slug>/combined_profiles_<scenario>_<county_slug>.csv`
+- Internal helpers (no user action)
+  - Utility → import plans: `helpers/electricity_rate_helpers`
+  - NEM3 export rates: `helpers/nem3_export_rates` (ACC tables and `NEM3Options`)
+  - Utility lookup: `helpers.utility_helpers.get_utility_for_county`
+- Optional library
+  - SciPy (`scipy.optimize`) for global + local continuous optimization; code falls back to a pure-Python search if unavailable.
+
+Outputs
+- Per-county results CSV: `data/loadprofiles/<scenario>/<housing_type>/<county_slug>/optimized_sizes_<county_slug>.csv`
+  - One row per eligible import plan for the county’s utility.
+  - Columns:
+    - `plan`: plan name (e.g., `E-TOU-C`)
+    - `solar_kw`: optimal PV size (kW AC)
+    - `battery_kwh`: optimal battery usable energy (kWh)
+    - `eac_total`: minimized annualized total cost ($/year)
+    - `bill_nem3`: annual electric bill with NEM3 ($/year)
+    - `capex_annual_pv`: annualized PV cost ($/year)
+    - `capex_annual_batt`: annualized battery cost ($/year)
+    - `best`: boolean flag for the globally best plan/size
+- Programmatic return (from `process(...)`): list of written file paths
