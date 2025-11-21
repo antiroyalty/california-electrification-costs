@@ -162,9 +162,24 @@ def _try_load_from_ctcz_folder(base_dir: str, utility: str, county_slug: str) ->
     if not (ucol and ccol and zcol):
         return None
     subset = mdf[(mdf[ccol].map(lambda x: slugify_county_name(str(x))) == cslug) & (mdf[ucol].map(_norm_util) == util_norm)]
+    # If no direct match, prefer 'alameda' row (any utility), then any row for this utility, then any row at all
     if subset.empty:
-        return None
-    # For now, use first match (folder supports one entry today)
+        # 1) Alameda preferred default
+        alameda_rows = mdf[mdf[ccol].map(lambda x: slugify_county_name(str(x))) == 'alameda']
+        if not alameda_rows.empty:
+            subset = alameda_rows.iloc[[0]]
+        else:
+            # 2) Any row for same utility
+            util_rows = mdf[mdf[ucol].map(_norm_util) == util_norm]
+            if not util_rows.empty:
+                subset = util_rows.iloc[[0]]
+            else:
+                # 3) Any row at all
+                if not mdf.empty:
+                    subset = mdf.iloc[[0]]
+                else:
+                    return None
+    # Use first selected match
     zone = str(subset.iloc[0][zcol]).strip()
 
     # Locate a zone table CSV whose filename starts with the zone token (case-insensitive)
