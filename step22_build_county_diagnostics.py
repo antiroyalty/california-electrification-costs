@@ -51,6 +51,8 @@ from helpers.diagnostics_helpers import (
 
 
 import matplotlib.pyplot as plt
+from helpers.utility_helpers import get_utility_for_county
+from helpers.nem3_export_rates import get_export_rate_table_for_county
 
 
 # ---------- Solar + storage deployment figure (from Step 9 outputs) ----------
@@ -1338,6 +1340,79 @@ def _load_exports_timeseries(
         return None
 
 
+def compute_nem3_export_credits(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+) -> Optional[tuple[dict[int, float], float]]:
+    """Compute annual dollars earned from NEM3 exports: sum(export_kWh_hour * ACC_rate(month,hour)).
+
+    Reads:
+      - Step 10 Aggregator: loadprofiles_for_rates_{county}.csv with 'timestamp' and 'nem3.exports.kwh'
+      - Export ACC table: helpers.nem3_export_rates.get_export_rate_table_for_county(base_dir='data/NEM3', utility, county)
+    """
+    try:
+        df = _load_exports_timeseries(base_input_dir, scenario, housing_type, county_slug)
+        if df is None or df.empty:
+            return None
+        s = pd.to_numeric(df["exports"], errors="coerce").fillna(0.0)
+        if s.sum() <= 0:
+            return ({m: 0.0 for m in range(1, 13)}, 0.0)
+        util = get_utility_for_county(county_slug) or "PG&E"
+        table = get_export_rate_table_for_county(
+            base_dir=os.path.join("data", "NEM3"), utility=util, county_name_or_slug=county_slug
+        )
+        # Vectorized mapping month/hour -> rate
+        idx = s.index
+        months = idx.month.astype(int)
+        hours = idx.hour.astype(int)
+        # Build simple lookup lists (ensure 24-length rows)
+        lookup = {int(m): [float(x) for x in row] for m, row in table.items()}
+        rate_series = pd.Series(
+            [float(lookup.get(int(m), [0.0] * 24)[int(h)]) for m, h in zip(months, hours)],
+            index=s.index,
+        )
+        dollars = s * rate_series
+        monthly = dollars.groupby(dollars.index.month).sum().to_dict()
+        # make sure all 12 months are present
+        for m in range(1, 13):
+            monthly.setdefault(m, 0.0)
+        total = float(dollars.sum())
+        return (monthly, total)
+    except Exception as e:
+        print(f"Error computing NEM3 export credits for {county_slug}: {e}")
+        return None
+
+
+def create_nem3_export_credits_card(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+) -> str:
+    try:
+        res = compute_nem3_export_credits(base_input_dir, scenario, housing_type, county_slug)
+        if res is None:
+            return "<div class='metric-value'>N/A<br><small>No exports or rates</small></div>"
+        monthly, annual = res
+        # Build a compact monthly table with cents
+        months = [
+            (1, "Jan"), (2, "Feb"), (3, "Mar"), (4, "Apr"), (5, "May"), (6, "Jun"),
+            (7, "Jul"), (8, "Aug"), (9, "Sep"), (10, "Oct"), (11, "Nov"), (12, "Dec"),
+        ]
+        parts = []
+        parts.append(f"<div class='metric-value'>${annual:,.2f}<br><small>Exports × ACC (annual)</small></div>")
+        parts.append("<table class=\"kmtbl\" style=\"margin-top:8px;\"><thead><tr><th>Month</th><th>Credits</th></tr></thead><tbody>")
+        for m, label in months:
+            val = float(monthly.get(m, 0.0))
+            parts.append(f"<tr><td>{label}</td><td class=\"money\">${val:,.2f}</td></tr>")
+        parts.append(f"<tr><td style=\"font-weight:600;\">Total</td><td class=\"money\" style=\"font-weight:600;\">${annual:,.2f}</td></tr>")
+        parts.append("</tbody></table>")
+        return "".join(parts)
+    except Exception:
+        return "<div class='metric-value'>N/A<br><small>Error computing credits</small></div>"
+
 def create_nem3_exports_plot(
     base_input_dir: str,
     scenario: str,
@@ -1444,6 +1519,7 @@ def _dashboard_html(
     flows_with: Optional[dict] = None,
     cost_breakdowns: Optional[dict] = None,
     assets_info: Optional[dict] = None,
+    nem3_export_credits_html: Optional[str] = None,
 ) -> str:
     scen_title = scenario.replace("_", " ").title()
     county_title = county_slug.replace("-", " ").title()
@@ -1582,6 +1658,12 @@ def _dashboard_html(
         parts.append(grid_supply_html or "<div class=\"metric-value\">N/A<br><small>No data</small></div>")
         parts.append("</div>")
         parts.append("</div>")
+    parts.append("</div>")
+
+    # Card 3a: NEM3 Export Credits (Annual)
+    parts.append("<div class=\"card\">")
+    parts.append("<h2>NEM3 Export Credits (Annual)</h2>")
+    parts.append(nem3_export_credits_html or "<div class=\"metric-value\">N/A<br><small>No data</small></div>")
     parts.append("</div>")
 
     # Card 3: Energy Flows — With vs Without Solar+Storage
@@ -1826,6 +1908,7 @@ def process(
     Build county dashboards. Returns list of written HTML file paths.
     """
     written: List[str] = []
+    county_written: List[Tuple[str, str]] = []  # (county_slug, html_path)
     sha = git_short_sha()
     # Normalize input counties to slugs
     county_slugs = [slugify_county_name(c) for c in counties]
@@ -1867,6 +1950,9 @@ def process(
                 base_input_dir, scenario, housing_type, county_slug
             )
             grid_supply_html = create_grid_supply_card(
+                base_input_dir, scenario, housing_type, county_slug
+            )
+            nem3_export_credits_html = create_nem3_export_credits_card(
                 base_input_dir, scenario, housing_type, county_slug
             )
             # With vs Without key metrics
@@ -1911,6 +1997,7 @@ def process(
                 flows_with=flows_with,
                 cost_breakdowns=cost_breakdowns,
                 assets_info=assets_info,
+                nem3_export_credits_html=nem3_export_credits_html,
             )
             out_path = os.path.join(
                 output_dir,
@@ -1920,12 +2007,73 @@ def process(
             )
             _write_dashboard(out_path, html)
             written.append(out_path)
+            county_written.append((county_slug, out_path))
             try:
                 print(f"County diagnostics written: {os.path.abspath(out_path)}")
             except Exception:
                 pass
         except Exception as e:
             print(f"Error building diagnostics for {county_slug}: {e}")
+
+    # Also create a scenario-level dashboard (single file) listing all county pages
+    try:
+        scen_index_dir = os.path.join(output_dir, "county_diagnostics")
+        os.makedirs(scen_index_dir, exist_ok=True)
+        scen_index_path = os.path.join(scen_index_dir, f"{scenario}_diagnostics_g{sha}.html")
+        parts: List[str] = []
+        scen_title = scenario.replace("_", " ").title()
+        parts.append(
+            f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset=\"utf-8\" />
+                <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+                <title>County Diagnostics — {scen_title} — {housing_type}</title>
+                <style>
+                    body {{ font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f7f7f7; }}
+                    .header {{ background: white; padding: 16px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.08); margin-bottom: 18px; }}
+                    .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }}
+                    .card {{ background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.08); padding: 12px; }}
+                    .muted {{ color: #666; font-size: 12px; }}
+                    a.btn {{ display: inline-block; padding: 10px 12px; background: #2c5aa0; color: white; text-decoration: none; border-radius: 6px; }}
+                    a.btn:hover {{ background: #234a85; }}
+                    ul {{ list-style: none; padding-left: 0; }}
+                    li {{ margin: 8px 0; }}
+                </style>
+            </head>
+            <body>
+                <div class=\"header\">
+                    <h1>County Diagnostics — {scen_title}</h1>
+                    <div class=\"muted\">Housing type: {housing_type}</div>
+                </div>
+                <div class=\"card\">
+                    <h2>Per‑County Dashboards</h2>
+                    <ul>
+            """
+        )
+        for slug, path in county_written:
+            # create relative path from scenario index to county file
+            rel = os.path.relpath(path, os.path.dirname(scen_index_path))
+            label = slug.replace("-", " ").title()
+            parts.append(f"<li><a class=\"btn\" href=\"{rel}\">{label}</a></li>")
+        parts.append("""
+                    </ul>
+                    <div class=\"muted\">This scenario file aggregates links to per‑county dashboards.</div>
+                </div>
+            </body>
+            </html>
+        """)
+        with open(scen_index_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(parts))
+        written.insert(0, scen_index_path)
+        try:
+            print(f"Scenario diagnostics written: {os.path.abspath(scen_index_path)}")
+        except Exception:
+            pass
+    except Exception as e:
+        print(f"Warning: could not write scenario index: {e}")
+
     return written
 
 
