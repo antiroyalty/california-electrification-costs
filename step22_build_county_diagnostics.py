@@ -52,7 +52,24 @@ from helpers.diagnostics_helpers import (
 
 import matplotlib.pyplot as plt
 from helpers.utility_helpers import get_utility_for_county
-from helpers.nem3_export_rates import get_export_rate_table_for_county
+from helpers.nem3_export_rates import (
+    get_export_rate_table_for_county,
+    get_export_rate_table_for_zone,
+    default_options_for_utility,
+)
+from helpers.electricity_rate_helpers import (
+    PGE_RATE_PLANS,
+    SCE_RATE_PLANS,
+    SDGE_RATE_PLANS,
+)
+from step12_evaluate_electricity_rates import calculate_nem3_annual_costs
+
+# Rate plans by utility (plan name -> structure)
+RATE_PLANS = {
+    "PG&E": PGE_RATE_PLANS,
+    "SCE": SCE_RATE_PLANS,
+    "SDG&E": SDGE_RATE_PLANS,
+}
 
 
 # ---------- Solar + storage deployment figure (from Step 9 outputs) ----------
@@ -1413,6 +1430,131 @@ def create_nem3_export_credits_card(
     except Exception:
         return "<div class='metric-value'>N/A<br><small>Error computing credits</small></div>"
 
+
+# ---------- NEM3 by climate zone (holding load constant) ----------
+
+def _load_import_export_timeseries(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+) -> Optional[tuple[pd.DatetimeIndex, pd.Series, pd.Series]]:
+    """Load hourly imports/exports for NEM3 billing from Step 10 Aggregator.
+
+    Returns (timestamps, imports_kwh, exports_kwh) or None if unavailable.
+    """
+    try:
+        agg_path = os.path.join(
+            base_input_dir, scenario, housing_type, county_slug, f"loadprofiles_for_rates_{county_slug}.csv"
+        )
+        if not os.path.exists(agg_path):
+            return None
+        df = pd.read_csv(agg_path)
+        if not {"nem3.imports.kwh", "nem3.exports.kwh"}.issubset(set(df.columns)):
+            return None
+        ts = pd.to_datetime(df["timestamp"]) if "timestamp" in df.columns else pd.date_range(
+            start="2018-01-01", periods=len(df), freq="H"
+        )
+        imp = pd.to_numeric(df["nem3.imports.kwh"], errors="coerce").fillna(0.0)
+        exp = pd.to_numeric(df["nem3.exports.kwh"], errors="coerce").fillna(0.0)
+        return (ts, imp, exp)
+    except Exception:
+        return None
+
+
+def _candidate_zones_for_county(
+    base_dir_nem3: str,
+    utility: str,
+    county_slug: str,
+) -> List[str]:
+    """Get candidate climate zones for a county.
+
+    Preference:
+      1) data/NEM3/county_to_climate_zone.csv for (utility, county_slug)
+      2) ZIP→CZ join via CPUC Excel + CA ZIP PDF
+    """
+    # Only use the curated mapping CSV
+    try:
+        map_csv = os.path.join(base_dir_nem3, "county_to_climate_zone.csv")
+        if not os.path.exists(map_csv):
+            return []
+        m = pd.read_csv(map_csv)
+        cols = {c.strip().lower(): c for c in m.columns}
+        ucol = cols.get("utility") or cols.get("iou")
+        ccol = cols.get("county_slug") or cols.get("county")
+        zcol = cols.get("climate_zone") or cols.get("zone")
+        if not (ucol and ccol and zcol):
+            return []
+        sub = m[(m[ccol].map(slugify_county_name) == county_slug) & (m[ucol].map(lambda x: str(x).strip().upper()) == utility)]
+        zones = sorted({str(z).strip() for z in sub[zcol].dropna().unique().tolist()})
+        return zones
+    except Exception:
+        return []
+
+
+def create_nem3_by_zone_card(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+) -> str:
+    """Compute NEM3 annual bills by climate zone for the county, holding load constant.
+
+    - Imports/exports: from Step 10 Aggregator (nem3.imports.kwh / nem3.exports.kwh)
+    - Utility: inferred from county
+    - Zones: derived from ZIP→CZ mapping for this county; zones without a CSV for this utility are skipped.
+    - Plan selection: min (best) across residential plans for the utility per zone.
+    """
+    try:
+        util = get_utility_for_county(county_slug)
+        if not util:
+            return "<div class='muted'>No utility for county</div>"
+        base_dir_nem3 = os.path.join("data", "NEM3")
+        ts_imp_exp = _load_import_export_timeseries(base_input_dir, scenario, housing_type, county_slug)
+        if ts_imp_exp is None:
+            return "<div class='muted'>No imports/exports series</div>"
+        ts, imp, exp = ts_imp_exp
+        zones = _candidate_zones_for_county(base_dir_nem3, util, county_slug)
+        if not zones:
+            return "<div class='muted'>No candidate climate zones</div>"
+        plans = list(RATE_PLANS.get(util, {}).keys())
+        if not plans:
+            return "<div class='muted'>No rate plans configured</div>"
+        opts = default_options_for_utility(util)
+
+        rows: List[tuple[str, str, float]] = []  # (zone, best_plan, best_cost)
+        for zone in zones:
+            # Load export-rate table for this zone; skip if CSV missing for utility
+            try:
+                table = get_export_rate_table_for_zone(base_dir_nem3, util, zone)
+            except FileNotFoundError:
+                continue
+            best_plan = None
+            best_cost = None
+            for plan in plans:
+                result = calculate_nem3_annual_costs(
+                    ts, imp.tolist(), exp.tolist(), util, plan, options=opts, export_table=table
+                )
+                cost = float(result.get(plan, 0.0))
+                if best_cost is None or cost < best_cost:
+                    best_cost = cost
+                    best_plan = plan
+            if best_plan is not None:
+                rows.append((zone, best_plan, float(best_cost)))
+
+        if not rows:
+            return "<div class='muted'>No zones available for utility</div>"
+
+        rows.sort(key=lambda x: x[2])
+        parts = []
+        parts.append("<table class=\"kmtbl\"><thead><tr><th>Climate Zone</th><th>Best Plan</th><th>Annual Bill (NEM3)</th></tr></thead><tbody>")
+        for zone, plan, cost in rows:
+            parts.append(f"<tr><td>{zone}</td><td>{plan}</td><td class=\"money\">${cost:,.2f}</td></tr>")
+        parts.append("</tbody></table>")
+        return "".join(parts)
+    except Exception as e:
+        return f"<div class='muted'>Error computing NEM3 by zone: {e}</div>"
+
 def create_nem3_exports_plot(
     base_input_dir: str,
     scenario: str,
@@ -1520,6 +1662,7 @@ def _dashboard_html(
     cost_breakdowns: Optional[dict] = None,
     assets_info: Optional[dict] = None,
     nem3_export_credits_html: Optional[str] = None,
+    nem3_by_zone_html: Optional[str] = None,
 ) -> str:
     scen_title = scenario.replace("_", " ").title()
     county_title = county_slug.replace("-", " ").title()
@@ -1664,6 +1807,13 @@ def _dashboard_html(
     parts.append("<div class=\"card\">")
     parts.append("<h2>NEM3 Export Credits (Annual)</h2>")
     parts.append(nem3_export_credits_html or "<div class=\"metric-value\">N/A<br><small>No data</small></div>")
+    parts.append("</div>")
+
+    # Card 3b: NEM3 Annual Bill by Climate Zone (holding load constant)
+    parts.append("<div class=\"card\">")
+    parts.append("<h2>NEM3 Annual Bill by Climate Zone</h2>")
+    parts.append(nem3_by_zone_html or "<div class=\"metric-value\">N/A<br><small>No data</small></div>")
+    parts.append("<div class=\"muted\" style=\"margin-top:6px;\">Uses the same imports/exports series; compares ACC by climate zone for this county.</div>")
     parts.append("</div>")
 
     # Card 3: Energy Flows — With vs Without Solar+Storage
@@ -1955,6 +2105,9 @@ def process(
             nem3_export_credits_html = create_nem3_export_credits_card(
                 base_input_dir, scenario, housing_type, county_slug
             )
+            nem3_by_zone_html = create_nem3_by_zone_card(
+                base_input_dir, scenario, housing_type, county_slug
+            )
             # With vs Without key metrics
             key_metrics = compute_key_metrics(
                 base_input_dir, scenario, housing_type, county_slug
@@ -1998,6 +2151,7 @@ def process(
                 cost_breakdowns=cost_breakdowns,
                 assets_info=assets_info,
                 nem3_export_credits_html=nem3_export_credits_html,
+                nem3_by_zone_html=nem3_by_zone_html,
             )
             out_path = os.path.join(
                 output_dir,
