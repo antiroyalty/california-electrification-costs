@@ -427,49 +427,26 @@ def get_export_rate_table_for_county(base_dir: str, utility: str, county_name_or
     mapping = _load_county_to_zone_mapping(base_dir)
     rows = mapping.get((util, cslug))
 
-    # 1) Mapped zones (possibly multiple with weights)
-    if rows:
-        weighted: List[Tuple[Dict[int, List[float]], float]] = []
-        for zone, weight, sheet_name in rows:
-            # Prefer CSVs in export_rates/ if present; fallback to Excel sheets
-            table = _load_export_rates_from_csv(base_dir, utility, zone)
-            if table is None:
-                table = _load_export_rates_from_excel(base_dir, utility, zone, sheet_name=sheet_name)
-            if table is not None:
-                weighted.append((table, weight))
-        if weighted:
-            return _blend_tables(weighted)
-        # Fall through if nothing parsed
-
-    # 2) Fallbacks: any CSV for this utility, else any Excel sheet
-    # Try any CSV that matches this utility
-    csv_any = None
-    export_dir = os.path.join(base_dir, "export_rates")
-    util_tag = _norm_util_for_csv_tag(utility)
-    if util_tag and os.path.isdir(export_dir):
-        try:
-            # Pick the first CSV for this utility (alphabetical order)
-            candidates = sorted(
-                f for f in os.listdir(export_dir) if f.endswith(f"_{util_tag}.csv")
-            )
-            if candidates:
-                csv_any = _load_export_rates_from_csv(base_dir, utility, candidates[0].split("_")[0])
-        except Exception:
-            pass
-    table = csv_any if csv_any is not None else _load_export_rates_from_excel(base_dir, utility, None)
-    if table is None:
-        print(
-            f"[NEM3] Missing export rate table for utility={util}, county={cslug}. "
-            f"Place ACC 12x24 Excel under {base_dir} and add mapping in county_to_climate_zone.csv."
-        )
-        return _zeros_table()
-    # Warn if mapping missing
+    # 1) Mapped zones are required. No Excel fallback; require CSVs.
     if not rows:
-        print(
-            f"[NEM3] Warning: No county→climate_zone mapping for utility={util}, county={cslug}. "
-            f"Using fallback sheet from Excel. Add a row to {os.path.join(base_dir, 'county_to_climate_zone.csv')}"
+        raise ValueError(
+            f"[NEM3] No county→climate_zone mapping found for utility={util}, county={cslug} in "
+            f"{os.path.join(base_dir, 'county_to_climate_zone.csv')}"
         )
-    return table
+
+    weighted: List[Tuple[Dict[int, List[float]], float]] = []
+    for zone, weight, _sheet_name in rows:
+        table = _load_export_rates_from_csv(base_dir, utility, zone)
+        if table is None:
+            util_tag = _norm_util_for_csv_tag(utility) or utility
+            export_dir = os.path.join(base_dir, 'export_rates')
+            raise FileNotFoundError(
+                f"[NEM3] Missing export rates CSV for {utility} zone={zone}. "
+                f"Expected file like '{zone}_{util_tag}.csv' under {export_dir}."
+            )
+        weighted.append((table, weight))
+
+    return _blend_tables(weighted)
 
 
 @dataclass
