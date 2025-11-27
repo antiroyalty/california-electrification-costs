@@ -126,6 +126,81 @@ def _norm_util(s: str) -> str:
     return (s or "").upper().replace("&", "").replace(".", "").replace(" ", "")
 
 
+def _norm_util_for_csv_tag(utility: str) -> Optional[str]:
+    """Return canonical utility tag as used in export_rates CSV filenames.
+
+    - PG&E -> "PG&E"
+    - SCE  -> "SCE"
+    - SDG&E/SDGE -> "SDGE"
+    """
+    u = _norm_util(utility)
+    if u.startswith("PGE"):
+        return "PG&E"
+    if u.startswith("SCE"):
+        return "SCE"
+    if u.startswith("SDGE") or u.startswith("SDG"):
+        return "SDGE"
+    return None
+
+
+def _load_export_rates_from_csv(
+    base_dir: str,
+    utility: str,
+    climate_zone: Optional[str],
+) -> Optional[Dict[int, List[float]]]:
+    """Load a 12×24 export table from CSVs in base_dir/export_rates.
+
+    Expected filenames: "{zone}_{UTIL}.csv", e.g., "CZ9_SCE.csv", "CZ3A_PG&E.csv", "CZ10_SDGE.csv".
+    Performs a prefix match for cases like PG&E where mapping may specify "CZ3"
+    but files are split into "CZ3A" / "CZ3B" — in such cases the lexicographically
+    first match will be selected (typically "CZ3A").
+    """
+    if not climate_zone:
+        return None
+    export_dir = os.path.join(base_dir, "export_rates")
+    if not os.path.isdir(export_dir):
+        return None
+    util_tag = _norm_util_for_csv_tag(utility)
+    if not util_tag:
+        return None
+
+    zone = str(climate_zone).strip()
+    # 1) Exact match first
+    exact = os.path.join(export_dir, f"{zone}_{util_tag}.csv")
+    candidate_path = exact if os.path.exists(exact) else None
+    # 2) Fallback: prefix match (e.g., CZ3 -> CZ3A)
+    if candidate_path is None:
+        lower_zone = zone.lower()
+        suffix = f"_{util_tag}.csv".lower()
+        try:
+            matches = [
+                os.path.join(export_dir, f)
+                for f in os.listdir(export_dir)
+                if f.lower().startswith(lower_zone) and f.lower().endswith(suffix)
+            ]
+        except Exception:
+            matches = []
+        if matches:
+            candidate_path = sorted(matches)[0]
+
+    if not candidate_path:
+        return None
+
+    try:
+        df = pd.read_csv(candidate_path)
+        # Keep at most the first 25 columns (month + 24 hours)
+        if df.shape[1] > 25:
+            df = df.iloc[:, :25]
+        # Rename first column to a month-like token for the parser to drop
+        first_col = df.columns[0]
+        if str(first_col).strip().lower() not in ("month", "mon", "month/hour", "month_hour"):
+            df = df.rename(columns={first_col: "month"})
+        table = _parse_12x24_table(df)
+        return table
+    except Exception:
+        return None
+
+
 def _try_load_from_ctcz_folder(base_dir: str, utility: str, county_slug: str) -> Optional[Dict[int, List[float]]]:
     """Prefer a curated county→zone folder if present: base_dir/county_to_climate_zone.
 
@@ -356,15 +431,32 @@ def get_export_rate_table_for_county(base_dir: str, utility: str, county_name_or
     if rows:
         weighted: List[Tuple[Dict[int, List[float]], float]] = []
         for zone, weight, sheet_name in rows:
-            table = _load_export_rates_from_excel(base_dir, utility, zone, sheet_name=sheet_name)
+            # Prefer CSVs in export_rates/ if present; fallback to Excel sheets
+            table = _load_export_rates_from_csv(base_dir, utility, zone)
+            if table is None:
+                table = _load_export_rates_from_excel(base_dir, utility, zone, sheet_name=sheet_name)
             if table is not None:
                 weighted.append((table, weight))
         if weighted:
             return _blend_tables(weighted)
         # Fall through if nothing parsed
 
-    # 2) Fallback: use IOU Excel first available sheet
-    table = _load_export_rates_from_excel(base_dir, utility, None)
+    # 2) Fallbacks: any CSV for this utility, else any Excel sheet
+    # Try any CSV that matches this utility
+    csv_any = None
+    export_dir = os.path.join(base_dir, "export_rates")
+    util_tag = _norm_util_for_csv_tag(utility)
+    if util_tag and os.path.isdir(export_dir):
+        try:
+            # Pick the first CSV for this utility (alphabetical order)
+            candidates = sorted(
+                f for f in os.listdir(export_dir) if f.endswith(f"_{util_tag}.csv")
+            )
+            if candidates:
+                csv_any = _load_export_rates_from_csv(base_dir, utility, candidates[0].split("_")[0])
+        except Exception:
+            pass
+    table = csv_any if csv_any is not None else _load_export_rates_from_excel(base_dir, utility, None)
     if table is None:
         print(
             f"[NEM3] Missing export rate table for utility={util}, county={cslug}. "
