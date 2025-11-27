@@ -349,6 +349,25 @@ def _load_export_rates_from_excel(
     return None
 
 
+def get_export_rate_table_for_zone(base_dir: str, utility: str, climate_zone: str) -> Dict[int, List[float]]:
+    """Public helper: load a 12×24 export table for a specific utility and climate zone from CSVs.
+
+    Looks under `{base_dir}/export_rates` for a file named `{climate_zone}_{UTIL}.csv`.
+    For PG&E where mapping may specify `CZ3`, a prefix match will select `CZ3A` or `CZ3B` (first alphabetical).
+
+    Raises FileNotFoundError if no matching CSV is found.
+    """
+    table = _load_export_rates_from_csv(base_dir, utility, climate_zone)
+    if table is None:
+        util_tag = _norm_util_for_csv_tag(utility) or utility
+        export_dir = os.path.join(base_dir, 'export_rates')
+        raise FileNotFoundError(
+            f"[NEM3] Missing export rates CSV for {utility} zone={climate_zone}. "
+            f"Expected file like '{climate_zone}_{util_tag}.csv' under {export_dir}."
+        )
+    return table
+
+
 def _blend_tables(weighted_tables: Iterable[Tuple[Dict[int, List[float]], float]]) -> Dict[int, List[float]]:
     """Blend multiple 12×24 tables with weights (auto-normalized)."""
     # Normalize weights
