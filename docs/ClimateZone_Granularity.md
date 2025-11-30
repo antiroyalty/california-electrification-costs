@@ -29,9 +29,17 @@ TODO (tracked in code and here): Publish `NEM3/county_to_climate_zone.csv` with 
 ## Implementation Plan (by step)
 
 ### Step 9 (PV + storage)
-- No change to dispatch. Already writes:
-  - `PV AC (kWh)` and `PV to Grid (kWh)` in `sam_optimized_load_profiles_*.csv` (used for exports).
-- Outputs remain per county.
+- Inputs: per‑county weather CSV at `data/loadprofiles/<scenario>/<housing>/<county>/weather_TMY_<county>.csv` and the per‑county load profile.
+- Irradiance used: the Global Horizontal Irradiance (GHI) column from the weather CSV. No POA/tilt transposition is performed.
+- Timestamp alignment: weather is rotated by a fixed `WEATHER_SHIFT_HOURS = 8` to line up with local load timestamps.
+- PV model (simple PVWatts‑style approximation):
+  - Cell temperature: `Tcell ≈ Tamb + ((NOCT − 20) / 800) × GHI`.
+  - Temperature derate: `derate = 1 + γ_PDC × (Tcell − 25°C)`.
+  - Hourly AC energy: `AC_kWh[h] = system_capacity_kW × (GHI[h]/1000) × PR_base × derate[h]`.
+  - Values are clipped to ≥ 0; inverter clipping is not modeled.
+- Sizing: capacity is derived to approximately match annual load from annual GHI (via assumed panel efficiency and PR), then scaled by `PV_SIZE_FRACTION`.
+- Important: Step 9 does not choose a geographic point (e.g., county centroid) itself — it uses whatever weather CSV is provided upstream for the county. If you want centroid‑based or climate‑zone‑based weather, generate `weather_TMY_<county>.csv` accordingly (or add an optional override that maps a county to a zone‑canonical weather file).
+- Outputs (unchanged): writes `sam_optimized_load_profiles_*.csv` (including `PV AC (kWh)` and, in the exports variant, `Exports to Grid (kWh)`).
 
 ### Step 10 (Loads for rates)
 - Already writes per county `loadprofiles_for_rates_*.csv`, now including:
@@ -41,9 +49,7 @@ TODO (tracked in code and here): Publish `NEM3/county_to_climate_zone.csv` with 
 ### Step 12 (Electricity rates, NEM 3.0)
 - Loader uses `helpers/nem3_export_rates.get_export_rate_table_for_county(base_dir='NEM3', utility, county)` to:
   1) Read `NEM3/county_to_climate_zone.csv` to choose a `climate_zone` for (utility, county_slug).
-  2) Open the IOU Excel file and select the sheet/table matching `climate_zone`.
-  3) Build a 12×24 month×hour $/kWh matrix for ACC export rates.
-- If mapping is missing, the loader prints a TODO and falls back to the first available sheet in the IOU Excel.
+  2) Load the 12×24 month×hour $/kWh matrix from `NEM3/export_rates/{climate_zone}_{UTIL}.csv` (CSV‑only; no Excel fallback).
 
 Where to introduce the mapping:
 - Introduce the county→climate_zone mapping right before Step 12 (i.e., once Steps 9–11 have produced the export/import series).
