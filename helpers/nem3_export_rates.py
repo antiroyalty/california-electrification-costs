@@ -38,27 +38,10 @@ def get_export_rate_table(utility: str) -> Dict[int, List[float]]:
     return _zeros_table()
 
 
-def _find_excel_for_utility(base_dir: str, utility: str) -> Optional[str]:
-    """Return a path to an Excel file for a given utility inside base_dir/NEM3.
-
-    Accepts flexible naming, e.g., 'PGE', 'PG&E', 'SCE', 'SDGE', 'SDG&E'.
-    """
-    u = (utility or "").lower().replace("&", "").replace(".", "").replace(" ", "")
-    candidates = []
-    try:
-        for root, _, files in os.walk(base_dir):
-            for f in files:
-                if f.lower().endswith((".xlsx", ".xls")):
-                    fnorm = f.lower().replace("&", "").replace(".", "").replace(" ", "")
-                    if any(tag in fnorm for tag in (u,)):
-                        candidates.append(os.path.join(root, f))
-    except Exception:
-        return None
-    # Prefer files closer to base_dir (shorter path)
-    return sorted(candidates, key=lambda p: (p.count(os.sep), len(p)))[0] if candidates else None
+# (Excel discovery removed — CSV-only rates are supported.)
 
 
-# Simple in-process cache to avoid re-reading Excel for each county
+# Simple in-process cache to avoid re-reading tables repeatedly
 _TABLE_CACHE: Dict[Tuple[str, str, str], Dict[int, List[float]]] = {}
 
 
@@ -201,152 +184,10 @@ def _load_export_rates_from_csv(
         return None
 
 
-def _try_load_from_ctcz_folder(base_dir: str, utility: str, county_slug: str) -> Optional[Dict[int, List[float]]]:
-    """Prefer a curated county→zone folder if present: base_dir/county_to_climate_zone.
-
-    Expects inside that folder:
-      - A mapping CSV (name contains 'county_to_climate_zone') with columns: utility, county_slug, climate_zone
-      - One or more zone tables like 'CZ9-Table 1.csv' with 12 rows (Jan..Dec) and 24 hour columns (1..24)
-    """
-    folder = os.path.join(base_dir, "county_to_climate_zone")
-    if not os.path.isdir(folder):
-        return None
-
-    # Find a mapping file
-    mapping_path = None
-    for f in os.listdir(folder):
-        if f.lower().endswith(".csv") and "county_to_climate_zone" in f.lower():
-            mapping_path = os.path.join(folder, f)
-            break
-    if not mapping_path:
-        return None
-
-    try:
-        mdf = pd.read_csv(mapping_path)
-    except Exception:
-        return None
-
-    util_norm = _norm_util(utility)
-    # Normalize county slug
-    cslug = slugify_county_name(county_slug)
-    # Find rows for this utility and county
-    cols = {c.strip().lower(): c for c in mdf.columns}
-    ucol = cols.get("utility") or cols.get("iou")
-    ccol = cols.get("county_slug") or cols.get("county")
-    zcol = cols.get("climate_zone") or cols.get("zone")
-    if not (ucol and ccol and zcol):
-        return None
-    subset = mdf[(mdf[ccol].map(lambda x: slugify_county_name(str(x))) == cslug) & (mdf[ucol].map(_norm_util) == util_norm)]
-    # If no direct match, prefer 'alameda' row (any utility), then any row for this utility, then any row at all
-    if subset.empty:
-        # 1) Alameda preferred default
-        alameda_rows = mdf[mdf[ccol].map(lambda x: slugify_county_name(str(x))) == 'alameda']
-        if not alameda_rows.empty:
-            subset = alameda_rows.iloc[[0]]
-        else:
-            # 2) Any row for same utility
-            util_rows = mdf[mdf[ucol].map(_norm_util) == util_norm]
-            if not util_rows.empty:
-                subset = util_rows.iloc[[0]]
-            else:
-                # 3) Any row at all
-                if not mdf.empty:
-                    subset = mdf.iloc[[0]]
-                else:
-                    return None
-    # Use first selected match
-    zone = str(subset.iloc[0][zcol]).strip()
-
-    # Locate a zone table CSV whose filename starts with the zone token (case-insensitive)
-    zone_path = None
-    for f in os.listdir(folder):
-        if f.lower().endswith(".csv") and f.lower().startswith(zone.lower()):
-            zone_path = os.path.join(folder, f)
-            break
-    if not zone_path:
-        return None
-
-    try:
-        df = pd.read_csv(zone_path)
-        # Accept wide 12×24 with first column like 'Month/Hour'
-        # Keep only the first 25 columns (month + 24 hours)
-        if df.shape[1] > 25:
-            df = df.iloc[:, :25]
-        # Rename first column to 'month' to be dropped by parser
-        first_col = df.columns[0]
-        if str(first_col).strip().lower() not in ("month", "mon", "month/hour", "month_hour"):
-            df = df.rename(columns={first_col: "month"})
-        table = _parse_12x24_table(df)
-        if table is not None:
-            # Cache by folder mapping
-            key = (f"ctcz:{folder}", util_norm, cslug)
-            _TABLE_CACHE[key] = table
-            return table
-    except Exception:
-        return None
-    return None
+# (Removed curated folder override — single source of truth is the top-level CSV + export_rates CSVs.)
 
 
-def _load_export_rates_from_excel(
-    base_dir: str,
-    utility: str,
-    climate_zone: Optional[str],
-    *,
-    sheet_name: Optional[str] = None,
-) -> Optional[Dict[int, List[float]]]:
-    """Load a 12×24 export table from the IOU Excel file.
-
-    - If sheet_name is provided and exists, prefer it.
-    - Else if climate_zone provided, try exact sheet match, else substring match.
-    - Else try a sheet containing 'rate' in its name, else the first sheet.
-    Results are cached by (excel_path, sheet_name, climate_zone).
-    """
-    path = _find_excel_for_utility(base_dir, utility)
-    if not path:
-        return None
-    key = (path, (sheet_name or "").lower(), (climate_zone or "").lower())
-    if key in _TABLE_CACHE:
-        return _TABLE_CACHE[key]
-    try:
-        xls = pd.ExcelFile(path)
-        chosen_sheet = None
-        # 1) explicit sheet override
-        if sheet_name and sheet_name in xls.sheet_names:
-            chosen_sheet = sheet_name
-        # 2) climate-zone exact match
-        if chosen_sheet is None and climate_zone and climate_zone in xls.sheet_names:
-            chosen_sheet = climate_zone
-        # 3) climate-zone substring match (case-insensitive)
-        if chosen_sheet is None and climate_zone:
-            cz = climate_zone.lower()
-            for s in xls.sheet_names:
-                if cz in s.lower():
-                    chosen_sheet = s
-                    break
-        # 4) any sheet with 'rate'
-        if chosen_sheet is None:
-            chosen_sheet = next((s for s in xls.sheet_names if 'rate' in s.lower()), xls.sheet_names[0])
-
-        # Try chosen sheet
-        df = pd.read_excel(path, sheet_name=chosen_sheet)
-        table = _parse_12x24_table(df)
-        if table is not None:
-            _TABLE_CACHE[key] = table
-            return table
-
-        # Fallback: iterate all sheets and pick first parseable
-        for s in xls.sheet_names:
-            try:
-                df2 = pd.read_excel(path, sheet_name=s)
-                table = _parse_12x24_table(df2)
-                if table is not None:
-                    _TABLE_CACHE[key] = table
-                    return table
-            except Exception:
-                continue
-    except Exception as e:
-        print(f"[NEM3] Failed to read Excel for {utility}: {e}")
-    return None
+# (Excel loader removed — CSV-only export rates are supported)
 
 
 def get_export_rate_table_for_zone(base_dir: str, utility: str, climate_zone: str) -> Dict[int, List[float]]:
@@ -394,7 +235,7 @@ def _load_county_to_zone_mapping(base_dir: str) -> Dict[Tuple[str, str], List[Tu
       - climate_zone (or zone)
     Optional columns:
       - weight (fractional share if county spans multiple zones)
-      - sheet_name (or sheet) to explicitly select an Excel tab
+      - sheet_name (ignored; CSV-only)
     Returns: {(UTILITY, county_slug): [(zone, weight, sheet_name), ...]}
     """
     mapping: Dict[Tuple[str, str], List[Tuple[str, float, Optional[str]]]] = {}
@@ -423,25 +264,15 @@ def _load_county_to_zone_mapping(base_dir: str) -> Dict[Tuple[str, str], List[Tu
 
 
 def get_export_rate_table_for_county(base_dir: str, utility: str, county_name_or_slug: str) -> Dict[int, List[float]]:
-    """Return ACC-based export table for a county by selecting a climate zone.
+    """Return ACC-based export table for a county by selecting a climate zone (CSV-only).
 
-    Selection order:
-      1) If mapping CSV exists at base_dir/county_to_climate_zone.csv, use it.
-      2) Else, attempt to load any table for the utility and use it as a fallback.
-
-    TODO: Provide a robust county→climate_zone mapping per IOU. A suggested approach:
-      - For PG&E, reuse baseline territories (P,Q,R,S,T,V,W,X,Y,Z) as zones and map counties accordingly.
-      - For SCE, reuse baseline regions (5,6,8,9,10,13,14,15,16).
-      - For SDG&E, define a single zone or coastal/inland split per utility publication.
-      - Maintain mapping in NEM3/county_to_climate_zone.csv with columns: utility, county_slug, climate_zone.
+    Behavior:
+      - Requires a row in base_dir/county_to_climate_zone.csv for (utility, county_slug).
+      - For each listed climate_zone, loads {zone}_{UTIL}.csv from base_dir/export_rates and blends by weights (if present).
+      - No Excel fallback is used.
     """
     util = (utility or "").strip().upper()
     cslug = slugify_county_name(county_name_or_slug)
-    # 0) Prefer curated county_to_climate_zone folder if present
-    table = _try_load_from_ctcz_folder(base_dir, util, cslug)
-    if table is not None:
-        return table
-
     # 1) CSV mapping at base_dir/county_to_climate_zone.csv
     mapping = _load_county_to_zone_mapping(base_dir)
     rows = mapping.get((util, cslug))
