@@ -2,6 +2,8 @@
 
 SCENARIOS = {
     "baseline": {"gas": {"heating", "hot_water", "cooking"}, "electric": {"appliances", "misc"}},
+    # Co-optimized PV+Storage variant (dispatch via step9b); appliance mix identical to 'baseline'
+    "baseline_coopt": {"gas": {"heating", "hot_water", "cooking"}, "electric": {"appliances", "misc"}},
     "induction_stove": {"gas": {"hot_water", "heating"}, "electric": {"appliances", "misc", "cooking"}},
     "water_heating": {"gas": {"cooking", "heating"}, "electric": {"hot_water", "appliances", "misc"}},
     "heat_pump": {"gas": {"hot_water", "cooking"}, "electric": {"appliances", "misc", "heating"}},
