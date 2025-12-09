@@ -29,6 +29,31 @@ SCENARIO_DATA_MAP = {
             }
         },
     },
+    # Co-optimized variant uses same file conventions as 'baseline'
+    "baseline_coopt": {
+        # baseline
+        "default": {
+            "electricity": {
+                "file_prefix": "electricity_loads_", # or "sam_optimized_load_profiles_"
+                "column": "total_load"
+            },
+            "gas": {
+                "file_prefix": "gas_loads_",
+                "column": "load.gas.building_avg.therms"
+            },
+        },
+        # baseline w/ solar + storage (Step 9b compatible)
+        "solar_storage": {
+            "electricity": {
+                "file_prefix": "sam_optimized_load_profiles_",
+                "column": "Grid to Load"
+            },
+            "gas": {
+                "file_prefix": "gas_loads_",
+                "column": "load.gas.building_avg.therms"
+            }
+        },
+    },
     "heat_pump": {
         # household adopted heat pump
         "default": {

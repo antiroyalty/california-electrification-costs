@@ -20,6 +20,7 @@ import step6_build_electric_vehicle_load_profiles as BuildElectricVehicleLoadPro
 import step7_combine_real_and_simulated_electricity_loads as CombineRealAndSimulatedProfiles
 import step8_get_weather_files as WeatherFiles
 import step9_my_own_solar_storage as Step9MyOwnSolarStorage
+import step9b_cooptimize_pv_battery as Step9bCoopt
 import step10_get_loads_for_rates as GetLoadsForRates
 import step11_evaluate_gas_rates as EvaluateGasRates
 import step12_evaluate_electricity_rates as EvaluateElectricityRates
@@ -72,6 +73,36 @@ class CostService:
         return f"Dispatch: {mode}; Sizing: {sizing}{batt_str}{plan_str}; Billing variant: NEM3 for with-solar"
 
     def run(self):
+        def _is_coopt_scenario(name: str) -> bool:
+            return str(name).endswith("_coopt")
+
+        def _ensure_weather_symlink_for_coopt(housing_type: str, counties: list[str]):
+            """For _coopt scenarios, if a county has no weather file but baseline does, symlink it.
+
+            Avoids fetching from NREL again; no data duplication.
+            """
+            for c in counties:
+                county = c
+                base_raw = os.path.join(
+                    "data", "loadprofiles", "baseline", housing_type, county,
+                    f"weather_TMY_{county}.csv",
+                )
+                coopt_raw = os.path.join(
+                    "data", "loadprofiles", self.scenario, housing_type, county,
+                    f"weather_TMY_{county}.csv",
+                )
+                if not os.path.exists(coopt_raw) and os.path.exists(base_raw):
+                    os.makedirs(os.path.dirname(coopt_raw), exist_ok=True)
+                    try:
+                        # Create relative symlink to keep paths tidy if moved
+                        rel_src = os.path.relpath(base_raw, os.path.dirname(coopt_raw))
+                        os.symlink(rel_src, coopt_raw)
+                        print(f"[coopt] Symlinked weather for {county}: {coopt_raw} -> {rel_src}")
+                    except FileExistsError:
+                        pass
+                    except Exception as e:
+                        print(f"[coopt] Warning: could not symlink weather for {county}: {e}")
+
         self.log_step(1)
         IdentifySuitableBuildings.process(self.scenario, self.housing_type, output_base_dir="data", target_counties=self.counties, force_recompute=False)
 
@@ -94,10 +125,32 @@ class CostService:
         CombineRealAndSimulatedProfiles.process("data/loadprofiles", "data/loadprofiles", self.scenario, [self.housing_type], self.counties, force_recompute=False)
 
         self.log_step(8)
-        WeatherFiles.process("data/loadprofiles", "data/loadprofiles", self.scenario, [self.housing_type], 2018, self.counties)
+        if _is_coopt_scenario(self.scenario):
+            # Reuse baseline weather when available to avoid re-fetching
+            _ensure_weather_symlink_for_coopt(self.housing_type, self.counties)
+        WeatherFiles.process("data", "data/loadprofiles", self.scenario, [self.housing_type], 2018, self.counties)
 
         self.log_step(9)
-        Step9MyOwnSolarStorage.process("data/loadprofiles", "data/loadprofiles", self.scenario, self.housing_type, self.counties, force_recompute=True)
+        if _is_coopt_scenario(self.scenario):
+            # Co-optimized PV/Battery sizing + dispatch (LP)
+            Step9bCoopt.process(
+                base_input_dir="data/loadprofiles",
+                base_output_dir="data/loadprofiles",
+                scenario=self.scenario,
+                housing_type=self.housing_type,
+                counties=self.counties,
+                allow_grid_charging=False,
+                allow_batt_export=False,
+            )
+        else:
+            Step9MyOwnSolarStorage.process(
+                "data/loadprofiles",
+                "data/loadprofiles",
+                self.scenario,
+                self.housing_type,
+                self.counties,
+                force_recompute=True,
+            )
 
         self.log_step(10)
         GetLoadsForRates.process("data/loadprofiles", "data/loadprofiles", self.scenario, [self.housing_type], self.counties)
@@ -239,13 +292,14 @@ if __name__ == "__main__":
     print(f"\nRunning cost analysis for scenario: {scenario}")
     print(f"Housing type: {housing_type}")
     all_counties = norcal_counties + central_counties + socal_counties
+    alameda_county = ["Alameda County"]
     print(f"Counties: {len(all_counties)} total counties")
     print("-" * 60)
 
     cost_service = CostService(
         scenario,
         housing_type,
-        counties=all_counties,
+        counties=alameda_county,
         rate_plans=rate_plans,
         input_dir=input_dir,
         output_dir=output_dir,

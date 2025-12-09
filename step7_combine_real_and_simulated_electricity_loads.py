@@ -31,6 +31,31 @@ SCENARIO_DATA_MAP = {
             },
         },
     },
+    # Co-optimized variant uses the same upstream inputs as 'baseline'
+    "baseline_coopt": {
+        "default": {
+            "electricity": {
+                "file_prefix": "electricity_loads_",
+                "columns": ["total_load"],
+            },
+            "electricity_simulated": {
+                "file_prefix": "electricity_loads_simulated_",
+                "columns": []
+            },
+            "electricity_vehicle": {
+                "file_prefix": "vehicle_charging_profile_",
+                "columns": []
+            },
+            "gas": {
+                "file_prefix": "gas_loads_",
+                "columns": [
+                    "out.natural_gas.range_oven.energy_consumption.gas.building_avg.therms",
+                    "out.natural_gas.hot_water.energy_consumption.gas.building_avg.therms",
+                    "out.natural_gas.heating.energy_consumption.gas.building_avg.therms",
+                ],
+            },
+        },
+    },
     "baseline_ice_car": {
         "default": {
             "electricity": {
