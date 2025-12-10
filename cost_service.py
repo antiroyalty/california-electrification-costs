@@ -76,11 +76,7 @@ class CostService:
         def _is_coopt_scenario(name: str) -> bool:
             return str(name).endswith("_coopt")
 
-        def _ensure_weather_symlink_for_coopt(housing_type: str, counties: list[str]):
-            """For _coopt scenarios, if a county has no weather file but baseline does, symlink it.
-
-            Avoids fetching from NREL again; no data duplication.
-            """
+        def _ensure_weather_copy_for_coopt(housing_type: str, counties):
             for c in counties:
                 county = c
                 base_raw = os.path.join(
@@ -94,15 +90,11 @@ class CostService:
                 if not os.path.exists(coopt_raw) and os.path.exists(base_raw):
                     os.makedirs(os.path.dirname(coopt_raw), exist_ok=True)
                     try:
-                        # Create relative symlink to keep paths tidy if moved
-                        rel_src = os.path.relpath(base_raw, os.path.dirname(coopt_raw))
-                        os.symlink(rel_src, coopt_raw)
-                        print(f"[coopt] Symlinked weather for {county}: {coopt_raw} -> {rel_src}")
-                    except FileExistsError:
-                        pass
+                        import shutil
+                        shutil.copy2(base_raw, coopt_raw)
+                        print(f"[coopt] Copied weather for {county}: {coopt_raw}")
                     except Exception as e:
-                        print(f"[coopt] Warning: could not symlink weather for {county}: {e}")
-
+                        print(f"[coopt] Warning: could not copy weather for {county}: {e}")
         self.log_step(1)
         IdentifySuitableBuildings.process(self.scenario, self.housing_type, output_base_dir="data", target_counties=self.counties, force_recompute=False)
 
@@ -126,9 +118,9 @@ class CostService:
 
         self.log_step(8)
         if _is_coopt_scenario(self.scenario):
-            # Reuse baseline weather when available to avoid re-fetching
-            _ensure_weather_symlink_for_coopt(self.housing_type, self.counties)
-        WeatherFiles.process("data", "data/loadprofiles", self.scenario, [self.housing_type], 2018, self.counties)
+            # Reuse baseline weather when available to avoid re-fetching (copy, not symlink)
+            _ensure_weather_copy_for_coopt(self.housing_type, self.counties)
+        WeatherFiles.process("data/loadprofiles", "data/loadprofiles", self.scenario, [self.housing_type], 2018, self.counties)
 
         self.log_step(9)
         if _is_coopt_scenario(self.scenario):
