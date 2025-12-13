@@ -340,6 +340,7 @@ def process(
 ) -> None:
     scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
     counties_to_run = get_counties(scenario_path, counties)
+    capacity_records = []
 
     for county in counties_to_run:
         county_slug = slugify_county_name(county)
@@ -402,6 +403,25 @@ def process(
         # Write outputs (Step 9 compatibility)
         _write_step9_outputs(out_dir, county_slug, ts_index, load_kwh, G, PV_kw, flows)
         print(f"[step9b] {county_slug}: PV={PV_kw:.2f} kW, Battery={B_E_kWh:.2f} kWh")
+
+        # Collect capacity summary for diagnostics cards
+        capacity_records.append({
+            "County": county_slug,
+            "Solar Capacity (kW)": round(PV_kw, 2),
+            "Battery Capacity (kWh)": round(B_E_kWh, 2),
+            "Allow Grid Charging": bool(allow_grid_charging),
+            "Allow Battery Export": bool(allow_batt_export),
+        })
+
+    # Write capacity summary CSV for the scenario (compatible path with Step 9 diagnostics)
+    try:
+        if capacity_records:
+            cap_dir = os.path.join(base_output_dir, scenario, housing_type, "CAPITAL_COSTS")
+            os.makedirs(cap_dir, exist_ok=True)
+            cap_path = os.path.join(cap_dir, "electrified_assets.csv")
+            pd.DataFrame(capacity_records).to_csv(cap_path, index=False)
+    except Exception as e:
+        print(f"[step9b] Warning: could not write capacity summary CSV: {e}")
 
 
 def main():
