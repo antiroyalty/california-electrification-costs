@@ -132,7 +132,8 @@ class CostService:
                 housing_type=self.housing_type,
                 counties=self.counties,
                 allow_grid_charging=False,
-                allow_batt_export=False,
+                # Battery exports are allowed for co-optimization; downstream steps account for them
+                allow_batt_export=True,
             )
         else:
             Step9MyOwnSolarStorage.process(
