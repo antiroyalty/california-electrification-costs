@@ -294,6 +294,8 @@ def _write_step9_outputs(
         "Battery SOC": soc,
         "PV AC (kWh)": pv_ac,
         "PV to Grid (kWh)": pv2grid,
+        # New: write battery export flow explicitly for downstream accounting
+        "Battery to Grid (kWh)": batt2grid,
     }
     base_df = pd.DataFrame(base_cols)
 
@@ -302,9 +304,10 @@ def _write_step9_outputs(
     base_df.to_csv(out_base, index=False)
 
     # Exports file (preferred by Step 10)
+    # Exports = PV→Grid + Battery→Grid when battery export is allowed
     exp_df = pd.DataFrame({
         "timestamp": timestamps,
-        "Exports to Grid (kWh)": pv2grid,
+        "Exports to Grid (kWh)": [pg + bg for pg, bg in zip(pv2grid, batt2grid)],
     })
     out_exp = os.path.join(out_dir, f"sam_optimized_load_profiles_with_exports_{county}.csv")
     exp_df.to_csv(out_exp, index=False)
