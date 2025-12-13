@@ -295,23 +295,21 @@ def _read_step9_imports(series_path: str) -> pd.Series:
 
 
 def _read_step9_exports(base_path: str, exports_path: str) -> pd.Series:
-    """Read hourly exports, preferring the exports-only CSV; fall back to base PV to Grid.
+    """Read hourly exports strictly from the exports-only CSV.
 
-    Preferred: 'Exports to Grid (kWh)' from sam_optimized_load_profiles_with_exports_ file.
-    Fallback:  'PV to Grid (kWh)' from sam_optimized_load_profiles_ base file.
+    Required: 'Exports to Grid (kWh)' present in sam_optimized_load_profiles_with_exports_ file.
+    No fallback is used to avoid silent misinterpretation of results.
     """
-    if os.path.exists(exports_path):
-        df_exp = pd.read_csv(exports_path)
-        if "Exports to Grid (kWh)" in df_exp.columns:
-            return df_exp["Exports to Grid (kWh)"].astype(float)
-        raise RuntimeError(f"Column 'Exports to Grid (kWh)' not found in file: {exports_path}")
-    # Fallback to base file
-    df_base = pd.read_csv(base_path)
-    if "PV to Grid (kWh)" not in df_base.columns:
+    if not os.path.exists(exports_path):
         raise RuntimeError(
-            "Missing exports. Provide either 'Exports to Grid (kWh)' in the exports CSV or 'PV to Grid (kWh)' in the base CSV."
+            f"Exports file not found: {exports_path}. Ensure Step 9/9b wrote 'sam_optimized_load_profiles_with_exports_<county>.csv'"
         )
-    return df_base["PV to Grid (kWh)"].astype(float)
+    df_exp = pd.read_csv(exports_path)
+    if "Exports to Grid (kWh)" not in df_exp.columns:
+        raise RuntimeError(
+            f"Column 'Exports to Grid (kWh)' not found in file: {exports_path}"
+        )
+    return df_exp["Exports to Grid (kWh)"].astype(float)
 
 
 def prepare_for_rates_analysis(base_input_dir, base_output_dir, housing_type, scenario, county):
@@ -342,10 +340,27 @@ def prepare_for_rates_analysis(base_input_dir, base_output_dir, housing_type, sc
     gas_default_hourly = aggregate_to_hourly(gas_default_file, directory["default"]["gas"]["column"])
     gas_solar_storage_hourly = aggregate_to_hourly(gas_solar_storage_file, directory["solar_storage"]["gas"]["column"])
 
-    # NEM3 exports: prefer the exports-only CSV, fallback to base PV→Grid
+    # NEM3 exports: strict — require the exports‑only CSV
     nem3_exports = _read_step9_exports(step9_base_electric_file, step9_exports_electric_file)
-    # Retail exports are zero (no feedback to grid)
-    retail_exports = pd.Series([0.0] * len(nem3_exports))
+
+    # Sanity check: enforce aligned lengths for all series
+    expected_len = len(timestamp)
+    series_map = {
+        "default.electricity.kwh": electricity_default,
+        "retail.imports.kwh": retail_imports,
+        "nem3.imports.kwh": nem3_imports,
+        "nem3.exports.kwh": nem3_exports,
+        "default.gas.therms": gas_default_hourly,
+        "solarstorage.gas.therms": gas_solar_storage_hourly,
+    }
+    for name, s in series_map.items():
+        if len(s) != expected_len:
+            raise RuntimeError(
+                f"Length mismatch for {name}: expected {expected_len}, got {len(s)}"
+            )
+
+    # Retail exports are zero (no feedback to grid), aligned to expected length
+    retail_exports = pd.Series([0.0] * expected_len)
 
     combined_df = pd.DataFrame(
         {
@@ -361,7 +376,7 @@ def prepare_for_rates_analysis(base_input_dir, base_output_dir, housing_type, sc
             # Gas (unchanged by PV/storage)
             "solarstorage.gas.therms": gas_solar_storage_hourly,
         }
-    ).dropna()
+    )
 
     output_file_path = os.path.join(base_output_dir, scenario, housing_type, county, f"{OUTPUT_FILE_NAME}_{county}.csv")
     os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
