@@ -29,29 +29,29 @@ SCENARIO_DATA_MAP = {
             }
         },
     },
-    # Co-optimized variant uses same file conventions as 'baseline'
+    # Co-optimized variant (Step 9b output). Uses combined default profiles plus SAM outputs.
     "baseline_coopt": {
-        # baseline
+        # Baseline (no PV/storage): combined electricity + gas profile per county
         "default": {
             "electricity": {
-                "file_prefix": "electricity_loads_", # or "sam_optimized_load_profiles_"
-                "column": "total_load"
+                "file_prefix": "combined_profiles_baseline_coopt_",
+                "column": "electricity.real_and_simulated.for_typical_county_home.kwh",
             },
             "gas": {
-                "file_prefix": "gas_loads_",
-                "column": "load.gas.building_avg.therms"
+                "file_prefix": "combined_profiles_baseline_coopt_",
+                "column": "gas.hourly_total.for_typical_county_home.therms",
             },
         },
-        # baseline w/ solar + storage (Step 9b compatible)
+        # With PV/storage: electricity from SAM; gas unchanged (same combined file)
         "solar_storage": {
             "electricity": {
                 "file_prefix": "sam_optimized_load_profiles_",
-                "column": "Grid to Load"
+                "column": "Grid to Load",
             },
             "gas": {
-                "file_prefix": "gas_loads_",
-                "column": "load.gas.building_avg.therms"
-            }
+                "file_prefix": "combined_profiles_baseline_coopt_",
+                "column": "gas.hourly_total.for_typical_county_home.therms",
+            },
         },
     },
     "heat_pump": {
