@@ -14,8 +14,6 @@ The step expects prior steps to have produced:
 - Step 9 (baseline) and Step 9b (baseline_coopt) SAM CSVs per county
 - Step 10 aggregated loads for rates (imports/exports series)
 - Step 11/12 annual bills (RESULTS_* CSVs)
-
-This module does not wire into cost_service.py by default.
 """
 
 from __future__ import annotations
@@ -141,6 +139,8 @@ def _read_assets_for_county(
                 abe = row.get("Allow Battery Export")
                 allow_gc = None if pd.isna(agc) else bool(agc)
                 allow_be = None if pd.isna(abe) else bool(abe)
+            else:
+                print(f"[step23] Size info not found for {county_slug} in {path}")
         except Exception:
             pass
     return SizeInfo(
@@ -477,7 +477,10 @@ def _html_dashboard(
                 .metric {{ display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }}
                 .mrow {{ display: contents; }}
                 .mhead {{ font-weight: 600; color: #2c3e50; }}
-                .val {{ font-weight: 700; color: #2c5aa0; }}
+                .mhead div {{ text-align: center; }}
+                .metric > div:first-child {{ text-align: left; }}
+                /* Center numeric values so they sit visually under the column headers */
+                .metric .val {{ font-weight: 700; color: #2c5aa0; text-align: center; }}
                 .muted {{ color: #666; font-size: 12px; }}
             </style>
         </head>
@@ -490,61 +493,70 @@ def _html_dashboard(
         """
     )
 
-    # Sizes
+    # Helper to render a compact comparison table
+    def table(rows: List[Tuple[str, str, str, str]]) -> str:
+        t = []
+        t.append("<table style='width:100%; border-collapse:collapse;'>")
+        t.append("<thead><tr><th style='text-align:left;'>Metric</th><th>Baseline</th><th>Co‑opt</th><th>Δ</th></tr></thead>")
+        t.append("<tbody>")
+        for label, vb, vc, vd in rows:
+            t.append(
+                "<tr>"
+                f"<td style='text-align:left; color:#666;'>{label}</td>"
+                f"<td style='text-align:center; font-weight:700; color:#2c5aa0;'>{vb}</td>"
+                f"<td style='text-align:center; font-weight:700; color:#2c5aa0;'>{vc}</td>"
+                f"<td style='text-align:center; color:#666;'>{vd or ''}</td>"
+                "</tr>"
+            )
+        t.append("</tbody></table>")
+        return "".join(t)
+
+    # Sizes (as a table)
     parts.append('<div class="card">')
     parts.append("<h3>System Sizes</h3>")
-    parts.append('<div class="metric mhead"><div></div><div>Baseline</div><div>Co‑opt</div></div>')
-    parts.append(
-        f"<div class='metric mrow'><div>PV Size</div><div class='val'>{fmt(size_baseline.pv_kw, 'kW')}</div><div class='val'>{fmt(size_coopt.pv_kw, 'kW')} <span class='muted'>&Delta; {pv_delta}</span></div></div>"
-    )
-    parts.append(
-        f"<div class='metric mrow'><div>Battery Size</div><div class='val'>{fmt(size_baseline.batt_kwh, 'kWh')}</div><div class='val'>{fmt(size_coopt.batt_kwh, 'kWh')} <span class='muted'>&Delta; {batt_delta}</span></div></div>"
-    )
-    parts.append(
-        f"<div class='metric mrow'><div>Flags</div><div class='muted'>n/a</div><div class='muted'>grid_charging={size_coopt.allow_grid_charging} batt_export={size_coopt.allow_batt_export}</div></div>"
-    )
+    size_rows = [
+        ("PV Size", fmt(size_baseline.pv_kw, 'kW'), fmt(size_coopt.pv_kw, 'kW'), pv_delta),
+        ("Battery Size", fmt(size_baseline.batt_kwh, 'kWh'), fmt(size_coopt.batt_kwh, 'kWh'), batt_delta),
+        (
+            "Flags",
+            "n/a",
+            f"grid_charging={size_coopt.allow_grid_charging} batt_export={size_coopt.allow_batt_export}",
+            "",
+        ),
+    ]
+    parts.append(table(size_rows))
     parts.append("</div>")
 
-    # Flows
+    # Flows (as a table)
     parts.append('<div class="card">')
     parts.append("<h3>Energy Flows (Annual)</h3>")
-    parts.append('<div class="metric mhead"><div></div><div>Baseline</div><div>Co‑opt</div></div>')
-    parts.append(
-        f"<div class='metric mrow'><div>PV AC</div><div class='val'>{fmt(flows_baseline.pv_ac_kwh, 'kWh')}</div><div class='val'>{fmt(flows_coopt.pv_ac_kwh, 'kWh')}</div></div>"
-    )
-    parts.append(
-        f"<div class='metric mrow'><div>Grid Imports</div><div class='val'>{fmt(flows_baseline.grid_to_load_kwh, 'kWh')}</div><div class='val'>{fmt(flows_coopt.grid_to_load_kwh, 'kWh')} <span class='muted'>&Delta; {imports_delta}</span></div></div>"
-    )
-    parts.append(
-        f"<div class='metric mrow'><div>Exports</div><div class='val'>{fmt(flows_baseline.exports_kwh, 'kWh')}</div><div class='val'>{fmt(flows_coopt.exports_kwh, 'kWh')} <span class='muted'>&Delta; {exports_delta}</span></div></div>"
-    )
-    parts.append(
-        f"<div class='metric mrow'><div>Self‑Consumption</div><div class='val'>{fmt(flows_baseline.self_consumption_ratio, '%')}</div><div class='val'>{fmt(flows_coopt.self_consumption_ratio, '%')}</div></div>"
-    )
+    flow_rows = [
+        ("PV AC", fmt(flows_baseline.pv_ac_kwh, 'kWh'), fmt(flows_coopt.pv_ac_kwh, 'kWh'), ""),
+        ("Grid Imports", fmt(flows_baseline.grid_to_load_kwh, 'kWh'), fmt(flows_coopt.grid_to_load_kwh, 'kWh'), imports_delta),
+        ("Exports", fmt(flows_baseline.exports_kwh, 'kWh'), fmt(flows_coopt.exports_kwh, 'kWh'), exports_delta),
+        ("Self‑Consumption", fmt(flows_baseline.self_consumption_ratio, '%'), fmt(flows_coopt.self_consumption_ratio, '%'), ""),
+    ]
+    parts.append(table(flow_rows))
     parts.append("</div>")
 
-    # Bills
+    # Bills (as a table)
     parts.append('<div class="card">')
     parts.append("<h3>Annual Bills</h3>")
-    parts.append('<div class="metric mhead"><div></div><div>Baseline</div><div>Co‑opt</div></div>')
-    parts.append(
-        f"<div class='metric mrow'><div>Electricity</div><div class='val'>{fmt(costs_baseline.electricity, '$')}</div><div class='val'>{fmt(costs_coopt.electricity, '$')}</div></div>"
-    )
-    parts.append(
-        f"<div class='metric mrow'><div>Gas</div><div class='val'>{fmt(costs_baseline.gas, '$')}</div><div class='val'>{fmt(costs_coopt.gas, '$')}</div></div>"
-    )
-    parts.append(
-        f"<div class='metric mrow'><div>Total Annual Bill</div><div class='val'>{fmt(costs_baseline.total_bill, '$')}</div><div class='val'>{fmt(costs_coopt.total_bill, '$')} <span class='muted'>&Delta; {bill_delta}</span></div></div>"
-    )
+    bill_rows = [
+        ("Electricity", fmt(costs_baseline.electricity, '$'), fmt(costs_coopt.electricity, '$'), ""),
+        ("Gas", fmt(costs_baseline.gas, '$'), fmt(costs_coopt.gas, '$'), ""),
+        ("Total Annual Bill", fmt(costs_baseline.total_bill, '$'), fmt(costs_coopt.total_bill, '$'), bill_delta),
+    ]
+    parts.append(table(bill_rows))
     parts.append("</div>")
 
-    # EAC (optional)
+    # EAC (as a table)
     parts.append('<div class="card">')
     parts.append("<h3>Equivalent Annual Cost (EAC)</h3>")
-    parts.append('<div class="metric mhead"><div></div><div>Baseline</div><div>Co‑opt</div></div>')
-    parts.append(
-        f"<div class='metric mrow'><div>Total EAC</div><div class='val'>{fmt(eac_baseline, '$')}</div><div class='val'>{fmt(eac_coopt, '$')} <span class='muted'>&Delta; {eac_delta}</span></div></div>"
-    )
+    eac_rows = [
+        ("Total EAC", fmt(eac_baseline, '$'), fmt(eac_coopt, '$'), eac_delta),
+    ]
+    parts.append(table(eac_rows))
     parts.append("</div>")
 
     # Charts
@@ -736,14 +748,11 @@ def main() -> None:
     p.add_argument("--counties", nargs="*")
     p.add_argument("--all-counties", action="store_true")
     p.add_argument("--electricity-variant", choices=["nem3", "retail"], default="nem3")
+    p.add_argument("--no-open", action="store_true", help="Do not automatically open the generated dashboard in a browser")
     args = p.parse_args()
 
-    if args.all_counties or not args.counties:
-        counties = _discover_union_counties(args.base_input_dir, args.housing_type)
-        if not counties:
-            counties = ["Alameda County"]
-    else:
-        counties = args.counties
+    # Restrict to Alameda County regardless of flags
+    counties = ["Alameda County"]
 
     written = process(
         base_input_dir=args.base_input_dir,
@@ -755,10 +764,15 @@ def main() -> None:
     if written:
         try:
             print(f"Compare dashboards written (first): {os.path.abspath(written[0])}")
+            if not args.no_open:
+                import webbrowser
+                from pathlib import Path
+                first = Path(written[0]).resolve().as_uri()
+                print(f"Opening dashboard in browser: {first}")
+                webbrowser.open_new_tab(first)
         except Exception:
             pass
 
 
 if __name__ == "__main__":
     main()
-

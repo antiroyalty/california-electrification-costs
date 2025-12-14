@@ -1587,6 +1587,9 @@ def _dashboard_html(
                 .kmtbl th {{ text-align: center; font-weight: 600; color: #2c3e50; }}
                 .kmtbl td {{ text-align: center; }}
                 .kmtbl td:first-child {{ text-align: left; color: #666; width: 40%; }}
+                /* Right-align numeric value cells for better readability */
+                .kmtbl td.val {{ text-align: right; }}
+                .kmtbl td.money {{ text-align: right; }}
                 .val {{ font-weight: 700; color: #2c5aa0; }}
                 .formula {{ color: #888; font-size: 11px; margin-top: 2px; }}
                 .money {{ color: #1a5; font-weight: 700; }}

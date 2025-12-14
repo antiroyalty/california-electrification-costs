@@ -413,15 +413,37 @@ def process(
             "Allow Battery Export": bool(allow_batt_export),
         })
 
-    # Write capacity summary CSV for the scenario (compatible path with Step 9 diagnostics)
+    # Write/merge capacity summary CSV for the scenario (compatible path with Step 9 diagnostics)
     try:
         if capacity_records:
             cap_dir = os.path.join(base_output_dir, scenario, housing_type, "CAPITAL_COSTS")
             os.makedirs(cap_dir, exist_ok=True)
             cap_path = os.path.join(cap_dir, "electrified_assets.csv")
-            pd.DataFrame(capacity_records).to_csv(cap_path, index=False)
+            new_df = pd.DataFrame(capacity_records)
+            if os.path.exists(cap_path):
+                try:
+                    old_df = pd.read_csv(cap_path)
+                except Exception:
+                    old_df = pd.DataFrame()
+                # Merge on County (slug)
+                if not old_df.empty:
+                    # Drop overlapping counties in old, then append new
+                    keep = [
+                        r for _, r in old_df.iterrows()
+                        if str(r.get("County", "")).strip().lower() not in set(new_df["County"].astype(str).str.lower())
+                    ]
+                    if keep:
+                        old_kept = pd.DataFrame(keep)
+                        merged = pd.concat([old_kept, new_df], ignore_index=True)
+                    else:
+                        merged = new_df
+                else:
+                    merged = new_df
+                merged.to_csv(cap_path, index=False)
+            else:
+                new_df.to_csv(cap_path, index=False)
     except Exception as e:
-        print(f"[step9b] Warning: could not write capacity summary CSV: {e}")
+        print(f"[step9b] Warning: could not write/merge capacity summary CSV: {e}")
 
 
 def main():
