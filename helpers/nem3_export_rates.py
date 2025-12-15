@@ -58,6 +58,44 @@ def _find_excel_for_utility(base_dir: str, utility: str) -> Optional[str]:
     return sorted(candidates, key=lambda p: (p.count(os.sep), len(p)))[0] if candidates else None
 
 
+def _normalize_util(util: str) -> str:
+    return (util or "").strip().replace("&", "").replace(" ", "").replace(".", "").upper().replace("PGEE", "PGE")
+
+
+def _load_export_rates_from_csv(base_dir: str, utility: str, climate_zone: Optional[str]) -> Optional[Dict[int, List[float]]]:
+    """Try loading a 12x24 or long-form CSV override for a specific utility + climate zone.
+
+    Naming conventions searched (under base_dir):
+      - <UTIL>_<ZONE>_12x24.csv (e.g., PGE_CZ3A_12x24.csv)
+      - <UTIL>_<ZONE>.csv
+      - PG&E forms also accepted as PGE
+    """
+    if not climate_zone:
+        return None
+    u = _normalize_util(utility)
+    z = (climate_zone or "").strip()
+    # Search in a dedicated overrides folder first, then in the base_dir root
+    overrides_dir = os.path.join(base_dir, "utility-county-climatezone")
+    candidates = [
+        os.path.join(overrides_dir, f"{u}_{z}_12x24.csv"),
+        os.path.join(overrides_dir, f"{u}_{z}.csv"),
+        os.path.join(base_dir, f"{u}_{z}_12x24.csv"),
+        os.path.join(base_dir, f"{u}_{z}.csv"),
+        os.path.join(base_dir, f"{utility}_{z}_12x24.csv"),
+        os.path.join(base_dir, f"{utility}_{z}.csv"),
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            try:
+                df = pd.read_csv(path)
+                table = _parse_12x24_table(df)
+                if table is not None:
+                    return table
+            except Exception:
+                continue
+    return None
+
+
 def _parse_12x24_table(df: pd.DataFrame) -> Optional[Dict[int, List[float]]]:
     """Try to coerce a DataFrame into a 12x24 month-hour table of floats.
 
@@ -66,7 +104,7 @@ def _parse_12x24_table(df: pd.DataFrame) -> Optional[Dict[int, List[float]]]:
       2) Long: columns include 'month' and 'hour' and 'rate'
     """
     # Case 2: long form
-    lower_cols = [c.strip().lower() for c in df.columns]
+    lower_cols = [str(c).strip().lower() for c in df.columns]
     if all(col in lower_cols for col in ["month", "hour"]) and any(c in lower_cols for c in ["rate", "value", "export", "acc"]):
         cmonth = df.columns[lower_cols.index("month")]
         chour = df.columns[lower_cols.index("hour")]
@@ -177,29 +215,31 @@ def _load_county_to_zone_mapping(base_dir: str) -> Dict[Tuple[str, str], str]:
 def get_export_rate_table_for_county(base_dir: str, utility: str, county_name_or_slug: str) -> Dict[int, List[float]]:
     """Return ACC-based export table for a county by selecting a climate zone.
 
-    Selection order:
-      1) If mapping CSV exists at base_dir/county_to_climate_zone.csv, use it.
-      2) Else, attempt to load any table for the utility and use it as a fallback.
-
-    TODO: Provide a robust county→climate_zone mapping per IOU. A suggested approach:
-      - For PG&E, reuse baseline territories (P,Q,R,S,T,V,W,X,Y,Z) as zones and map counties accordingly.
-      - For SCE, reuse baseline regions (5,6,8,9,10,13,14,15,16).
-      - For SDG&E, define a single zone or coastal/inland split per utility publication.
-      - Maintain mapping in NEM3/county_to_climate_zone.csv with columns: utility, county_slug, climate_zone.
+    Strict mode: requires an explicit county→climate_zone mapping and a CSV
+    override for (utility, zone). No Excel fallback is attempted. Fails loudly
+    with a descriptive error if inputs are missing.
     """
     util = (utility or "").strip().upper()
     cslug = slugify_county_name(county_name_or_slug)
+    # Require an explicit mapping
     mapping = _load_county_to_zone_mapping(base_dir)
     zone = mapping.get((util, cslug), None)
-    table = _load_export_rates_from_excel(base_dir, utility, zone)
-    if table is None:
-        print(
-            f"[NEM3] TODO: Missing county→climate_zone mapping for utility={util}, county={cslug}. "
-            f"Using first available sheet in Excel as fallback. Create {os.path.join(base_dir, 'county_to_climate_zone.csv')}"
+    if not zone:
+        raise RuntimeError(
+            "NEM3 export-rate lookup failed: missing county→climate_zone mapping. "
+            f"Add a row to {os.path.join(base_dir, 'county_to_climate_zone.csv')} with columns: "
+            f"utility={util}, county_slug={cslug}, climate_zone=<SHEET_OR_ZONE>."
         )
-        # Try again without a zone to pick the first available sheet
-        table = _load_export_rates_from_excel(base_dir, utility, None)
-    return table if table is not None else _zeros_table()
+    # Require a CSV override for this utility+zone
+    table = _load_export_rates_from_csv(base_dir, utility, zone)
+    if table is None:
+        util_tag = _normalize_util(utility)
+        raise RuntimeError(
+            "NEM3 export-rate lookup failed: no CSV override found for utility/zone. "
+            f"Provide a 12x24 or long-form CSV at one of: "
+            f"{os.path.join(base_dir, 'utility-county-climatezone', util_tag + '_' + zone + '_12x24.csv')} or {os.path.join(base_dir, 'utility-county-climatezone', util_tag + '_' + zone + '.csv')}"
+        )
+    return table
 
 
 @dataclass
