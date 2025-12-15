@@ -29,6 +29,83 @@ SCENARIO_DATA_MAP = {
             }
         },
     },
+    # Co-optimized variants for all scenarios — use combined default profiles plus SAM outputs
+    "induction_stove_coopt": {
+        "default": {
+            "electricity": {
+                "file_prefix": "combined_profiles_induction_stove_coopt_",
+                "column": "electricity.real_and_simulated.for_typical_county_home.kwh",
+            },
+            "gas": {
+                "file_prefix": "combined_profiles_induction_stove_coopt_",
+                "column": "gas.hourly_total.for_typical_county_home.therms",
+            },
+        },
+        "solar_storage": {
+            "electricity": {"file_prefix": "sam_optimized_load_profiles_", "column": "Grid to Load"},
+            "gas": {"file_prefix": "combined_profiles_induction_stove_coopt_", "column": "gas.hourly_total.for_typical_county_home.therms"},
+        },
+    },
+    "water_heating_coopt": {
+        "default": {
+            "electricity": {"file_prefix": "combined_profiles_water_heating_coopt_", "column": "electricity.real_and_simulated.for_typical_county_home.kwh"},
+            "gas": {"file_prefix": "combined_profiles_water_heating_coopt_", "column": "gas.hourly_total.for_typical_county_home.therms"},
+        },
+        "solar_storage": {
+            "electricity": {"file_prefix": "sam_optimized_load_profiles_", "column": "Grid to Load"},
+            "gas": {"file_prefix": "combined_profiles_water_heating_coopt_", "column": "gas.hourly_total.for_typical_county_home.therms"},
+        },
+    },
+    "heat_pump_coopt": {
+        "default": {
+            "electricity": {"file_prefix": "combined_profiles_heat_pump_coopt_", "column": "electricity.real_and_simulated.for_typical_county_home.kwh"},
+            "gas": {"file_prefix": "combined_profiles_heat_pump_coopt_", "column": "gas.hourly_total.for_typical_county_home.therms"},
+        },
+        "solar_storage": {
+            "electricity": {"file_prefix": "sam_optimized_load_profiles_", "column": "Grid to Load"},
+            "gas": {"file_prefix": "combined_profiles_heat_pump_coopt_", "column": "gas.hourly_total.for_typical_county_home.therms"},
+        },
+    },
+    "heat_pump_and_induction_stove_and_water_heating_coopt": {
+        "default": {
+            "electricity": {"file_prefix": "combined_profiles_heat_pump_and_induction_stove_and_water_heating_coopt_", "column": "electricity.real_and_simulated.for_typical_county_home.kwh"},
+            "gas": {"file_prefix": "combined_profiles_heat_pump_and_induction_stove_and_water_heating_coopt_", "column": "gas.hourly_total.for_typical_county_home.therms"},
+        },
+        "solar_storage": {
+            "electricity": {"file_prefix": "sam_optimized_load_profiles_", "column": "Grid to Load"},
+            "gas": {"file_prefix": "combined_profiles_heat_pump_and_induction_stove_and_water_heating_coopt_", "column": "gas.hourly_total.for_typical_county_home.therms"},
+        },
+    },
+    "baseline_ice_car_coopt": {
+        "default": {
+            "electricity": {"file_prefix": "combined_profiles_baseline_ice_car_coopt_", "column": "electricity.real_and_simulated.for_typical_county_home.kwh"},
+            "gas": {"file_prefix": "combined_profiles_baseline_ice_car_coopt_", "column": "gas.hourly_total.for_typical_county_home.therms"},
+        },
+        "solar_storage": {
+            "electricity": {"file_prefix": "sam_optimized_load_profiles_", "column": "Grid to Load"},
+            "gas": {"file_prefix": "combined_profiles_baseline_ice_car_coopt_", "column": "gas.hourly_total.for_typical_county_home.therms"},
+        },
+    },
+    "baseline_ev_car_coopt": {
+        "default": {
+            "electricity": {"file_prefix": "combined_profiles_baseline_ev_car_coopt_", "column": "electricity.real_and_simulated.for_typical_county_home.kwh"},
+            "gas": {"file_prefix": "combined_profiles_baseline_ev_car_coopt_", "column": "gas.hourly_total.for_typical_county_home.therms"},
+        },
+        "solar_storage": {
+            "electricity": {"file_prefix": "sam_optimized_load_profiles_", "column": "Grid to Load"},
+            "gas": {"file_prefix": "combined_profiles_baseline_ev_car_coopt_", "column": "gas.hourly_total.for_typical_county_home.therms"},
+        },
+    },
+    "full_electric_ev_coopt": {
+        "default": {
+            "electricity": {"file_prefix": "combined_profiles_full_electric_ev_coopt_", "column": "electricity.real_and_simulated.for_typical_county_home.kwh"},
+            "gas": {"file_prefix": "combined_profiles_full_electric_ev_coopt_", "column": "gas.hourly_total.for_typical_county_home.therms"},
+        },
+        "solar_storage": {
+            "electricity": {"file_prefix": "sam_optimized_load_profiles_", "column": "Grid to Load"},
+            "gas": {"file_prefix": "combined_profiles_full_electric_ev_coopt_", "column": "gas.hourly_total.for_typical_county_home.therms"},
+        },
+    },
     # Co-optimized variant (Step 9b output). Uses combined default profiles plus SAM outputs.
     "baseline_coopt": {
         # Baseline (no PV/storage): combined electricity + gas profile per county
