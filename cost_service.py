@@ -77,24 +77,25 @@ class CostService:
             return str(name).endswith("_coopt")
 
         def _ensure_weather_copy_for_coopt(housing_type: str, counties):
+            from helpers.main_helpers import slugify_county_name
             for c in counties:
-                county = c
+                slug = slugify_county_name(c)
                 base_raw = os.path.join(
-                    "data", "loadprofiles", "baseline", housing_type, county,
-                    f"weather_TMY_{county}.csv",
+                    "data", "loadprofiles", "baseline", housing_type, slug,
+                    f"weather_TMY_{slug}.csv",
                 )
                 coopt_raw = os.path.join(
-                    "data", "loadprofiles", self.scenario, housing_type, county,
-                    f"weather_TMY_{county}.csv",
+                    "data", "loadprofiles", self.scenario, housing_type, slug,
+                    f"weather_TMY_{slug}.csv",
                 )
                 if not os.path.exists(coopt_raw) and os.path.exists(base_raw):
                     os.makedirs(os.path.dirname(coopt_raw), exist_ok=True)
                     try:
                         import shutil
                         shutil.copy2(base_raw, coopt_raw)
-                        print(f"[coopt] Copied weather for {county}: {coopt_raw}")
+                        print(f"[coopt] Copied weather for {slug}: {coopt_raw}")
                     except Exception as e:
-                        print(f"[coopt] Warning: could not copy weather for {county}: {e}")
+                        print(f"[coopt] Warning: could not copy weather for {slug}: {e}")
         self.log_step(1)
         IdentifySuitableBuildings.process(self.scenario, self.housing_type, output_base_dir="data", target_counties=self.counties, force_recompute=False)
 
