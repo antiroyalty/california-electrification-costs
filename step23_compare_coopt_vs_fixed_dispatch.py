@@ -39,6 +39,7 @@ from helpers.utility_helpers import get_utility_for_county
 from helpers.plot_scenario_comparison_helper import (
     collect_eac_components_by_county,
 )
+from scenarios import SCENARIOS
 
 
 BASELINE_SCENARIO = "baseline"
@@ -339,7 +340,7 @@ def _save_fig_as_b64(fig: plt.Figure) -> str:
 
 
 def monthly_imports_exports_chart(
-    base_input_dir: str, housing_type: str, county_slug: str
+    base_input_dir: str, housing_type: str, county_slug: str, scen_base: str, scen_coopt: str
 ) -> Optional[str]:
     """Build a two‑panel monthly chart comparing baseline vs coopt imports/exports (NEM3)."""
     try:
@@ -356,8 +357,8 @@ def monthly_imports_exports_chart(
             mexp = pd.Series(exp).groupby(mo).sum()
             return mimp, mexp
 
-        imp_b, exp_b = load_monthly(BASELINE_SCENARIO)
-        imp_c, exp_c = load_monthly(COOPT_SCENARIO)
+        imp_b, exp_b = load_monthly(scen_base)
+        imp_c, exp_c = load_monthly(scen_coopt)
         months = range(1, 13)
         fig, axes = plt.subplots(1, 2, figsize=(12, 4))
         # Imports
@@ -382,7 +383,7 @@ def monthly_imports_exports_chart(
 
 
 def weekly_overlay_chart(
-    base_input_dir: str, housing_type: str, county_slug: str, column: str = "Grid to Load"
+    base_input_dir: str, housing_type: str, county_slug: str, scen_base: str, scen_coopt: str, column: str = "Grid to Load"
 ) -> Optional[str]:
     """Overlay first 7×24 hours for a Step 9 column across baseline and co‑opt."""
     try:
@@ -393,8 +394,8 @@ def weekly_overlay_chart(
             series = pd.to_numeric(df.get(column, pd.Series([0.0] * len(df))), errors="coerce").fillna(0.0)
             return series.iloc[:168].tolist() if len(series) >= 168 else series.tolist() + [0.0] * (168 - len(series))
 
-        b_path = _sam_csv_path(base_input_dir, BASELINE_SCENARIO, housing_type, county_slug)
-        c_path = _sam_csv_path(base_input_dir, COOPT_SCENARIO, housing_type, county_slug)
+        b_path = _sam_csv_path(base_input_dir, scen_base, housing_type, county_slug)
+        c_path = _sam_csv_path(base_input_dir, scen_coopt, housing_type, county_slug)
         y1 = first_week(b_path)
         y2 = first_week(c_path)
         x = list(range(168))
@@ -417,16 +418,7 @@ def weekly_overlay_chart(
 def _html_dashboard(
     county_slug: str,
     housing_type: str,
-    size_baseline: SizeInfo,
-    size_coopt: SizeInfo,
-    flows_baseline: FlowInfo,
-    flows_coopt: FlowInfo,
-    costs_baseline: CostInfo,
-    costs_coopt: CostInfo,
-    monthly_b64: Optional[str],
-    weekly_b64: Optional[str],
-    eac_baseline: Optional[float],
-    eac_coopt: Optional[float],
+    sections: List[str],
 ) -> str:
     def fmt(x, unit=""):
         try:
@@ -511,65 +503,9 @@ def _html_dashboard(
         t.append("</tbody></table>")
         return "".join(t)
 
-    # Sizes (as a table)
-    parts.append('<div class="card">')
-    parts.append("<h3>System Sizes</h3>")
-    size_rows = [
-        ("PV Size", fmt(size_baseline.pv_kw, 'kW'), fmt(size_coopt.pv_kw, 'kW'), pv_delta),
-        ("Battery Size", fmt(size_baseline.batt_kwh, 'kWh'), fmt(size_coopt.batt_kwh, 'kWh'), batt_delta),
-        (
-            "Flags",
-            "n/a",
-            f"grid_charging={size_coopt.allow_grid_charging} batt_export={size_coopt.allow_batt_export}",
-            "",
-        ),
-    ]
-    parts.append(table(size_rows))
-    parts.append("</div>")
-
-    # Flows (as a table)
-    parts.append('<div class="card">')
-    parts.append("<h3>Energy Flows (Annual)</h3>")
-    flow_rows = [
-        ("PV AC", fmt(flows_baseline.pv_ac_kwh, 'kWh'), fmt(flows_coopt.pv_ac_kwh, 'kWh'), ""),
-        ("Grid Imports", fmt(flows_baseline.grid_to_load_kwh, 'kWh'), fmt(flows_coopt.grid_to_load_kwh, 'kWh'), imports_delta),
-        ("Exports", fmt(flows_baseline.exports_kwh, 'kWh'), fmt(flows_coopt.exports_kwh, 'kWh'), exports_delta),
-        ("Self‑Consumption", fmt(flows_baseline.self_consumption_ratio, '%'), fmt(flows_coopt.self_consumption_ratio, '%'), ""),
-    ]
-    parts.append(table(flow_rows))
-    parts.append("</div>")
-
-    # Bills (as a table)
-    parts.append('<div class="card">')
-    parts.append("<h3>Annual Bills</h3>")
-    bill_rows = [
-        ("Electricity", fmt(costs_baseline.electricity, '$'), fmt(costs_coopt.electricity, '$'), ""),
-        ("Gas", fmt(costs_baseline.gas, '$'), fmt(costs_coopt.gas, '$'), ""),
-        ("Total Annual Bill", fmt(costs_baseline.total_bill, '$'), fmt(costs_coopt.total_bill, '$'), bill_delta),
-    ]
-    parts.append(table(bill_rows))
-    parts.append("</div>")
-
-    # EAC (as a table)
-    parts.append('<div class="card">')
-    parts.append("<h3>Equivalent Annual Cost (EAC)</h3>")
-    eac_rows = [
-        ("Total EAC", fmt(eac_baseline, '$'), fmt(eac_coopt, '$'), eac_delta),
-    ]
-    parts.append(table(eac_rows))
-    parts.append("</div>")
-
-    # Charts
-    if monthly_b64:
-        parts.append('<div class="card">')
-        parts.append("<h3>Monthly Imports / Exports</h3>")
-        parts.append(f"<img src='data:image/png;base64,{monthly_b64}' alt='monthly' style='width:100%;height:auto;border-radius:6px;' />")
-        parts.append("</div>")
-    if weekly_b64:
-        parts.append('<div class="card">')
-        parts.append("<h3>Weekly Overlay — January (Grid to Load)</h3>")
-        parts.append(f"<img src='data:image/png;base64,{weekly_b64}' alt='weekly' style='width:100%;height:auto;border-radius:6px;' />")
-        parts.append("</div>")
+    # Insert pre-built sections for each scenario pair
+    for sec in sections:
+        parts.append(sec)
 
     parts.append("</div></body></html>")
     return "\n".join(parts)
@@ -581,13 +517,15 @@ def _total_eac_for_county(
     base_input_dir: str,
     housing_type: str,
     county_slug: str,
+    scen_base: str,
+    scen_coopt: str,
     variant: str = "nem3",
 ) -> Tuple[Optional[float], Optional[float]]:
     try:
         df = collect_eac_components_by_county(
             base_input_dir,
             housing_type,
-            [BASELINE_SCENARIO, COOPT_SCENARIO],
+            [scen_base, scen_coopt],
             [county_slug],
             electricity_variant=variant,
         )
@@ -605,7 +543,7 @@ def _total_eac_for_county(
                 + r.get("annual_bill_gas", 0.0)
             )
             out[str(r.get("scenario"))] = total
-        return out.get(BASELINE_SCENARIO), out.get(COOPT_SCENARIO)
+        return out.get(scen_base), out.get(scen_coopt)
     except Exception:
         return None, None
 
@@ -614,6 +552,19 @@ def _write(path: str, text: str) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         f.write(text)
+
+
+def _scenario_pairs_all() -> List[Tuple[str, str]]:
+    """Return list of (scenario, scenario_coopt) pairs present in SCENARIOS."""
+    pairs: List[Tuple[str, str]] = []
+    keys = set(SCENARIOS.keys())
+    for s in sorted(keys):
+        if s.endswith("_coopt"):
+            continue
+        c = f"{s}_coopt"
+        if c in keys:
+            pairs.append((s, c))
+    return pairs
 
 
 def process(
@@ -630,42 +581,168 @@ def process(
     county_slugs = [slugify_county_name(c) for c in counties]
 
     rows_summary: List[Dict] = []
-
+    
     for county_slug in county_slugs:
         try:
-            # Sizes
-            size_b = _read_assets_for_county(base_input_dir, BASELINE_SCENARIO, housing_type, county_slug)
-            size_c = _read_assets_for_county(base_input_dir, COOPT_SCENARIO, housing_type, county_slug)
+            pair_sections: List[str] = []
+            rows_for_county: List[Dict] = []
+            for scen_base, scen_coopt in _scenario_pairs_all():
+                # Sizes
+                size_b = _read_assets_for_county(base_input_dir, scen_base, housing_type, county_slug)
+                size_c = _read_assets_for_county(base_input_dir, scen_coopt, housing_type, county_slug)
 
-            # Flows
-            flow_b = _flow_info_from_sources(base_input_dir, BASELINE_SCENARIO, housing_type, county_slug)
-            flow_c = _flow_info_from_sources(base_input_dir, COOPT_SCENARIO, housing_type, county_slug)
+                # Flows
+                flow_b = _flow_info_from_sources(base_input_dir, scen_base, housing_type, county_slug)
+                flow_c = _flow_info_from_sources(base_input_dir, scen_coopt, housing_type, county_slug)
 
-            # Costs
-            cost_b = _cost_info(base_input_dir, BASELINE_SCENARIO, housing_type, county_slug, variant=electricity_variant)
-            cost_c = _cost_info(base_input_dir, COOPT_SCENARIO, housing_type, county_slug, variant=electricity_variant)
+                # Costs
+                cost_b = _cost_info(base_input_dir, scen_base, housing_type, county_slug, variant=electricity_variant)
+                cost_c = _cost_info(base_input_dir, scen_coopt, housing_type, county_slug, variant=electricity_variant)
 
-            # EAC totals (optional)
-            eac_b, eac_c = _total_eac_for_county(base_input_dir, housing_type, county_slug, variant=electricity_variant)
+                # EAC totals (optional)
+                eac_b, eac_c = _total_eac_for_county(base_input_dir, housing_type, county_slug, scen_base, scen_coopt, variant=electricity_variant)
 
-            # Charts
-            monthly_b64 = monthly_imports_exports_chart(base_input_dir, housing_type, county_slug)
-            weekly_b64 = weekly_overlay_chart(base_input_dir, housing_type, county_slug, column="Grid to Load")
+                # Charts for this pair
+                monthly_b64 = monthly_imports_exports_chart(base_input_dir, housing_type, county_slug, scen_base, scen_coopt)
+                weekly_b64 = weekly_overlay_chart(base_input_dir, housing_type, county_slug, scen_base, scen_coopt, column="Grid to Load")
 
-            # HTML
+                # Build pair section HTML (tables + charts)
+                def fmt(x, unit=""):
+                    try:
+                        if x is None:
+                            return "N/A"
+                        if unit == "kW":
+                            return f"{float(x):.2f} kW"
+                        if unit == "kWh":
+                            return f"{float(x):,.0f} kWh"
+                        if unit == "$":
+                            return f"${float(x):,.0f}"
+                        if unit == "%":
+                            return f"{float(x)*100:.1f}%"
+                        return str(x)
+                    except Exception:
+                        return "N/A"
+
+                def pct_delta(a: Optional[float], b: Optional[float]) -> str:
+                    try:
+                        if a is None or b is None or a == 0:
+                            return "—"
+                        return f"{(b - a) / a * 100:.1f}%"
+                    except Exception:
+                        return "—"
+
+                pv_delta = pct_delta(size_b.pv_kw, size_c.pv_kw)
+                batt_delta = pct_delta(size_b.batt_kwh, size_c.batt_kwh)
+                imports_delta = pct_delta(flow_b.grid_to_load_kwh, flow_c.grid_to_load_kwh)
+                exports_delta = pct_delta(flow_b.exports_kwh, flow_c.exports_kwh)
+                bill_delta = pct_delta(cost_b.total_bill, cost_c.total_bill)
+                eac_delta = pct_delta(eac_b, eac_c) if (eac_b is not None and eac_c is not None) else "—"
+
+                def table(rows: List[Tuple[str, str, str, str]]) -> str:
+                    t = []
+                    t.append("<table style='width:100%; border-collapse:collapse;'>")
+                    t.append("<thead><tr><th style='text-align:left;'>Metric</th><th>Baseline</th><th>Co‑opt</th><th>Δ</th></tr></thead>")
+                    t.append("<tbody>")
+                    for label, vb, vc, vd in rows:
+                        t.append(
+                            "<tr>"
+                            f"<td style='text-align:left; color:#666;'>{label}</td>"
+                            f"<td style='text-align:center; font-weight:700; color:#2c5aa0;'>{vb}</td>"
+                            f"<td style='text-align:center; font-weight:700; color:#2c5aa0;'>{vc}</td>"
+                            f"<td style='text-align:center; color:#666;'>{vd or ''}</td>"
+                            "</tr>"
+                        )
+                    t.append("</tbody></table>")
+                    return "".join(t)
+
+                section = []
+                title = scen_base.replace('_', ' ').title()
+                section.append('<div class="card">')
+                section.append(f"<h3>{title} — System Sizes</h3>")
+                size_rows = [
+                    ("PV Size", fmt(size_b.pv_kw, 'kW'), fmt(size_c.pv_kw, 'kW'), pv_delta),
+                    ("Battery Size", fmt(size_b.batt_kwh, 'kWh'), fmt(size_c.batt_kwh, 'kWh'), batt_delta),
+                    ("Flags", "n/a", f"grid_charging={size_c.allow_grid_charging} batt_export={size_c.allow_batt_export}", ""),
+                ]
+                section.append(table(size_rows))
+                section.append("</div>")
+
+                section.append('<div class="card">')
+                section.append(f"<h3>{title} — Energy Flows (Annual)</h3>")
+                flow_rows = [
+                    ("PV AC", fmt(flow_b.pv_ac_kwh, 'kWh'), fmt(flow_c.pv_ac_kwh, 'kWh'), ""),
+                    ("Grid Imports", fmt(flow_b.grid_to_load_kwh, 'kWh'), fmt(flow_c.grid_to_load_kwh, 'kWh'), imports_delta),
+                    ("Exports", fmt(flow_b.exports_kwh, 'kWh'), fmt(flow_c.exports_kwh, 'kWh'), exports_delta),
+                    ("Self‑Consumption", fmt(flow_b.self_consumption_ratio, '%'), fmt(flow_c.self_consumption_ratio, '%'), ""),
+                ]
+                section.append(table(flow_rows))
+                section.append("</div>")
+
+                section.append('<div class="card">')
+                section.append(f"<h3>{title} — Annual Bills</h3>")
+                bill_rows = [
+                    ("Electricity", fmt(cost_b.electricity, '$'), fmt(cost_c.electricity, '$'), ""),
+                    ("Gas", fmt(cost_b.gas, '$'), fmt(cost_c.gas, '$'), ""),
+                    ("Total Annual Bill", fmt(cost_b.total_bill, '$'), fmt(cost_c.total_bill, '$'), bill_delta),
+                ]
+                section.append(table(bill_rows))
+                section.append("</div>")
+
+                section.append('<div class="card">')
+                section.append(f"<h3>{title} — Equivalent Annual Cost (EAC)</h3>")
+                eac_rows = [("Total EAC", fmt(eac_b, '$'), fmt(eac_c, '$'), eac_delta)]
+                section.append(table(eac_rows))
+                section.append("</div>")
+
+                # Charts
+                if monthly_b64:
+                    section.append('<div class="card">')
+                    section.append(f"<h3>{title} — Monthly Imports / Exports</h3>")
+                    section.append(f"<img src='data:image/png;base64,{monthly_b64}' alt='monthly' style='width:100%;height:auto;border-radius:6px;' />")
+                    section.append("</div>")
+                if weekly_b64:
+                    section.append('<div class="card">')
+                    section.append(f"<h3>{title} — Weekly Overlay — January (Grid to Load)</h3>")
+                    section.append(f"<img src='data:image/png;base64,{weekly_b64}' alt='weekly' style='width:100%;height:auto;border-radius:6px;' />")
+                    section.append("</div>")
+
+                pair_sections.append("\n".join(section))
+
+                # Per‑pair metrics row (for summary/CSV)
+                def safe(x):
+                    return None if x is None or (isinstance(x, float) and pd.isna(x)) else x
+                rows_for_county.append({
+                    "scenario": scen_base,
+                    "county_slug": county_slug,
+                    # Sizes
+                    "pv_kw_baseline": safe(size_b.pv_kw),
+                    "pv_kw_coopt": safe(size_c.pv_kw),
+                    "batt_kwh_baseline": safe(size_b.batt_kwh),
+                    "batt_kwh_coopt": safe(size_c.batt_kwh),
+                    # Flows
+                    "imports_kwh_baseline": flow_b.grid_to_load_kwh,
+                    "imports_kwh_coopt": flow_c.grid_to_load_kwh,
+                    "exports_kwh_baseline": flow_b.exports_kwh,
+                    "exports_kwh_coopt": flow_c.exports_kwh,
+                    "sc_ratio_baseline": safe(flow_b.self_consumption_ratio),
+                    "sc_ratio_coopt": safe(flow_c.self_consumption_ratio),
+                    # Costs
+                    "electricity_bill_baseline": safe(cost_b.electricity),
+                    "electricity_bill_coopt": safe(cost_c.electricity),
+                    "gas_bill_baseline": safe(cost_b.gas),
+                    "gas_bill_coopt": safe(cost_c.gas),
+                    "total_bill_baseline": safe(cost_b.total_bill),
+                    "total_bill_coopt": safe(cost_c.total_bill),
+                    # EAC
+                    "total_eac_baseline": safe(eac_b),
+                    "total_eac_coopt": safe(eac_c),
+                })
+
+            # Build one dashboard per county aggregating all scenario pairs
             html = _html_dashboard(
                 county_slug,
                 housing_type,
-                size_b,
-                size_c,
-                flow_b,
-                flow_c,
-                cost_b,
-                cost_c,
-                monthly_b64,
-                weekly_b64,
-                eac_b,
-                eac_c,
+                sections=pair_sections,
             )
             out_html = os.path.join(
                 output_dir,
@@ -675,44 +752,15 @@ def process(
             )
             _write(out_html, html)
             written.append(out_html)
-
-            # Per‑county CSV of metrics
-            def safe(x):
-                return None if x is None or (isinstance(x, float) and pd.isna(x)) else x
-
-            per_row = {
-                "county_slug": county_slug,
-                # Sizes
-                "pv_kw_baseline": safe(size_b.pv_kw),
-                "pv_kw_coopt": safe(size_c.pv_kw),
-                "batt_kwh_baseline": safe(size_b.batt_kwh),
-                "batt_kwh_coopt": safe(size_c.batt_kwh),
-                # Flows
-                "imports_kwh_baseline": flow_b.grid_to_load_kwh,
-                "imports_kwh_coopt": flow_c.grid_to_load_kwh,
-                "exports_kwh_baseline": flow_b.exports_kwh,
-                "exports_kwh_coopt": flow_c.exports_kwh,
-                "sc_ratio_baseline": safe(flow_b.self_consumption_ratio),
-                "sc_ratio_coopt": safe(flow_c.self_consumption_ratio),
-                # Costs
-                "electricity_bill_baseline": safe(cost_b.electricity),
-                "electricity_bill_coopt": safe(cost_c.electricity),
-                "gas_bill_baseline": safe(cost_b.gas),
-                "gas_bill_coopt": safe(cost_c.gas),
-                "total_bill_baseline": safe(cost_b.total_bill),
-                "total_bill_coopt": safe(cost_c.total_bill),
-                # EAC
-                "total_eac_baseline": safe(eac_b),
-                "total_eac_coopt": safe(eac_c),
-            }
             per_csv = os.path.join(
                 output_dir,
                 "compare_coopt_vs_fixed",
                 housing_type,
                 f"{county_slug}_metrics_g{sha}.csv",
             )
-            pd.DataFrame([per_row]).to_csv(per_csv, index=False)
-            rows_summary.append(per_row)
+            if rows_for_county:
+                pd.DataFrame(rows_for_county).to_csv(per_csv, index=False)
+                rows_summary.extend(rows_for_county)
         except Exception as e:
             print(f"[step23] Error comparing {county_slug}: {e}")
 
