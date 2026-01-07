@@ -31,6 +31,61 @@ SCENARIO_DATA_MAP = {
             },
         },
     },
+    "baseline_ice_car_coopt": {
+        "default": {
+            "electricity": {"file_prefix": "electricity_loads_", "columns": ["total_load"]},
+            "electricity_simulated": {"file_prefix": "electricity_loads_simulated_", "columns": []},
+            "electricity_vehicle": {"file_prefix": "vehicle_charging_profile_", "columns": []},
+            "gas": {
+                "file_prefix": "gas_loads_",
+                "columns": [
+                    "out.natural_gas.range_oven.energy_consumption.gas.building_avg.therms",
+                    "out.natural_gas.hot_water.energy_consumption.gas.building_avg.therms",
+                    "out.natural_gas.heating.energy_consumption.gas.building_avg.therms",
+                ],
+            },
+        },
+    },
+    # Co-optimized variant uses the same upstream inputs as 'baseline'
+    "baseline_coopt": {
+        "default": {
+            "electricity": {
+                "file_prefix": "electricity_loads_",
+                "columns": ["total_load"],
+            },
+            "electricity_simulated": {
+                "file_prefix": "electricity_loads_simulated_",
+                "columns": []
+            },
+            "electricity_vehicle": {
+                "file_prefix": "vehicle_charging_profile_",
+                "columns": []
+            },
+            "gas": {
+                "file_prefix": "gas_loads_",
+                "columns": [
+                    "out.natural_gas.range_oven.energy_consumption.gas.building_avg.therms",
+                    "out.natural_gas.hot_water.energy_consumption.gas.building_avg.therms",
+                    "out.natural_gas.heating.energy_consumption.gas.building_avg.therms",
+                ],
+            },
+        },
+    },
+    "baseline_ev_car_coopt": {
+        "default": {
+            "electricity": {"file_prefix": "electricity_loads_", "columns": ["total_load"]},
+            "electricity_simulated": {"file_prefix": "electricity_loads_simulated_", "columns": []},
+            "electricity_vehicle": {"file_prefix": "vehicle_charging_profile_", "columns": ["vehicle_charging"]},
+            "gas": {
+                "file_prefix": "gas_loads_",
+                "columns": [
+                    "out.natural_gas.range_oven.energy_consumption.gas.building_avg.therms",
+                    "out.natural_gas.hot_water.energy_consumption.gas.building_avg.therms",
+                    "out.natural_gas.heating.energy_consumption.gas.building_avg.therms",
+                ],
+            },
+        },
+    },
     "baseline_ice_car": {
         "default": {
             "electricity": {
@@ -51,6 +106,21 @@ SCENARIO_DATA_MAP = {
             },
         },
     },
+    "full_electric_ev_coopt": {
+        "default": {
+            "electricity": {"file_prefix": "electricity_loads_", "columns": ["total_load"]},
+            "electricity_simulated": {
+                "file_prefix": "electricity_loads_simulated_",
+                "columns": [
+                    "simulated.electricity.induction_stove.energy_consumption.electricity.kwh",
+                    "simulated.electricity.heat_pump.energy_consumption.electricity.kwh",
+                    "simulated.electricity.hot_water.energy_consumption.electricity.kwh",
+                ],
+            },
+            "electricity_vehicle": {"file_prefix": "vehicle_charging_profile_", "columns": ["vehicle_charging"]},
+            "gas": {"file_prefix": "gas_loads_", "columns": []},
+        },
+    },
     "baseline_ev_car": {
         "default": {
             "electricity": {
@@ -68,6 +138,23 @@ SCENARIO_DATA_MAP = {
             "gas": {
                 "file_prefix": "gas_loads_",
                 "columns": ["out.natural_gas.range_oven.energy_consumption.gas.building_avg.therms", "out.natural_gas.hot_water.energy_consumption.gas.building_avg.therms", "out.natural_gas.heating.energy_consumption.gas.building_avg.therms"]
+            },
+        },
+    },
+    "heat_pump_coopt": {
+        "default": {
+            "electricity": {"file_prefix": "electricity_loads_", "columns": ["total_load"]},
+            "electricity_simulated": {
+                "file_prefix": "electricity_loads_simulated_",
+                "columns": ["simulated.electricity.heat_pump.energy_consumption.electricity.kwh"],
+            },
+            "electricity_vehicle": {"file_prefix": "vehicle_charging_profile_", "columns": []},
+            "gas": {
+                "file_prefix": "gas_loads_",
+                "columns": [
+                    "out.natural_gas.range_oven.energy_consumption.gas.building_avg.therms",
+                    "out.natural_gas.hot_water.energy_consumption.gas.building_avg.therms",
+                ],
             },
         },
     },
@@ -91,6 +178,23 @@ SCENARIO_DATA_MAP = {
             },
         },
     },
+    "induction_stove_coopt": {
+        "default": {
+            "electricity": {"file_prefix": "electricity_loads_", "columns": ["total_load"]},
+            "electricity_simulated": {
+                "file_prefix": "electricity_loads_simulated_",
+                "columns": ["simulated.electricity.induction_stove.energy_consumption.electricity.kwh"],
+            },
+            "electricity_vehicle": {"file_prefix": "vehicle_charging_profile_", "columns": []},
+            "gas": {
+                "file_prefix": "gas_loads_",
+                "columns": [
+                    "out.natural_gas.heating.energy_consumption.gas.building_avg.therms",
+                    "out.natural_gas.hot_water.energy_consumption.gas.building_avg.therms",
+                ],
+            },
+        },
+    },
     "heat_pump": { 
         "default": {
             "electricity": {
@@ -111,6 +215,23 @@ SCENARIO_DATA_MAP = {
             }
         },
     },
+    "water_heating_coopt": {
+        "default": {
+            "electricity": {"file_prefix": "electricity_loads_", "columns": ["total_load"]},
+            "electricity_simulated": {
+                "file_prefix": "electricity_loads_simulated_",
+                "columns": ["simulated.electricity.hot_water.energy_consumption.electricity.kwh"],
+            },
+            "electricity_vehicle": {"file_prefix": "vehicle_charging_profile_", "columns": []},
+            "gas": {
+                "file_prefix": "gas_loads_",
+                "columns": [
+                    "out.natural_gas.range_oven.energy_consumption.gas.building_avg.therms",
+                    "out.natural_gas.heating.energy_consumption.gas.building_avg.therms",
+                ],
+            },
+        },
+    },
     "induction_stove": { 
         "default": {
             "electricity": {
@@ -129,6 +250,21 @@ SCENARIO_DATA_MAP = {
                 "file_prefix": "gas_loads_",
                 "columns":  ["out.natural_gas.heating.energy_consumption.gas.building_avg.therms", "out.natural_gas.hot_water.energy_consumption.gas.building_avg.therms"],
             }
+        },
+    },
+    "heat_pump_and_induction_stove_and_water_heating_coopt": {
+        "default": {
+            "electricity": {"file_prefix": "electricity_loads_", "columns": ["total_load"]},
+            "electricity_simulated": {
+                "file_prefix": "electricity_loads_simulated_",
+                "columns": [
+                    "simulated.electricity.induction_stove.energy_consumption.electricity.kwh",
+                    "simulated.electricity.heat_pump.energy_consumption.electricity.kwh",
+                    "simulated.electricity.hot_water.energy_consumption.electricity.kwh",
+                ],
+            },
+            "electricity_vehicle": {"file_prefix": "vehicle_charging_profile_", "columns": []},
+            "gas": {"file_prefix": "gas_loads_", "columns": []},
         },
     },
     "heat_pump_and_induction_stove": {

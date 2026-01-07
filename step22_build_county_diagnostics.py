@@ -53,6 +53,104 @@ from helpers.diagnostics_helpers import (
 import matplotlib.pyplot as plt
 
 
+def _is_coopt_scenario(scenario: str) -> bool:
+    return str(scenario).endswith("_coopt")
+
+
+def _read_coopt_capacities(base_input_dir: str, scenario: str, housing_type: str, county_slug: str) -> Optional[dict]:
+    """Read co-optimization sizes and flags from the Step 9b capacity CSV if present.
+
+    Returns dict with keys: 'solar_kw', 'battery_kwh', 'allow_grid_charging', 'allow_batt_export'
+    or None when not available.
+    """
+    try:
+        cap_csv = os.path.join(base_input_dir, scenario, housing_type, "CAPITAL_COSTS", "electrified_assets.csv")
+        if not os.path.exists(cap_csv):
+            return None
+        df = pd.read_csv(cap_csv)
+        if df.empty:
+            return None
+        # Normalize county slug
+        def to_slug(x):
+            try:
+                return slugify_county_name(str(x))
+            except Exception:
+                return str(x)
+        row = None
+        # Prefer explicit County column
+        if "County" in df.columns:
+            for _, r in df.iterrows():
+                if to_slug(r["County"]) == county_slug:
+                    row = r
+                    break
+        if row is None:
+            # Fallback: if first column looks like a county slug
+            first_col = df.columns[0]
+            for _, r in df.iterrows():
+                if to_slug(r[first_col]) == county_slug:
+                    row = r
+                    break
+        if row is None:
+            return None
+        out = {
+            "solar_kw": None,
+            "battery_kwh": None,
+            "allow_grid_charging": None,
+            "allow_batt_export": None,
+        }
+        if "Solar Capacity (kW)" in row:
+            try:
+                out["solar_kw"] = float(row["Solar Capacity (kW)"])
+            except Exception:
+                pass
+        if "Battery Capacity (kWh)" in row:
+            try:
+                out["battery_kwh"] = float(row["Battery Capacity (kWh)"])
+            except Exception:
+                pass
+        if "Allow Grid Charging" in row:
+            out["allow_grid_charging"] = bool(row["Allow Grid Charging"]) if not pd.isnull(row["Allow Grid Charging"]) else None
+        if "Allow Battery Export" in row:
+            out["allow_batt_export"] = bool(row["Allow Battery Export"]) if not pd.isnull(row["Allow Battery Export"]) else None
+        return out
+    except Exception:
+        return None
+
+
+def create_coopt_results_card(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+) -> str:
+    """Create a card summarizing Step 9b co-optimization results for the county.
+
+    Shows PV size (kW), Battery size (kWh), and dispatch flags.
+    If scenario is not a *_coopt variant or data is missing, returns an N/A card.
+    """
+    if not _is_coopt_scenario(scenario):
+        return "<div class='muted'>N/A — Not a co-optimization scenario</div>"
+    results = _read_coopt_capacities(base_input_dir, scenario, housing_type, county_slug)
+    if not results:
+        return "<div class='muted'>N/A — Co-optimization results not found</div>"
+    def fmt_bool(x):
+        return "Yes" if x is True else ("No" if x is False else "—")
+    pv = results.get("solar_kw")
+    bat = results.get("battery_kwh")
+    grid_ch = results.get("allow_grid_charging")
+    batt_exp = results.get("allow_batt_export")
+    pv_str = f"{pv:.2f} kW" if isinstance(pv, (int, float)) else "—"
+    bat_str = f"{bat:.2f} kWh" if isinstance(bat, (int, float)) else "—"
+    return (
+        "<div class='metrics-grid'>"
+        f"<div class='metric-block'><div class='muted'>PV Size (co‑opt)</div><div class='metric-value'>{pv_str}</div></div>"
+        f"<div class='metric-block'><div class='muted'>Battery Size (co‑opt)</div><div class='metric-value'>{bat_str}</div></div>"
+        f"<div class='metric-block'><div class='muted'>Battery Exports</div><div class='metric-value'>{fmt_bool(batt_exp)}<small>allow_batt_export</small></div></div>"
+        f"<div class='metric-block'><div class='muted'>Grid Charging</div><div class='metric-value'>{fmt_bool(grid_ch)}<small>allow_grid_charging</small></div></div>"
+        "</div>"
+    )
+
+
 # ---------- Solar + storage deployment figure (from Step 9 outputs) ----------
 
 
@@ -1444,6 +1542,7 @@ def _dashboard_html(
     flows_with: Optional[dict] = None,
     cost_breakdowns: Optional[dict] = None,
     assets_info: Optional[dict] = None,
+    coopt_card_html: Optional[str] = None,
 ) -> str:
     scen_title = scenario.replace("_", " ").title()
     county_title = county_slug.replace("-", " ").title()
@@ -1488,6 +1587,9 @@ def _dashboard_html(
                 .kmtbl th {{ text-align: center; font-weight: 600; color: #2c3e50; }}
                 .kmtbl td {{ text-align: center; }}
                 .kmtbl td:first-child {{ text-align: left; color: #666; width: 40%; }}
+                /* Right-align numeric value cells for better readability */
+                .kmtbl td.val {{ text-align: right; }}
+                .kmtbl td.money {{ text-align: right; }}
                 .val {{ font-weight: 700; color: #2c5aa0; }}
                 .formula {{ color: #888; font-size: 11px; margin-top: 2px; }}
                 .money {{ color: #1a5; font-weight: 700; }}
@@ -1582,6 +1684,15 @@ def _dashboard_html(
         parts.append(grid_supply_html or "<div class=\"metric-value\">N/A<br><small>No data</small></div>")
         parts.append("</div>")
         parts.append("</div>")
+    parts.append("</div>")
+
+    # Card 2b: Co‑Optimization Results (Step 9b)
+    parts.append('<div class="card">')
+    parts.append("<h2>Co‑Optimization Results (Step 9b)</h2>")
+    if coopt_card_html:
+        parts.append(coopt_card_html)
+    else:
+        parts.append('<div class="muted">N/A</div>')
     parts.append("</div>")
 
     # Card 3: Energy Flows — With vs Without Solar+Storage
@@ -1911,6 +2022,7 @@ def process(
                 flows_with=flows_with,
                 cost_breakdowns=cost_breakdowns,
                 assets_info=assets_info,
+                coopt_card_html=create_coopt_results_card(base_input_dir, scenario, housing_type, county_slug),
             )
             out_path = os.path.join(
                 output_dir,

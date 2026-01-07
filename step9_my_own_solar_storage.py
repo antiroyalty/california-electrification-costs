@@ -60,7 +60,7 @@ from step9_solar_storage_dispatch_core import (
     battery_dispatch_dynamic,
     temp_battery_capacity_kwh,
 )
-from step9_exports import (
+from helpers.step9_exports import (
     compute_excess_solar_exports,
     prepare_export_enabled_outputs,
 )

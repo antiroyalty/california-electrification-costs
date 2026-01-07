@@ -172,6 +172,8 @@ def process(base_input_dir, output_dir, scenario, housing_types, year, counties=
     only the rows for the given 'year'. The target year is passed as a top-level argument.
     """
     for housing_type in housing_types:
+        print("scenario: ", scenario)
+        print("base_input_dir: ", base_input_dir)
         scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
         counties_list = get_counties(scenario_path, counties)
 
@@ -179,4 +181,4 @@ def process(base_input_dir, output_dir, scenario, housing_types, year, counties=
             process_county_weather(county, output_dir, scenario, housing_type, year, force_recompute)
 
 if __name__ == '__main__':
-    process("data", "data/loadprofiles", "baseline", ["single-family-detached"], 2018, norcal_counties + central_counties + socal_counties)
+    process("data/loadprofiles", "data/loadprofiles", "baseline_coopt", ["single-family-detached"], 2018, ['Alameda County']) # norcal_counties + central_counties + socal_counties
