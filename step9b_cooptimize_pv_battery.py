@@ -47,8 +47,8 @@ Flags / configuration
   Retail plan for the resolved utility (e.g., PG&E: E-TOU-D; SCE: TOU-D-4-9PM; SDG&E: TOU-ELEC). Defaults to the first plan found for the utility.
 - --allow-grid-charging
   Enable Grid→Battery charging (off by default)
-- --allow-batt-export
-  Enable Battery→Grid exports (off by default — many utilities prohibit crediting non‑PV exports)
+- --allow-batt-export / --disallow-batt-export
+  Enable or disable Battery→Grid exports (default: enabled)
 - --discount-rate (default: 0.07)
 - --pv-capex-kw (default: 2830.0 $/kW)
 - --batt-capex-kwh (default: 800.0 $/kWh)
@@ -153,7 +153,7 @@ def _solve_lp(
     p_exp: List[float],
     *,
     allow_grid_charging: bool = False,
-    allow_batt_export: bool = False,
+    allow_batt_export: bool = True,
     c_pv_kw: float = 2830.0,           # $/kW
     c_batt_kwh: float = 800.0,         # $/kWh (approx, configurable)
     c_batt_kw: float = 0.0,            # $/kW PCS/inverter (optional)
@@ -329,7 +329,7 @@ def process(
     *,
     plan_override: Optional[str] = None,
     allow_grid_charging: bool = False,
-    allow_batt_export: bool = False,
+    allow_batt_export: bool = True,
     discount_rate: float = 0.07,
     pv_capex_per_kw: float = 2830.0,
     batt_capex_per_kwh: float = 800.0,
@@ -455,7 +455,11 @@ def main():
     p.add_argument("--counties", nargs="*")
     p.add_argument("--plan", help="Override plan name for the resolved utility (e.g., E-TOU-D, TOU-D-4-9PM)")
     p.add_argument("--allow-grid-charging", action="store_true")
-    p.add_argument("--allow-batt-export", action="store_true")
+    # Battery export flags (default: enabled)
+    p.add_argument("--allow-batt-export", dest="allow_batt_export", action="store_true", default=True,
+                   help="Allow Battery→Grid exports (default: enabled)")
+    p.add_argument("--disallow-batt-export", dest="allow_batt_export", action="store_false",
+                   help="Disable Battery→Grid exports")
     p.add_argument("--discount-rate", type=float, default=0.07)
     p.add_argument("--pv-capex-kw", type=float, default=2830.0)
     p.add_argument("--batt-capex-kwh", type=float, default=800.0)
