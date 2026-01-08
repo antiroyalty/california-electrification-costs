@@ -22,20 +22,6 @@ class CostService:
         self.output_dir = output_dir
         self.desired_rate_plans = rate_plans
 
-    def _scenario_list_for_comparisons(self):
-        preferred = [
-            "baseline",
-            "induction_stove",
-            "water_heating",
-            "heat_pump",
-            "heat_pump_and_induction_stove",
-            "heat_pump_and_induction_stove_and_water_heating",
-            "baseline_ice_car",
-            "baseline_ev_car",
-            "full_electric_ev",
-        ]
-        return [s for s in preferred if s in SCENARIOS]
-
     def run(self):
         def _run_module(script_rel_path: str, **kwargs):
             script_path = os.path.join(os.path.dirname(__file__), script_rel_path)
@@ -149,4 +135,3 @@ if __name__ == "__main__":
     cost_service.run()
 
     print("\nCost analysis completed successfully!")
-    print(f"Results saved to: {output_dir}")
