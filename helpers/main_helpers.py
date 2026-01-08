@@ -154,3 +154,14 @@ def git_short_sha() -> str:
 
 def format_load_profile(load_profile):
     return [round(x, 3) for x in load_profile[5:20]]
+
+
+def log_step(step: int | str, label: str | None = None) -> None:
+    """Print a simple step banner for progress visibility.
+
+    Examples
+      log_step(8)
+      log_step(9, label="PV/Storage")
+    """
+    name = label if label is not None else step
+    print("-" * 15, f" Step {name} ", "-" * 15)

@@ -6,6 +6,7 @@ wip-outputs
 images
 .DS_Store
 .env
+.venv/
 visualizations/
 cb_2018_us_county_20m
 cb_2018_us_county_20m.zip
