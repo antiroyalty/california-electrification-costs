@@ -22,9 +22,6 @@ class CostService:
         self.output_dir = output_dir
         self.desired_rate_plans = rate_plans
 
-    def log_step(self, step: int):
-        print("-" * 15, f" Step {step} ", "-" * 15)
-
     def _scenario_list_for_comparisons(self):
         preferred = [
             "baseline",
@@ -136,32 +133,21 @@ class CostService:
             base_dir="data/loadprofiles",
         )
 
-        # Prepare outputs and assumptions before Module 4
-        base_input_dir, output_dir = self._prepare_outputs()
-        print("\nAssumptions — " + self._summarize_dispatch_and_sizing())
-        plan_pref = list({v.get('electricity') for v in self.desired_rate_plans.values() if isinstance(v, dict) and v.get('electricity')})
-
         # Module 4: Steps 15, 18–22
         _run_module(
             os.path.join("4_visualize-and-compare-results", "run.py"),
             scenario=self.scenario,
             housing_type=self.housing_type,
             counties=self.counties,
-            base_input_dir=base_input_dir,
-            output_dir=output_dir,
+            base_input_dir=self.output_dir,
+            output_dir=os.path.join("analysis_results"),
             electricity_variant="nem3",
-            plan_preference=plan_pref,
+            plan_preference=None,
+            desired_rate_plans=self.desired_rate_plans,
             incentive="full_incentives",
             discount_rate=0.07,
             agg="mean",
         )
-
-    def _prepare_outputs(self) -> tuple[str, str]:
-        """Prepare and return (base_input_dir, output_dir). Keeps run() tidy."""
-        base_input_dir = self.output_dir
-        output_dir = os.path.join("analysis_results")
-        os.makedirs(output_dir, exist_ok=True)
-        return base_input_dir, output_dir
 
 
 def parse_arguments():

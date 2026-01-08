@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, Dict
 
 
 # Ensure module folder and repo root are importable
@@ -14,6 +14,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from scenarios import SCENARIOS  # noqa: E402
+import runpy  # noqa: E402
 
 import step15_payback_periods as PaybackPeriods  # noqa: E402
 # import step16_display_key_metrics_maps as DisplayMaps  # optional, mirrors cost_service (commented)
@@ -34,6 +35,7 @@ def run(
     output_dir: str = "analysis_results",
     electricity_variant: str = "nem3",
     plan_preference: Optional[Iterable[str]] = None,
+    desired_rate_plans: Optional[Dict[str, Dict[str, str]]] = None,
     incentive: str = "full_incentives",
     discount_rate: float = 0.07,
     agg: str = "mean",
@@ -41,6 +43,38 @@ def run(
     """Run module 4: visualize and compare results (Steps 15, 18–22)."""
     c_list: List[str] = list(counties)
     os.makedirs(output_dir, exist_ok=True)
+    # Prepare plan preference if not provided
+    if (not plan_preference) and desired_rate_plans:
+        try:
+            plan_preference = list({
+                v.get('electricity') for v in desired_rate_plans.values()
+                if isinstance(v, dict) and v.get('electricity')
+            })
+        except Exception:
+            plan_preference = None
+    # Print assumptions summary (dispatch + sizing + plan preference)
+    try:
+        step9_path = os.path.join(ROOT, "2_compute-and-cooptimize-solar-storage", "step9_my_own_solar_storage.py")
+        ns = runpy.run_path(step9_path, run_name="__not_main__")
+        pv_size_fraction = ns.get("PV_SIZE_FRACTION")
+        use_eac_opt = bool(ns.get("USE_EAC_OPTIMAL_SIZING", False))
+        batt = ns.get("BATTERY_CAPACITY_KWH")
+        mode = "dynamic PV-only"
+        sizing = (
+            "EAC-optimal per county"
+            if use_eac_opt
+            else (
+                f"fraction of annual-match (PV_SIZE_FRACTION={pv_size_fraction})"
+                if pv_size_fraction is not None
+                else "default sizing"
+            )
+        )
+        plans = list(plan_preference) if plan_preference else []
+        plan_str = f"; Electricity plan preference: {', '.join(plans)}" if plans else ""
+        batt_str = f", default battery ≈{batt} kWh" if batt else ""
+        print("\nAssumptions — " + f"Dispatch: {mode}; Sizing: {sizing}{batt_str}{plan_str}; Billing variant: NEM3 for with-solar")
+    except Exception:
+        pass
     # 15) Payback periods
     log_step(15)
     PaybackPeriods.process(base_input_dir, scenario, housing_type, c_list)
