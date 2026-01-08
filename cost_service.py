@@ -36,64 +36,7 @@ class CostService:
         ]
         return [s for s in preferred if s in SCENARIOS]
 
-    def _summarize_dispatch_and_sizing(self):
-        # Step 9 (DIY) is dynamic dispatch by design. Read sizing constants from file.
-        step9_path = os.path.join(
-            os.path.dirname(__file__),
-            "2_compute-and-cooptimize-solar-storage",
-            "step9_my_own_solar_storage.py",
-        )
-        pv_size_fraction = None
-        use_eac_opt = False
-        batt = None
-        try:
-            ns = runpy.run_path(step9_path, run_name="__not_main__")
-            pv_size_fraction = ns.get("PV_SIZE_FRACTION")
-            use_eac_opt = bool(ns.get("USE_EAC_OPTIMAL_SIZING", False))
-            batt = ns.get("BATTERY_CAPACITY_KWH")
-        except Exception:
-            pass
-
-        mode = "dynamic PV-only"
-        sizing = (
-            "EAC-optimal per county"
-            if use_eac_opt
-            else (
-                f"fraction of annual-match (PV_SIZE_FRACTION={pv_size_fraction})"
-                if pv_size_fraction is not None
-                else "default sizing"
-            )
-        )
-        batt_str = f", default battery ≈{batt} kWh" if batt else ""
-        plans = sorted({v.get('electricity') for v in self.desired_rate_plans.values() if isinstance(v, dict) and v.get('electricity')})
-        plan_str = f"; Electricity plan preference: {', '.join(plans)}" if plans else ""
-        return f"Dispatch: {mode}; Sizing: {sizing}{batt_str}{plan_str}; Billing variant: NEM3 for with-solar"
-
     def run(self):
-        def _is_coopt_scenario(name: str) -> bool:
-            return str(name).endswith("_coopt")
-
-        def _ensure_weather_copy_for_coopt(housing_type: str, counties):
-            from helpers.main_helpers import slugify_county_name
-            for c in counties:
-                slug = slugify_county_name(c)
-                base_raw = os.path.join(
-                    "data", "loadprofiles", "baseline", housing_type, slug,
-                    f"weather_TMY_{slug}.csv",
-                )
-                coopt_raw = os.path.join(
-                    "data", "loadprofiles", self.scenario, housing_type, slug,
-                    f"weather_TMY_{slug}.csv",
-                )
-                if not os.path.exists(coopt_raw) and os.path.exists(base_raw):
-                    os.makedirs(os.path.dirname(coopt_raw), exist_ok=True)
-                    try:
-                        import shutil
-                        shutil.copy2(base_raw, coopt_raw)
-                        print(f"[coopt] Copied weather for {slug}: {coopt_raw}")
-                    except Exception as e:
-                        print(f"[coopt] Warning: could not copy weather for {slug}: {e}")
-
         def _run_module(script_rel_path: str, **kwargs):
             script_path = os.path.join(os.path.dirname(__file__), script_rel_path)
             ns = runpy.run_path(script_path, run_name="__not_main__")
@@ -113,8 +56,6 @@ class CostService:
         )
 
         # Module 2: Steps 8–9
-        if _is_coopt_scenario(self.scenario):
-            _ensure_weather_copy_for_coopt(self.housing_type, self.counties)
         _run_module(
             os.path.join("2_compute-and-cooptimize-solar-storage", "run.py"),
             scenario=self.scenario,

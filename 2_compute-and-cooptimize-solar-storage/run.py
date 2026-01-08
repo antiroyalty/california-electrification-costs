@@ -16,6 +16,7 @@ if ROOT not in sys.path:
 import step8_get_weather_files as WeatherFiles  # noqa: E402
 import step9_my_own_solar_storage as Step9MyOwnSolarStorage  # noqa: E402
 import step9b_cooptimize_pv_battery as Step9bCoopt  # noqa: E402
+from helpers.main_helpers import slugify_county_name  # noqa: E402
 from helpers.main_helpers import log_step  # noqa: E402
 
 
@@ -33,6 +34,25 @@ def run(
 ) -> None:
     """Run module 2: weather fetch + PV/Storage sizing/dispatch (Steps 8–9)."""
     c_list: List[str] = list(counties)
+    # Co-opt runs reuse baseline weather if present (copy, not symlink)
+    if _is_coopt_scenario(scenario):
+        for c in c_list:
+            slug = slugify_county_name(c)
+            base_raw = os.path.join(
+                base_dir, "baseline", housing_type, slug, f"weather_TMY_{slug}.csv"
+            )
+            coopt_raw = os.path.join(
+                base_dir, scenario, housing_type, slug, f"weather_TMY_{slug}.csv"
+            )
+            if not os.path.exists(coopt_raw) and os.path.exists(base_raw):
+                os.makedirs(os.path.dirname(coopt_raw), exist_ok=True)
+                try:
+                    import shutil
+                    shutil.copy2(base_raw, coopt_raw)
+                    print(f"[coopt] Copied weather for {slug}: {coopt_raw}")
+                except Exception as e:
+                    print(f"[coopt] Warning: could not copy weather for {slug}: {e}")
+
     # 8) Weather files
     log_step(8)
     WeatherFiles.process(base_dir, base_dir, scenario, [housing_type], weather_year, c_list)
