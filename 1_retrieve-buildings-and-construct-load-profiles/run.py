@@ -5,8 +5,11 @@ import sys
 from typing import Iterable, List
 
 
-# Ensure repo root is importable (for scenarios.py)
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Ensure module folder and repo root are importable
+MODDIR = os.path.dirname(os.path.abspath(__file__))
+if MODDIR not in sys.path:
+    sys.path.insert(0, MODDIR)
+ROOT = os.path.dirname(os.path.dirname(MODDIR))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
@@ -116,4 +119,3 @@ if __name__ == "__main__":
     args = p.parse_args()
 
     run(args.scenario, args.housing_type, args.counties, input_dir=args.input_dir, output_dir=args.output_dir)
-
