@@ -16,6 +16,7 @@ if ROOT not in sys.path:
 import step8_get_weather_files as WeatherFiles  # noqa: E402
 import step9_my_own_solar_storage as Step9MyOwnSolarStorage  # noqa: E402
 import step9b_cooptimize_pv_battery as Step9bCoopt  # noqa: E402
+from helpers.main_helpers import log_step  # noqa: E402
 
 
 def _is_coopt_scenario(name: str) -> bool:
@@ -32,11 +33,12 @@ def run(
 ) -> None:
     """Run module 2: weather fetch + PV/Storage sizing/dispatch (Steps 8–9)."""
     c_list: List[str] = list(counties)
-
     # 8) Weather files
+    log_step(8)
     WeatherFiles.process(base_dir, base_dir, scenario, [housing_type], weather_year, c_list)
 
     # 9) PV/Storage modeling (co‑opt LP variant or default dispatch)
+    log_step(9)
     if _is_coopt_scenario(scenario):
         Step9bCoopt.process(
             base_input_dir=base_dir,

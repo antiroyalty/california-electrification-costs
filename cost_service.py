@@ -106,7 +106,6 @@ class CostService:
             raise RuntimeError(f"run() not found in {script_rel_path}")
 
         # Module 1: Steps 1–7
-        self.log_step(1)
         _run_module(
             os.path.join("1_retrieve-buildings-and-construct-load-profiles", "run.py"),
             scenario=self.scenario,
@@ -117,7 +116,6 @@ class CostService:
         )
 
         # Module 2: Steps 8–9
-        self.log_step(8)
         if _is_coopt_scenario(self.scenario):
             _ensure_weather_copy_for_coopt(self.housing_type, self.counties)
         _run_module(
@@ -130,7 +128,6 @@ class CostService:
         )
 
         # Module 3: Steps 10–14
-        self.log_step(10)
         _run_module(
             os.path.join("3_compute_rates_and_capital_costs", "run.py"),
             scenario=self.scenario,
@@ -145,7 +142,6 @@ class CostService:
         plan_pref = list({v.get('electricity') for v in self.desired_rate_plans.values() if isinstance(v, dict) and v.get('electricity')})
 
         # Module 4: Steps 15, 18–22
-        self.log_step(15)
         _run_module(
             os.path.join("4_visualize-and-compare-results", "run.py"),
             scenario=self.scenario,

@@ -22,6 +22,7 @@ import step19_compare_two_scenarios as Step19CompareTwoScenarios  # noqa: E402
 import step20_no_solar_storage_electrification as Step20NoSolarStorageElectrification  # noqa: E402
 import step21_compare_eac_with_vs_without as Step21CompareEACWithVsWithout  # noqa: E402
 import step22_build_county_diagnostics as Step22BuildCountyDiagnostics  # noqa: E402
+from helpers.main_helpers import log_step  # noqa: E402
 
 
 def run(
@@ -40,14 +41,15 @@ def run(
     """Run module 4: visualize and compare results (Steps 15, 18–22)."""
     c_list: List[str] = list(counties)
     os.makedirs(output_dir, exist_ok=True)
-
     # 15) Payback periods
+    log_step(15)
     PaybackPeriods.process(base_input_dir, scenario, housing_type, c_list)
 
     # 16) Optional maps (kept commented to match cost_service behavior)
     # DisplayMaps.process(base_input_dir, base_input_dir, scenario, housing_type, c_list, desired_rate_plans)
 
     # 18) Cross-scenario EAC (use all scenarios)
+    log_step(18)
     Step18CrossScenarioComparisons.process(
         base_input_dir,
         output_dir,
@@ -59,6 +61,7 @@ def run(
     )
 
     # 19) EV vs ICE comparison
+    log_step(19)
     Step19CompareTwoScenarios.process(
         base_input_dir,
         output_dir,
@@ -70,6 +73,7 @@ def run(
     )
 
     # 20) No-solar EAC for the current scenario
+    log_step(20)
     Step20NoSolarStorageElectrification.process(
         base_input_dir,
         output_dir,
@@ -82,6 +86,7 @@ def run(
     )
 
     # 21) With vs without PV for the current scenario
+    log_step(21)
     Step21CompareEACWithVsWithout.process(
         base_input_dir,
         output_dir,
@@ -96,6 +101,7 @@ def run(
     )
 
     # 22) Per-county diagnostics
+    log_step(22)
     Step22BuildCountyDiagnostics.process(
         base_input_dir,
         output_dir,

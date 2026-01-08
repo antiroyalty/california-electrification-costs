@@ -14,6 +14,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from scenarios import SCENARIOS  # noqa: E402
+from helpers.main_helpers import log_step  # noqa: E402
 
 import step1_identify_suitable_buildings as IdentifySuitableBuildings  # noqa: E402
 import step2_pull_buildings as PullBuildings  # noqa: E402
@@ -36,6 +37,7 @@ def run(
     c_list: List[str] = list(counties)
 
     # 1) Identify suitable buildings
+    log_step(1)
     IdentifySuitableBuildings.process(
         scenario,
         housing_type,
@@ -45,6 +47,7 @@ def run(
     )
 
     # 2) Pull buildings metadata/inputs
+    log_step(2)
     PullBuildings.process(
         scenario,
         housing_type,
@@ -54,6 +57,7 @@ def run(
     )
 
     # 3) Electricity load profiles
+    log_step(3)
     BuildElectricityLoadProfiles.process(
         scenario,
         SCENARIOS[scenario],
@@ -65,6 +69,7 @@ def run(
     )
 
     # 4) Gas load profiles
+    log_step(4)
     BuildGasLoadProfiles.process(
         input_dir,
         output_dir,
@@ -76,6 +81,7 @@ def run(
     )
 
     # 5) Convert gas appliances to electrical equivalents
+    log_step(5)
     ConvertGasToElectric.process(
         output_dir,
         output_dir,
@@ -86,6 +92,7 @@ def run(
     )
 
     # 6) EV load profiles
+    log_step(6)
     BuildElectricVehicleLoadProfiles.process(
         input_dir,
         output_dir,
@@ -97,6 +104,7 @@ def run(
     )
 
     # 7) Combine real and simulated electricity loads
+    log_step(7)
     CombineRealAndSimulatedProfiles.process(
         output_dir,
         output_dir,
