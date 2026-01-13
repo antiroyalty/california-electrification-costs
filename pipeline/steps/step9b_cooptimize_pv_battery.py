@@ -87,7 +87,7 @@ from helpers.utility_helpers import get_utility_for_county
 from helpers.nem3_export_rates import get_export_rate_table_for_county
 from helpers.electricity_rate_helpers import PGE_RATE_PLANS, SCE_RATE_PLANS, SDGE_RATE_PLANS
 
-from step9_solar_storage_dispatch_core import (
+from .step9_solar_storage_dispatch_core import (
     prepare_weather_and_load,
     pv_timeseries_ac_kwh,
     PR_BASE,

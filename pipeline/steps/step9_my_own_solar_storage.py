@@ -48,7 +48,7 @@ from helpers.main_helpers import (
 )
 from helpers import log_profiles
 from helpers.step9_plotting_helper import plot_first_weeks
-from step9_solar_storage_dispatch_core import (
+from .step9_solar_storage_dispatch_core import (
     PR_BASE,
     NOCT_C,
     GAMMA_PDC,

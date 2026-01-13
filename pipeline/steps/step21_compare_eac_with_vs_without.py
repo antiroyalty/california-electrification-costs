@@ -29,7 +29,7 @@ from scenarios import SCENARIOS
 from helpers.main_helpers import slugify_county_name, get_scenario_path, git_short_sha
 
 from helpers.plot_scenario_comparison_helper import collect_eac_components
-from step20_no_solar_storage_electrification import collect_eac_no_pv
+from .step20_no_solar_storage_electrification import collect_eac_no_pv
 
 
 
@@ -236,7 +236,7 @@ def process(
     # Per-county delta export
     try:
         from helpers.plot_scenario_comparison_helper import collect_eac_components_by_county
-        from step20_no_solar_storage_electrification import collect_eac_no_pv_by_county
+        from .step20_no_solar_storage_electrification import collect_eac_no_pv_by_county
         with_by_cty = collect_eac_components_by_county(
             base_input_dir,
             housing_type,
