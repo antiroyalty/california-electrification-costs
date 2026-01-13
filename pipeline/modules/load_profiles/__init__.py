@@ -6,13 +6,13 @@ from ...config import Config
 from helpers.main_helpers import log_step
 from scenarios import SCENARIOS
 
-import step1_identify_suitable_buildings as IdentifySuitableBuildings
-import step2_pull_buildings as PullBuildings
-import step3_build_electricity_load_profiles as BuildElectricityLoadProfiles
-import step4_build_gas_load_profiles as BuildGasLoadProfiles
-import step5_convert_gas_appliances_to_electrical_appliances as ConvertGasToElectric
-import step6_build_electric_vehicle_load_profiles as BuildElectricVehicleLoadProfiles
-import step7_combine_real_and_simulated_electricity_loads as CombineRealAndSimulatedProfiles
+from pipeline.steps import step1_identify_suitable_buildings as IdentifySuitableBuildings
+from pipeline.steps import step2_pull_buildings as PullBuildings
+from pipeline.steps import step3_build_electricity_load_profiles as BuildElectricityLoadProfiles
+from pipeline.steps import step4_build_gas_load_profiles as BuildGasLoadProfiles
+from pipeline.steps import step5_convert_gas_appliances_to_electrical_appliances as ConvertGasToElectric
+from pipeline.steps import step6_build_electric_vehicle_load_profiles as BuildElectricVehicleLoadProfiles
+from pipeline.steps import step7_combine_real_and_simulated_electricity_loads as CombineRealAndSimulatedProfiles
 
 
 def run(cfg: Config) -> None:

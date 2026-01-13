@@ -6,9 +6,9 @@ from typing import List
 from ...config import Config
 from helpers.main_helpers import log_step, slugify_county_name
 
-import step8_get_weather_files as WeatherFiles
-import step9_my_own_solar_storage as Step9MyOwnSolarStorage
-import step9b_cooptimize_pv_battery as Step9bCoopt
+from pipeline.steps import step8_get_weather_files as WeatherFiles
+from pipeline.steps import step9_my_own_solar_storage as Step9MyOwnSolarStorage
+from pipeline.steps import step9b_cooptimize_pv_battery as Step9bCoopt
 
 
 def _is_coopt_scenario(name: str) -> bool:

@@ -1,18 +1,17 @@
 from __future__ import annotations
 
 import os
-import runpy
 from typing import Dict, Iterable, List, Optional
 
 from ...config import Config
 from helpers.main_helpers import log_step
 
-import step15_payback_periods as PaybackPeriods
-import step18_cross_scenario_comparisons as Step18CrossScenarioComparisons
-import step19_compare_two_scenarios as Step19CompareTwoScenarios
-import step20_no_solar_storage_electrification as Step20NoSolarStorageElectrification
-import step21_compare_eac_with_vs_without as Step21CompareEACWithVsWithout
-import step22_build_county_diagnostics as Step22BuildCountyDiagnostics
+from pipeline.steps import step15_payback_periods as PaybackPeriods
+from pipeline.steps import step18_cross_scenario_comparisons as Step18CrossScenarioComparisons
+from pipeline.steps import step19_compare_two_scenarios as Step19CompareTwoScenarios
+from pipeline.steps import step20_no_solar_storage_electrification as Step20NoSolarStorageElectrification
+from pipeline.steps import step21_compare_eac_with_vs_without as Step21CompareEACWithVsWithout
+from pipeline.steps import step22_build_county_diagnostics as Step22BuildCountyDiagnostics
 from scenarios import SCENARIOS
 
 
@@ -38,13 +37,10 @@ def run(cfg: Config) -> None:
 
     # Print assumptions summary (dispatch + sizing + plan preference)
     try:
-        step9_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-                                  "2_compute-and-cooptimize-solar-storage",
-                                  "step9_my_own_solar_storage.py")
-        ns = runpy.run_path(step9_path, run_name="__not_main__")
-        pv_size_fraction = ns.get("PV_SIZE_FRACTION")
-        use_eac_opt = bool(ns.get("USE_EAC_OPTIMAL_SIZING", False))
-        batt = ns.get("BATTERY_CAPACITY_KWH")
+        from pipeline.steps import step9_my_own_solar_storage as S9
+        pv_size_fraction = getattr(S9, "PV_SIZE_FRACTION", None)
+        use_eac_opt = bool(getattr(S9, "USE_EAC_OPTIMAL_SIZING", False))
+        batt = getattr(S9, "BATTERY_CAPACITY_KWH", None)
         mode = "dynamic PV-only"
         sizing = (
             "EAC-optimal per county"

@@ -5,11 +5,11 @@ from typing import List
 from ...config import Config
 from helpers.main_helpers import log_step
 
-import step10_get_loads_for_rates as GetLoadsForRates
-import step11_evaluate_gas_rates as EvaluateGasRates
-import step12_evaluate_electricity_rates as EvaluateElectricityRates
-import step13_combine_total_annual_costs as CombineTotalAnnualCosts
-import step14_build_capital_costs_lifetimes_incentives as BuildCapitalCostsLifetimesIncentives
+from pipeline.steps import step10_get_loads_for_rates as GetLoadsForRates
+from pipeline.steps import step11_evaluate_gas_rates as EvaluateGasRates
+from pipeline.steps import step12_evaluate_electricity_rates as EvaluateElectricityRates
+from pipeline.steps import step13_combine_total_annual_costs as CombineTotalAnnualCosts
+from pipeline.steps import step14_build_capital_costs_lifetimes_incentives as BuildCapitalCostsLifetimesIncentives
 
 
 def run(cfg: Config) -> None:
