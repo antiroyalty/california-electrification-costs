@@ -31,7 +31,7 @@ import matplotlib.pyplot as plt
 
 from helpers.main_helpers import slugify_county_name, get_scenario_path, git_short_sha
 from helpers.capital_cost_map_builder import LIFETIMES
-from step15_payback_periods import vehicle_annual_adders_from_ledger
+from .step15_payback_periods import vehicle_annual_adders_from_ledger
 from scenarios import SCENARIOS
 
 try:

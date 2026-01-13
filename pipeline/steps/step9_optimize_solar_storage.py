@@ -54,14 +54,14 @@ from helpers.nem3_export_rates import (
     default_options_for_utility,
     NEM3Options,
 )
-from step9_solar_storage_dispatch_core import (
+from .step9_solar_storage_dispatch_core import (
     prepare_weather_and_load,
     pv_timeseries_ac_kwh,
     battery_dispatch_dynamic,
     temp_battery_capacity_kwh,
     compute_system_capacity_kW,
 )
-from step12_evaluate_electricity_rates import calculate_nem3_annual_costs
+from .step12_evaluate_electricity_rates import calculate_nem3_annual_costs
 
 
 # Constants
