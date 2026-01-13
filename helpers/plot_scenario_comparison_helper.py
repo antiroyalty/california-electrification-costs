@@ -56,7 +56,7 @@ from helpers.main_helpers import slugify_county_name, get_scenario_path
 from helpers.maps_helpers import get_latest_csv_file
 from helpers.utility_helpers import get_utility_for_county
 from helpers.capital_cost_map_builder import LIFETIMES
-from step15_payback_periods import vehicle_annual_adders_from_ledger
+from evaluations.vehicles import vehicle_annual_adders_from_ledger
 
 
 # ---------- Internal data access helpers ----------
