@@ -1752,13 +1752,19 @@ def _dashboard_html(
         parts.append("<div class=\"metric-block\">")
         parts.append("<div class=\"muted\">Grid Supply to Load</div>")
         parts.append(grid_supply_html or "<div class=\"metric-value\">N/A<br><small>No data</small></div>")
-        # PV LCOE
-        parts.append(lcoe_html or "")
         parts.append("</div>")
         parts.append("</div>")
     parts.append("</div>")
 
-    # Card 2b: Co‑Optimization Results (Step 9b)
+    # Card 2b: PV LCOE
+    parts.append("<div class=\"card\">")
+    parts.append("<h2>PV LCOE</h2>")
+    parts.append("<div class=\"metrics-grid\">")
+    parts.append(lcoe_html or "<div class='muted'>No LCOE data available</div>")
+    parts.append("</div>")
+    parts.append("</div>")
+
+    # Card 2c: Co‑Optimization Results (Step 9b)
     parts.append('<div class="card">')
     parts.append("<h2>Co‑Optimization Results (Step 9b)</h2>")
     if coopt_card_html:
