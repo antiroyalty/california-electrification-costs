@@ -158,20 +158,24 @@ def _read_row_value_for_plan(
     plan_preference: Optional[Iterable[str]] = None,
     variant: Optional[str] = None,
 ) -> float:
-    """Return a row value using plan/variant via evaluations.tariffs; fallback to first numeric."""
+    """Return a row value using plan/variant via evaluations.tariffs.
+
+    Research code: no silent fallbacks. If selection fails, raise an error.
+    """
     if not path or not os.path.exists(path):
-        return 0.0
+        raise FileNotFoundError(f"Results CSV not found: {path}")
     try:
         df = pd.read_csv(path, index_col="scenario")
-        row = df.iloc[0] if row_name not in df.index else df.loc[row_name]
+        if row_name not in df.index:
+            raise KeyError(f"Row '{row_name}' not found in {path}")
+        row = df.loc[row_name]
         val = _select_plan_value(row, plan_preference=plan_preference, variant=variant)
-        if val:
-            return float(val)
-        # Fallback to first numeric anywhere in row
-        ser = pd.to_numeric(row, errors="coerce").dropna()
-        return float(ser.iloc[0]) if not ser.empty else 0.0
-    except Exception:
-        return 0.0
+        if val is None:
+            raise ValueError("No electricity.* column matched plan/variant selection")
+        return float(val)
+    except Exception as e:
+        # Fail loudly: do not return a surrogate value
+        raise
 
 
 def _annual_bill_parts(
