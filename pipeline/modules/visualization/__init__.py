@@ -7,6 +7,7 @@ from ...config import Config
 from helpers.main_helpers import log_step
 
 from pipeline.steps import step15_payback_periods as PaybackPeriods
+from pipeline.steps import step16_display_key_metrics_maps as Step16DisplayMaps
 from pipeline.steps import step18_cross_scenario_comparisons as Step18CrossScenarioComparisons
 from pipeline.steps import step19_compare_two_scenarios as Step19CompareTwoScenarios
 from pipeline.steps import step20_no_solar_storage_electrification as Step20NoSolarStorageElectrification
@@ -28,7 +29,7 @@ def _plan_pref_from(rate_plans: Optional[Dict[str, Dict[str, str]]]) -> Optional
 
 
 def run(cfg: Config) -> None:
-    """Run Module 4: visualize and compare results (Steps 15, 18–22)."""
+    """Run Module 4: visualize and compare results (Steps 15, 16, 18–22)."""
     c_list: List[str] = list(cfg.counties)
     os.makedirs(cfg.output_dir, exist_ok=True)
 
@@ -61,6 +62,21 @@ def run(cfg: Config) -> None:
     # 15) Payback periods
     log_step(15)
     PaybackPeriods.process(cfg.base_input_dir, cfg.scenario, cfg.housing_type, c_list)
+
+    # 16) Key metrics maps (HTML dashboard + appliance breakdown)
+    try:
+        log_step(16)
+        Step16DisplayMaps.process(
+            cfg.base_input_dir,
+            cfg.base_input_dir,
+            cfg.scenario,
+            cfg.housing_type,
+            c_list,
+            cfg.rate_plans or {},
+        )
+    except Exception as e:
+        # Non-fatal — continue with other visualizations
+        print(f"[Step16] Warning: map generation failed: {e}")
 
     # 18) Cross-scenario EAC (use all scenarios)
     log_step(18)
@@ -122,6 +138,7 @@ def run(cfg: Config) -> None:
         cfg.housing_type,
         cfg.scenario,
         c_list,
+        open_browser=True,
     )
 
 

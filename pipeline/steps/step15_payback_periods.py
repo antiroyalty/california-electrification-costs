@@ -673,7 +673,7 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
     except Exception as e:
         print(f"Error calculating payback periods: {e}")
         log(
-            at="step16_payback_periods",
+            at="step15_payback_periods",
             info="payback_calculation_failed",
             scenario=scenario,
             error=str(e),
@@ -711,7 +711,7 @@ def process(base_input_dir: str, scenario: str, housing_type: str, counties: lis
         counties: List of counties to process
     """
     log(
-        at="step16_payback_periods",
+        at="step15_payback_periods",
         info="starting_payback_calculations",
         scenario=scenario,
         housing_type=housing_type,
@@ -724,7 +724,7 @@ def process(base_input_dir: str, scenario: str, housing_type: str, counties: lis
         
         if payback_df.empty:
             log(
-                at="step16_payback_periods",
+                at="step15_payback_periods",
                 info="no_payback_data_calculated",
                 scenario=scenario
             )
@@ -744,7 +744,7 @@ def process(base_input_dir: str, scenario: str, housing_type: str, counties: lis
         incentive_scenarios = payback_df['incentive_scenario'].unique()
         
         log(
-            at="step16_payback_periods",
+            at="step15_payback_periods",
             info="payback_calculations_completed",
             scenario=scenario,
             csv_path=csv_path,
@@ -763,7 +763,7 @@ def process(base_input_dir: str, scenario: str, housing_type: str, counties: lis
         
     except Exception as e:
         log(
-            at="step16_payback_periods",
+            at="step15_payback_periods",
             info="payback_calculations_failed",
             scenario=scenario,
             error=str(e)

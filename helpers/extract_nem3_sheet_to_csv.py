@@ -2,7 +2,7 @@
 Utility: Extract a utility climate-zone sheet from a NEM3 Excel into a 12x24 or long-form CSV
 
 Usage examples
-  python3 tools/extract_nem3_sheet_to_csv.py \
+  python3 helpers/extract_nem3_sheet_to_csv.py \
     --xlsx data/NEM3/PG&E_2024_ACC_12x24_Export_Rates.xlsx \
     --utility "PG&E" \
     --zone CZ3A \
