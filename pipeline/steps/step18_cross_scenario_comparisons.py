@@ -40,6 +40,8 @@ from helpers.plot_scenario_comparison_helper import (
     plot_eac_stacked_bar,
     collect_pv_sizes,
     plot_pv_size_bar,
+    collect_pv_lcoe,
+    collect_pv_lcoe_by_county,
 )
 
 from helpers.main_helpers import get_scenario_path
@@ -157,6 +159,16 @@ def main() -> None:
         pv_df.to_csv(pv_csv, index=False)
     fig = plot_pv_size_bar(pv_df, scenario_order=scenarios)
     fig.savefig(os.path.join(output_dir, f"step18_pv_size_bar_g{sha}.png"), dpi=150, bbox_inches="tight")
+
+    # 6) PV LCOE (optional diagnostics)
+    lcoe_df = collect_pv_lcoe(base_input_dir, housing_type, scenarios, counties, agg=args.agg)
+    if not lcoe_df.empty:
+        lcoe_csv = os.path.join(output_dir, f"step18_lcoe_summary_g{sha}.csv")
+        lcoe_df.to_csv(lcoe_csv, index=False)
+    lcoe_cty_df = collect_pv_lcoe_by_county(base_input_dir, housing_type, scenarios, counties)
+    if not lcoe_cty_df.empty:
+        lcoe_cty_csv = os.path.join(output_dir, f"step18_lcoe_by_county_g{sha}.csv")
+        lcoe_cty_df.to_csv(lcoe_cty_csv, index=False)
 
     # Final console summary
     print("Cross-scenario comparisons complete.")

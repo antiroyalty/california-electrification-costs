@@ -51,6 +51,7 @@ from helpers.diagnostics_helpers import (
 
 
 import matplotlib.pyplot as plt
+from evaluations.lcoe import lcoe_crf_simple
 
 
 def _is_coopt_scenario(scenario: str) -> bool:
@@ -208,6 +209,74 @@ def _read_step9_series(path: str) -> Optional[dict]:
     except Exception as e:
         print(f"Warning: could not read Step 9 CSV for deployment figure: {e}")
         return None
+
+
+def _sam_csv_path(base_input_dir: str, scenario: str, housing_type: str, county_slug: str) -> Optional[str]:
+    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+    a = os.path.join(county_dir, f"sam_optimized_load_profiles_{county_slug}.csv")
+    b = os.path.join(county_dir, f"sam_optimized_load_profiles_{scenario}_{county_slug}.csv")
+    if os.path.exists(a):
+        return a
+    if os.path.exists(b):
+        return b
+    return None
+
+
+def _pv_annual_kwh(base_input_dir: str, scenario: str, housing_type: str, county_slug: str) -> float:
+    path = _sam_csv_path(base_input_dir, scenario, housing_type, county_slug)
+    if not path:
+        return 0.0
+    try:
+        df = pd.read_csv(path)
+        pvl = pd.to_numeric(df.get("System to Load", pd.Series([0])), errors='coerce').fillna(0.0).sum()
+        pvb = pd.to_numeric(df.get("System to Battery", pd.Series([0])), errors='coerce').fillna(0.0).sum()
+        return float(pvl + pvb)
+    except Exception:
+        return 0.0
+
+
+def _pv_net_capex(base_input_dir: str, scenario: str, housing_type: str, county_slug: str, *, incentive: str = 'full_incentives') -> float:
+    cap_dir = os.path.join(base_input_dir, "capital_costs")
+    fname = f"capital_costs_summary_with_pv_{scenario}_{housing_type.replace('-', '_')}.csv"
+    path = os.path.join(cap_dir, fname)
+    if not os.path.exists(path):
+        return 0.0
+    try:
+        df = pd.read_csv(path)
+        row = df[df['county_slug'].str.lower() == county_slug]
+        if row.empty:
+            return 0.0
+        pv_capex = float(row.iloc[0].get('pv_capex', 0.0))
+        pv_inc_full = float(row.iloc[0].get('pv_incentives_full', 0.0)) if 'pv_incentives_full' in row.columns else 0.0
+        inc = (incentive or '').lower()
+        if inc == 'full_incentives':
+            return pv_capex - pv_inc_full
+        if inc == 'half_incentives':
+            return pv_capex - (pv_inc_full * 0.5)
+        return pv_capex
+    except Exception:
+        return 0.0
+
+
+def create_lcoe_card(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+    *,
+    discount_rate: float = 0.07,
+    lifetime_years: int = 25,
+) -> str:
+    pv_net = _pv_net_capex(base_input_dir, scenario, housing_type, county_slug)
+    annual_pv = _pv_annual_kwh(base_input_dir, scenario, housing_type, county_slug)
+    lcoe = lcoe_crf_simple(pv_net, 0.0, annual_pv, discount_rate, lifetime_years)
+    val = f"${lcoe:.3f}/kWh" if lcoe > 0 else "N/A"
+    return (
+        "<div class='metric-block'>"
+        "<div class='muted'>PV LCOE</div>"
+        f"<div class='metric-value'>{val}<small>Approximate</small></div>"
+        "</div>"
+    )
 
 
 def create_solar_storage_deployment_graph(
@@ -1535,6 +1604,7 @@ def _dashboard_html(
     nem3_exports_week_jul_b64: Optional[str] = None,
     step18_images: Optional[dict] = None,
     solar_size_html: Optional[str] = None,
+    lcoe_html: Optional[str] = None,
     annual_load_html: Optional[str] = None,
     grid_supply_html: Optional[str] = None,
     key_metrics: Optional[dict] = None,
@@ -1682,6 +1752,8 @@ def _dashboard_html(
         parts.append("<div class=\"metric-block\">")
         parts.append("<div class=\"muted\">Grid Supply to Load</div>")
         parts.append(grid_supply_html or "<div class=\"metric-value\">N/A<br><small>No data</small></div>")
+        # PV LCOE
+        parts.append(lcoe_html or "")
         parts.append("</div>")
         parts.append("</div>")
     parts.append("</div>")
@@ -1932,6 +2004,8 @@ def process(
     housing_type: str,
     scenario: str,
     counties: List[str],
+    *,
+    open_browser: bool = False,
 ) -> List[str]:
     """
     Build county dashboards. Returns list of written HTML file paths.
@@ -2015,6 +2089,7 @@ def process(
                 nem3_exports_week_jul_b64=nem3_exports_week_jul_b64,
                 step18_images=step18,
                 solar_size_html=solar_size_html,
+                lcoe_html=create_lcoe_card(base_input_dir, scenario, housing_type, county_slug),
                 annual_load_html=annual_load_html,
                 grid_supply_html=grid_supply_html,
                 key_metrics=key_metrics,
@@ -2038,6 +2113,17 @@ def process(
                 pass
         except Exception as e:
             print(f"Error building diagnostics for {county_slug}: {e}")
+    # Optionally open the first generated dashboard in the default browser
+    if open_browser and written:
+        try:
+            import webbrowser
+            from pathlib import Path
+
+            first = Path(written[0]).resolve().as_uri()
+            print(f"Opening county diagnostics dashboard: {first}")
+            webbrowser.open_new_tab(first)
+        except Exception as e:
+            print(f"Warning: Could not open dashboard automatically: {e}")
     return written
 
 
@@ -2065,18 +2151,9 @@ def main() -> None:
         housing_type=args.housing_type,
         scenario=args.scenario,
         counties=args.counties,
+        open_browser=not args.no_open,
     )
-    # Auto-open the first generated dashboard unless disabled
-    try:
-        if not args.no_open and written:
-            import webbrowser
-            from pathlib import Path
-
-            first = Path(written[0]).resolve().as_uri()
-            print(f"Opening dashboard in browser: {first}")
-            webbrowser.open_new_tab(first)
-    except Exception as e:
-        print(f"Warning: Could not open dashboard automatically: {e}")
+    # process already handles opening when requested
 
 
 # ---------- Step 18 assets embedding ----------

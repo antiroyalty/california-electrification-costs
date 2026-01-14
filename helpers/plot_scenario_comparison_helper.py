@@ -57,6 +57,9 @@ from helpers.maps_helpers import get_latest_csv_file
 from helpers.utility_helpers import get_utility_for_county
 from helpers.capital_cost_map_builder import LIFETIMES
 from evaluations.vehicles import vehicle_annual_adders_from_ledger
+from evaluations.eac import crf as _crf, compute_eac_from_inputs
+from evaluations.tariffs import select_row_value_for_plan as _select_plan_value
+from evaluations.lcoe import lcoe_crf_simple
 
 
 # ---------- Internal data access helpers ----------
@@ -155,42 +158,16 @@ def _read_row_value_for_plan(
     plan_preference: Optional[Iterable[str]] = None,
     variant: Optional[str] = None,
 ) -> float:
-    """Return a row value for a specific electricity plan/variant; fallback to first numeric.
-
-    - plan_preference: ordered sequence of substrings to match within the plan token.
-    - variant: 'nem3' selects columns ending with '_NEM3'; 'retail' selects columns without that suffix.
-    """
+    """Return a row value using plan/variant via evaluations.tariffs; fallback to first numeric."""
     if not path or not os.path.exists(path):
         return 0.0
     try:
         df = pd.read_csv(path, index_col="scenario")
         row = df.iloc[0] if row_name not in df.index else df.loc[row_name]
-        # Electricity-only columns
-        cols = [c for c in row.index if str(c).startswith("electricity.")]
-        if not cols:
-            return _read_first_numeric_for_row(path, row_name)
-        # Filter by variant
-        if variant:
-            v = str(variant).lower()
-            if v == "nem3":
-                cols = [c for c in cols if str(c).endswith("_NEM3")]
-            elif v == "retail":
-                cols = [c for c in cols if not str(c).endswith("_NEM3")]
-        # Filter by plan preference
-        if plan_preference:
-            prefs = list(plan_preference)
-            for pref in prefs:
-                sub = [c for c in cols if str(pref).lower() in str(c).lower()]
-                if sub:
-                    val = pd.to_numeric(row[sub[0]], errors="coerce")
-                    if pd.notna(val):
-                        return float(val)
-        # Fallback: first numeric among considered columns
-        for c in cols:
-            val = pd.to_numeric(row[c], errors="coerce")
-            if pd.notna(val):
-                return float(val)
-        # Last resort: first numeric anywhere in row
+        val = _select_plan_value(row, plan_preference=plan_preference, variant=variant)
+        if val:
+            return float(val)
+        # Fallback to first numeric anywhere in row
         ser = pd.to_numeric(row, errors="coerce").dropna()
         return float(ser.iloc[0]) if not ser.empty else 0.0
     except Exception:
@@ -720,11 +697,6 @@ def collect_eac_components(
 
         per_county = []
         for slug in county_slugs:
-            capex_pv = 0.0
-            capex_storage = 0.0
-            capex_electric = 0.0
-            capex_gas = 0.0
-            vehicle_om = 0.0
             # Bills split into electricity + gas under with-solar variant
             e_bill, g_bill = _annual_bill_parts(
                 base_input_dir,
@@ -737,80 +709,55 @@ def collect_eac_components(
                 electricity_variant=electricity_variant,
             )
 
-            # From capital ledger (annualize per appliance)
+            county_ledger = None
             if ledger is not None and not ledger.empty:
                 df = ledger.copy()
                 df = df[df['county_slug'].str.lower() == slug]
                 df['incentive_scenario'] = df['incentive_scenario'].str.lower()
                 df = df[df['incentive_scenario'] == inc]
-                # Electric capex (non-PV/storage)
-                if not df.empty:
-                    # Some rows may miss lifetime_years; default to 15
-                    life = pd.to_numeric(df.get('lifetime_years', pd.Series([15] * len(df))), errors='coerce').fillna(15)
-                    crf = _crf(discount_rate, 1)  # placeholder, recompute per row below
-                    # Annualize per-row
-                    capex_electric += float((
-                        ((df['appliance_category'] == 'electric') & (~df['appliance_type'].isin(['solar', 'storage'])))
-                        .astype(float)
-                        * 0  # placeholder
-                    ).sum())
-                    # Loop rows for clarity
-                    for _, r in df.iterrows():
-                        try:
-                            lt = float(r.get('lifetime_years', 15) or 15)
-                            c = _crf(discount_rate, lt)
-                            if r.get('appliance_category') == 'electric' and r.get('appliance_type') not in ('solar', 'storage'):
-                                capex_electric += float(r.get('net_cost', 0.0)) * c
-                            if r.get('appliance_category') == 'gas':
-                                capex_gas += float(r.get('base_cost', 0.0)) * c
-                        except Exception:
-                            continue
+                county_ledger = df
 
-                # Vehicle O&M adders
-                try:
-                    adders = vehicle_annual_adders_from_ledger(df)
-                    if slug in adders.index:
-                        ev_val = float(adders.loc[slug, 'ev_operating']) if 'ev_operating' in adders.columns else 0.0
-                        ice_val = float(adders.loc[slug, 'ice_operating']) if 'ice_operating' in adders.columns else 0.0
-                        # Prefer scenario-driven inclusion, fall back to positive values
-                        scen_l = (scen or '').lower()
-                        if ('ev' in scen_l) or (ev_val > 0):
-                            vehicle_om += ev_val
-                        if ('ice' in scen_l) or (ice_val > 0 and 'ev' not in scen_l):
-                            vehicle_om += ice_val
-                except Exception:
-                    pass
-
-            # PV + Storage capex (annualized) from summary_with_pv
+            pv_row = None
             if pvsum is not None and not pvsum.empty:
                 row = pvsum[pvsum['county_slug'].str.lower() == slug]
                 if not row.empty:
-                    pv_capex = float(row.iloc[0].get('pv_capex', 0.0))
-                    st_capex = float(row.iloc[0].get('storage_capex', 0.0))
-                    pv_inc_full = float(row.iloc[0].get('pv_incentives_full', 0.0)) if 'pv_incentives_full' in row.columns else 0.0
-                    st_inc_full = float(row.iloc[0].get('storage_incentives_full', 0.0)) if 'storage_incentives_full' in row.columns else 0.0
-                    if inc == 'full_incentives':
-                        pv_net = pv_capex - pv_inc_full
-                        st_net = st_capex - st_inc_full
-                    elif inc == 'half_incentives':
-                        pv_net = pv_capex - (pv_inc_full * 0.5)
-                        st_net = st_capex - (st_inc_full * 0.5)
-                    else:  # no_incentives
-                        pv_net = pv_capex
-                        st_net = st_capex
-                    capex_pv += pv_net * _crf(discount_rate, LIFETIMES.get('solar', 25))
-                    capex_storage += st_net * _crf(discount_rate, LIFETIMES.get('storage', 15))
+                    pv_row = row.iloc[0]
+
+            vehicle_om = 0.0
+            try:
+                adders = vehicle_annual_adders_from_ledger(county_ledger) if county_ledger is not None else None
+                if adders is not None and slug in adders.index:
+                    ev_val = float(adders.loc[slug, 'ev_operating']) if 'ev_operating' in adders.columns else 0.0
+                    ice_val = float(adders.loc[slug, 'ice_operating']) if 'ice_operating' in adders.columns else 0.0
+                    scen_l = (scen or '').lower()
+                    if ('ev' in scen_l) or (ev_val > 0):
+                        vehicle_om += ev_val
+                    if ('ice' in scen_l) or (ice_val > 0 and 'ev' not in scen_l):
+                        vehicle_om += ice_val
+            except Exception:
+                pass
+
+            comp = compute_eac_from_inputs(
+                ledger_df=county_ledger,
+                pv_summary_row=pv_row,
+                incentive=inc,
+                discount_rate=discount_rate,
+                lifetimes=LIFETIMES,
+                annual_bill_electric=e_bill,
+                annual_bill_gas=g_bill,
+                vehicle_om=vehicle_om,
+            )
 
             per_county.append({
                 'scenario': scen,
                 'county_slug': slug,
-                'capex_pv': capex_pv,
-                'capex_storage': capex_storage,
-                'capex_electric': capex_electric,
-                'capex_gas': capex_gas,
-                'annual_bill_electric': e_bill,
-                'annual_bill_gas': g_bill,
-                'vehicle_om': vehicle_om,
+                'capex_pv': comp.capex_pv,
+                'capex_storage': comp.capex_storage,
+                'capex_electric': comp.capex_electric,
+                'capex_gas': comp.capex_gas,
+                'annual_bill_electric': comp.annual_bill_electric,
+                'annual_bill_gas': comp.annual_bill_gas,
+                'vehicle_om': comp.vehicle_om,
             })
 
         if not per_county:
@@ -853,11 +800,6 @@ def collect_eac_components_by_county(
         ledger = _read_capital_ledger(base_input_dir, scen, housing_type)
         pvsum = _read_capital_summary_with_pv(base_input_dir, scen, housing_type)
         for slug in county_slugs:
-            capex_pv = 0.0
-            capex_storage = 0.0
-            capex_electric = 0.0
-            capex_gas = 0.0
-            vehicle_om = 0.0
             e_bill, g_bill = _annual_bill_parts(
                 base_input_dir,
                 scen,
@@ -868,7 +810,7 @@ def collect_eac_components_by_county(
                 electricity_plan_preference=electricity_plan_preference,
                 electricity_variant=electricity_variant,
             )
-
+            county_ledger = None
             if ledger is not None and not ledger.empty:
                 df = ledger.copy()
                 if 'county_slug' in df.columns:
@@ -876,59 +818,45 @@ def collect_eac_components_by_county(
                 if 'incentive_scenario' in df.columns:
                     df['incentive_scenario'] = df['incentive_scenario'].str.lower()
                     df = df[df['incentive_scenario'] == inc]
-                if not df.empty:
-                    for _, r in df.iterrows():
-                        try:
-                            lt = float(r.get('lifetime_years', 15) or 15)
-                            c = _crf(discount_rate, lt)
-                            if r.get('appliance_category') == 'electric' and r.get('appliance_type') not in ('solar', 'storage'):
-                                capex_electric += float(r.get('net_cost', 0.0)) * c
-                            if r.get('appliance_category') == 'gas':
-                                capex_gas += float(r.get('base_cost', 0.0)) * c
-                        except Exception:
-                            continue
-                try:
-                    adders = vehicle_annual_adders_from_ledger(df)
-                    if slug in adders.index:
-                        ev_val = float(adders.loc[slug, 'ev_operating']) if 'ev_operating' in adders.columns else 0.0
-                        ice_val = float(adders.loc[slug, 'ice_operating']) if 'ice_operating' in adders.columns else 0.0
-                        scen_l = (scen or '').lower()
-                        if ('ev' in scen_l) or (ev_val > 0):
-                            vehicle_om += ev_val
-                        if ('ice' in scen_l) or (ice_val > 0 and 'ev' not in scen_l):
-                            vehicle_om += ice_val
-                except Exception:
-                    pass
-
+                county_ledger = df
+            pv_row = None
             if pvsum is not None and not pvsum.empty:
                 row = pvsum[pvsum['county_slug'].str.lower() == slug]
                 if not row.empty:
-                    pv_capex = float(row.iloc[0].get('pv_capex', 0.0))
-                    st_capex = float(row.iloc[0].get('storage_capex', 0.0))
-                    pv_inc_full = float(row.iloc[0].get('pv_incentives_full', 0.0)) if 'pv_incentives_full' in row.columns else 0.0
-                    st_inc_full = float(row.iloc[0].get('storage_incentives_full', 0.0)) if 'storage_incentives_full' in row.columns else 0.0
-                    if inc == 'full_incentives':
-                        pv_net = pv_capex - pv_inc_full
-                        st_net = st_capex - st_inc_full
-                    elif inc == 'half_incentives':
-                        pv_net = pv_capex - (pv_inc_full * 0.5)
-                        st_net = st_capex - (st_inc_full * 0.5)
-                    else:
-                        pv_net = pv_capex
-                        st_net = st_capex
-                    capex_pv += pv_net * _crf(discount_rate, LIFETIMES.get('solar', 25))
-                    capex_storage += st_net * _crf(discount_rate, LIFETIMES.get('storage', 15))
-
+                    pv_row = row.iloc[0]
+            vehicle_om = 0.0
+            try:
+                adders = vehicle_annual_adders_from_ledger(county_ledger) if county_ledger is not None else None
+                if adders is not None and slug in adders.index:
+                    ev_val = float(adders.loc[slug, 'ev_operating']) if 'ev_operating' in adders.columns else 0.0
+                    ice_val = float(adders.loc[slug, 'ice_operating']) if 'ice_operating' in adders.columns else 0.0
+                    scen_l = (scen or '').lower()
+                    if ('ev' in scen_l) or (ev_val > 0):
+                        vehicle_om += ev_val
+                    if ('ice' in scen_l) or (ice_val > 0 and 'ev' not in scen_l):
+                        vehicle_om += ice_val
+            except Exception:
+                pass
+            comp = compute_eac_from_inputs(
+                ledger_df=county_ledger,
+                pv_summary_row=pv_row,
+                incentive=inc,
+                discount_rate=discount_rate,
+                lifetimes=LIFETIMES,
+                annual_bill_electric=e_bill,
+                annual_bill_gas=g_bill,
+                vehicle_om=vehicle_om,
+            )
             out_rows.append({
                 'scenario': scen,
                 'county_slug': slug,
-                'capex_pv': capex_pv,
-                'capex_storage': capex_storage,
-                'capex_electric': capex_electric,
-                'capex_gas': capex_gas,
-                'annual_bill_electric': e_bill,
-                'annual_bill_gas': g_bill,
-                'vehicle_om': vehicle_om,
+                'capex_pv': comp.capex_pv,
+                'capex_storage': comp.capex_storage,
+                'capex_electric': comp.capex_electric,
+                'capex_gas': comp.capex_gas,
+                'annual_bill_electric': comp.annual_bill_electric,
+                'annual_bill_gas': comp.annual_bill_gas,
+                'vehicle_om': comp.vehicle_om,
             })
 
     return pd.DataFrame(out_rows)
