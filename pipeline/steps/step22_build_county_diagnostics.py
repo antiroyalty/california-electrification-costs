@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import base64
 import io
+import json
 import os
 from typing import Iterable, List, Optional, Tuple
 from datetime import datetime
@@ -51,6 +52,7 @@ from helpers.diagnostics_helpers import (
 
 
 import matplotlib.pyplot as plt
+from evaluations.lcoe import lcoe_crf_simple
 
 
 def _is_coopt_scenario(scenario: str) -> bool:
@@ -208,6 +210,143 @@ def _read_step9_series(path: str) -> Optional[dict]:
     except Exception as e:
         print(f"Warning: could not read Step 9 CSV for deployment figure: {e}")
         return None
+
+
+def _sam_csv_path(base_input_dir: str, scenario: str, housing_type: str, county_slug: str) -> Optional[str]:
+    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+    a = os.path.join(county_dir, f"sam_optimized_load_profiles_{county_slug}.csv")
+    b = os.path.join(county_dir, f"sam_optimized_load_profiles_{scenario}_{county_slug}.csv")
+    if os.path.exists(a):
+        return a
+    if os.path.exists(b):
+        return b
+    return None
+
+
+def _pv_annual_kwh(base_input_dir: str, scenario: str, housing_type: str, county_slug: str) -> float:
+    path = _sam_csv_path(base_input_dir, scenario, housing_type, county_slug)
+    if not path:
+        return 0.0
+    try:
+        df = pd.read_csv(path)
+        pvl = pd.to_numeric(df.get("System to Load", pd.Series([0])), errors='coerce').fillna(0.0).sum()
+        pvb = pd.to_numeric(df.get("System to Battery", pd.Series([0])), errors='coerce').fillna(0.0).sum()
+        return float(pvl + pvb)
+    except Exception:
+        return 0.0
+
+
+def _pv_net_capex(base_input_dir: str, scenario: str, housing_type: str, county_slug: str, *, incentive: str = 'full_incentives') -> float:
+    cap_dir = os.path.join(base_input_dir, "capital_costs")
+    fname = f"capital_costs_summary_with_pv_{scenario}_{housing_type.replace('-', '_')}.csv"
+    path = os.path.join(cap_dir, fname)
+    if not os.path.exists(path):
+        return 0.0
+    try:
+        df = pd.read_csv(path)
+        row = df[df['county_slug'].str.lower() == county_slug]
+        if row.empty:
+            return 0.0
+        pv_capex = float(row.iloc[0].get('pv_capex', 0.0))
+        pv_inc_full = float(row.iloc[0].get('pv_incentives_full', 0.0)) if 'pv_incentives_full' in row.columns else 0.0
+        inc = (incentive or '').lower()
+        if inc == 'full_incentives':
+            return pv_capex - pv_inc_full
+        if inc == 'half_incentives':
+            return pv_capex - (pv_inc_full * 0.5)
+        return pv_capex
+    except Exception:
+        return 0.0
+
+
+def create_lcoe_card(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+    *,
+    discount_rate: float = 0.07,
+    lifetime_years: int = 25,
+) -> str:
+    pv_net = _pv_net_capex(base_input_dir, scenario, housing_type, county_slug)
+    annual_pv = _pv_annual_kwh(base_input_dir, scenario, housing_type, county_slug)
+    lcoe = lcoe_crf_simple(pv_net, 0.0, annual_pv, discount_rate, lifetime_years)
+    val = f"${lcoe:.3f}/kWh" if lcoe > 0 else "N/A"
+    return (
+        "<div class='metric-block'>"
+        "<div class='muted'>PV LCOE</div>"
+        f"<div class='metric-value'>{val}<small>Approximate</small></div>"
+        "</div>"
+    )
+
+
+def _load_methods_manifest() -> Optional[dict]:
+    root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    path = os.path.join(root, "docs", "methods.yaml")
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Warning: could not load methods manifest: {e}")
+        return None
+
+
+def _render_methods_manifest(methods: Optional[dict]) -> str:
+    if not methods:
+        return "<div class='muted'>Methods manifest not available</div>"
+
+    def render_table(section: str, data: dict) -> str:
+        if not data:
+            return ""
+        rows = []
+        for k, v in data.items():
+            rows.append(f"<tr><td class='method-key'>{k}</td><td>{v}</td></tr>")
+        return (
+            f"<div class='method-section'><div class='method-label'>{section}</div>"
+            "<table class='method-table'>"
+            "<tbody>"
+            + "".join(rows)
+            + "</tbody></table></div>"
+        )
+
+    parts: List[str] = []
+    for key, entry in methods.items():
+        title = entry.get("title") or key
+        formula = entry.get("formula")
+        assumptions = entry.get("assumptions") or {}
+        constants = entry.get("constants") or {}
+        data_sources = entry.get("data_sources") or {}
+        code_refs = entry.get("code") or []
+        notes = entry.get("notes")
+        parts.append(f"<details class='method'><summary>{title} ({key})</summary>")
+        parts.append("<div class='method-body'>")
+        if formula:
+            parts.append(
+                "<div class='method-section'>"
+                "<div class='method-label'>Formula</div>"
+                f"<div class='mono'>{formula}</div>"
+                "</div>"
+            )
+        parts.append(render_table("Assumptions", assumptions))
+        parts.append(render_table("Constants", constants))
+        parts.append(render_table("Data Sources", data_sources))
+        if code_refs:
+            parts.append("<div class='method-section'><div class='method-label'>Code</div>")
+            parts.append("<ul class='code-list'>")
+            for ref in code_refs:
+                parts.append(f"<li><span class='mono'>{ref}</span></li>")
+            parts.append("</ul></div>")
+        if notes:
+            parts.append(
+                "<div class='method-section'>"
+                "<div class='method-label'>Notes</div>"
+                f"<div>{notes}</div>"
+                "</div>"
+            )
+        parts.append("</div></details>")
+    return "".join(parts)
 
 
 def create_solar_storage_deployment_graph(
@@ -1535,6 +1674,7 @@ def _dashboard_html(
     nem3_exports_week_jul_b64: Optional[str] = None,
     step18_images: Optional[dict] = None,
     solar_size_html: Optional[str] = None,
+    lcoe_html: Optional[str] = None,
     annual_load_html: Optional[str] = None,
     grid_supply_html: Optional[str] = None,
     key_metrics: Optional[dict] = None,
@@ -1543,6 +1683,7 @@ def _dashboard_html(
     cost_breakdowns: Optional[dict] = None,
     assets_info: Optional[dict] = None,
     coopt_card_html: Optional[str] = None,
+    methods_manifest: Optional[dict] = None,
 ) -> str:
     scen_title = scenario.replace("_", " ").title()
     county_title = county_slug.replace("-", " ").title()
@@ -1595,6 +1736,17 @@ def _dashboard_html(
                 .money {{ color: #1a5; font-weight: 700; }}
                 /* Highlight for minimum cost cell in plan table */
                 .highlight-min {{ background: #eaffea; }}
+                /* Methods manifest */
+                .method {{ margin-bottom: 8px; }}
+                .method summary {{ cursor: pointer; font-weight: 600; color: #2c3e50; }}
+                .method-body {{ margin-top: 6px; }}
+                .method-section {{ margin: 6px 0 10px; }}
+                .method-label {{ font-size: 12px; font-weight: 600; color: #555; margin-bottom: 4px; }}
+                .method-table {{ width: 100%; border-collapse: collapse; font-size: 12px; }}
+                .method-table td {{ border-bottom: 1px solid #eee; padding: 4px 6px; vertical-align: top; }}
+                .method-key {{ width: 30%; color: #444; }}
+                .mono {{ font-family: "Courier New", monospace; font-size: 12px; background: #f5f5f5; padding: 4px 6px; border-radius: 4px; display: inline-block; }}
+                .code-list {{ margin: 4px 0 8px 18px; }}
             </style>
         </head>
         <body>
@@ -1686,7 +1838,21 @@ def _dashboard_html(
         parts.append("</div>")
     parts.append("</div>")
 
-    # Card 2b: Co‑Optimization Results (Step 9b)
+    # Card 2b: Methods
+    parts.append("<div class=\"card\">")
+    parts.append("<h2>Methods</h2>")
+    parts.append(_render_methods_manifest(methods_manifest))
+    parts.append("</div>")
+
+    # Card 2c: PV LCOE
+    parts.append("<div class=\"card\">")
+    parts.append("<h2>PV LCOE</h2>")
+    parts.append("<div class=\"metrics-grid\">")
+    parts.append(lcoe_html or "<div class='muted'>No LCOE data available</div>")
+    parts.append("</div>")
+    parts.append("</div>")
+
+    # Card 2d: Co‑Optimization Results (Step 9b)
     parts.append('<div class="card">')
     parts.append("<h2>Co‑Optimization Results (Step 9b)</h2>")
     if coopt_card_html:
@@ -1932,12 +2098,15 @@ def process(
     housing_type: str,
     scenario: str,
     counties: List[str],
+    *,
+    open_browser: bool = False,
 ) -> List[str]:
     """
     Build county dashboards. Returns list of written HTML file paths.
     """
     written: List[str] = []
     sha = git_short_sha()
+    methods_manifest = _load_methods_manifest()
     # Normalize input counties to slugs
     county_slugs = [slugify_county_name(c) for c in counties]
     for county_slug in county_slugs:
@@ -2015,6 +2184,7 @@ def process(
                 nem3_exports_week_jul_b64=nem3_exports_week_jul_b64,
                 step18_images=step18,
                 solar_size_html=solar_size_html,
+                lcoe_html=create_lcoe_card(base_input_dir, scenario, housing_type, county_slug),
                 annual_load_html=annual_load_html,
                 grid_supply_html=grid_supply_html,
                 key_metrics=key_metrics,
@@ -2023,6 +2193,7 @@ def process(
                 cost_breakdowns=cost_breakdowns,
                 assets_info=assets_info,
                 coopt_card_html=create_coopt_results_card(base_input_dir, scenario, housing_type, county_slug),
+                methods_manifest=methods_manifest,
             )
             out_path = os.path.join(
                 output_dir,
@@ -2038,6 +2209,17 @@ def process(
                 pass
         except Exception as e:
             print(f"Error building diagnostics for {county_slug}: {e}")
+    # Optionally open the first generated dashboard in the default browser
+    if open_browser and written:
+        try:
+            import webbrowser
+            from pathlib import Path
+
+            first = Path(written[0]).resolve().as_uri()
+            print(f"Opening county diagnostics dashboard: {first}")
+            webbrowser.open_new_tab(first)
+        except Exception as e:
+            print(f"Warning: Could not open dashboard automatically: {e}")
     return written
 
 
@@ -2065,18 +2247,9 @@ def main() -> None:
         housing_type=args.housing_type,
         scenario=args.scenario,
         counties=args.counties,
+        open_browser=not args.no_open,
     )
-    # Auto-open the first generated dashboard unless disabled
-    try:
-        if not args.no_open and written:
-            import webbrowser
-            from pathlib import Path
-
-            first = Path(written[0]).resolve().as_uri()
-            print(f"Opening dashboard in browser: {first}")
-            webbrowser.open_new_tab(first)
-    except Exception as e:
-        print(f"Warning: Could not open dashboard automatically: {e}")
+    # process already handles opening when requested
 
 
 # ---------- Step 18 assets embedding ----------
