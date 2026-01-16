@@ -1,3 +1,4 @@
+import importlib
 import json
 import math
 import os
@@ -10,7 +11,8 @@ REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from evaluations import eac, energy, incentives, lcoe, npv, payback_periods, tariffs, vehicles
+from evaluations import eac, energy, incentives, lcoe, payback_periods, tariffs, vehicles
+npv_module = importlib.import_module("evaluations.npv")
 
 
 def _repo_root() -> str:
@@ -72,8 +74,8 @@ def test_example_calculations() -> None:
     assert energy.therms_to_kwh(1.0) == pytest.approx(29.3001)
     assert energy.effective_price_per_kwh(100.0, 50.0) == pytest.approx(2.0)
 
-    assert npv.annuity_factor(0.0, 10) == pytest.approx(0.1)
-    assert npv.npv(0.1, [100.0, 100.0]) == pytest.approx(190.9090909)
+    assert npv_module.annuity_factor(0.0, 10) == pytest.approx(0.1)
+    assert npv_module.npv(0.1, [100.0, 100.0]) == pytest.approx(190.9090909)
 
     crf = eac.crf(0.1, 2)
     expected_crf = (0.1 * (1.1**2)) / ((1.1**2) - 1.0)
