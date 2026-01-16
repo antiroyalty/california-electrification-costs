@@ -52,7 +52,9 @@ from helpers.diagnostics_helpers import (
 
 
 import matplotlib.pyplot as plt
+from evaluations.npv import npv as _npv
 from evaluations.lcoe import lcoe_crf_simple
+from evaluations.incentives import apply_pv_storage_incentives
 
 
 def _is_coopt_scenario(scenario: str) -> bool:
@@ -257,6 +259,235 @@ def _pv_net_capex(base_input_dir: str, scenario: str, housing_type: str, county_
         return pv_capex
     except Exception:
         return 0.0
+
+
+def _pv_storage_net_capex(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+    *,
+    incentive: str = "full_incentives",
+) -> Optional[float]:
+    cap_dir = os.path.join(base_input_dir, "capital_costs")
+    fname = f"capital_costs_summary_with_pv_{scenario}_{housing_type.replace('-', '_')}.csv"
+    path = os.path.join(cap_dir, fname)
+    if not os.path.exists(path):
+        return None
+    try:
+        df = pd.read_csv(path)
+        if df.empty or "county_slug" not in df.columns:
+            return None
+        row = df[df["county_slug"].str.lower() == county_slug]
+        if row.empty:
+            return None
+        pv_capex = float(row.iloc[0].get("pv_capex", 0.0))
+        st_capex = float(row.iloc[0].get("storage_capex", 0.0))
+        pv_inc_full = float(row.iloc[0].get("pv_incentives_full", 0.0))
+        st_inc_full = float(row.iloc[0].get("storage_incentives_full", 0.0))
+        pv_net, st_net = apply_pv_storage_incentives(
+            pv_capex,
+            st_capex,
+            pv_incentives_full=pv_inc_full,
+            storage_incentives_full=st_inc_full,
+            incentive=incentive,
+        )
+        return float(pv_net + st_net)
+    except Exception:
+        return None
+
+
+def _electrification_net_capex(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+    *,
+    incentive: str = "full_incentives",
+) -> Optional[float]:
+    cap_dir = os.path.join(base_input_dir, "capital_costs")
+    fname = f"capital_costs_{scenario}_{housing_type.replace('-', '_')}.csv"
+    path = os.path.join(cap_dir, fname)
+    if not os.path.exists(path):
+        return None
+    try:
+        df = pd.read_csv(path)
+        if df.empty:
+            return None
+        if "county_slug" not in df.columns or "net_cost" not in df.columns:
+            return None
+        sub = df[df["county_slug"].str.lower() == county_slug]
+        if "incentive_scenario" in sub.columns:
+            sub["incentive_scenario"] = sub["incentive_scenario"].str.lower()
+            sub = sub[sub["incentive_scenario"] == (incentive or "").lower()]
+        if sub.empty:
+            return None
+        if "appliance_category" in sub.columns:
+            sub = sub[sub["appliance_category"] == "electric"]
+        if "appliance_type" in sub.columns:
+            sub = sub[~sub["appliance_type"].isin(["solar", "storage"])]
+        if sub.empty:
+            return None
+        vals = pd.to_numeric(sub["net_cost"], errors="coerce").dropna()
+        if vals.empty:
+            return None
+        return float(vals.sum())
+    except Exception:
+        return None
+
+
+def _read_total_annual_cost(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+    *,
+    with_solar: bool = False,
+) -> Optional[float]:
+    if with_solar:
+        results_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug, "results", "solarstorage")
+        row_name = f"{scenario}.solarstorage"
+    else:
+        results_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug, "results", "totals")
+        row_name = scenario
+    if not os.path.isdir(results_dir):
+        return None
+    try:
+        path = get_latest_csv_file(results_dir, f"RESULTS_total_annual_costs_{county_slug}_")
+        df = pd.read_csv(path, index_col="scenario")
+        if row_name not in df.index:
+            return None
+        row = df.loc[row_name]
+        vals = pd.to_numeric(row, errors="coerce").dropna()
+        if vals.empty:
+            return None
+        return float(vals.iloc[0])
+    except Exception:
+        return None
+
+
+def compute_npv_details(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+    *,
+    horizon_years: int = 25,
+    discount_rate: float = 0.07,
+    incentive: str = "full_incentives",
+) -> Optional[dict]:
+    baseline_cost = _read_total_annual_cost(
+        base_input_dir, "baseline", housing_type, county_slug, with_solar=False
+    )
+    scenario_cost = _read_total_annual_cost(
+        base_input_dir, scenario, housing_type, county_slug, with_solar=False
+    )
+    scenario_solar_cost = _read_total_annual_cost(
+        base_input_dir, scenario, housing_type, county_slug, with_solar=True
+    )
+    if baseline_cost is None or scenario_cost is None or scenario_solar_cost is None:
+        return None
+
+    pv_storage_net = _pv_storage_net_capex(
+        base_input_dir, scenario, housing_type, county_slug, incentive=incentive
+    )
+    electrification_net = _electrification_net_capex(
+        base_input_dir, scenario, housing_type, county_slug, incentive=incentive
+    )
+    if pv_storage_net is None:
+        return None
+
+    annual_savings_with_solar = baseline_cost - scenario_solar_cost
+    annual_savings_solar_only = scenario_cost - scenario_solar_cost
+
+    cashflows_solar = [-pv_storage_net] + [annual_savings_solar_only] * int(horizon_years)
+    npv_solar = _npv(discount_rate, cashflows_solar)
+
+    npv_all = None
+    total_net = None
+    if electrification_net is not None:
+        total_net = pv_storage_net + electrification_net
+        cashflows_all = [-total_net] + [annual_savings_with_solar] * int(horizon_years)
+        npv_all = _npv(discount_rate, cashflows_all)
+
+    return {
+        "horizon_years": int(horizon_years),
+        "discount_rate": float(discount_rate),
+        "baseline_cost": float(baseline_cost),
+        "scenario_cost": float(scenario_cost),
+        "scenario_solar_cost": float(scenario_solar_cost),
+        "solar_storage": {
+            "net_capex": float(pv_storage_net),
+            "annual_savings": float(annual_savings_solar_only),
+            "npv": float(npv_solar),
+            "savings_definition": "scenario_cost - scenario_solar_cost",
+        },
+        "all_electrification": {
+            "net_capex": float(total_net) if total_net is not None else None,
+            "annual_savings": float(annual_savings_with_solar),
+            "npv": float(npv_all) if npv_all is not None else None,
+            "savings_definition": "baseline_cost - scenario_solar_cost",
+        },
+    }
+
+
+def create_npv_card(npv_details: Optional[dict]) -> str:
+    if not npv_details:
+        return "<div class='muted'>No NPV data available</div>"
+
+    def fmt_money(val: Optional[float]) -> str:
+        try:
+            if val is None:
+                return "N/A"
+            return f"${float(val):,.0f}"
+        except Exception:
+            return "N/A"
+
+    def fmt_rate(val: Optional[float]) -> str:
+        try:
+            if val is None:
+                return "N/A"
+            return f"{float(val):.2%}"
+        except Exception:
+            return "N/A"
+
+    h = npv_details.get("horizon_years")
+    r = npv_details.get("discount_rate")
+    s = npv_details.get("solar_storage", {})
+    a = npv_details.get("all_electrification", {})
+
+    parts = []
+    parts.append("<div class='method-section'>")
+    parts.append("<div class='method-label'>Formula</div>")
+    parts.append("<div class='mono'>NPV = -capex + sum_{t=1..N} savings_t / (1 + r)^t</div>")
+    parts.append("</div>")
+    parts.append("<table class='kmtbl'>")
+    parts.append("<thead><tr><th>Case</th><th>NPV</th><th>Net Capex</th><th>Annual Savings</th></tr></thead>")
+    parts.append("<tbody>")
+    parts.append(
+        "<tr>"
+        "<td>Solar + Storage Only</td>"
+        f"<td class='money'>{fmt_money(s.get('npv'))}</td>"
+        f"<td class='money'>{fmt_money(s.get('net_capex'))}</td>"
+        f"<td class='money'>{fmt_money(s.get('annual_savings'))}</td>"
+        "</tr>"
+    )
+    parts.append(
+        "<tr>"
+        "<td>All Electrification</td>"
+        f"<td class='money'>{fmt_money(a.get('npv'))}</td>"
+        f"<td class='money'>{fmt_money(a.get('net_capex'))}</td>"
+        f"<td class='money'>{fmt_money(a.get('annual_savings'))}</td>"
+        "</tr>"
+    )
+    parts.append("</tbody></table>")
+    parts.append(
+        f"<div class='muted'>Horizon: {h} years; Discount rate: {fmt_rate(r)}. "
+        "Savings definitions: "
+        f"Solar+Storage uses {s.get('savings_definition')}; "
+        f"All Electrification uses {a.get('savings_definition')}.</div>"
+    )
+    return "".join(parts)
 
 
 def create_lcoe_card(
@@ -1684,6 +1915,7 @@ def _dashboard_html(
     assets_info: Optional[dict] = None,
     coopt_card_html: Optional[str] = None,
     methods_manifest: Optional[dict] = None,
+    npv_details: Optional[dict] = None,
 ) -> str:
     scen_title = scenario.replace("_", " ").title()
     county_title = county_slug.replace("-", " ").title()
@@ -1844,7 +2076,13 @@ def _dashboard_html(
     parts.append(_render_methods_manifest(methods_manifest))
     parts.append("</div>")
 
-    # Card 2c: PV LCOE
+    # Card 2c: NPV
+    parts.append("<div class=\"card\">")
+    parts.append("<h2>NPV (25-year horizon)</h2>")
+    parts.append(create_npv_card(npv_details))
+    parts.append("</div>")
+
+    # Card 2d: PV LCOE
     parts.append("<div class=\"card\">")
     parts.append("<h2>PV LCOE</h2>")
     parts.append("<div class=\"metrics-grid\">")
@@ -1852,7 +2090,7 @@ def _dashboard_html(
     parts.append("</div>")
     parts.append("</div>")
 
-    # Card 2d: Co‑Optimization Results (Step 9b)
+    # Card 2e: Co-Optimization Results (Step 9b)
     parts.append('<div class="card">')
     parts.append("<h2>Co‑Optimization Results (Step 9b)</h2>")
     if coopt_card_html:
@@ -2168,6 +2406,15 @@ def process(
             assets_info = compute_assets_info(
                 base_input_dir, scenario, housing_type, county_slug
             )
+            npv_details = compute_npv_details(
+                base_input_dir,
+                scenario,
+                housing_type,
+                county_slug,
+                horizon_years=25,
+                discount_rate=0.07,
+                incentive="full_incentives",
+            )
             # Collect Step 18 cross-scenario plots
             step18 = _gather_step18_images(output_dir, sha)
             html = _dashboard_html(
@@ -2194,6 +2441,7 @@ def process(
                 assets_info=assets_info,
                 coopt_card_html=create_coopt_results_card(base_input_dir, scenario, housing_type, county_slug),
                 methods_manifest=methods_manifest,
+                npv_details=npv_details,
             )
             out_path = os.path.join(
                 output_dir,
