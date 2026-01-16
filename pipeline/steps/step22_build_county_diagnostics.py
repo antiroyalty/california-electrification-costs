@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import base64
 import io
+import json
 import os
 from typing import Iterable, List, Optional, Tuple
 from datetime import datetime
@@ -277,6 +278,75 @@ def create_lcoe_card(
         f"<div class='metric-value'>{val}<small>Approximate</small></div>"
         "</div>"
     )
+
+
+def _load_methods_manifest() -> Optional[dict]:
+    root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    path = os.path.join(root, "docs", "methods.yaml")
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Warning: could not load methods manifest: {e}")
+        return None
+
+
+def _render_methods_manifest(methods: Optional[dict]) -> str:
+    if not methods:
+        return "<div class='muted'>Methods manifest not available</div>"
+
+    def render_table(section: str, data: dict) -> str:
+        if not data:
+            return ""
+        rows = []
+        for k, v in data.items():
+            rows.append(f"<tr><td class='method-key'>{k}</td><td>{v}</td></tr>")
+        return (
+            f"<div class='method-section'><div class='method-label'>{section}</div>"
+            "<table class='method-table'>"
+            "<tbody>"
+            + "".join(rows)
+            + "</tbody></table></div>"
+        )
+
+    parts: List[str] = []
+    for key, entry in methods.items():
+        title = entry.get("title") or key
+        formula = entry.get("formula")
+        assumptions = entry.get("assumptions") or {}
+        constants = entry.get("constants") or {}
+        data_sources = entry.get("data_sources") or {}
+        code_refs = entry.get("code") or []
+        notes = entry.get("notes")
+        parts.append(f"<details class='method'><summary>{title} ({key})</summary>")
+        parts.append("<div class='method-body'>")
+        if formula:
+            parts.append(
+                "<div class='method-section'>"
+                "<div class='method-label'>Formula</div>"
+                f"<div class='mono'>{formula}</div>"
+                "</div>"
+            )
+        parts.append(render_table("Assumptions", assumptions))
+        parts.append(render_table("Constants", constants))
+        parts.append(render_table("Data Sources", data_sources))
+        if code_refs:
+            parts.append("<div class='method-section'><div class='method-label'>Code</div>")
+            parts.append("<ul class='code-list'>")
+            for ref in code_refs:
+                parts.append(f"<li><span class='mono'>{ref}</span></li>")
+            parts.append("</ul></div>")
+        if notes:
+            parts.append(
+                "<div class='method-section'>"
+                "<div class='method-label'>Notes</div>"
+                f"<div>{notes}</div>"
+                "</div>"
+            )
+        parts.append("</div></details>")
+    return "".join(parts)
 
 
 def create_solar_storage_deployment_graph(
@@ -1613,6 +1683,7 @@ def _dashboard_html(
     cost_breakdowns: Optional[dict] = None,
     assets_info: Optional[dict] = None,
     coopt_card_html: Optional[str] = None,
+    methods_manifest: Optional[dict] = None,
 ) -> str:
     scen_title = scenario.replace("_", " ").title()
     county_title = county_slug.replace("-", " ").title()
@@ -1665,6 +1736,17 @@ def _dashboard_html(
                 .money {{ color: #1a5; font-weight: 700; }}
                 /* Highlight for minimum cost cell in plan table */
                 .highlight-min {{ background: #eaffea; }}
+                /* Methods manifest */
+                .method {{ margin-bottom: 8px; }}
+                .method summary {{ cursor: pointer; font-weight: 600; color: #2c3e50; }}
+                .method-body {{ margin-top: 6px; }}
+                .method-section {{ margin: 6px 0 10px; }}
+                .method-label {{ font-size: 12px; font-weight: 600; color: #555; margin-bottom: 4px; }}
+                .method-table {{ width: 100%; border-collapse: collapse; font-size: 12px; }}
+                .method-table td {{ border-bottom: 1px solid #eee; padding: 4px 6px; vertical-align: top; }}
+                .method-key {{ width: 30%; color: #444; }}
+                .mono {{ font-family: "Courier New", monospace; font-size: 12px; background: #f5f5f5; padding: 4px 6px; border-radius: 4px; display: inline-block; }}
+                .code-list {{ margin: 4px 0 8px 18px; }}
             </style>
         </head>
         <body>
@@ -1756,7 +1838,13 @@ def _dashboard_html(
         parts.append("</div>")
     parts.append("</div>")
 
-    # Card 2b: PV LCOE
+    # Card 2b: Methods
+    parts.append("<div class=\"card\">")
+    parts.append("<h2>Methods</h2>")
+    parts.append(_render_methods_manifest(methods_manifest))
+    parts.append("</div>")
+
+    # Card 2c: PV LCOE
     parts.append("<div class=\"card\">")
     parts.append("<h2>PV LCOE</h2>")
     parts.append("<div class=\"metrics-grid\">")
@@ -1764,7 +1852,7 @@ def _dashboard_html(
     parts.append("</div>")
     parts.append("</div>")
 
-    # Card 2c: Co‑Optimization Results (Step 9b)
+    # Card 2d: Co‑Optimization Results (Step 9b)
     parts.append('<div class="card">')
     parts.append("<h2>Co‑Optimization Results (Step 9b)</h2>")
     if coopt_card_html:
@@ -2018,6 +2106,7 @@ def process(
     """
     written: List[str] = []
     sha = git_short_sha()
+    methods_manifest = _load_methods_manifest()
     # Normalize input counties to slugs
     county_slugs = [slugify_county_name(c) for c in counties]
     for county_slug in county_slugs:
@@ -2104,6 +2193,7 @@ def process(
                 cost_breakdowns=cost_breakdowns,
                 assets_info=assets_info,
                 coopt_card_html=create_coopt_results_card(base_input_dir, scenario, housing_type, county_slug),
+                methods_manifest=methods_manifest,
             )
             out_path = os.path.join(
                 output_dir,

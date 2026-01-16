@@ -1,0 +1,221 @@
+{
+  "constants": {
+    "title": "Evaluation Constants",
+    "constants": {
+      "LIFETIMES_DEFAULT": "solar=25, storage=15, heat_pump=15, induction_stove=15, water_heater=15 (years)",
+      "THERM_TO_KWH": "29.3001 kWh/therm"
+    },
+    "code": [
+      "evaluations/constants.py"
+    ],
+    "notes": "These constants are used across evaluations unless overridden by call sites."
+  },
+  "energy.therms_to_kwh": {
+    "title": "Gas Energy Conversion (therms to kWh)",
+    "formula": "kWh = therms * THERM_TO_KWH",
+    "assumptions": {
+      "THERM_TO_KWH": "29.3001 kWh/therm"
+    },
+    "code": [
+      "evaluations/energy.py:therms_to_kwh"
+    ]
+  },
+  "energy.effective_price_per_kwh": {
+    "title": "Effective Price per kWh",
+    "formula": "price_per_kwh = annual_cost / annual_kwh",
+    "assumptions": {
+      "returns": "0.0 when annual_kwh <= 0"
+    },
+    "code": [
+      "evaluations/energy.py:effective_price_per_kwh"
+    ]
+  },
+  "npv.npv": {
+    "title": "Net Present Value (NPV)",
+    "formula": "NPV = sum_{t=0..N} cashflow_t / (1 + r)^t",
+    "assumptions": {
+      "discount_rate": "real rate, provided by caller",
+      "cashflow_t": "t=0 is up-front cost; t>=1 are annual flows"
+    },
+    "data_sources": {
+      "cashflows": "caller-provided sequences (varies by evaluation)"
+    },
+    "code": [
+      "evaluations/npv.py:npv"
+    ],
+    "notes": "No sign convention enforced; callers must supply costs/benefits."
+  },
+  "npv.annuity_factor": {
+    "title": "Annuity Factor (NPV to EAC)",
+    "formula": "A = r / (1 - (1 + r)^-n)",
+    "assumptions": {
+      "returns": "1/n when r <= 0; 1.0 when n <= 0"
+    },
+    "code": [
+      "evaluations/npv.py:annuity_factor"
+    ],
+    "notes": "Used to convert NPV to an equivalent annual amount."
+  },
+  "eac.crf": {
+    "title": "Capital Recovery Factor (CRF)",
+    "formula": "CRF = r(1+r)^n / ((1+r)^n - 1)",
+    "assumptions": {
+      "returns": "1/n when r <= 0; 1.0 when n <= 0"
+    },
+    "code": [
+      "evaluations/eac.py:crf"
+    ]
+  },
+  "eac.EACComponents": {
+    "title": "EAC Components (Data Structure)",
+    "assumptions": {
+      "units": "All values are $/year except annual_bill_* which are already annual flows."
+    },
+    "data_sources": {
+      "capex_pv": "annualized PV capex",
+      "capex_storage": "annualized storage capex",
+      "capex_electric": "annualized electrification capex",
+      "capex_gas": "annualized gas capex",
+      "annual_bill_electric": "annual electricity bill",
+      "annual_bill_gas": "annual gas bill",
+      "vehicle_om": "annual vehicle O&M adders"
+    },
+    "code": [
+      "evaluations/eac.py:EACComponents"
+    ]
+  },
+  "eac.compute_eac_from_inputs": {
+    "title": "Equivalent Annual Cost (EAC)",
+    "formula": "EAC = annualized_capex_pv + annualized_capex_storage + annualized_capex_electric + annualized_capex_gas + annual_bill_electric + annual_bill_gas + vehicle_om",
+    "assumptions": {
+      "discount_rate": "0.07 real (default unless overridden)",
+      "lifetimes": "solar=25, storage=15, appliance rows use lifetime_years (default 15 if missing)",
+      "incentives": "full/half/no incentives applied to PV/storage capex",
+      "capital_recovery_factor": "CRF = r(1+r)^n / ((1+r)^n - 1)"
+    },
+    "data_sources": {
+      "capex_ledger": "capital_costs_<scenario>_<housing>.csv",
+      "pv_summary": "capital_costs_summary_with_pv_<scenario>_<housing>.csv",
+      "annual_bills": "RESULTS_electricity_annual_costs_* and RESULTS_gas_annual_costs_*",
+      "vehicle_om": "ledger rows: appliance_type in {vehicle_charging, vehicle_fuel}"
+    },
+    "code": [
+      "evaluations/eac.py:compute_eac_from_inputs",
+      "helpers/plot_scenario_comparison_helper.py:collect_eac_components",
+      "pipeline/steps/step20_no_solar_storage_electrification.py:collect_eac_no_pv"
+    ]
+  },
+  "incentives.apply_pv_storage_incentives": {
+    "title": "PV/Storage Incentives (Net Capex)",
+    "formula": "net_capex = capex - incentive; half_incentives applies 50% of full incentive",
+    "assumptions": {
+      "incentive": "full_incentives | half_incentives | no_incentives"
+    },
+    "code": [
+      "evaluations/incentives.py:apply_pv_storage_incentives"
+    ]
+  },
+  "payback.choose_annual_savings": {
+    "title": "Annual Savings Selection (Payback)",
+    "formula": "with_solar = baseline - scenario_solar; scenario_only = baseline - scenario",
+    "assumptions": {
+      "preference_order": "with_solar (if positive), then scenario_only (if positive), else no_savings",
+      "no_savings_value": "0.01 (epsilon to avoid divide-by-zero in callers)"
+    },
+    "code": [
+      "evaluations/payback_periods.py:choose_annual_savings"
+    ]
+  },
+  "payback.compute_payback_years": {
+    "title": "Simple Payback Period",
+    "formula": "payback_years = net_capital_cost / annual_savings",
+    "assumptions": {
+      "returns": "inf when annual_savings <= 0"
+    },
+    "code": [
+      "evaluations/payback_periods.py:compute_payback_years"
+    ]
+  },
+  "tariffs.select_row_value_for_plan": {
+    "title": "Tariff Plan Selection (Electricity)",
+    "assumptions": {
+      "variant": "nem3 filters to columns ending with _NEM3; retail filters to non-NEM3 electricity columns",
+      "plan_preference": "ordered substrings matched against electricity.* columns",
+      "fallbacks": "first numeric electricity column, then first numeric in row, then 0.0"
+    },
+    "data_sources": {
+      "row": "results row with electricity.* columns"
+    },
+    "code": [
+      "evaluations/tariffs.py:select_row_value_for_plan"
+    ],
+    "notes": "This selector is permissive; strict selection is enforced in some downstream helpers."
+  },
+  "vehicles.vehicle_annual_adders_from_ledger": {
+    "title": "Vehicle O&M Adders from Ledger",
+    "formula": "Sum annual_operating_cost by county and vehicle type",
+    "assumptions": {
+      "ev_rows": "appliance_category='electric' AND appliance_type='vehicle_charging'",
+      "ice_rows": "appliance_category='gas' AND appliance_type='vehicle_fuel'",
+      "missing_columns": "filled with 0.0 or '' for safe grouping"
+    },
+    "data_sources": {
+      "ledger_df": "capital_costs_<scenario>_<housing>.csv"
+    },
+    "code": [
+      "evaluations/vehicles.py:vehicle_annual_adders_from_ledger"
+    ]
+  },
+  "lcoe.present_value_energy": {
+    "title": "Present Value of Energy (with degradation)",
+    "formula": "PV(E) = sum_{t=1..N} (annual_kwh_year1 * (1 - d)^(t-1)) / (1 + r)^t",
+    "assumptions": {
+      "degradation_rate": "d per year (default 0.0)",
+      "returns": "0.0 if annual_kwh_year1 <= 0 or N <= 0"
+    },
+    "code": [
+      "evaluations/lcoe.py:present_value_energy"
+    ]
+  },
+  "lcoe.lcoe_crf_simple": {
+    "title": "LCOE (CRF, constant annual generation)",
+    "formula": "(capex * CRF + fixed_om + variable_om_per_kwh * annual_kwh) / annual_kwh",
+    "assumptions": {
+      "annual_kwh": "constant each year (no degradation)",
+      "returns": "0.0 if annual_kwh <= 0"
+    },
+    "data_sources": {
+      "capex": "caller-provided",
+      "annual_kwh": "caller-provided"
+    },
+    "code": [
+      "evaluations/lcoe.py:lcoe_crf_simple",
+      "helpers/plot_scenario_comparison_helper.py:collect_pv_lcoe",
+      "pipeline/steps/step22_build_county_diagnostics.py:create_lcoe_card"
+    ],
+    "notes": "Dashboard LCOE uses net PV capex and annual PV generation; no degradation or O&M."
+  },
+  "lcoe.lcoe_npv_from_params": {
+    "title": "LCOE (NPV cost / NPV energy)",
+    "formula": "LCOE = PV(costs) / PV(energy)",
+    "assumptions": {
+      "costs": "capex at t=0; fixed O&M and variable O&M tied to energy each year",
+      "energy": "annual_kwh_year1 degraded by (1 - d)^(t-1)",
+      "returns": "0.0 if PV(energy) == 0"
+    },
+    "code": [
+      "evaluations/lcoe.py:lcoe_npv_from_params"
+    ]
+  },
+  "lcoe.lcoe_from_schedules": {
+    "title": "LCOE from Explicit Schedules",
+    "formula": "LCOE = PV(costs) / PV(energy)",
+    "assumptions": {
+      "annual_costs": "include t=0 capex as first element",
+      "annual_generation_kwh": "energy per year; prepend 0 for t=0 to align with NPV"
+    },
+    "code": [
+      "evaluations/lcoe.py:lcoe_from_schedules"
+    ]
+  }
+}
