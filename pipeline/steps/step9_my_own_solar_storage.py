@@ -25,8 +25,8 @@ Outputs (columns used downstream by step10):
 Files:
 - Reads weather: data/loadprofiles/<scenario>/<housing_type>/<county>/weather_TMY_<county>.csv
 - Reads load:   data/loadprofiles/<scenario>/<housing_type>/<county>/combined_profiles_<scenario>_<county}.csv
-- Writes:       data/loadprofiles/<scenario>/<housing_type>/<county>/sam_optimized_load_profiles_<county>.csv
-                data/loadprofiles/<scenario>/<housing_type>/<county>/sam_optimized_load_profiles_with_exports_<county>.csv
+- Writes:       data/loadprofiles/<scenario>/<housing_type>/<county>/solar_storage_dispatch_profiles_<county>.csv
+                data/loadprofiles/<scenario>/<housing_type>/<county>/solar_storage_dispatch_profiles_with_exports_<county>.csv
 
 """
 
@@ -69,9 +69,9 @@ from helpers.step9_exports import (
 # I/O constants
 LOADPROFILE_FILE_PREFIX = "combined_profiles"
 TOTAL_LOAD_COLUMN_NAME = "electricity.real_and_simulated.for_typical_county_home.kwh"
-OUTPUT_LOADPROFILE_FILE_PREFIX = "sam_optimized_load_profiles"
+OUTPUT_LOADPROFILE_FILE_PREFIX = "solar_storage_dispatch_profiles"
 # New: export-enabled companion file prefix (will not overwrite the non-export file)
-OUTPUT_EXPORT_LOADPROFILE_FILE_PREFIX = "sam_optimized_load_profiles_with_exports"
+OUTPUT_EXPORT_LOADPROFILE_FILE_PREFIX = "solar_storage_dispatch_profiles_with_exports"
 SOLAR_STORAGE_CAPACITY_PREFIX = "electrified_assets"
 CAPITAL_COSTS_FOLDER_NAME = "CAPITAL_COSTS"
 

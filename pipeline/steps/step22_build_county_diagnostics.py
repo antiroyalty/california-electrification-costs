@@ -333,10 +333,10 @@ def create_solar_storage_deployment_graph(
             print(f"Warning: could not embed Step 9 PNG for {county_slug}: {e}")
 
     # Fallback: load time series and plot using helper
-    csv_path = os.path.join(county_dir, f"sam_optimized_load_profiles_{county_slug}.csv")
+    csv_path = os.path.join(county_dir, f"solar_storage_dispatch_profiles_{county_slug}.csv")
     if not os.path.exists(csv_path):
         # Older naming variant
-        csv_path = os.path.join(county_dir, f"sam_optimized_load_profiles_{scenario}_{county_slug}.csv")
+        csv_path = os.path.join(county_dir, f"solar_storage_dispatch_profiles_{scenario}_{county_slug}.csv")
     if not os.path.exists(csv_path):
         print(f"Warning: Step 9 CSV not found for {county_slug}")
         return None
@@ -590,7 +590,7 @@ def create_annual_load_card(
     """Create a simple text card showing total annual household load in kWh."""
     try:
         county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
-        sam_file = os.path.join(county_dir, f"sam_optimized_load_profiles_{county_slug}.csv")
+        sam_file = os.path.join(county_dir, f"solar_storage_dispatch_profiles_{county_slug}.csv")
         
         if not os.path.exists(sam_file):
             return "<div class='metric-value'>N/A<br><small>No data available</small></div>"
@@ -624,7 +624,7 @@ def create_grid_supply_card(
     """Create a simple text card showing annual load supplied by grid in kWh."""
     try:
         county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
-        sam_file = os.path.join(county_dir, f"sam_optimized_load_profiles_{county_slug}.csv")
+        sam_file = os.path.join(county_dir, f"solar_storage_dispatch_profiles_{county_slug}.csv")
         
         if not os.path.exists(sam_file):
             return "<div class='metric-value'>N/A<br><small>No data available</small></div>"
@@ -927,7 +927,7 @@ def _load_exports_timeseries(
             except Exception:
                 pass
         s9_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
-        s9_exp = os.path.join(s9_dir, f"sam_optimized_load_profiles_with_exports_{county_slug}.csv")
+        s9_exp = os.path.join(s9_dir, f"solar_storage_dispatch_profiles_with_exports_{county_slug}.csv")
         if os.path.exists(s9_exp):
             try:
                 df = pd.read_csv(s9_exp)
@@ -937,9 +937,9 @@ def _load_exports_timeseries(
                     return pd.DataFrame({"exports": exp.values}, index=ts)
             except Exception:
                 pass
-        s9_base = os.path.join(s9_dir, f"sam_optimized_load_profiles_{county_slug}.csv")
+        s9_base = os.path.join(s9_dir, f"solar_storage_dispatch_profiles_{county_slug}.csv")
         if not os.path.exists(s9_base):
-            alt = os.path.join(s9_dir, f"sam_optimized_load_profiles_{scenario}_{county_slug}.csv")
+            alt = os.path.join(s9_dir, f"solar_storage_dispatch_profiles_{scenario}_{county_slug}.csv")
             s9_base = alt if os.path.exists(alt) else s9_base
         if os.path.exists(s9_base):
             try:

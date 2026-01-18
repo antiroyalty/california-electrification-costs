@@ -10,8 +10,8 @@ Notes
 - Weather→PV per‑kW yield is computed using Step 9 core helpers (GHI‑based PVWatts‑style)
 
 Outputs (per county)
-- sam_optimized_load_profiles_<county>.csv
-- sam_optimized_load_profiles_with_exports_<county>.csv
+- solar_storage_dispatch_profiles_<county>.csv
+- solar_storage_dispatch_profiles_with_exports_<county>.csv
 
 These match Step 9 column conventions so Step 10 can build aggregator files for Step 12 without changes.
 
@@ -300,7 +300,7 @@ def _write_step9_outputs(
     base_df = pd.DataFrame(base_cols)
 
     # Write base
-    out_base = os.path.join(out_dir, f"sam_optimized_load_profiles_{county}.csv")
+    out_base = os.path.join(out_dir, f"solar_storage_dispatch_profiles_{county}.csv")
     base_df.to_csv(out_base, index=False)
 
     # Exports file (preferred by Step 10)
@@ -309,7 +309,7 @@ def _write_step9_outputs(
         "timestamp": timestamps,
         "Exports to Grid (kWh)": [pg + bg for pg, bg in zip(pv2grid, batt2grid)],
     })
-    out_exp = os.path.join(out_dir, f"sam_optimized_load_profiles_with_exports_{county}.csv")
+    out_exp = os.path.join(out_dir, f"solar_storage_dispatch_profiles_with_exports_{county}.csv")
     exp_df.to_csv(out_exp, index=False)
 
 
@@ -446,6 +446,7 @@ def process(
         print(f"[step9b] Warning: could not write/merge capacity summary CSV: {e}")
 
 
+# Where is the total cost for the co-optimized values?
 def main():
     p = argparse.ArgumentParser(description="Step 9b: Co‑optimize PV/Battery sizing and hourly dispatch")
     p.add_argument("--base-input-dir", default="data/loadprofiles")
