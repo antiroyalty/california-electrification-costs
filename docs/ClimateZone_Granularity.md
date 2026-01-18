@@ -30,7 +30,7 @@ TODO (tracked in code and here): Publish `NEM3/county_to_climate_zone.csv` with 
 
 ### Step 9 (PV + storage)
 - No change to dispatch. Already writes:
-  - `PV AC (kWh)` and `PV to Grid (kWh)` in `sam_optimized_load_profiles_*.csv` (used for exports).
+  - `PV AC (kWh)` and `PV to Grid (kWh)` in `solar_storage_dispatch_profiles_*.csv` (used for exports).
 - Outputs remain per county.
 
 ### Step 10 (Loads for rates)

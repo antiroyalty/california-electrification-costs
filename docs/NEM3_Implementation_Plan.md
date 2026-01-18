@@ -10,7 +10,7 @@ The goal is to correctly compute annual electricity costs for scenarios with sol
 - Optional year‑end Net Surplus Compensation (NSC) for unused credits.
 
 ## Current Pipeline (quick recap)
-- Step 9 (solar + storage): writes `sam_optimized_load_profiles_<county>.csv` with flows:
+- Step 9 (solar + storage): writes `solar_storage_dispatch_profiles_<county>.csv` with flows:
   - `Load Profile`, `System to Load` (PV→Load), `Battery to Load`, `Grid to Load`, `System to Battery` (PV→Battery), `Grid to Battery`, `Battery SOC`, etc.
 - Step 10 (rates prep): writes `loadprofiles_for_rates_<county>.csv` with hourly columns:
   - `default.electricity.kwh`, `solarstorage.electricity.kwh` (currently Grid→Load only), and gas.
@@ -30,7 +30,7 @@ Today, the solar+storage electricity bill uses only residual imports (Grid→Loa
 ## Proposed changes by step
 
 ### 1) Step 9 — add PV generation and export columns
-Add the following columns to `sam_optimized_load_profiles_<county>.csv` (both `step9_my_own_solar_storage.py` and the PySAM variants as feasible):
+Add the following columns to `solar_storage_dispatch_profiles_<county>.csv` (both `step9_my_own_solar_storage.py` and the PySAM variants as feasible):
 - `PV AC (kWh)`: hourly PV AC generation time series (already computed internally as `solar_gen`).
 - `PV to Grid (kWh)`: hourly net PV export to grid. For the DIY dispatch, this is
   `max(0, PV_AC − System to Load − System to Battery)`.

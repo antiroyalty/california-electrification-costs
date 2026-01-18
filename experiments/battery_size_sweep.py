@@ -284,7 +284,7 @@ def _write_hourly(out_dir: str, county_slug: str, load_profile: List[float], pv:
         "Grid to Battery": gtb,
         "Battery SOC": soc,
     }, index=idx)
-    df.to_csv(os.path.join(out_dir, f"sam_optimized_load_profiles_{county_slug}.csv"))
+    df.to_csv(os.path.join(out_dir, f"solar_storage_dispatch_profiles_{county_slug}.csv"))
 
 
 def _ensure_rate_inputs(exp_scen_dir: str, base_input_dir: str, scenario: str, housing_type: str, county_slug: str, timestamps: pd.DatetimeIndex, load_profile: List[float]) -> None:

@@ -222,8 +222,8 @@ def read_coopt_capacities(
 
 def sam_csv_path(base_input_dir: str, scenario: str, housing_type: str, county_slug: str) -> Optional[str]:
     county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
-    a = os.path.join(county_dir, f"sam_optimized_load_profiles_{county_slug}.csv")
-    b = os.path.join(county_dir, f"sam_optimized_load_profiles_{scenario}_{county_slug}.csv")
+    a = os.path.join(county_dir, f"solar_storage_dispatch_profiles_{county_slug}.csv")
+    b = os.path.join(county_dir, f"solar_storage_dispatch_profiles_{scenario}_{county_slug}.csv")
     if os.path.exists(a):
         return a
     if os.path.exists(b):
@@ -359,9 +359,9 @@ def lookup_pv_size_kw(
             except Exception:
                 pass
         county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
-        sam_file = os.path.join(county_dir, f"sam_optimized_load_profiles_{county_slug}.csv")
+        sam_file = os.path.join(county_dir, f"solar_storage_dispatch_profiles_{county_slug}.csv")
         if not os.path.exists(sam_file):
-            alt = os.path.join(county_dir, f"sam_optimized_load_profiles_{scenario}_{county_slug}.csv")
+            alt = os.path.join(county_dir, f"solar_storage_dispatch_profiles_{scenario}_{county_slug}.csv")
             sam_file = alt if os.path.exists(alt) else sam_file
         return infer_pv_size_kw_from_csv(sam_file)
     except Exception:
@@ -376,9 +376,9 @@ def compute_key_metrics(
 ) -> Optional[dict]:
     """Compute key metrics with and without solar+storage from Step 9 output."""
     county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
-    sam_file = os.path.join(county_dir, f"sam_optimized_load_profiles_{county_slug}.csv")
+    sam_file = os.path.join(county_dir, f"solar_storage_dispatch_profiles_{county_slug}.csv")
     if not os.path.exists(sam_file):
-        alt = os.path.join(county_dir, f"sam_optimized_load_profiles_{scenario}_{county_slug}.csv")
+        alt = os.path.join(county_dir, f"solar_storage_dispatch_profiles_{scenario}_{county_slug}.csv")
         sam_file = alt if os.path.exists(alt) else sam_file
     if not os.path.exists(sam_file):
         return None
@@ -476,9 +476,9 @@ def compute_energy_flow_metrics(
 ) -> Optional[dict]:
     """Compute detailed energy flow metrics from Step 9 solar+storage CSV."""
     county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
-    sam_file = os.path.join(county_dir, f"sam_optimized_load_profiles_{county_slug}.csv")
+    sam_file = os.path.join(county_dir, f"solar_storage_dispatch_profiles_{county_slug}.csv")
     if not os.path.exists(sam_file):
-        alt = os.path.join(county_dir, f"sam_optimized_load_profiles_{scenario}_{county_slug}.csv")
+        alt = os.path.join(county_dir, f"solar_storage_dispatch_profiles_{scenario}_{county_slug}.csv")
         sam_file = alt if os.path.exists(alt) else sam_file
     if not os.path.exists(sam_file):
         return None

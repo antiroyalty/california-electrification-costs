@@ -326,7 +326,7 @@ def run_for_county(
                         "Grid to Battery": gtb,
                         "Battery SOC": soc,
                     }, index=idx)
-                    dfh.to_csv(os.path.join(exp_scen_dir, f"sam_optimized_load_profiles_{county_slug}.csv"))
+                    dfh.to_csv(os.path.join(exp_scen_dir, f"solar_storage_dispatch_profiles_{county_slug}.csv"))
                     # Ensure Step 10 inputs and compute bills
                     sss._ensure_rate_inputs_for_fraction(exp_scen_dir, base_input_dir, scenario, housing_type, county_slug, idx, load_profile)  # type: ignore
                     sss._compute_bill_for_fraction(exp_scen_root, scenario, housing_type, [county])  # type: ignore
