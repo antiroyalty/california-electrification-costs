@@ -138,7 +138,7 @@ Produce a summary showing:
   - `--base-input-dir`, `--base-output-dir`, `--scenario`, `--housing-type`, `--counties`, `--timeslices {8760|288}`
   - `--allow-grid-charging`, `--allow-batt-export`, `--plan <rate-plan>` (or iterate plans)
 - Outputs per county:
-  - `sam_optimized_load_profiles_<county>.csv` and `_with_exports_` variant, matching Step 9 column names (for plotting)
+  - `solar_storage_dispatch_profiles_<county>.csv` and `_with_exports_` variant, matching Step 9 column names (for plotting)
   - `loadprofiles_for_rates_<county>.csv` with the aggregator fields used by Step 12:
     - `nem3.imports.kwh`, `nem3.exports.kwh`, `retail.imports.kwh`, `timestamp`
   - `CAPITAL_COSTS/electrified_assets.csv` update (append new PV/Battery sizes), or a parallel file (to avoid overwriting other runs)

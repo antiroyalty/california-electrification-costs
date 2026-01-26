@@ -9,7 +9,7 @@ SCENARIO_DATA_MAP = {
         # baseline
         "default": {
             "electricity": {
-                "file_prefix": "electricity_loads_", # or "sam_optimized_load_profiles_"
+                "file_prefix": "electricity_loads_", # or "solar_storage_dispatch_profiles_"
                 "column": "total_load" # or + "Total Load"
             },
             "gas": {
@@ -20,7 +20,7 @@ SCENARIO_DATA_MAP = {
         # baseline w/ solar + storage
         "solar_storage": {
             "electricity": {
-                "file_prefix": "sam_optimized_load_profiles_",
+                "file_prefix": "solar_storage_dispatch_profiles_",
                 "column": "Grid to Load"
             },
             "gas": {
@@ -42,7 +42,7 @@ SCENARIO_DATA_MAP = {
             },
         },
         "solar_storage": {
-            "electricity": {"file_prefix": "sam_optimized_load_profiles_", "column": "Grid to Load"},
+            "electricity": {"file_prefix": "solar_storage_dispatch_profiles_", "column": "Grid to Load"},
             "gas": {"file_prefix": "combined_profiles_induction_stove_coopt_", "column": "gas.hourly_total.for_typical_county_home.therms"},
         },
     },
@@ -52,7 +52,7 @@ SCENARIO_DATA_MAP = {
             "gas": {"file_prefix": "combined_profiles_water_heating_coopt_", "column": "gas.hourly_total.for_typical_county_home.therms"},
         },
         "solar_storage": {
-            "electricity": {"file_prefix": "sam_optimized_load_profiles_", "column": "Grid to Load"},
+            "electricity": {"file_prefix": "solar_storage_dispatch_profiles_", "column": "Grid to Load"},
             "gas": {"file_prefix": "combined_profiles_water_heating_coopt_", "column": "gas.hourly_total.for_typical_county_home.therms"},
         },
     },
@@ -62,7 +62,7 @@ SCENARIO_DATA_MAP = {
             "gas": {"file_prefix": "combined_profiles_heat_pump_coopt_", "column": "gas.hourly_total.for_typical_county_home.therms"},
         },
         "solar_storage": {
-            "electricity": {"file_prefix": "sam_optimized_load_profiles_", "column": "Grid to Load"},
+            "electricity": {"file_prefix": "solar_storage_dispatch_profiles_", "column": "Grid to Load"},
             "gas": {"file_prefix": "combined_profiles_heat_pump_coopt_", "column": "gas.hourly_total.for_typical_county_home.therms"},
         },
     },
@@ -72,7 +72,7 @@ SCENARIO_DATA_MAP = {
             "gas": {"file_prefix": "combined_profiles_heat_pump_and_induction_stove_and_water_heating_coopt_", "column": "gas.hourly_total.for_typical_county_home.therms"},
         },
         "solar_storage": {
-            "electricity": {"file_prefix": "sam_optimized_load_profiles_", "column": "Grid to Load"},
+            "electricity": {"file_prefix": "solar_storage_dispatch_profiles_", "column": "Grid to Load"},
             "gas": {"file_prefix": "combined_profiles_heat_pump_and_induction_stove_and_water_heating_coopt_", "column": "gas.hourly_total.for_typical_county_home.therms"},
         },
     },
@@ -82,7 +82,7 @@ SCENARIO_DATA_MAP = {
             "gas": {"file_prefix": "combined_profiles_baseline_ice_car_coopt_", "column": "gas.hourly_total.for_typical_county_home.therms"},
         },
         "solar_storage": {
-            "electricity": {"file_prefix": "sam_optimized_load_profiles_", "column": "Grid to Load"},
+            "electricity": {"file_prefix": "solar_storage_dispatch_profiles_", "column": "Grid to Load"},
             "gas": {"file_prefix": "combined_profiles_baseline_ice_car_coopt_", "column": "gas.hourly_total.for_typical_county_home.therms"},
         },
     },
@@ -92,7 +92,7 @@ SCENARIO_DATA_MAP = {
             "gas": {"file_prefix": "combined_profiles_baseline_ev_car_coopt_", "column": "gas.hourly_total.for_typical_county_home.therms"},
         },
         "solar_storage": {
-            "electricity": {"file_prefix": "sam_optimized_load_profiles_", "column": "Grid to Load"},
+            "electricity": {"file_prefix": "solar_storage_dispatch_profiles_", "column": "Grid to Load"},
             "gas": {"file_prefix": "combined_profiles_baseline_ev_car_coopt_", "column": "gas.hourly_total.for_typical_county_home.therms"},
         },
     },
@@ -102,7 +102,7 @@ SCENARIO_DATA_MAP = {
             "gas": {"file_prefix": "combined_profiles_full_electric_ev_coopt_", "column": "gas.hourly_total.for_typical_county_home.therms"},
         },
         "solar_storage": {
-            "electricity": {"file_prefix": "sam_optimized_load_profiles_", "column": "Grid to Load"},
+            "electricity": {"file_prefix": "solar_storage_dispatch_profiles_", "column": "Grid to Load"},
             "gas": {"file_prefix": "combined_profiles_full_electric_ev_coopt_", "column": "gas.hourly_total.for_typical_county_home.therms"},
         },
     },
@@ -122,7 +122,7 @@ SCENARIO_DATA_MAP = {
         # With PV/storage: electricity from SAM; gas unchanged (same combined file)
         "solar_storage": {
             "electricity": {
-                "file_prefix": "sam_optimized_load_profiles_",
+                "file_prefix": "solar_storage_dispatch_profiles_",
                 "column": "Grid to Load",
             },
             "gas": {
@@ -135,7 +135,7 @@ SCENARIO_DATA_MAP = {
         # household adopted heat pump
         "default": {
             "electricity": {
-                "file_prefix": "combined_profiles_heat_pump_", # or "sam_optimized_load_profiles_"
+                "file_prefix": "combined_profiles_heat_pump_", # or "solar_storage_dispatch_profiles_"
                 "column": "electricity.real_and_simulated.for_typical_county_home.kwh" # or + "Total Load"
             },
             "gas": {
@@ -146,7 +146,7 @@ SCENARIO_DATA_MAP = {
         # household adopted heat pump w/ solar + storage
         "solar_storage": {
             "electricity": {
-                "file_prefix": "sam_optimized_load_profiles_",
+                "file_prefix": "solar_storage_dispatch_profiles_",
                 "column": "Grid to Load"
             },
             "gas": {
@@ -158,7 +158,7 @@ SCENARIO_DATA_MAP = {
     "induction_stove": {
         "default": {
             "electricity": {
-                "file_prefix": "combined_profiles_induction_stove_", # or "sam_optimized_load_profiles_"
+                "file_prefix": "combined_profiles_induction_stove_", # or "solar_storage_dispatch_profiles_"
                 "column": "electricity.real_and_simulated.for_typical_county_home.kwh" # or + "Total Load"
             },
             "gas": {
@@ -168,7 +168,7 @@ SCENARIO_DATA_MAP = {
         },
         "solar_storage": {
             "electricity": {
-                "file_prefix": "sam_optimized_load_profiles_",
+                "file_prefix": "solar_storage_dispatch_profiles_",
                 "column": "Grid to Load"
             },
             "gas": {
@@ -181,7 +181,7 @@ SCENARIO_DATA_MAP = {
         # household adopted heat pump
         "default": {
             "electricity": {
-                "file_prefix": "combined_profiles_heat_pump_and_induction_stove_", # or "sam_optimized_load_profiles_"
+                "file_prefix": "combined_profiles_heat_pump_and_induction_stove_", # or "solar_storage_dispatch_profiles_"
                 "column": "electricity.real_and_simulated.for_typical_county_home.kwh" # or + "Total Load"
             },
             "gas": {
@@ -192,7 +192,7 @@ SCENARIO_DATA_MAP = {
         # household adopted heat pump w/ solar + storage
         "solar_storage": {
             "electricity": {
-                "file_prefix": "sam_optimized_load_profiles_",
+                "file_prefix": "solar_storage_dispatch_profiles_",
                 "column": "Grid to Load"
             },
             "gas": {
@@ -205,7 +205,7 @@ SCENARIO_DATA_MAP = {
         # household adopted water heating
         "default": {
             "electricity": {
-                "file_prefix": "combined_profiles_water_heating_", # or "sam_optimized_load_profiles_"
+                "file_prefix": "combined_profiles_water_heating_", # or "solar_storage_dispatch_profiles_"
                 "column": "electricity.real_and_simulated.for_typical_county_home.kwh" # or + "Total Load"
             },
             "gas": {
@@ -216,7 +216,7 @@ SCENARIO_DATA_MAP = {
         # household adopted water heating w/ solar + storage
         "solar_storage": {
             "electricity": {
-                "file_prefix": "sam_optimized_load_profiles_",
+                "file_prefix": "solar_storage_dispatch_profiles_",
                 "column": "Grid to Load"
             },
             "gas": {
@@ -229,7 +229,7 @@ SCENARIO_DATA_MAP = {
         # household adopted water heating
         "default": {
             "electricity": {
-                "file_prefix": "combined_profiles_heat_pump_and_induction_stove_and_water_heating_", # or "sam_optimized_load_profiles_"
+                "file_prefix": "combined_profiles_heat_pump_and_induction_stove_and_water_heating_", # or "solar_storage_dispatch_profiles_"
                 "column": "electricity.real_and_simulated.for_typical_county_home.kwh" # or + "Total Load"
             },
             "gas": {
@@ -240,7 +240,7 @@ SCENARIO_DATA_MAP = {
         # household adopted water heating w/ solar + storage
         "solar_storage": {
             "electricity": {
-                "file_prefix": "sam_optimized_load_profiles_",
+                "file_prefix": "solar_storage_dispatch_profiles_",
                 "column": "Grid to Load"
             },
             "gas": {
@@ -263,7 +263,7 @@ SCENARIO_DATA_MAP = {
         },
         "solar_storage": {
             "electricity": {
-                "file_prefix": "sam_optimized_load_profiles_",
+                "file_prefix": "solar_storage_dispatch_profiles_",
                 "column": "Grid to Load"
             },
             "gas": {
@@ -286,7 +286,7 @@ SCENARIO_DATA_MAP = {
         },
         "solar_storage": {
             "electricity": {
-                "file_prefix": "sam_optimized_load_profiles_",
+                "file_prefix": "solar_storage_dispatch_profiles_",
                 "column": "Grid to Load"
             },
             "gas": {
@@ -309,7 +309,7 @@ SCENARIO_DATA_MAP = {
         },
         "solar_storage": {
             "electricity": {
-                "file_prefix": "sam_optimized_load_profiles_",
+                "file_prefix": "solar_storage_dispatch_profiles_",
                 "column": "Grid to Load"
             },
             "gas": {
@@ -374,12 +374,12 @@ def _read_step9_imports(series_path: str) -> pd.Series:
 def _read_step9_exports(base_path: str, exports_path: str) -> pd.Series:
     """Read hourly exports strictly from the exports-only CSV.
 
-    Required: 'Exports to Grid (kWh)' present in sam_optimized_load_profiles_with_exports_ file.
+    Required: 'Exports to Grid (kWh)' present in solar_storage_dispatch_profiles_with_exports_ file.
     No fallback is used to avoid silent misinterpretation of results.
     """
     if not os.path.exists(exports_path):
         raise RuntimeError(
-            f"Exports file not found: {exports_path}. Ensure Step 9/9b wrote 'sam_optimized_load_profiles_with_exports_<county>.csv'"
+            f"Exports file not found: {exports_path}. Ensure Step 9/9b wrote 'solar_storage_dispatch_profiles_with_exports_<county>.csv'"
         )
     df_exp = pd.read_csv(exports_path)
     if "Exports to Grid (kWh)" not in df_exp.columns:
@@ -399,11 +399,11 @@ def prepare_for_rates_analysis(base_input_dir, base_output_dir, housing_type, sc
     electricity_default_file = get_file_path(path, county, directory["default"]["electricity"]["file_prefix"])
     gas_default_file = get_file_path(path, county, directory["default"]["gas"]["file_prefix"])
     # Step 9 base and exports files
-    step9_base_electric_file = get_file_path(path, county, directory["solar_storage"]["electricity"]["file_prefix"])  # sam_optimized_load_profiles_
+    step9_base_electric_file = get_file_path(path, county, directory["solar_storage"]["electricity"]["file_prefix"])  # solar_storage_dispatch_profiles_
     step9_exports_electric_file = get_file_path(
         path,
         county,
-        directory["solar_storage"]["electricity"]["file_prefix"].replace("sam_optimized_load_profiles_", "sam_optimized_load_profiles_with_exports_")
+        directory["solar_storage"]["electricity"]["file_prefix"].replace("solar_storage_dispatch_profiles_", "solar_storage_dispatch_profiles_with_exports_")
     )
     gas_solar_storage_file = get_file_path(path, county, directory["solar_storage"]["gas"]["file_prefix"])
 

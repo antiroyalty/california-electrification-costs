@@ -4,7 +4,7 @@ Reusable helpers to compare scenarios across payback, kWh flows, savings, and bi
 This module mirrors data-access patterns established in step15/step16:
 - Payback CSVs:   data/results/{housing_type}/payback_periods_{scenario}.csv
 - Totals results: data/loadprofiles/{scenario}/{housing_type}/{county_slug}/results/totals/
-- SAM hourly CSV: data/loadprofiles/{scenario}/{housing_type}/{county_slug}/sam_optimized_load_profiles_*.csv
+- Dispatch hourly CSV: data/loadprofiles/{scenario}/{housing_type}/{county_slug}/solar_storage_dispatch_profiles_*.csv
 
 Main capabilities
 - Collect and aggregate payback periods (with-solar only) over counties/scenarios
@@ -206,8 +206,8 @@ def _annual_bill_parts(
 
 def _sam_csv_path(base_input_dir: str, scenario: str, housing_type: str, county_slug: str) -> Optional[str]:
     county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
-    a = os.path.join(county_dir, f"sam_optimized_load_profiles_{county_slug}.csv")
-    b = os.path.join(county_dir, f"sam_optimized_load_profiles_{scenario}_{county_slug}.csv")
+    a = os.path.join(county_dir, f"solar_storage_dispatch_profiles_{county_slug}.csv")
+    b = os.path.join(county_dir, f"solar_storage_dispatch_profiles_{scenario}_{county_slug}.csv")
     if os.path.exists(a):
         return a
     if os.path.exists(b):
@@ -220,8 +220,8 @@ def _sam_metric_sum(base_input_dir: str, scenario: str, housing_type: str, count
     if not path:
         county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
         expected = [
-            os.path.join(county_dir, f"sam_optimized_load_profiles_{county_slug}.csv"),
-            os.path.join(county_dir, f"sam_optimized_load_profiles_{scenario}_{county_slug}.csv"),
+            os.path.join(county_dir, f"solar_storage_dispatch_profiles_{county_slug}.csv"),
+            os.path.join(county_dir, f"solar_storage_dispatch_profiles_{scenario}_{county_slug}.csv"),
         ]
         raise FileNotFoundError(f"SAM load profile CSV not found. Expected one of: {expected}")
     df = pd.read_csv(path)

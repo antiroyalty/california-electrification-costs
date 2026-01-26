@@ -378,8 +378,8 @@ def load_total_solar_generation_kwh(
     """
     county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
     candidates = [
-        os.path.join(county_dir, f"sam_optimized_load_profiles_{county_slug}.csv"),
-        os.path.join(county_dir, f"sam_optimized_load_profiles_{scenario}_{county_slug}.csv"),
+        os.path.join(county_dir, f"solar_storage_dispatch_profiles_{county_slug}.csv"),
+        os.path.join(county_dir, f"solar_storage_dispatch_profiles_{scenario}_{county_slug}.csv"),
     ]
     for path in candidates:
         if os.path.exists(path):
@@ -439,8 +439,8 @@ def load_self_supply_ratio(
     """
     county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
     for pattern in [
-        f"sam_optimized_load_profiles_{county_slug}.csv",
-        f"sam_optimized_load_profiles_{scenario}_{county_slug}.csv"
+        f"solar_storage_dispatch_profiles_{county_slug}.csv",
+        f"solar_storage_dispatch_profiles_{scenario}_{county_slug}.csv"
     ]:
         path = os.path.join(county_dir, pattern)
         if os.path.exists(path):
@@ -465,10 +465,10 @@ def load_peak_period_load_share(
     Peak-period load share = sum(load 16–21) / sum(load) using 'Load Profile' from SAM CSV.
     """
     county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
-    path = os.path.join(county_dir, f"sam_optimized_load_profiles_{county_slug}.csv")
+    path = os.path.join(county_dir, f"solar_storage_dispatch_profiles_{county_slug}.csv")
     if not os.path.exists(path):
         # Try alternate naming
-        path = os.path.join(county_dir, f"sam_optimized_load_profiles_{scenario}_{county_slug}.csv")
+        path = os.path.join(county_dir, f"solar_storage_dispatch_profiles_{scenario}_{county_slug}.csv")
         if not os.path.exists(path):
             return 0.0
     try:
@@ -500,8 +500,8 @@ def load_net_grid_consumption_data(
     
     # Try to find SAM optimized load profiles file
     sam_file_patterns = [
-        f"sam_optimized_load_profiles_{county_slug}.csv",
-        f"sam_optimized_load_profiles_{scenario}_{county_slug}.csv"
+        f"solar_storage_dispatch_profiles_{county_slug}.csv",
+        f"solar_storage_dispatch_profiles_{scenario}_{county_slug}.csv"
     ]
     
     for pattern in sam_file_patterns:
@@ -546,8 +546,8 @@ def load_total_consumption_data(
     
     # Try to find SAM optimized load profiles file
     sam_file_patterns = [
-        f"sam_optimized_load_profiles_{county_slug}.csv",
-        f"sam_optimized_load_profiles_{scenario}_{county_slug}.csv"
+        f"solar_storage_dispatch_profiles_{county_slug}.csv",
+        f"solar_storage_dispatch_profiles_{scenario}_{county_slug}.csv"
     ]
     
     for pattern in sam_file_patterns:
@@ -603,8 +603,8 @@ def load_battery_energy_data(
     
     # Try to find SAM optimized load profiles file
     sam_file_patterns = [
-        f"sam_optimized_load_profiles_{county_slug}.csv",
-        f"sam_optimized_load_profiles_{scenario}_{county_slug}.csv"
+        f"solar_storage_dispatch_profiles_{county_slug}.csv",
+        f"solar_storage_dispatch_profiles_{scenario}_{county_slug}.csv"
     ]
     
     for pattern in sam_file_patterns:
@@ -638,8 +638,8 @@ def load_solar_energy_data(
     
     # Try to find SAM optimized load profiles file
     sam_file_patterns = [
-        f"sam_optimized_load_profiles_{county_slug}.csv",
-        f"sam_optimized_load_profiles_{scenario}_{county_slug}.csv"
+        f"solar_storage_dispatch_profiles_{county_slug}.csv",
+        f"solar_storage_dispatch_profiles_{scenario}_{county_slug}.csv"
     ]
     
     for pattern in sam_file_patterns:
@@ -692,8 +692,8 @@ def load_sam_metric_data(
     
     # Try to find SAM optimized load profiles file
     sam_file_patterns = [
-        f"sam_optimized_load_profiles_{county_slug}.csv",
-        f"sam_optimized_load_profiles_{scenario}_{county_slug}.csv"
+        f"solar_storage_dispatch_profiles_{county_slug}.csv",
+        f"solar_storage_dispatch_profiles_{scenario}_{county_slug}.csv"
     ]
     
     for pattern in sam_file_patterns:
@@ -778,7 +778,7 @@ def load_sam_metric_data(base_input_dir: str, scenario: str, housing_type: str, 
     Load annual SAM metric data for mapping visualization.
     Returns total annual value for the specified metric column.
     """
-    sam_file = os.path.join(base_input_dir, scenario, housing_type, county_slug, f"sam_optimized_load_profiles_{county_slug}.csv")
+    sam_file = os.path.join(base_input_dir, scenario, housing_type, county_slug, f"solar_storage_dispatch_profiles_{county_slug}.csv")
     
     try:
         if not os.path.exists(sam_file):

@@ -228,7 +228,7 @@ def load_battery_soc_data(
     county_slug: str,
 ) -> Optional[pd.DataFrame]:
     county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
-    sam_file = os.path.join(county_dir, f"sam_optimized_load_profiles_{county_slug}.csv")
+    sam_file = os.path.join(county_dir, f"solar_storage_dispatch_profiles_{county_slug}.csv")
     if not os.path.exists(sam_file):
         print(f"Warning: Solar+storage load profiles file not found: {sam_file}")
         return None
@@ -264,8 +264,8 @@ def create_battery_soc_chart(
             return "<div class='muted'>No battery SOC data directory</div>"
 
         def find_sam_path(cslug: str) -> Optional[str]:
-            p1 = os.path.join(base_dir, cslug, f"sam_optimized_load_profiles_{cslug}.csv")
-            p2 = os.path.join(base_dir, cslug, f"sam_optimized_load_profiles_{scenario}_{cslug}.csv")
+            p1 = os.path.join(base_dir, cslug, f"solar_storage_dispatch_profiles_{cslug}.csv")
+            p2 = os.path.join(base_dir, cslug, f"solar_storage_dispatch_profiles_{scenario}_{cslug}.csv")
             if os.path.exists(p1):
                 return p1
             if os.path.exists(p2):
@@ -345,9 +345,9 @@ def load_sam_weekly_data(
 ) -> Optional[pd.DataFrame]:
     """Load SAM CSV and return requested metric columns for weekly charting."""
     county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
-    sam_file = os.path.join(county_dir, f"sam_optimized_load_profiles_{county_slug}.csv")
+    sam_file = os.path.join(county_dir, f"solar_storage_dispatch_profiles_{county_slug}.csv")
     if not os.path.exists(sam_file):
-        alt = os.path.join(county_dir, f"sam_optimized_load_profiles_{scenario}_{county_slug}.csv")
+        alt = os.path.join(county_dir, f"solar_storage_dispatch_profiles_{scenario}_{county_slug}.csv")
         sam_file = alt if os.path.exists(alt) else sam_file
     if not os.path.exists(sam_file):
         print(f"Warning: Solar+storage load profiles file not found: {sam_file}")

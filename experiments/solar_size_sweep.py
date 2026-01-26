@@ -350,7 +350,7 @@ def _write_hourly_for_fraction(out_dir: str, county_slug: str, load_profile: Lis
         "Grid to Battery": gtb,
         "Battery SOC": soc,
     }, index=idx)
-    df.to_csv(os.path.join(out_dir, f"sam_optimized_load_profiles_{county_slug}.csv"))
+    df.to_csv(os.path.join(out_dir, f"solar_storage_dispatch_profiles_{county_slug}.csv"))
 
 
 def _ensure_rate_inputs_for_fraction(

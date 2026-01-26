@@ -66,10 +66,10 @@ def _electrified_assets_csv(base_input_dir: str, scenario: str, housing_type: st
 
 def _sam_csv_path(base_input_dir: str, scenario: str, housing_type: str, county_slug: str) -> Optional[str]:
     folder = os.path.join(base_input_dir, scenario, housing_type, county_slug)
-    c1 = os.path.join(folder, f"sam_optimized_load_profiles_{county_slug}.csv")
+    c1 = os.path.join(folder, f"solar_storage_dispatch_profiles_{county_slug}.csv")
     if os.path.exists(c1):
         return c1
-    c2 = os.path.join(folder, f"sam_optimized_load_profiles_{scenario}_{county_slug}.csv")
+    c2 = os.path.join(folder, f"solar_storage_dispatch_profiles_{scenario}_{county_slug}.csv")
     if os.path.exists(c2):
         return c2
     return None

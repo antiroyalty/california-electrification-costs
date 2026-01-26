@@ -64,19 +64,20 @@ def run(cfg: Config) -> None:
     PaybackPeriods.process(cfg.base_input_dir, cfg.scenario, cfg.housing_type, c_list)
 
     # 16) Key metrics maps (HTML dashboard + appliance breakdown)
-    try:
-        log_step(16)
-        Step16DisplayMaps.process(
-            cfg.base_input_dir,
-            cfg.base_input_dir,
-            cfg.scenario,
-            cfg.housing_type,
-            c_list,
-            cfg.rate_plans or {},
-        )
-    except Exception as e:
-        # Non-fatal — continue with other visualizations
-        print(f"[Step16] Warning: map generation failed: {e}")
+    # Skipping map regeneration by default.
+    # try:
+    #     log_step(16)
+    #     Step16DisplayMaps.process(
+    #         cfg.base_input_dir,
+    #         cfg.base_input_dir,
+    #         cfg.scenario,
+    #         cfg.housing_type,
+    #         c_list,
+    #         cfg.rate_plans or {},
+    #     )
+    # except Exception as e:
+    #     # Non-fatal — continue with other visualizations
+    #     print(f"[Step16] Warning: map generation failed: {e}")
 
     # 18) Cross-scenario EAC (use all scenarios)
     log_step(18)

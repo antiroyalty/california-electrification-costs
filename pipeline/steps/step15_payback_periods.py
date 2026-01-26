@@ -257,8 +257,8 @@ def calculate_annual_savings(base_input_dir: str, county: str, scenario: str, ho
 
 def _sam_csv_path(base_input_dir: str, scenario: str, housing_type: str, county_slug: str) -> str | None:
     county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
-    a = os.path.join(county_dir, f"sam_optimized_load_profiles_{county_slug}.csv")
-    b = os.path.join(county_dir, f"sam_optimized_load_profiles_{scenario}_{county_slug}.csv")
+    a = os.path.join(county_dir, f"solar_storage_dispatch_profiles_{county_slug}.csv")
+    b = os.path.join(county_dir, f"solar_storage_dispatch_profiles_{scenario}_{county_slug}.csv")
     if os.path.exists(a):
         return a
     if os.path.exists(b):

@@ -45,6 +45,27 @@
     ],
     "notes": "No sign convention enforced; callers must supply costs/benefits."
   },
+  "npv.compute_npv_details_from_inputs": {
+    "title": "NPV Details (Solar+Storage vs All Electrification)",
+    "formula": "NPV = -capex + sum_{t=1..N} savings_t / (1 + r)^t",
+    "assumptions": {
+      "solar_storage_savings": "scenario_cost - scenario_solar_cost",
+      "all_electrification_savings": "baseline_cost - scenario_solar_cost",
+      "horizon_years": "default 25",
+      "discount_rate": "default 0.07"
+    },
+    "data_sources": {
+      "baseline_cost": "totals results (baseline)",
+      "scenario_cost": "totals results (scenario, no solar)",
+      "scenario_solar_cost": "solarstorage totals results",
+      "pv_storage_net_capex": "capital_costs_summary_with_pv",
+      "electrification_net_capex": "capital_costs_<scenario>_<housing>"
+    },
+    "code": [
+      "evaluations/npv.py:compute_npv_details_from_inputs",
+      "helpers/diagnostics_data.py:compute_npv_details"
+    ]
+  },
   "npv.annuity_factor": {
     "title": "Annuity Factor (NPV to EAC)",
     "formula": "A = r / (1 - (1 + r)^-n)",
