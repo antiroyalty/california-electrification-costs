@@ -198,6 +198,12 @@ def read_coopt_capacities(
         out = {
             "solar_kw": None,
             "battery_kwh": None,
+            "battery_kw": None,
+            "coopt_total_cost": None,
+            "coopt_capex_annual": None,
+            "coopt_import_cost": None,
+            "coopt_export_credit": None,
+            "coopt_degradation_cost": None,
             "allow_grid_charging": None,
             "allow_batt_export": None,
         }
@@ -209,6 +215,36 @@ def read_coopt_capacities(
         if "Battery Capacity (kWh)" in row:
             try:
                 out["battery_kwh"] = float(row["Battery Capacity (kWh)"])
+            except Exception:
+                pass
+        if "Battery Power Capacity (kW)" in row:
+            try:
+                out["battery_kw"] = float(row["Battery Power Capacity (kW)"])
+            except Exception:
+                pass
+        if "Coopt Total Cost" in row:
+            try:
+                out["coopt_total_cost"] = float(row["Coopt Total Cost"])
+            except Exception:
+                pass
+        if "Coopt Capex Annual" in row:
+            try:
+                out["coopt_capex_annual"] = float(row["Coopt Capex Annual"])
+            except Exception:
+                pass
+        if "Coopt Import Cost" in row:
+            try:
+                out["coopt_import_cost"] = float(row["Coopt Import Cost"])
+            except Exception:
+                pass
+        if "Coopt Export Credit" in row:
+            try:
+                out["coopt_export_credit"] = float(row["Coopt Export Credit"])
+            except Exception:
+                pass
+        if "Coopt Degradation Cost" in row:
+            try:
+                out["coopt_degradation_cost"] = float(row["Coopt Degradation Cost"])
             except Exception:
                 pass
         if "Allow Grid Charging" in row:
