@@ -49,6 +49,11 @@ class CooptResult:
     pv_kw: float
     batt_kwh: float
     batt_kw: float
+    total_cost: float
+    capex_annual: float
+    import_cost: float
+    export_credit: float
+    degradation_cost: float
     flows: FlowSeries
 
 
@@ -110,7 +115,7 @@ def _solve_lp(
     discount_rate: float = 0.07,
     c_deg_per_kwh: float = 0.0,        # degradation cost per kWh throughput
 ) -> CooptResult:
-    """Build and solve LP. Returns CooptResult with sizing + flows.
+    """Build and solve LP. Returns CooptResult with sizing, costs, and flows.
 
     FlowSeries order mirrors Step 9 conventions:
       pv_to_load, pv_to_batt, pv_to_grid, batt_to_load, batt_to_grid,
@@ -206,6 +211,11 @@ def _solve_lp(
     pv_kw_val = float(pulp.value(PV_kw))
     b_e_val = float(pulp.value(B_E))
     b_p_val = float(pulp.value(B_P))
+    capex_annual_val = float(pulp.value(capex_annual))
+    import_cost_val = float(pulp.value(pulp.lpSum([grid2load[h] * float(p_imp[h]) for h in range(H)])))
+    export_credit_val = float(pulp.value(pulp.lpSum([(pv2grid[h] + batt2grid[h]) * float(p_exp[h]) for h in range(H)])))
+    degradation_cost_val = float(pulp.value(degrade_cost))
+    total_cost_val = capex_annual_val + import_cost_val - export_credit_val + degradation_cost_val
     flows = FlowSeries(
         pv_to_load=[float(v.value()) for v in pv2load],
         pv_to_batt=[float(v.value()) for v in pv2batt],
@@ -216,4 +226,14 @@ def _solve_lp(
         grid_to_batt=[float(v.value()) for v in grid2batt],
         soc=[float(v.value()) for v in soc],
     )
-    return CooptResult(pv_kw=pv_kw_val, batt_kwh=b_e_val, batt_kw=b_p_val, flows=flows)
+    return CooptResult(
+        pv_kw=pv_kw_val,
+        batt_kwh=b_e_val,
+        batt_kw=b_p_val,
+        total_cost=total_cost_val,
+        capex_annual=capex_annual_val,
+        import_cost=import_cost_val,
+        export_credit=export_credit_val,
+        degradation_cost=degradation_cost_val,
+        flows=flows,
+    )

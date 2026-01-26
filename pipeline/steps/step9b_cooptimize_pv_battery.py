@@ -254,6 +254,12 @@ def process(
             "County": county_slug,
             "Solar Capacity (kW)": round(result.pv_kw, 2),
             "Battery Capacity (kWh)": round(result.batt_kwh, 2),
+            "Battery Power Capacity (kW)": round(result.batt_kw, 2),
+            "Coopt Total Cost": round(result.total_cost, 4),
+            "Coopt Capex Annual": round(result.capex_annual, 4),
+            "Coopt Import Cost": round(result.import_cost, 4),
+            "Coopt Export Credit": round(result.export_credit, 4),
+            "Coopt Degradation Cost": round(result.degradation_cost, 4),
             "Allow Grid Charging": bool(allow_grid_charging),
             "Allow Battery Export": bool(allow_batt_export),
         })
