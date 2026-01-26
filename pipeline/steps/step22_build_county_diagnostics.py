@@ -89,14 +89,32 @@ def create_coopt_results_card(
         return "Yes" if x is True else ("No" if x is False else "—")
     pv = results.get("solar_kw")
     bat = results.get("battery_kwh")
+    bat_kw = results.get("battery_kw")
     grid_ch = results.get("allow_grid_charging")
     batt_exp = results.get("allow_batt_export")
+    total_cost = results.get("coopt_total_cost")
+    capex_annual = results.get("coopt_capex_annual")
+    import_cost = results.get("coopt_import_cost")
+    export_credit = results.get("coopt_export_credit")
+    degrade_cost = results.get("coopt_degradation_cost")
     pv_str = f"{pv:.2f} kW" if isinstance(pv, (int, float)) else "—"
     bat_str = f"{bat:.2f} kWh" if isinstance(bat, (int, float)) else "—"
+    bat_kw_str = f"{bat_kw:.2f} kW" if isinstance(bat_kw, (int, float)) else "—"
+    total_cost_str = f"${total_cost:,.0f}" if isinstance(total_cost, (int, float)) else "—"
+    capex_str = f"${capex_annual:,.0f}" if isinstance(capex_annual, (int, float)) else "—"
+    import_str = f"${import_cost:,.0f}" if isinstance(import_cost, (int, float)) else "—"
+    export_str = f"${export_credit:,.0f}" if isinstance(export_credit, (int, float)) else "—"
+    degrade_str = f"${degrade_cost:,.0f}" if isinstance(degrade_cost, (int, float)) else "—"
     return (
         "<div class='metrics-grid'>"
         f"<div class='metric-block'><div class='muted'>PV Size (co‑opt)</div><div class='metric-value'>{pv_str}</div></div>"
         f"<div class='metric-block'><div class='muted'>Battery Size (co‑opt)</div><div class='metric-value'>{bat_str}</div></div>"
+        f"<div class='metric-block'><div class='muted'>Battery Power (co‑opt)</div><div class='metric-value'>{bat_kw_str}</div></div>"
+        f"<div class='metric-block'><div class='muted'>Co‑opt Total Cost</div><div class='metric-value'>{total_cost_str}</div></div>"
+        f"<div class='metric-block'><div class='muted'>Capex Annual</div><div class='metric-value'>{capex_str}</div></div>"
+        f"<div class='metric-block'><div class='muted'>Import Cost</div><div class='metric-value'>{import_str}</div></div>"
+        f"<div class='metric-block'><div class='muted'>Export Credit</div><div class='metric-value'>{export_str}</div></div>"
+        f"<div class='metric-block'><div class='muted'>Degradation Cost</div><div class='metric-value'>{degrade_str}</div></div>"
         f"<div class='metric-block'><div class='muted'>Battery Exports</div><div class='metric-value'>{fmt_bool(batt_exp)}<small>allow_batt_export</small></div></div>"
         f"<div class='metric-block'><div class='muted'>Grid Charging</div><div class='metric-value'>{fmt_bool(grid_ch)}<small>allow_grid_charging</small></div></div>"
         "</div>"
