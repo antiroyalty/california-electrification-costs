@@ -146,6 +146,14 @@ def _solve_lp(
     grid2batt = [pulp.LpVariable(f"grid2batt_{h}", lowBound=0) for h in range(H)]
     soc = [pulp.LpVariable(f"soc_{h}", lowBound=0) for h in range(H)]
 
+    # When grid charging is enabled, split SOC to prevent exporting grid-charged energy.
+    batt2load_pv = batt2load_grid = soc_pv = soc_grid = None
+    if allow_grid_charging:
+        batt2load_pv = [pulp.LpVariable(f"batt2load_pv_{h}", lowBound=0) for h in range(H)]
+        batt2load_grid = [pulp.LpVariable(f"batt2load_grid_{h}", lowBound=0) for h in range(H)]
+        soc_pv = [pulp.LpVariable(f"soc_pv_{h}", lowBound=0) for h in range(H)]
+        soc_grid = [pulp.LpVariable(f"soc_grid_{h}", lowBound=0) for h in range(H)]
+
     # Battery parameters (align with Step 9 defaults)
     SOC_MIN_FR = 0.20
     SOC_MAX_FR = 0.90
@@ -162,7 +170,11 @@ def _solve_lp(
         prob += pv2load[h] + batt2load[h] + grid2load[h] == float(L[h])
         # Power limits
         prob += pv2batt[h] + grid2batt[h] <= B_P
-        prob += batt2load[h] + batt2grid[h] <= B_P
+        if allow_grid_charging:
+            prob += batt2load_pv[h] + batt2load_grid[h] + batt2grid[h] <= B_P
+            prob += batt2load[h] == batt2load_pv[h] + batt2load_grid[h]
+        else:
+            prob += batt2load[h] + batt2grid[h] <= B_P
 
     # Disallow/allow grid charging and batt exports per flags
     if not allow_grid_charging:
@@ -175,12 +187,27 @@ def _solve_lp(
     # SOC dynamics and bounds; enforce cyclic SOC
     for h in range(H):
         h_next = 0 if (h == H - 1) else (h + 1)
-        prob += (
-            soc[h_next]
-            == soc[h]
-            + ETA_CH * (pv2batt[h] + grid2batt[h])
-            - (1.0 / ETA_DIS) * (batt2load[h] + batt2grid[h])
-        )
+        if allow_grid_charging:
+            prob += (
+                soc_pv[h_next]
+                == soc_pv[h]
+                + ETA_CH * pv2batt[h]
+                - (1.0 / ETA_DIS) * (batt2load_pv[h] + batt2grid[h])
+            )
+            prob += (
+                soc_grid[h_next]
+                == soc_grid[h]
+                + ETA_CH * grid2batt[h]
+                - (1.0 / ETA_DIS) * batt2load_grid[h]
+            )
+            prob += soc[h] == soc_pv[h] + soc_grid[h]
+        else:
+            prob += (
+                soc[h_next]
+                == soc[h]
+                + ETA_CH * (pv2batt[h] + grid2batt[h])
+                - (1.0 / ETA_DIS) * (batt2load[h] + batt2grid[h])
+            )
         # SOC bounds depend on capacity
         prob += soc[h] >= B_E * SOC_MIN_FR
         prob += soc[h] <= B_E * SOC_MAX_FR
@@ -192,7 +219,7 @@ def _solve_lp(
 
     # Operating bill (imports - exports) + degradation
     energy_cost = pulp.lpSum([
-        grid2load[h] * float(p_imp[h]) - pv2grid[h] * float(p_exp[h]) - batt2grid[h] * float(p_exp[h])
+        (grid2load[h] + grid2batt[h]) * float(p_imp[h]) - pv2grid[h] * float(p_exp[h]) - batt2grid[h] * float(p_exp[h])
         for h in range(H)
     ])
     degrade_cost = pulp.lpSum([
@@ -212,7 +239,7 @@ def _solve_lp(
     b_e_val = float(pulp.value(B_E))
     b_p_val = float(pulp.value(B_P))
     capex_annual_val = float(pulp.value(capex_annual))
-    import_cost_val = float(pulp.value(pulp.lpSum([grid2load[h] * float(p_imp[h]) for h in range(H)])))
+    import_cost_val = float(pulp.value(pulp.lpSum([(grid2load[h] + grid2batt[h]) * float(p_imp[h]) for h in range(H)])))
     export_credit_val = float(pulp.value(pulp.lpSum([(pv2grid[h] + batt2grid[h]) * float(p_exp[h]) for h in range(H)])))
     degradation_cost_val = float(pulp.value(degrade_cost))
     total_cost_val = capex_annual_val + import_cost_val - export_credit_val + degradation_cost_val
