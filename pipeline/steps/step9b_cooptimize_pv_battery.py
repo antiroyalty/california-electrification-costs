@@ -155,6 +155,80 @@ def _write_step9_outputs(
     exp_df.to_csv(out_exp, index=False)
 
 
+def _write_price_diagnostics(
+    out_dir: str,
+    county: str,
+    timestamps: List[pd.Timestamp],
+    p_imp: List[float],
+    p_exp: List[float],
+) -> None:
+    if len(p_imp) != len(p_exp) or len(p_imp) != len(timestamps):
+        raise ValueError("Price diagnostics requires aligned timestamps and price arrays.")
+
+    diag_df = pd.DataFrame({
+        "timestamp": timestamps,
+        "import_price_usd_per_kwh": p_imp,
+        "export_price_usd_per_kwh": p_exp,
+    })
+    diag_path = os.path.join(out_dir, f"coopt_price_series_{county}.csv")
+    diag_df.to_csv(diag_path, index=False)
+
+    stats = diag_df[["import_price_usd_per_kwh", "export_price_usd_per_kwh"]].describe(
+        percentiles=[0.05, 0.5, 0.95]
+    )
+    stats_path = os.path.join(out_dir, f"coopt_price_stats_{county}.csv")
+    stats.to_csv(stats_path)
+
+    print(
+        f"[step9b] Price stats for {county} "
+        f"(import min/median/max=${stats.loc['min', 'import_price_usd_per_kwh']:.3f}/"
+        f"{stats.loc['50%', 'import_price_usd_per_kwh']:.3f}/"
+        f"{stats.loc['max', 'import_price_usd_per_kwh']:.3f}, "
+        f"export min/median/max=${stats.loc['min', 'export_price_usd_per_kwh']:.3f}/"
+        f"{stats.loc['50%', 'export_price_usd_per_kwh']:.3f}/"
+        f"{stats.loc['max', 'export_price_usd_per_kwh']:.3f})"
+    )
+
+    try:
+        import matplotlib.pyplot as plt
+
+        diag_df["month"] = diag_df["timestamp"].dt.month
+        monthly = diag_df.groupby("month")[["import_price_usd_per_kwh", "export_price_usd_per_kwh"]].mean()
+
+        fig, axes = plt.subplots(2, 1, figsize=(10, 6), tight_layout=True)
+        axes[0].plot(monthly.index, monthly["import_price_usd_per_kwh"], label="Import ($/kWh)", color="#1f77b4")
+        axes[0].plot(monthly.index, monthly["export_price_usd_per_kwh"], label="Export ($/kWh)", color="#ff7f0e")
+        axes[0].set_xlabel("Month")
+        axes[0].set_ylabel("Avg Price ($/kWh)")
+        axes[0].set_title("Monthly Average Prices")
+        axes[0].legend()
+
+        axes[1].hist(
+            p_imp,
+            bins=40,
+            alpha=0.7,
+            label="Import ($/kWh)",
+            color="#1f77b4",
+        )
+        axes[1].hist(
+            p_exp,
+            bins=40,
+            alpha=0.7,
+            label="Export ($/kWh)",
+            color="#ff7f0e",
+        )
+        axes[1].set_xlabel("Price ($/kWh)")
+        axes[1].set_ylabel("Hours")
+        axes[1].set_title("Price Distribution")
+        axes[1].legend()
+
+        fig_path = os.path.join(out_dir, f"coopt_price_diagnostics_{county}.png")
+        fig.savefig(fig_path, dpi=150)
+        plt.close(fig)
+    except Exception as e:
+        raise RuntimeError(f"Failed to write price diagnostics plot: {e}")
+
+
 def _default_plan_for_utility(util: str) -> str:
     plans = list(RATE_PLANS.get(util, {}).keys())
     if not plans:
@@ -172,6 +246,7 @@ def process(
     plan_override: Optional[str] = None,
     allow_grid_charging: bool = False,
     allow_batt_export: bool = True,
+    debug_prices: bool = False,
     discount_rate: float = 0.07,
     pv_capex_per_kw: float = 2830.0,
     batt_capex_per_kwh: float = 800.0,
@@ -224,6 +299,9 @@ def process(
         ts_index = _timestamp_index_8760(2018)
         p_imp = [_hourly_import_rate(plan_details, ts) for ts in ts_index]
         p_exp = [float(export_table[ts.month][ts.hour]) for ts in ts_index]
+
+        if debug_prices:
+            _write_price_diagnostics(out_dir, county_slug, ts_index, p_imp, p_exp)
 
         # Solve LP
         inputs = CooptInputs(
@@ -312,6 +390,7 @@ def main():
                    help="Allow Battery→Grid exports (default: enabled)")
     p.add_argument("--disallow-batt-export", dest="allow_batt_export", action="store_false",
                    help="Disable Battery→Grid exports")
+    p.add_argument("--debug-prices", action="store_true", help="Write price diagnostics CSV/plot for each county")
     p.add_argument("--discount-rate", type=float, default=0.07)
     p.add_argument("--pv-capex-kw", type=float, default=2830.0)
     p.add_argument("--batt-capex-kwh", type=float, default=800.0)
@@ -330,6 +409,7 @@ def main():
         plan_override=args.plan,
         allow_grid_charging=args.allow_grid_charging,
         allow_batt_export=args.allow_batt_export,
+        debug_prices=args.debug_prices,
         discount_rate=args.discount_rate,
         pv_capex_per_kw=args.pv_capex_kw,
         batt_capex_per_kwh=args.batt_capex_kwh,
