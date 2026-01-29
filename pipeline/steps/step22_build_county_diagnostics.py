@@ -208,6 +208,11 @@ def _find_latest_step9_png(county_dir: str) -> Optional[str]:
     return os.path.join(county_dir, candidates[0])
 
 
+def _find_coopt_batt_capex_sweep_png(county_dir: str, county_slug: str) -> Optional[str]:
+    path = os.path.join(county_dir, f"coopt_batt_capex_sweep_{county_slug}.png")
+    return path if os.path.exists(path) else None
+
+
 def _read_step9_series(path: str) -> Optional[dict]:
     try:
         # Prefer the enriched CSV written by Step 9
