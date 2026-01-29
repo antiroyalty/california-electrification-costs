@@ -87,6 +87,8 @@ def create_coopt_results_card(
         return "<div class='muted'>N/A — Co-optimization results not found</div>"
     def fmt_bool(x):
         return "Yes" if x is True else ("No" if x is False else "—")
+    def fmt_usd(x):
+        return f"${x:,.0f}" if isinstance(x, (int, float)) else "—"
     pv = results.get("solar_kw")
     bat = results.get("battery_kwh")
     bat_kw = results.get("battery_kw")
@@ -100,11 +102,20 @@ def create_coopt_results_card(
     pv_str = f"{pv:.2f} kW" if isinstance(pv, (int, float)) else "—"
     bat_str = f"{bat:.2f} kWh" if isinstance(bat, (int, float)) else "—"
     bat_kw_str = f"{bat_kw:.2f} kW" if isinstance(bat_kw, (int, float)) else "—"
-    total_cost_str = f"${total_cost:,.0f}" if isinstance(total_cost, (int, float)) else "—"
-    capex_str = f"${capex_annual:,.0f}" if isinstance(capex_annual, (int, float)) else "—"
-    import_str = f"${import_cost:,.0f}" if isinstance(import_cost, (int, float)) else "—"
-    export_str = f"${export_credit:,.0f}" if isinstance(export_credit, (int, float)) else "—"
-    degrade_str = f"${degrade_cost:,.0f}" if isinstance(degrade_cost, (int, float)) else "—"
+    total_cost_str = fmt_usd(total_cost)
+    capex_str = fmt_usd(capex_annual)
+    import_str = fmt_usd(import_cost)
+    export_str = fmt_usd(export_credit)
+    degrade_str = fmt_usd(degrade_cost)
+
+    storage_value_str = "—"
+    storage_value = None
+    try:
+        storage_value = _coopt_storage_value_estimate(base_input_dir, scenario, housing_type, county_slug)
+    except Exception:
+        storage_value = None
+    if isinstance(storage_value, (int, float)):
+        storage_value_str = fmt_usd(storage_value)
     return (
         "<div class='metrics-grid'>"
         f"<div class='metric-block'><div class='muted'>PV Size (co‑opt)</div><div class='metric-value'>{pv_str}</div></div>"
@@ -114,6 +125,10 @@ def create_coopt_results_card(
         "title='LP objective (annual): capex_annual + import_cost - export_credit + degradation_cost. "
         "This is not the full household bill or LCOE.'>"
         f"<div class='muted'>Co‑opt Total Cost</div><div class='metric-value'>{total_cost_str}</div></div>"
+        "<div class='metric-block' "
+        "title='Upper bound estimate of annual value from shifting PV exports to higher-priced hours (24h look-ahead, PV-only, 96% RTE). "
+        "Requires coopt_price_series_<county>.csv from --debug-prices.'>"
+        f"<div class='muted'>Storage Value (24h upper bound)</div><div class='metric-value'>{storage_value_str}</div></div>"
         f"<div class='metric-block'><div class='muted'>Capex Annual</div><div class='metric-value'>{capex_str}</div></div>"
         f"<div class='metric-block'><div class='muted'>Import Cost</div><div class='metric-value'>{import_str}</div></div>"
         f"<div class='metric-block'><div class='muted'>Export Credit</div><div class='metric-value'>{export_str}</div></div>"
@@ -122,6 +137,57 @@ def create_coopt_results_card(
         f"<div class='metric-block'><div class='muted'>Grid Charging</div><div class='metric-value'>{fmt_bool(grid_ch)}<small>allow_grid_charging</small></div></div>"
         "</div>"
     )
+
+
+def _coopt_storage_value_estimate(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+    *,
+    window_hours: int = 24,
+    round_trip_efficiency: float = 0.96,
+) -> Optional[float]:
+    """Estimate upper bound annual storage value using PV exports and price spread (24h look-ahead).
+
+    Returns None if required inputs are missing.
+    """
+    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+    dispatch_path = os.path.join(county_dir, f"solar_storage_dispatch_profiles_{county_slug}.csv")
+    price_path = os.path.join(county_dir, f"coopt_price_series_{county_slug}.csv")
+    if not (os.path.exists(dispatch_path) and os.path.exists(price_path)):
+        return None
+
+    df = pd.read_csv(dispatch_path)
+    prices = pd.read_csv(price_path)
+    if "import_price_usd_per_kwh" not in prices.columns or "export_price_usd_per_kwh" not in prices.columns:
+        return None
+    if "PV to Grid (kWh)" in df.columns:
+        exports = pd.to_numeric(df["PV to Grid (kWh)"], errors="coerce").fillna(0.0).tolist()
+    elif "System to Grid" in df.columns:
+        exports = pd.to_numeric(df["System to Grid"], errors="coerce").fillna(0.0).tolist()
+    else:
+        return None
+
+    import_prices = pd.to_numeric(prices["import_price_usd_per_kwh"], errors="coerce").fillna(0.0).tolist()
+    export_prices = pd.to_numeric(prices["export_price_usd_per_kwh"], errors="coerce").fillna(0.0).tolist()
+    n = min(len(exports), len(import_prices), len(export_prices))
+    if n == 0:
+        return None
+
+    total_value = 0.0
+    for i in range(n):
+        export_kwh = float(exports[i])
+        if export_kwh <= 0:
+            continue
+        future = import_prices[i + 1 : i + 1 + window_hours]
+        if not future:
+            continue
+        max_future = max(future)
+        delta = max_future - float(export_prices[i])
+        if delta > 0:
+            total_value += export_kwh * delta * round_trip_efficiency
+    return total_value
 
 
 # ---------- Solar + storage deployment figure (from Step 9 outputs) ----------

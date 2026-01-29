@@ -54,6 +54,7 @@ def test_step22_coopt_card_includes_cost_components() -> None:
     required_snippets = [
         "Battery Power",
         "Total Cost",
+        "Storage Value",
         "Capex Annual",
         "Import Cost",
         "Export Credit",
