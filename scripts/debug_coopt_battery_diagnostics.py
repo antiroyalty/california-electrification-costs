@@ -22,6 +22,17 @@ def _find_dispatch_csv(base_input_dir: str, scenario: str, housing_type: str, co
     return path
 
 
+def _find_price_series_csv(base_input_dir: str, scenario: str, housing_type: str, county: str) -> str | None:
+    path = os.path.join(
+        base_input_dir,
+        scenario,
+        housing_type,
+        county,
+        f"coopt_price_series_{county}.csv",
+    )
+    return path if os.path.exists(path) else None
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description="Debug co-opt battery sizing (PV surplus + price stats)")
     p.add_argument("--base-input-dir", default="data/loadprofiles")
@@ -67,6 +78,57 @@ def main() -> None:
     print(f"Annual PV surplus (kWh): {pv_surplus.sum():,.1f}")
     print(f"Annual PV used onsite (kWh): {pv_used_onsite.sum():,.1f}")
     print(f"Annual Grid to Load (kWh): {grid_to_load.sum():,.1f}")
+
+    # Storage value diagnostic (upper bound within 24 hours, PV-only charging)
+    price_csv = _find_price_series_csv(args.base_input_dir, args.scenario, args.housing_type, args.county)
+    if price_csv:
+        prices = pd.read_csv(price_csv)
+        if "import_price_usd_per_kwh" in prices.columns and "export_price_usd_per_kwh" in prices.columns:
+            import_prices = pd.to_numeric(prices["import_price_usd_per_kwh"], errors="coerce").fillna(0.0).tolist()
+            export_prices = pd.to_numeric(prices["export_price_usd_per_kwh"], errors="coerce").fillna(0.0).tolist()
+            n = min(len(import_prices), len(export_prices), len(pv_to_grid))
+            import_prices = import_prices[:n]
+            export_prices = export_prices[:n]
+            exports_kwh = pv_to_grid.iloc[:n].astype(float).tolist()
+
+            rte = 0.96
+            window = 24
+            total_value = 0.0
+            total_exports = 0.0
+            for i in range(n):
+                export_kwh = float(exports_kwh[i])
+                if export_kwh <= 0:
+                    continue
+                future = import_prices[i + 1 : i + 1 + window]
+                if not future:
+                    continue
+                max_future = max(future)
+                delta = max_future - float(export_prices[i])
+                if delta > 0:
+                    total_value += export_kwh * delta * rte
+                total_exports += export_kwh
+
+            avg_value_per_kwh = (total_value / total_exports) if total_exports > 0 else 0.0
+            print(f"Storage value (24h upper bound, PV-only): ${total_value:,.2f}/yr")
+            print(f"Avg value per exported kWh: ${avg_value_per_kwh:.3f}")
+
+            summary_path = os.path.join(out_dir, f"coopt_storage_value_{args.county}.csv")
+            pd.DataFrame(
+                [
+                    {
+                        "storage_value_24h_upper_bound_usd_per_year": total_value,
+                        "exported_kwh": total_exports,
+                        "avg_value_per_export_kwh_usd": avg_value_per_kwh,
+                        "window_hours": window,
+                        "round_trip_efficiency": rte,
+                    }
+                ]
+            ).to_csv(summary_path, index=False)
+            print(f"Wrote storage value summary: {summary_path}")
+        else:
+            print(f"Price series missing required columns: {price_csv}")
+    else:
+        print("Price series not found (run Step9b with --debug-prices to generate).")
 
     out_dir = args.out_dir or os.path.dirname(csv_path)
     os.makedirs(out_dir, exist_ok=True)
