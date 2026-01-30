@@ -155,6 +155,154 @@ def _write_step9_outputs(
     exp_df.to_csv(out_exp, index=False)
 
 
+def _write_price_diagnostics(
+    out_dir: str,
+    county: str,
+    timestamps: List[pd.Timestamp],
+    p_imp: List[float],
+    p_exp: List[float],
+) -> None:
+    if len(p_imp) != len(p_exp) or len(p_imp) != len(timestamps):
+        raise ValueError("Price diagnostics requires aligned timestamps and price arrays.")
+
+    diag_df = pd.DataFrame({
+        "timestamp": timestamps,
+        "import_price_usd_per_kwh": p_imp,
+        "export_price_usd_per_kwh": p_exp,
+    })
+    diag_path = os.path.join(out_dir, f"coopt_price_series_{county}.csv")
+    diag_df.to_csv(diag_path, index=False)
+
+    stats = diag_df[["import_price_usd_per_kwh", "export_price_usd_per_kwh"]].describe(
+        percentiles=[0.05, 0.5, 0.95]
+    )
+    stats_path = os.path.join(out_dir, f"coopt_price_stats_{county}.csv")
+    stats.to_csv(stats_path)
+
+    print(
+        f"[step9b] Price stats for {county} "
+        f"(import min/median/max=${stats.loc['min', 'import_price_usd_per_kwh']:.3f}/"
+        f"{stats.loc['50%', 'import_price_usd_per_kwh']:.3f}/"
+        f"{stats.loc['max', 'import_price_usd_per_kwh']:.3f}, "
+        f"export min/median/max=${stats.loc['min', 'export_price_usd_per_kwh']:.3f}/"
+        f"{stats.loc['50%', 'export_price_usd_per_kwh']:.3f}/"
+        f"{stats.loc['max', 'export_price_usd_per_kwh']:.3f})"
+    )
+
+    try:
+        import matplotlib.pyplot as plt
+
+        diag_df["month"] = diag_df["timestamp"].dt.month
+        monthly = diag_df.groupby("month")[["import_price_usd_per_kwh", "export_price_usd_per_kwh"]].mean()
+
+        fig, axes = plt.subplots(2, 1, figsize=(10, 6), tight_layout=True)
+        axes[0].plot(monthly.index, monthly["import_price_usd_per_kwh"], label="Import ($/kWh)", color="#1f77b4")
+        axes[0].plot(monthly.index, monthly["export_price_usd_per_kwh"], label="Export ($/kWh)", color="#ff7f0e")
+        axes[0].set_xlabel("Month")
+        axes[0].set_ylabel("Avg Price ($/kWh)")
+        axes[0].set_title("Monthly Average Prices")
+        axes[0].legend()
+
+        axes[1].hist(
+            p_imp,
+            bins=40,
+            alpha=0.7,
+            label="Import ($/kWh)",
+            color="#1f77b4",
+        )
+        axes[1].hist(
+            p_exp,
+            bins=40,
+            alpha=0.7,
+            label="Export ($/kWh)",
+            color="#ff7f0e",
+        )
+        axes[1].set_xlabel("Price ($/kWh)")
+        axes[1].set_ylabel("Hours")
+        axes[1].set_title("Price Distribution")
+        axes[1].legend()
+
+        fig_path = os.path.join(out_dir, f"coopt_price_diagnostics_{county}.png")
+        fig.savefig(fig_path, dpi=150)
+        plt.close(fig)
+    except Exception as e:
+        raise RuntimeError(f"Failed to write price diagnostics plot: {e}")
+
+
+def _write_batt_capex_sweep(
+    out_dir: str,
+    county: str,
+    inputs: CooptInputs,
+    *,
+    allow_grid_charging: bool,
+    allow_batt_export: bool,
+    batt_capex_values: List[float],
+    pv_capex_per_kw: float,
+    batt_capex_per_kw: float,
+    pv_life_yrs: int,
+    batt_life_yrs: int,
+    discount_rate: float,
+    batt_degrade_cost_per_kwh: float,
+) -> None:
+    records = []
+    for capex_kwh in batt_capex_values:
+        result = _solve_lp(
+            inputs,
+            allow_grid_charging=allow_grid_charging,
+            allow_batt_export=allow_batt_export,
+            c_pv_kw=pv_capex_per_kw,
+            c_batt_kwh=capex_kwh,
+            c_batt_kw=batt_capex_per_kw,
+            pv_life_yrs=pv_life_yrs,
+            batt_life_yrs=batt_life_yrs,
+            discount_rate=discount_rate,
+            c_deg_per_kwh=batt_degrade_cost_per_kwh,
+        )
+        records.append(
+            {
+                "battery_capex_kwh": float(capex_kwh),
+                "pv_kw": result.pv_kw,
+                "batt_kwh": result.batt_kwh,
+                "batt_kw": result.batt_kw,
+                "total_cost": result.total_cost,
+                "capex_annual": result.capex_annual,
+                "import_cost": result.import_cost,
+                "export_credit": result.export_credit,
+                "degradation_cost": result.degradation_cost,
+            }
+        )
+
+    if not records:
+        return
+    df = pd.DataFrame(records)
+    csv_path = os.path.join(out_dir, f"coopt_batt_capex_sweep_{county}.csv")
+    df.to_csv(csv_path, index=False)
+
+    try:
+        import matplotlib.pyplot as plt
+
+        fig, axes = plt.subplots(2, 1, figsize=(10, 7), tight_layout=True)
+
+        axes[0].plot(df["battery_capex_kwh"], df["batt_kwh"], label="Battery Size (kWh)", color="#1f77b4")
+        axes[0].plot(df["battery_capex_kwh"], df["batt_kw"], label="Battery Power (kW)", color="#ff7f0e")
+        axes[0].set_xlabel("Battery Capex ($/kWh)")
+        axes[0].set_ylabel("Battery Size")
+        axes[0].set_title("Battery Size vs Capex")
+        axes[0].legend()
+
+        axes[1].plot(df["battery_capex_kwh"], df["total_cost"], label="Total Cost (annual)", color="#2ca02c")
+        axes[1].set_xlabel("Battery Capex ($/kWh)")
+        axes[1].set_ylabel("Annual Cost ($)")
+        axes[1].set_title("Co‑opt Objective vs Capex")
+        axes[1].legend()
+
+        fig_path = os.path.join(out_dir, f"coopt_batt_capex_sweep_{county}.png")
+        fig.savefig(fig_path, dpi=150)
+        plt.close(fig)
+    except Exception as e:
+        raise RuntimeError(f"Failed to write battery capex sweep plot: {e}")
+
+
 def _default_plan_for_utility(util: str) -> str:
     plans = list(RATE_PLANS.get(util, {}).keys())
     if not plans:
@@ -172,6 +320,8 @@ def process(
     plan_override: Optional[str] = None,
     allow_grid_charging: bool = False,
     allow_batt_export: bool = True,
+    debug_prices: bool = False,
+    batt_capex_sweep: Optional[List[float]] = None,
     discount_rate: float = 0.07,
     pv_capex_per_kw: float = 2830.0,
     batt_capex_per_kwh: float = 800.0,
@@ -225,6 +375,30 @@ def process(
         p_imp = [_hourly_import_rate(plan_details, ts) for ts in ts_index]
         p_exp = [float(export_table[ts.month][ts.hour]) for ts in ts_index]
 
+        if debug_prices:
+            _write_price_diagnostics(out_dir, county_slug, ts_index, p_imp, p_exp)
+
+        if batt_capex_sweep:
+            _write_batt_capex_sweep(
+                out_dir,
+                county_slug,
+                CooptInputs(
+                    load_kwh=load_kwh,
+                    pv_gen_per_kw=G,
+                    import_rates=p_imp,
+                    export_rates=p_exp,
+                ),
+                allow_grid_charging=allow_grid_charging,
+                allow_batt_export=allow_batt_export,
+                batt_capex_values=batt_capex_sweep,
+                pv_capex_per_kw=pv_capex_per_kw,
+                batt_capex_per_kw=batt_capex_per_kw,
+                pv_life_yrs=pv_life_yrs,
+                batt_life_yrs=batt_life_yrs,
+                discount_rate=discount_rate,
+                batt_degrade_cost_per_kwh=batt_degrade_cost_per_kwh,
+            )
+
         # Solve LP
         inputs = CooptInputs(
             load_kwh=load_kwh,
@@ -254,6 +428,12 @@ def process(
             "County": county_slug,
             "Solar Capacity (kW)": round(result.pv_kw, 2),
             "Battery Capacity (kWh)": round(result.batt_kwh, 2),
+            "Battery Power Capacity (kW)": round(result.batt_kw, 2),
+            "Coopt Total Cost": round(result.total_cost, 4),
+            "Coopt Capex Annual": round(result.capex_annual, 4),
+            "Coopt Import Cost": round(result.import_cost, 4),
+            "Coopt Export Credit": round(result.export_credit, 4),
+            "Coopt Degradation Cost": round(result.degradation_cost, 4),
             "Allow Grid Charging": bool(allow_grid_charging),
             "Allow Battery Export": bool(allow_batt_export),
         })
@@ -306,6 +486,8 @@ def main():
                    help="Allow Battery→Grid exports (default: enabled)")
     p.add_argument("--disallow-batt-export", dest="allow_batt_export", action="store_false",
                    help="Disable Battery→Grid exports")
+    p.add_argument("--debug-prices", action="store_true", help="Write price diagnostics CSV/plot for each county")
+    p.add_argument("--batt-capex-sweep", default="", help="Comma-separated list of battery capex ($/kWh) for sweep plot")
     p.add_argument("--discount-rate", type=float, default=0.07)
     p.add_argument("--pv-capex-kw", type=float, default=2830.0)
     p.add_argument("--batt-capex-kwh", type=float, default=800.0)
@@ -314,6 +496,13 @@ def main():
     p.add_argument("--batt-life-yrs", type=int, default=15)
     p.add_argument("--batt-degrade-cost-kwh", type=float, default=0.0)
     args = p.parse_args()
+
+    sweep_vals = []
+    if args.batt_capex_sweep:
+        try:
+            sweep_vals = [float(v.strip()) for v in args.batt_capex_sweep.split(",") if v.strip()]
+        except Exception:
+            raise ValueError("Invalid --batt-capex-sweep list; expected comma-separated numbers.")
 
     process(
         base_input_dir=args.base_input_dir,
@@ -324,6 +513,8 @@ def main():
         plan_override=args.plan,
         allow_grid_charging=args.allow_grid_charging,
         allow_batt_export=args.allow_batt_export,
+        debug_prices=args.debug_prices,
+        batt_capex_sweep=sweep_vals if sweep_vals else None,
         discount_rate=args.discount_rate,
         pv_capex_per_kw=args.pv_capex_kw,
         batt_capex_per_kwh=args.batt_capex_kwh,

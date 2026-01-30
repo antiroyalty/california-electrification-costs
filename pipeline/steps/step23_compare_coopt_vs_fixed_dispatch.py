@@ -87,6 +87,12 @@ def _aggregator_csv_path(base_input_dir: str, scenario: str, housing_type: str, 
 class SizeInfo:
     pv_kw: Optional[float]
     batt_kwh: Optional[float]
+    batt_kw: Optional[float]
+    coopt_total_cost: Optional[float]
+    coopt_capex_annual: Optional[float]
+    coopt_import_cost: Optional[float]
+    coopt_export_credit: Optional[float]
+    coopt_degradation_cost: Optional[float]
     allow_grid_charging: Optional[bool]
     allow_batt_export: Optional[bool]
 
@@ -113,7 +119,8 @@ def _read_assets_for_county(
     base_input_dir: str, scenario: str, housing_type: str, county_slug: str
 ) -> SizeInfo:
     path = _electrified_assets_csv(base_input_dir, scenario, housing_type)
-    pv = batt = None
+    pv = batt = batt_kw = None
+    coopt_total = coopt_capex = coopt_import = coopt_export = coopt_degrade = None
     allow_gc = allow_be = None
     if path and os.path.exists(path):
         try:
@@ -135,6 +142,12 @@ def _read_assets_for_county(
             if row is not None:
                 pv = pd.to_numeric(row.get("Solar Capacity (kW)"), errors="coerce")
                 batt = pd.to_numeric(row.get("Battery Capacity (kWh)"), errors="coerce")
+                batt_kw = pd.to_numeric(row.get("Battery Power Capacity (kW)"), errors="coerce")
+                coopt_total = pd.to_numeric(row.get("Coopt Total Cost"), errors="coerce")
+                coopt_capex = pd.to_numeric(row.get("Coopt Capex Annual"), errors="coerce")
+                coopt_import = pd.to_numeric(row.get("Coopt Import Cost"), errors="coerce")
+                coopt_export = pd.to_numeric(row.get("Coopt Export Credit"), errors="coerce")
+                coopt_degrade = pd.to_numeric(row.get("Coopt Degradation Cost"), errors="coerce")
                 # flags available for coopt (Step 9b); may be absent for baseline
                 agc = row.get("Allow Grid Charging")
                 abe = row.get("Allow Battery Export")
@@ -147,6 +160,12 @@ def _read_assets_for_county(
     return SizeInfo(
         pv_kw=float(pv) if pv is not None and not pd.isna(pv) else None,
         batt_kwh=float(batt) if batt is not None and not pd.isna(batt) else None,
+        batt_kw=float(batt_kw) if batt_kw is not None and not pd.isna(batt_kw) else None,
+        coopt_total_cost=float(coopt_total) if coopt_total is not None and not pd.isna(coopt_total) else None,
+        coopt_capex_annual=float(coopt_capex) if coopt_capex is not None and not pd.isna(coopt_capex) else None,
+        coopt_import_cost=float(coopt_import) if coopt_import is not None and not pd.isna(coopt_import) else None,
+        coopt_export_credit=float(coopt_export) if coopt_export is not None and not pd.isna(coopt_export) else None,
+        coopt_degradation_cost=float(coopt_degrade) if coopt_degrade is not None and not pd.isna(coopt_degrade) else None,
         allow_grid_charging=allow_gc,
         allow_batt_export=allow_be,
     )
@@ -987,6 +1006,8 @@ def process(
                     "pv_kw_coopt": safe(size_c.pv_kw),
                     "batt_kwh_baseline": safe(size_b.batt_kwh),
                     "batt_kwh_coopt": safe(size_c.batt_kwh),
+                    "batt_kw_baseline": safe(size_b.batt_kw),
+                    "batt_kw_coopt": safe(size_c.batt_kw),
                     # Flows
                     "imports_kwh_baseline": flow_b.grid_to_load_kwh,
                     "imports_kwh_coopt": flow_c.grid_to_load_kwh,
@@ -1001,6 +1022,17 @@ def process(
                     "gas_bill_coopt": safe(cost_c.gas),
                     "total_bill_baseline": safe(cost_b.total_bill),
                     "total_bill_coopt": safe(cost_c.total_bill),
+                    # Co-opt objective (LP)
+                    "coopt_total_cost_baseline": safe(size_b.coopt_total_cost),
+                    "coopt_total_cost_coopt": safe(size_c.coopt_total_cost),
+                    "coopt_capex_annual_baseline": safe(size_b.coopt_capex_annual),
+                    "coopt_capex_annual_coopt": safe(size_c.coopt_capex_annual),
+                    "coopt_import_cost_baseline": safe(size_b.coopt_import_cost),
+                    "coopt_import_cost_coopt": safe(size_c.coopt_import_cost),
+                    "coopt_export_credit_baseline": safe(size_b.coopt_export_credit),
+                    "coopt_export_credit_coopt": safe(size_c.coopt_export_credit),
+                    "coopt_degradation_cost_baseline": safe(size_b.coopt_degradation_cost),
+                    "coopt_degradation_cost_coopt": safe(size_c.coopt_degradation_cost),
                     # EAC
                     "total_eac_baseline": safe(eac_b),
                     "total_eac_coopt": safe(eac_c),
@@ -1044,6 +1076,7 @@ def process(
                 size_rows = [
                     ("PV Size", fmt(pi["size_b"].pv_kw, 'kW'), fmt(pi["size_c"].pv_kw, 'kW'), pi["pv_delta"]),
                     ("Battery Size", fmt(pi["size_b"].batt_kwh, 'kWh'), fmt(pi["size_c"].batt_kwh, 'kWh'), pi["batt_delta"]),
+                    ("Battery Power", fmt(pi["size_b"].batt_kw, 'kW'), fmt(pi["size_c"].batt_kw, 'kW'), ""),
                     ("Flags", "n/a", f"grid_charging={pi['size_c'].allow_grid_charging} batt_export={pi['size_c'].allow_batt_export}", ""),
                 ]
                 section.append(table(size_rows))
@@ -1082,6 +1115,19 @@ def process(
                 ]
                 section.append(table(cap_rows))
                 section.append("<div class='muted'>Annualization parameters: PV 25 years, Storage 15 years, discount rate 7%. Other assets use per‑row lifetimes from the capital ledger (default 15 years).</div>")
+                section.append("</div>")
+
+                # Co-optimization objective (LP)
+                section.append('<div class="card">')
+                section.append(f"<h3>{title} — Co‑opt Objective (LP)</h3>")
+                coopt_rows = [
+                    ("Total Cost", fmt(pi["size_b"].coopt_total_cost, '$'), fmt(pi["size_c"].coopt_total_cost, '$'), ""),
+                    ("Capex Annual", fmt(pi["size_b"].coopt_capex_annual, '$'), fmt(pi["size_c"].coopt_capex_annual, '$'), ""),
+                    ("Import Cost", fmt(pi["size_b"].coopt_import_cost, '$'), fmt(pi["size_c"].coopt_import_cost, '$'), ""),
+                    ("Export Credit", fmt(pi["size_b"].coopt_export_credit, '$'), fmt(pi["size_c"].coopt_export_credit, '$'), ""),
+                    ("Degradation Cost", fmt(pi["size_b"].coopt_degradation_cost, '$'), fmt(pi["size_c"].coopt_degradation_cost, '$'), ""),
+                ]
+                section.append(table(coopt_rows))
                 section.append("</div>")
 
                 # Capital costs (upfront PV+Storage net of incentives)
