@@ -213,6 +213,23 @@ def _find_coopt_batt_capex_sweep_png(county_dir: str, county_slug: str) -> Optio
     return path if os.path.exists(path) else None
 
 
+def create_coopt_batt_capex_sweep_chart(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+) -> Optional[str]:
+    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+    png = _find_coopt_batt_capex_sweep_png(county_dir, county_slug)
+    if not png:
+        return None
+    try:
+        with open(png, "rb") as f:
+            return base64.b64encode(f.read()).decode("utf-8")
+    except Exception:
+        return None
+
+
 def _read_step9_series(path: str) -> Optional[dict]:
     try:
         # Prefer the enriched CSV written by Step 9
@@ -1155,6 +1172,7 @@ def _dashboard_html(
     cost_breakdowns: Optional[dict] = None,
     assets_info: Optional[dict] = None,
     coopt_card_html: Optional[str] = None,
+    coopt_capex_sweep_b64: Optional[str] = None,
     methods_manifest: Optional[dict] = None,
     npv_details: Optional[dict] = None,
 ) -> str:
@@ -1338,6 +1356,17 @@ def _dashboard_html(
         parts.append(coopt_card_html)
     else:
         parts.append('<div class="muted">N/A</div>')
+    parts.append("</div>")
+
+    # Card 2f: Co-Optimization Battery Capex Sweep
+    parts.append('<div class="card">')
+    parts.append("<h2>Battery Capex Sweep — Co‑opt (Step 9b)</h2>")
+    if coopt_capex_sweep_b64:
+        parts.append(
+            f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{coopt_capex_sweep_b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{coopt_capex_sweep_b64}\" alt=\"coopt battery capex sweep\"/></a></div>"
+        )
+    else:
+        parts.append("<div class=\"muted\">No sweep plot available (run Step 9b with --batt-capex-sweep).</div>")
     parts.append("</div>")
 
     # Card 3: Energy Flows — With vs Without Solar+Storage
@@ -1647,6 +1676,9 @@ def process(
             assets_info = compute_assets_info(
                 base_input_dir, scenario, housing_type, county_slug
             )
+            coopt_capex_sweep_b64 = create_coopt_batt_capex_sweep_chart(
+                base_input_dir, scenario, housing_type, county_slug
+            )
             npv_details = compute_npv_details(
                 base_input_dir,
                 scenario,
@@ -1681,6 +1713,7 @@ def process(
                 cost_breakdowns=cost_breakdowns,
                 assets_info=assets_info,
                 coopt_card_html=create_coopt_results_card(base_input_dir, scenario, housing_type, county_slug),
+                coopt_capex_sweep_b64=coopt_capex_sweep_b64,
                 methods_manifest=methods_manifest,
                 npv_details=npv_details,
             )
