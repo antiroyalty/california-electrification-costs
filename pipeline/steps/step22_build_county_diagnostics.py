@@ -48,15 +48,11 @@ from helpers.diagnostics_data import (
     compute_key_metrics,
     compute_npv_details,
     lookup_pv_size_kw,
-    pv_annual_kwh,
-    pv_net_capex,
     read_coopt_capacities,
 )
 from helpers.diagnostics_cost_plots import (
-    create_cashflow_chart,
     create_cost_waterfall_chart,
     create_price_signal_overlay_chart,
-    create_storage_value_vs_cost_chart,
     estimate_storage_value_upper_bound,
 )
 from helpers.diagnostics_helpers import (
@@ -71,7 +67,6 @@ from helpers.diagnostics_helpers import (
 
 
 import matplotlib.pyplot as plt
-from evaluations.lcoe import lcoe_crf_simple
 
 
 def _is_coopt_scenario(scenario: str) -> bool:
@@ -126,7 +121,7 @@ def create_coopt_results_card(
     if isinstance(storage_value, (int, float)):
         storage_value_str = fmt_usd(storage_value)
     return (
-        "<div class='metrics-grid'>"
+        "<div class='metrics-grid metrics-grid-compact'>"
         f"<div class='metric-block'><div class='muted'>PV Size (co‑opt)</div><div class='metric-value'>{pv_str}</div></div>"
         f"<div class='metric-block'><div class='muted'>Battery Size (co‑opt)</div><div class='metric-value'>{bat_str}</div></div>"
         f"<div class='metric-block'><div class='muted'>Battery Power (co‑opt)</div><div class='metric-value'>{bat_kw_str}</div></div>"
@@ -234,7 +229,7 @@ def create_coopt_pv_batt_cost_heatmap_chart(
 
 def _parse_pv_capex_from_filename(path: str) -> Optional[float]:
     name = os.path.basename(path)
-    m = re.search(r"_pv([0-9]+(?:p[0-9]+)?)\\.png$", name)
+    m = re.search(r"_pv([0-9]+(?:p[0-9]+)?)\.png$", name)
     if not m:
         return None
     token = m.group(1).replace("p", ".")
@@ -385,27 +380,6 @@ def create_npv_card(npv_details: Optional[dict]) -> str:
         f"All Electrification uses {a.get('savings_definition')}.</div>"
     )
     return "".join(parts)
-
-
-def create_lcoe_card(
-    base_input_dir: str,
-    scenario: str,
-    housing_type: str,
-    county_slug: str,
-    *,
-    discount_rate: float = 0.07,
-    lifetime_years: int = 25,
-) -> str:
-    pv_net = pv_net_capex(base_input_dir, scenario, housing_type, county_slug)
-    annual_pv = pv_annual_kwh(base_input_dir, scenario, housing_type, county_slug)
-    lcoe = lcoe_crf_simple(pv_net, 0.0, annual_pv, discount_rate, lifetime_years)
-    val = f"${lcoe:.3f}/kWh" if lcoe > 0 else "N/A"
-    return (
-        "<div class='metric-block'>"
-        "<div class='muted'>PV LCOE</div>"
-        f"<div class='metric-value'>{val}<small>Approximate</small></div>"
-        "</div>"
-    )
 
 
 def _load_methods_manifest() -> Optional[dict]:
@@ -1218,7 +1192,6 @@ def _dashboard_html(
     nem3_exports_week_jul_b64: Optional[str] = None,
     step18_images: Optional[dict] = None,
     solar_size_html: Optional[str] = None,
-    lcoe_html: Optional[str] = None,
     annual_load_html: Optional[str] = None,
     grid_supply_html: Optional[str] = None,
     key_metrics: Optional[dict] = None,
@@ -1232,8 +1205,6 @@ def _dashboard_html(
     coopt_pv_batt_heatmap_b64: Optional[str] = None,
     coopt_pv_capex_gallery: Optional[List[dict]] = None,
     cost_waterfall_b64: Optional[str] = None,
-    cashflow_b64: Optional[str] = None,
-    storage_value_b64: Optional[str] = None,
     price_signal_b64: Optional[str] = None,
     methods_manifest: Optional[dict] = None,
     npv_details: Optional[dict] = None,
@@ -1255,7 +1226,7 @@ def _dashboard_html(
                 .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(480px, 1fr)); gap: 16px; }}
                 .card {{ background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.08); padding: 12px; }}
                 .metric-card {{ background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.08); padding: 20px; text-align: center; }}
-                .section {{ background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.08); padding: 12px; grid-column: 1 / -1; }}
+                .section {{ background: #fff7e6; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.08); padding: 12px; grid-column: 1 / -1; }}
                 .section summary {{ cursor: pointer; font-size: 18px; font-weight: 600; color: #b00020; }}
                 .section-grid {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 12px; }}
                 @media (max-width: 1100px) {{
@@ -1276,6 +1247,15 @@ def _dashboard_html(
                     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
                     gap: 12px;
                     align-items: stretch;
+                }}
+                .metrics-grid-compact {{
+                    grid-template-columns: repeat(2, minmax(0, 1fr));
+                }}
+                .metrics-grid-compact .metric-block {{
+                    padding: 12px;
+                }}
+                .metrics-grid-compact .metric-value {{
+                    font-size: 20px;
                 }}
                 .metric-block {{
                     background: #fbfbfb;
@@ -1321,7 +1301,7 @@ def _dashboard_html(
     )
 
     # Energy flows section
-    parts.append('<details class="section" open>')
+    parts.append('<details class="section">')
     parts.append("<summary>Energy Flows</summary>")
     parts.append('<div class="section-grid">')
 
@@ -1455,115 +1435,18 @@ def _dashboard_html(
     parts.append("</div>")
     parts.append("</details>")
 
-    # Card 2b: Methods
-    parts.append("<div class=\"card\">")
-    parts.append("<h2>Methods</h2>")
-    parts.append(_render_methods_manifest(methods_manifest))
-    parts.append("</div>")
+    # Annual Costs + NPV section
+    parts.append('<details class="section">')
+    parts.append("<summary>Annual Costs & NPV</summary>")
+    parts.append('<div class="section-grid">')
 
-    # Card 2c: NPV
+    # Card: NPV
     parts.append("<div class=\"card\">")
     parts.append("<h2>NPV (25-year horizon)</h2>")
     parts.append(create_npv_card(npv_details))
     parts.append("</div>")
 
-    # Card 2d: PV LCOE
-    parts.append("<div class=\"card\">")
-    parts.append("<h2>PV LCOE</h2>")
-    parts.append("<div class=\"metrics-grid\">")
-    parts.append(lcoe_html or "<div class='muted'>No LCOE data available</div>")
-    parts.append("</div>")
-    parts.append("</div>")
-
-    # Co-Optimization section
-    parts.append('<details class="section" open>')
-    parts.append("<summary>Co-Optimization</summary>")
-    parts.append('<div class="section-grid">')
-
-    # Card 2e: Co-Optimization Results (Step 9b)
-    parts.append('<div class="card">')
-    parts.append("<h2>Co‑Optimization Results (Step 9b)</h2>")
-    if coopt_card_html:
-        parts.append(coopt_card_html)
-    else:
-        parts.append('<div class="muted">N/A</div>')
-    parts.append("</div>")
-
-    # Card 2f: Co-Optimization Battery Capex Sweep
-    parts.append('<div class="card">')
-    parts.append("<h2>Battery Capex Sweep — Co‑opt (Step 9b)</h2>")
-    if coopt_capex_sweep_b64:
-        parts.append(
-            f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{coopt_capex_sweep_b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{coopt_capex_sweep_b64}\" alt=\"coopt battery capex sweep\"/></a></div>"
-        )
-    else:
-        parts.append("<div class=\"muted\">No sweep plot available (run Step 9b with --batt-capex-sweep).</div>")
-    parts.append("</div>")
-
-    # Card 2g: Co-Optimization Cost Heatmap (Capex x Battery Size)
-    parts.append('<div class="card">')
-    parts.append("<h2>Cost Heatmap — Battery Size × Capex (Co‑opt)</h2>")
-    if coopt_cost_heatmap_b64:
-        parts.append(
-            f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{coopt_cost_heatmap_b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{coopt_cost_heatmap_b64}\" alt=\"coopt cost heatmap\"/></a></div>"
-        )
-    else:
-        parts.append("<div class=\"muted\">No heatmap available (run Step 9b with --batt-capex-sweep and --batt-size-sweep).</div>")
-    parts.append("</div>")
-
-    # Card 2g.1: Co-Optimization PV × Battery Cost Heatmap
-    parts.append('<div class="card">')
-    parts.append("<h2>Cost Heatmap — PV Size × Battery Size (Co‑opt)</h2>")
-    if coopt_pv_batt_heatmap_b64:
-        parts.append(
-            f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{coopt_pv_batt_heatmap_b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{coopt_pv_batt_heatmap_b64}\" alt=\"coopt pv vs battery heatmap\"/></a></div>"
-        )
-    else:
-        parts.append("<div class=\"muted\">No PV×battery heatmap available (run Step 9b with --pv-size-sweep and --batt-size-sweep).</div>")
-    parts.append("</div>")
-
-    # Card 2g.2: PV Capex Sensitivity Gallery
-    parts.append('<div class="card">')
-    parts.append("<h2>PV Capex Sensitivity (Sweep)</h2>")
-    if coopt_pv_capex_gallery:
-        for entry in coopt_pv_capex_gallery:
-            cap = entry.get("capex")
-            parts.append(f"<div class=\"muted\" style=\"font-weight:600; margin-top:8px;\">PV Capex: ${cap:,.0f}/kW</div>")
-            for label, b64 in entry.get("images", {}).items():
-                parts.append(f"<div class=\"muted\" style=\"margin-top:4px;\">{label}</div>")
-                parts.append(
-                    f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{b64}\" alt=\"{label}\"/></a></div>"
-                )
-    else:
-        parts.append("<div class=\"muted\">No PV capex sweep plots available (run Step 9b with --pv-capex-sweep).</div>")
-    parts.append("</div>")
-
-    # Card 2j: Storage Value vs Cost
-    parts.append('<div class="card">')
-    parts.append("<h2>Storage Value vs Cost</h2>")
-    if storage_value_b64:
-        parts.append(
-            f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{storage_value_b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{storage_value_b64}\" alt=\"storage value vs cost\"/></a></div>"
-        )
-    else:
-        parts.append("<div class=\"muted\">No storage value plot available (requires price series + coopt sizes).</div>")
-    parts.append("</div>")
-
-    # Card 2k: Price Signal Overlay
-    parts.append('<div class="card">')
-    parts.append("<h2>Price Signal Overlay (PV Export Hours)</h2>")
-    if price_signal_b64:
-        parts.append(
-            f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{price_signal_b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{price_signal_b64}\" alt=\"price signal overlay\"/></a></div>"
-        )
-    else:
-        parts.append("<div class=\"muted\">No price signal plot available (run Step 9b with --debug-prices).</div>")
-    parts.append("</div>")
-
-    parts.append("</div>")
-    parts.append("</details>")
-
-    # Card 2h: Cost Waterfall
+    # Card: Cost Waterfall
     parts.append('<div class="card">')
     parts.append("<h2>Annual Cost Waterfall — Solar + Storage</h2>")
     if cost_waterfall_b64:
@@ -1574,18 +1457,7 @@ def _dashboard_html(
         parts.append("<div class=\"muted\">No waterfall available (missing annual cost or capex inputs).</div>")
     parts.append("</div>")
 
-    # Card 2i: Cashflow
-    parts.append('<div class="card">')
-    parts.append("<h2>Cumulative Cashflow — Solar + Storage</h2>")
-    if cashflow_b64:
-        parts.append(
-            f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{cashflow_b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{cashflow_b64}\" alt=\"cumulative cashflow\"/></a></div>"
-        )
-    else:
-        parts.append("<div class=\"muted\">No cashflow plot available.</div>")
-    parts.append("</div>")
-
-    # Card 5: Annual Costs by Rate Plan (Electricity + Gas)
+    # Card: Annual Costs by Rate Plan (Electricity + Gas)
     parts.append("<div class=\"card\">")
     parts.append("<h2>Annual Costs by Rate Plan</h2>")
     if cost_breakdowns and cost_breakdowns.get("electricity"):
@@ -1665,8 +1537,88 @@ def _dashboard_html(
     parts.append("</tbody></table>")
     parts.append("</div>")
 
+    parts.append("</div>")
+    parts.append("</details>")
+
+    # Co-Optimization section
+    parts.append('<details class="section">')
+    parts.append("<summary>Co-Optimization</summary>")
+    parts.append('<div class="section-grid">')
+
+    # Card 2e: Co-Optimization Results (Step 9b)
+    parts.append('<div class="card">')
+    parts.append("<h2>Co‑Optimization Results (Step 9b)</h2>")
+    if coopt_card_html:
+        parts.append(coopt_card_html)
+    else:
+        parts.append('<div class="muted">N/A</div>')
+    parts.append("</div>")
+
+    # Card 2f: Co-Optimization Battery Capex Sweep
+    parts.append('<div class="card">')
+    parts.append("<h2>Battery Capex Sweep — Co‑opt (Step 9b)</h2>")
+    if coopt_capex_sweep_b64:
+        parts.append(
+            f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{coopt_capex_sweep_b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{coopt_capex_sweep_b64}\" alt=\"coopt battery capex sweep\"/></a></div>"
+        )
+    else:
+        parts.append("<div class=\"muted\">No sweep plot available (run Step 9b with --batt-capex-sweep).</div>")
+    parts.append("</div>")
+
+    # Card 2g: Co-Optimization Cost Heatmap (Capex x Battery Size)
+    parts.append('<div class="card">')
+    parts.append("<h2>Cost Heatmap — Battery Size × Capex (Co‑opt)</h2>")
+    if coopt_cost_heatmap_b64:
+        parts.append(
+            f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{coopt_cost_heatmap_b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{coopt_cost_heatmap_b64}\" alt=\"coopt cost heatmap\"/></a></div>"
+        )
+    else:
+        parts.append("<div class=\"muted\">No heatmap available (run Step 9b with --batt-capex-sweep and --batt-size-sweep).</div>")
+    parts.append("</div>")
+
+    # Card 2g.1: Co-Optimization PV × Battery Cost Heatmap
+    parts.append('<div class="card">')
+    parts.append("<h2>Cost Heatmap — PV Size × Battery Size (Co‑opt)</h2>")
+    if coopt_pv_batt_heatmap_b64:
+        parts.append(
+            f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{coopt_pv_batt_heatmap_b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{coopt_pv_batt_heatmap_b64}\" alt=\"coopt pv vs battery heatmap\"/></a></div>"
+        )
+    else:
+        parts.append("<div class=\"muted\">No PV×battery heatmap available (run Step 9b with --pv-size-sweep and --batt-size-sweep).</div>")
+    parts.append("</div>")
+
+    # Card 2g.2: PV Capex Sensitivity Gallery
+    parts.append('<div class="card">')
+    parts.append("<h2>PV Capex Sweep — Battery Capex/Size Sensitivity</h2>")
+    if coopt_pv_capex_gallery:
+        for entry in coopt_pv_capex_gallery:
+            cap = entry.get("capex")
+            parts.append(f"<div class=\"muted\" style=\"font-weight:600; margin-top:8px;\">PV Capex: ${cap:,.0f}/kW</div>")
+            for label, b64 in entry.get("images", {}).items():
+                parts.append(f"<div class=\"muted\" style=\"margin-top:4px;\">{label}</div>")
+                parts.append(
+                    f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{b64}\" alt=\"{label}\"/></a></div>"
+                )
+    else:
+        parts.append("<div class=\"muted\">No PV capex sweep plots available (run Step 9b with --pv-capex-sweep).</div>")
+    parts.append("</div>")
+
+    # Card 2k: Price Signal Overlay
+    parts.append('<div class="card">')
+    parts.append("<h2>Price Signal Overlay (PV Export Hours)</h2>")
+    if price_signal_b64:
+        parts.append(
+            f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{price_signal_b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{price_signal_b64}\" alt=\"price signal overlay\"/></a></div>"
+        )
+    else:
+        parts.append("<div class=\"muted\">No price signal plot available (run Step 9b with --debug-prices).</div>")
+    parts.append("</div>")
+
+    parts.append("</div>")
+    parts.append("</details>")
+
     # Weekly flows section
-    parts.append('<details class="section" open>')
+    parts.append('<details class="section">')
     parts.append("<summary>Weekly Flows: Load + Solar + Battery</summary>")
     parts.append('<div class="section-grid">')
 
@@ -1719,7 +1671,7 @@ def _dashboard_html(
     parts.append("</details>")
 
     # Exports to Grid section
-    parts.append('<details class="section" open>')
+    parts.append('<details class="section">')
     parts.append("<summary>Exports to Grid</summary>")
     parts.append('<div class="section-grid">')
 
@@ -1772,6 +1724,12 @@ def _dashboard_html(
             else:
                 parts.append("<div class=\"muted\">Not available</div>")
             parts.append("</div>")
+
+    # Methods (last card)
+    parts.append("<div class=\"card\">")
+    parts.append("<h2>Methods</h2>")
+    parts.append(_render_methods_manifest(methods_manifest))
+    parts.append("</div>")
 
     parts.append("</div></body></html>")
     return "\n".join(parts)
@@ -1874,12 +1832,6 @@ def process(
             cost_waterfall_b64 = create_cost_waterfall_chart(
                 base_input_dir, scenario, housing_type, county_slug
             )
-            cashflow_b64 = create_cashflow_chart(
-                base_input_dir, scenario, housing_type, county_slug
-            )
-            storage_value_b64 = create_storage_value_vs_cost_chart(
-                base_input_dir, scenario, housing_type, county_slug
-            )
             price_signal_b64 = create_price_signal_overlay_chart(
                 base_input_dir, scenario, housing_type, county_slug
             )
@@ -1908,7 +1860,6 @@ def process(
                 nem3_exports_week_jul_b64=nem3_exports_week_jul_b64,
                 step18_images=step18,
                 solar_size_html=solar_size_html,
-                lcoe_html=create_lcoe_card(base_input_dir, scenario, housing_type, county_slug),
                 annual_load_html=annual_load_html,
                 grid_supply_html=grid_supply_html,
                 key_metrics=key_metrics,
@@ -1922,8 +1873,6 @@ def process(
                 coopt_pv_batt_heatmap_b64=coopt_pv_batt_heatmap_b64,
                 coopt_pv_capex_gallery=coopt_pv_capex_gallery,
                 cost_waterfall_b64=cost_waterfall_b64,
-                cashflow_b64=cashflow_b64,
-                storage_value_b64=storage_value_b64,
                 price_signal_b64=price_signal_b64,
                 methods_manifest=methods_manifest,
                 npv_details=npv_details,

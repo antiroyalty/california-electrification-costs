@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import List
+from typing import List, Optional, Tuple
 
 import pandas as pd
 
@@ -107,6 +107,8 @@ def _solve_lp(
     *,
     fixed_pv_kw: float | None = None,
     fixed_batt_kwh: float | None = None,
+    weights: Optional[List[float]] = None,
+    cycle_monthly: bool = False,
     allow_grid_charging: bool = False,
     allow_batt_export: bool = True,
     c_pv_kw: float = 2830.0,           # $/kW
@@ -129,6 +131,10 @@ def _solve_lp(
     p_imp = inputs.import_rates
     p_exp = inputs.export_rates
     H = len(L)
+    if weights is None:
+        weights = [1.0] * H
+    if len(weights) != H:
+        raise ValueError("weights length must match number of hours")
 
     # Problem
     prob = pulp.LpProblem("CoOptimize_PV_Battery_Dispatch", pulp.LpMinimize)
@@ -196,7 +202,10 @@ def _solve_lp(
 
     # SOC dynamics and bounds; enforce cyclic SOC
     for h in range(H):
-        h_next = 0 if (h == H - 1) else (h + 1)
+        if cycle_monthly and H % 24 == 0:
+            h_next = h - 23 if (h % 24 == 23) else (h + 1)
+        else:
+            h_next = 0 if (h == H - 1) else (h + 1)
         if allow_grid_charging:
             prob += (
                 soc_pv[h_next]
@@ -229,11 +238,16 @@ def _solve_lp(
 
     # Operating bill (imports - exports) + degradation
     energy_cost = pulp.lpSum([
-        (grid2load[h] + grid2batt[h]) * float(p_imp[h]) - pv2grid[h] * float(p_exp[h]) - batt2grid[h] * float(p_exp[h])
+        float(weights[h])
+        * (
+            (grid2load[h] + grid2batt[h]) * float(p_imp[h])
+            - pv2grid[h] * float(p_exp[h])
+            - batt2grid[h] * float(p_exp[h])
+        )
         for h in range(H)
     ])
     degrade_cost = pulp.lpSum([
-        c_deg_per_kwh * (batt2load[h] + batt2grid[h]) for h in range(H)
+        float(weights[h]) * c_deg_per_kwh * (batt2load[h] + batt2grid[h]) for h in range(H)
     ])
 
     prob += capex_annual + energy_cost + degrade_cost
@@ -249,8 +263,20 @@ def _solve_lp(
     b_e_val = float(pulp.value(B_E))
     b_p_val = float(pulp.value(B_P))
     capex_annual_val = float(pulp.value(capex_annual))
-    import_cost_val = float(pulp.value(pulp.lpSum([(grid2load[h] + grid2batt[h]) * float(p_imp[h]) for h in range(H)])))
-    export_credit_val = float(pulp.value(pulp.lpSum([(pv2grid[h] + batt2grid[h]) * float(p_exp[h]) for h in range(H)])))
+    import_cost_val = float(
+        pulp.value(
+            pulp.lpSum(
+                [float(weights[h]) * (grid2load[h] + grid2batt[h]) * float(p_imp[h]) for h in range(H)]
+            )
+        )
+    )
+    export_credit_val = float(
+        pulp.value(
+            pulp.lpSum(
+                [float(weights[h]) * (pv2grid[h] + batt2grid[h]) * float(p_exp[h]) for h in range(H)]
+            )
+        )
+    )
     degradation_cost_val = float(pulp.value(degrade_cost))
     total_cost_val = capex_annual_val + import_cost_val - export_credit_val + degradation_cost_val
     flows = FlowSeries(
@@ -274,3 +300,54 @@ def _solve_lp(
         degradation_cost=degradation_cost_val,
         flows=flows,
     )
+
+
+def build_monthly_hourly_inputs(
+    inputs: CooptInputs,
+    *,
+    year: int = 2018,
+) -> Tuple[CooptInputs, List[float]]:
+    """Aggregate 8760 series into 12x24 monthly-hourly averages plus weights."""
+    if len(inputs.load_kwh) != 8760:
+        raise ValueError("Monthly-hourly aggregation expects 8760-length inputs.")
+    ts = _timestamp_index_8760(year)
+    df = pd.DataFrame(
+        {
+            "ts": ts,
+            "load": inputs.load_kwh,
+            "pv": inputs.pv_gen_per_kw,
+            "imp": inputs.import_rates,
+            "exp": inputs.export_rates,
+        }
+    )
+    df["month"] = df["ts"].dt.month
+    df["hour"] = df["ts"].dt.hour
+    grouped = (
+        df.groupby(["month", "hour"])
+        .mean(numeric_only=True)
+        .reset_index()
+    )
+    months = list(range(1, 13))
+    hours = list(range(0, 24))
+    load = []
+    pv = []
+    imp = []
+    exp = []
+    weights = []
+    import calendar
+    for m in months:
+        days_in_month = calendar.monthrange(year, m)[1]
+        for h in hours:
+            row = grouped[(grouped["month"] == m) & (grouped["hour"] == h)]
+            if row.empty:
+                load.append(0.0)
+                pv.append(0.0)
+                imp.append(0.0)
+                exp.append(0.0)
+            else:
+                load.append(float(row.iloc[0]["load"]))
+                pv.append(float(row.iloc[0]["pv"]))
+                imp.append(float(row.iloc[0]["imp"]))
+                exp.append(float(row.iloc[0]["exp"]))
+            weights.append(float(days_in_month))
+    return CooptInputs(load, pv, imp, exp), weights

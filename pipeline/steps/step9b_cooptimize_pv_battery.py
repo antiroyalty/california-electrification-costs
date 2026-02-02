@@ -87,6 +87,7 @@ from .step9_solar_storage_dispatch_core import (
 from .step9b_cooptimize_core import (
     CooptInputs,
     FlowSeries,
+    build_monthly_hourly_inputs,
     _hourly_import_rate,
     _solve_lp,
     _timestamp_index_8760,
@@ -248,6 +249,8 @@ def _write_batt_capex_sweep(
     batt_life_yrs: int,
     discount_rate: float,
     batt_degrade_cost_per_kwh: float,
+    weights: Optional[List[float]] = None,
+    cycle_monthly: bool = False,
     file_tag: Optional[str] = None,
 ) -> None:
     records = []
@@ -263,6 +266,8 @@ def _write_batt_capex_sweep(
             batt_life_yrs=batt_life_yrs,
             discount_rate=discount_rate,
             c_deg_per_kwh=batt_degrade_cost_per_kwh,
+            weights=weights,
+            cycle_monthly=cycle_monthly,
         )
         records.append(
             {
@@ -327,6 +332,8 @@ def _write_batt_cost_heatmap(
     batt_degrade_cost_per_kwh: float,
     marker_batt_kwh: Optional[float] = None,
     marker_capex_kwh: Optional[float] = None,
+    weights: Optional[List[float]] = None,
+    cycle_monthly: bool = False,
     file_tag: Optional[str] = None,
 ) -> None:
     records = []
@@ -344,6 +351,8 @@ def _write_batt_cost_heatmap(
                 batt_life_yrs=batt_life_yrs,
                 discount_rate=discount_rate,
                 c_deg_per_kwh=batt_degrade_cost_per_kwh,
+                weights=weights,
+                cycle_monthly=cycle_monthly,
             )
             records.append(
                 {
@@ -417,6 +426,8 @@ def _write_pv_batt_cost_heatmap(
     batt_degrade_cost_per_kwh: float,
     marker_pv_kw: Optional[float] = None,
     marker_batt_kwh: Optional[float] = None,
+    weights: Optional[List[float]] = None,
+    cycle_monthly: bool = False,
     file_tag: Optional[str] = None,
 ) -> None:
     records = []
@@ -435,6 +446,8 @@ def _write_pv_batt_cost_heatmap(
                 batt_life_yrs=batt_life_yrs,
                 discount_rate=discount_rate,
                 c_deg_per_kwh=batt_degrade_cost_per_kwh,
+                weights=weights,
+                cycle_monthly=cycle_monthly,
             )
             records.append(
                 {
@@ -512,6 +525,7 @@ def process(
     batt_size_sweep: Optional[List[float]] = None,
     pv_size_sweep: Optional[List[float]] = None,
     pv_capex_sweep: Optional[List[float]] = None,
+    coarse_sweeps: bool = False,
     discount_rate: float = 0.07,
     pv_capex_per_kw: float = 2830.0,
     batt_capex_per_kwh: float = 800.0,
@@ -588,6 +602,17 @@ def process(
             c_deg_per_kwh=batt_degrade_cost_per_kwh,
         )
 
+        sweep_inputs = inputs
+        sweep_weights = None
+        sweep_cycle = False
+        if coarse_sweeps:
+            try:
+                sweep_inputs, sweep_weights = build_monthly_hourly_inputs(inputs, year=2018)
+                sweep_cycle = True
+            except Exception as e:
+                print(f"[step9b] Coarse sweep aggregation failed for {county_slug}: {e}")
+                sweep_inputs, sweep_weights, sweep_cycle = inputs, None, False
+
         # Write outputs (Step 9 compatibility)
         _write_step9_outputs(out_dir, county_slug, ts_index, load_kwh, G, result.pv_kw, result.flows)
         print(f"[step9b] {county_slug}: PV={result.pv_kw:.2f} kW, Battery={result.batt_kwh:.2f} kWh")
@@ -596,7 +621,7 @@ def process(
             _write_batt_capex_sweep(
                 out_dir,
                 county_slug,
-                inputs,
+                sweep_inputs,
                 allow_grid_charging=allow_grid_charging,
                 allow_batt_export=allow_batt_export,
                 batt_capex_values=batt_capex_sweep,
@@ -606,13 +631,15 @@ def process(
                 batt_life_yrs=batt_life_yrs,
                 discount_rate=discount_rate,
                 batt_degrade_cost_per_kwh=batt_degrade_cost_per_kwh,
+                weights=sweep_weights,
+                cycle_monthly=sweep_cycle,
             )
 
         if batt_capex_sweep and batt_size_sweep:
             _write_batt_cost_heatmap(
                 out_dir,
                 county_slug,
-                inputs,
+                sweep_inputs,
                 allow_grid_charging=allow_grid_charging,
                 allow_batt_export=allow_batt_export,
                 batt_capex_values=batt_capex_sweep,
@@ -625,13 +652,15 @@ def process(
                 batt_degrade_cost_per_kwh=batt_degrade_cost_per_kwh,
                 marker_batt_kwh=result.batt_kwh,
                 marker_capex_kwh=batt_capex_per_kwh,
+                weights=sweep_weights,
+                cycle_monthly=sweep_cycle,
             )
 
         if pv_size_sweep and batt_size_sweep:
             _write_pv_batt_cost_heatmap(
                 out_dir,
                 county_slug,
-                inputs,
+                sweep_inputs,
                 allow_grid_charging=allow_grid_charging,
                 allow_batt_export=allow_batt_export,
                 pv_size_values=pv_size_sweep,
@@ -645,13 +674,15 @@ def process(
                 batt_degrade_cost_per_kwh=batt_degrade_cost_per_kwh,
                 marker_pv_kw=result.pv_kw,
                 marker_batt_kwh=result.batt_kwh,
+                weights=sweep_weights,
+                cycle_monthly=sweep_cycle,
             )
 
         if pv_capex_sweep:
             for pv_capex in pv_capex_sweep:
                 tag = _format_pv_capex_tag(pv_capex)
                 sweep_result = _solve_lp(
-                    inputs,
+                    sweep_inputs,
                     allow_grid_charging=allow_grid_charging,
                     allow_batt_export=allow_batt_export,
                     c_pv_kw=pv_capex,
@@ -661,13 +692,15 @@ def process(
                     batt_life_yrs=batt_life_yrs,
                     discount_rate=discount_rate,
                     c_deg_per_kwh=batt_degrade_cost_per_kwh,
+                    weights=sweep_weights,
+                    cycle_monthly=sweep_cycle,
                 )
 
                 if batt_capex_sweep:
                     _write_batt_capex_sweep(
                         out_dir,
                         county_slug,
-                        inputs,
+                        sweep_inputs,
                         allow_grid_charging=allow_grid_charging,
                         allow_batt_export=allow_batt_export,
                         batt_capex_values=batt_capex_sweep,
@@ -678,12 +711,14 @@ def process(
                         discount_rate=discount_rate,
                         batt_degrade_cost_per_kwh=batt_degrade_cost_per_kwh,
                         file_tag=tag,
+                        weights=sweep_weights,
+                        cycle_monthly=sweep_cycle,
                     )
                 if batt_capex_sweep and batt_size_sweep:
                     _write_batt_cost_heatmap(
                         out_dir,
                         county_slug,
-                        inputs,
+                        sweep_inputs,
                         allow_grid_charging=allow_grid_charging,
                         allow_batt_export=allow_batt_export,
                         batt_capex_values=batt_capex_sweep,
@@ -697,12 +732,14 @@ def process(
                         marker_batt_kwh=sweep_result.batt_kwh,
                         marker_capex_kwh=batt_capex_per_kwh,
                         file_tag=tag,
+                        weights=sweep_weights,
+                        cycle_monthly=sweep_cycle,
                     )
                 if pv_size_sweep and batt_size_sweep:
                     _write_pv_batt_cost_heatmap(
                         out_dir,
                         county_slug,
-                        inputs,
+                        sweep_inputs,
                         allow_grid_charging=allow_grid_charging,
                         allow_batt_export=allow_batt_export,
                         pv_size_values=pv_size_sweep,
@@ -717,6 +754,8 @@ def process(
                         marker_pv_kw=sweep_result.pv_kw,
                         marker_batt_kwh=sweep_result.batt_kwh,
                         file_tag=tag,
+                        weights=sweep_weights,
+                        cycle_monthly=sweep_cycle,
                     )
 
         # Collect capacity summary for diagnostics cards
@@ -787,6 +826,7 @@ def main():
     p.add_argument("--batt-size-sweep", default="", help="Comma-separated list of fixed battery sizes (kWh) for heatmap")
     p.add_argument("--pv-size-sweep", default="", help="Comma-separated list of fixed PV sizes (kW) for PV×battery heatmap")
     p.add_argument("--pv-capex-sweep", default="", help="Comma-separated list of PV capex ($/kW) for sensitivity sweeps")
+    p.add_argument("--coarse-sweeps", action="store_true", help="Use 12x24 monthly-hourly averages for sweep plots")
     p.add_argument("--discount-rate", type=float, default=0.07)
     p.add_argument("--pv-capex-kw", type=float, default=2830.0)
     p.add_argument("--batt-capex-kwh", type=float, default=800.0)
@@ -835,6 +875,7 @@ def main():
         batt_size_sweep=size_vals if size_vals else None,
         pv_size_sweep=pv_vals if pv_vals else None,
         pv_capex_sweep=pv_capex_vals if pv_capex_vals else None,
+        coarse_sweeps=args.coarse_sweeps,
         discount_rate=args.discount_rate,
         pv_capex_per_kw=args.pv_capex_kw,
         batt_capex_per_kwh=args.batt_capex_kwh,
