@@ -50,6 +50,13 @@ from helpers.diagnostics_data import (
     pv_net_capex,
     read_coopt_capacities,
 )
+from helpers.diagnostics_cost_plots import (
+    create_cashflow_chart,
+    create_cost_waterfall_chart,
+    create_price_signal_overlay_chart,
+    create_storage_value_vs_cost_chart,
+    estimate_storage_value_upper_bound,
+)
 from helpers.diagnostics_helpers import (
     load_appliance_breakdown_data,
     create_appliance_breakdown_chart,
@@ -111,7 +118,7 @@ def create_coopt_results_card(
     storage_value_str = "—"
     storage_value = None
     try:
-        storage_value = _coopt_storage_value_estimate(base_input_dir, scenario, housing_type, county_slug)
+        storage_value = estimate_storage_value_upper_bound(base_input_dir, scenario, housing_type, county_slug)
     except Exception:
         storage_value = None
     if isinstance(storage_value, (int, float)):
@@ -139,57 +146,6 @@ def create_coopt_results_card(
     )
 
 
-def _coopt_storage_value_estimate(
-    base_input_dir: str,
-    scenario: str,
-    housing_type: str,
-    county_slug: str,
-    *,
-    window_hours: int = 24,
-    round_trip_efficiency: float = 0.96,
-) -> Optional[float]:
-    """Estimate upper bound annual storage value using PV exports and price spread (24h look-ahead).
-
-    Returns None if required inputs are missing.
-    """
-    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
-    dispatch_path = os.path.join(county_dir, f"solar_storage_dispatch_profiles_{county_slug}.csv")
-    price_path = os.path.join(county_dir, f"coopt_price_series_{county_slug}.csv")
-    if not (os.path.exists(dispatch_path) and os.path.exists(price_path)):
-        return None
-
-    df = pd.read_csv(dispatch_path)
-    prices = pd.read_csv(price_path)
-    if "import_price_usd_per_kwh" not in prices.columns or "export_price_usd_per_kwh" not in prices.columns:
-        return None
-    if "PV to Grid (kWh)" in df.columns:
-        exports = pd.to_numeric(df["PV to Grid (kWh)"], errors="coerce").fillna(0.0).tolist()
-    elif "System to Grid" in df.columns:
-        exports = pd.to_numeric(df["System to Grid"], errors="coerce").fillna(0.0).tolist()
-    else:
-        return None
-
-    import_prices = pd.to_numeric(prices["import_price_usd_per_kwh"], errors="coerce").fillna(0.0).tolist()
-    export_prices = pd.to_numeric(prices["export_price_usd_per_kwh"], errors="coerce").fillna(0.0).tolist()
-    n = min(len(exports), len(import_prices), len(export_prices))
-    if n == 0:
-        return None
-
-    total_value = 0.0
-    for i in range(n):
-        export_kwh = float(exports[i])
-        if export_kwh <= 0:
-            continue
-        future = import_prices[i + 1 : i + 1 + window_hours]
-        if not future:
-            continue
-        max_future = max(future)
-        delta = max_future - float(export_prices[i])
-        if delta > 0:
-            total_value += export_kwh * delta * round_trip_efficiency
-    return total_value
-
-
 # ---------- Solar + storage deployment figure (from Step 9 outputs) ----------
 
 
@@ -213,6 +169,16 @@ def _find_coopt_batt_capex_sweep_png(county_dir: str, county_slug: str) -> Optio
     return path if os.path.exists(path) else None
 
 
+def _find_coopt_batt_cost_heatmap_png(county_dir: str, county_slug: str) -> Optional[str]:
+    path = os.path.join(county_dir, f"coopt_batt_cost_heatmap_{county_slug}.png")
+    return path if os.path.exists(path) else None
+
+
+def _find_coopt_pv_batt_cost_heatmap_png(county_dir: str, county_slug: str) -> Optional[str]:
+    path = os.path.join(county_dir, f"coopt_pv_batt_cost_heatmap_{county_slug}.png")
+    return path if os.path.exists(path) else None
+
+
 def create_coopt_batt_capex_sweep_chart(
     base_input_dir: str,
     scenario: str,
@@ -221,6 +187,40 @@ def create_coopt_batt_capex_sweep_chart(
 ) -> Optional[str]:
     county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
     png = _find_coopt_batt_capex_sweep_png(county_dir, county_slug)
+    if not png:
+        return None
+    try:
+        with open(png, "rb") as f:
+            return base64.b64encode(f.read()).decode("utf-8")
+    except Exception:
+        return None
+
+
+def create_coopt_batt_cost_heatmap_chart(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+) -> Optional[str]:
+    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+    png = _find_coopt_batt_cost_heatmap_png(county_dir, county_slug)
+    if not png:
+        return None
+    try:
+        with open(png, "rb") as f:
+            return base64.b64encode(f.read()).decode("utf-8")
+    except Exception:
+        return None
+
+
+def create_coopt_pv_batt_cost_heatmap_chart(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+) -> Optional[str]:
+    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+    png = _find_coopt_pv_batt_cost_heatmap_png(county_dir, county_slug)
     if not png:
         return None
     try:
@@ -1173,6 +1173,12 @@ def _dashboard_html(
     assets_info: Optional[dict] = None,
     coopt_card_html: Optional[str] = None,
     coopt_capex_sweep_b64: Optional[str] = None,
+    coopt_cost_heatmap_b64: Optional[str] = None,
+    coopt_pv_batt_heatmap_b64: Optional[str] = None,
+    cost_waterfall_b64: Optional[str] = None,
+    cashflow_b64: Optional[str] = None,
+    storage_value_b64: Optional[str] = None,
+    price_signal_b64: Optional[str] = None,
     methods_manifest: Optional[dict] = None,
     npv_details: Optional[dict] = None,
 ) -> str:
@@ -1367,6 +1373,72 @@ def _dashboard_html(
         )
     else:
         parts.append("<div class=\"muted\">No sweep plot available (run Step 9b with --batt-capex-sweep).</div>")
+    parts.append("</div>")
+
+    # Card 2g: Co-Optimization Cost Heatmap (Capex x Battery Size)
+    parts.append('<div class="card">')
+    parts.append("<h2>Cost Heatmap — Battery Size × Capex (Co‑opt)</h2>")
+    if coopt_cost_heatmap_b64:
+        parts.append(
+            f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{coopt_cost_heatmap_b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{coopt_cost_heatmap_b64}\" alt=\"coopt cost heatmap\"/></a></div>"
+        )
+    else:
+        parts.append("<div class=\"muted\">No heatmap available (run Step 9b with --batt-capex-sweep and --batt-size-sweep).</div>")
+    parts.append("</div>")
+
+    # Card 2g.1: Co-Optimization PV × Battery Cost Heatmap
+    parts.append('<div class="card">')
+    parts.append("<h2>Cost Heatmap — PV Size × Battery Size (Co‑opt)</h2>")
+    if coopt_pv_batt_heatmap_b64:
+        parts.append(
+            f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{coopt_pv_batt_heatmap_b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{coopt_pv_batt_heatmap_b64}\" alt=\"coopt pv vs battery heatmap\"/></a></div>"
+        )
+    else:
+        parts.append("<div class=\"muted\">No PV×battery heatmap available (run Step 9b with --pv-size-sweep and --batt-size-sweep).</div>")
+    parts.append("</div>")
+
+    # Card 2h: Cost Waterfall
+    parts.append('<div class="card">')
+    parts.append("<h2>Annual Cost Waterfall — Solar + Storage</h2>")
+    if cost_waterfall_b64:
+        parts.append(
+            f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{cost_waterfall_b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{cost_waterfall_b64}\" alt=\"annual cost waterfall\"/></a></div>"
+        )
+    else:
+        parts.append("<div class=\"muted\">No waterfall available (missing annual cost or capex inputs).</div>")
+    parts.append("</div>")
+
+    # Card 2i: Cashflow
+    parts.append('<div class="card">')
+    parts.append("<h2>Cumulative Cashflow — Solar + Storage</h2>")
+    if cashflow_b64:
+        parts.append(
+            f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{cashflow_b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{cashflow_b64}\" alt=\"cumulative cashflow\"/></a></div>"
+        )
+    else:
+        parts.append("<div class=\"muted\">No cashflow plot available.</div>")
+    parts.append("</div>")
+
+    # Card 2j: Storage Value vs Cost
+    parts.append('<div class="card">')
+    parts.append("<h2>Storage Value vs Cost</h2>")
+    if storage_value_b64:
+        parts.append(
+            f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{storage_value_b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{storage_value_b64}\" alt=\"storage value vs cost\"/></a></div>"
+        )
+    else:
+        parts.append("<div class=\"muted\">No storage value plot available (requires price series + coopt sizes).</div>")
+    parts.append("</div>")
+
+    # Card 2k: Price Signal Overlay
+    parts.append('<div class="card">')
+    parts.append("<h2>Price Signal Overlay (PV Export Hours)</h2>")
+    if price_signal_b64:
+        parts.append(
+            f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{price_signal_b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{price_signal_b64}\" alt=\"price signal overlay\"/></a></div>"
+        )
+    else:
+        parts.append("<div class=\"muted\">No price signal plot available (run Step 9b with --debug-prices).</div>")
     parts.append("</div>")
 
     # Card 3: Energy Flows — With vs Without Solar+Storage
@@ -1679,6 +1751,24 @@ def process(
             coopt_capex_sweep_b64 = create_coopt_batt_capex_sweep_chart(
                 base_input_dir, scenario, housing_type, county_slug
             )
+            coopt_cost_heatmap_b64 = create_coopt_batt_cost_heatmap_chart(
+                base_input_dir, scenario, housing_type, county_slug
+            )
+            coopt_pv_batt_heatmap_b64 = create_coopt_pv_batt_cost_heatmap_chart(
+                base_input_dir, scenario, housing_type, county_slug
+            )
+            cost_waterfall_b64 = create_cost_waterfall_chart(
+                base_input_dir, scenario, housing_type, county_slug
+            )
+            cashflow_b64 = create_cashflow_chart(
+                base_input_dir, scenario, housing_type, county_slug
+            )
+            storage_value_b64 = create_storage_value_vs_cost_chart(
+                base_input_dir, scenario, housing_type, county_slug
+            )
+            price_signal_b64 = create_price_signal_overlay_chart(
+                base_input_dir, scenario, housing_type, county_slug
+            )
             npv_details = compute_npv_details(
                 base_input_dir,
                 scenario,
@@ -1714,6 +1804,12 @@ def process(
                 assets_info=assets_info,
                 coopt_card_html=create_coopt_results_card(base_input_dir, scenario, housing_type, county_slug),
                 coopt_capex_sweep_b64=coopt_capex_sweep_b64,
+                coopt_cost_heatmap_b64=coopt_cost_heatmap_b64,
+                coopt_pv_batt_heatmap_b64=coopt_pv_batt_heatmap_b64,
+                cost_waterfall_b64=cost_waterfall_b64,
+                cashflow_b64=cashflow_b64,
+                storage_value_b64=storage_value_b64,
+                price_signal_b64=price_signal_b64,
                 methods_manifest=methods_manifest,
                 npv_details=npv_details,
             )
