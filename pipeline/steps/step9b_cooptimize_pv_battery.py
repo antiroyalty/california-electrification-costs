@@ -100,6 +100,11 @@ RATE_PLANS = {
 }
 
 
+def _format_pv_capex_tag(value: float) -> str:
+    tag = f"pv{value}"
+    return tag.replace(".", "p")
+
+
 def _write_step9_outputs(
     out_dir: str,
     county: str,
@@ -243,6 +248,7 @@ def _write_batt_capex_sweep(
     batt_life_yrs: int,
     discount_rate: float,
     batt_degrade_cost_per_kwh: float,
+    file_tag: Optional[str] = None,
 ) -> None:
     records = []
     for capex_kwh in batt_capex_values:
@@ -275,7 +281,8 @@ def _write_batt_capex_sweep(
     if not records:
         return
     df = pd.DataFrame(records)
-    csv_path = os.path.join(out_dir, f"coopt_batt_capex_sweep_{county}.csv")
+    tag = f"_{file_tag}" if file_tag else ""
+    csv_path = os.path.join(out_dir, f"coopt_batt_capex_sweep_{county}{tag}.csv")
     df.to_csv(csv_path, index=False)
 
     try:
@@ -296,11 +303,191 @@ def _write_batt_capex_sweep(
         axes[1].set_title("Co‑opt Objective vs Capex")
         axes[1].legend()
 
-        fig_path = os.path.join(out_dir, f"coopt_batt_capex_sweep_{county}.png")
+        fig_path = os.path.join(out_dir, f"coopt_batt_capex_sweep_{county}{tag}.png")
         fig.savefig(fig_path, dpi=150)
         plt.close(fig)
     except Exception as e:
         raise RuntimeError(f"Failed to write battery capex sweep plot: {e}")
+
+
+def _write_batt_cost_heatmap(
+    out_dir: str,
+    county: str,
+    inputs: CooptInputs,
+    *,
+    allow_grid_charging: bool,
+    allow_batt_export: bool,
+    batt_capex_values: List[float],
+    batt_size_values: List[float],
+    pv_capex_per_kw: float,
+    batt_capex_per_kw: float,
+    pv_life_yrs: int,
+    batt_life_yrs: int,
+    discount_rate: float,
+    batt_degrade_cost_per_kwh: float,
+    marker_batt_kwh: Optional[float] = None,
+    marker_capex_kwh: Optional[float] = None,
+    file_tag: Optional[str] = None,
+) -> None:
+    records = []
+    for capex_kwh in batt_capex_values:
+        for batt_kwh in batt_size_values:
+            result = _solve_lp(
+                inputs,
+                fixed_batt_kwh=batt_kwh,
+                allow_grid_charging=allow_grid_charging,
+                allow_batt_export=allow_batt_export,
+                c_pv_kw=pv_capex_per_kw,
+                c_batt_kwh=capex_kwh,
+                c_batt_kw=batt_capex_per_kw,
+                pv_life_yrs=pv_life_yrs,
+                batt_life_yrs=batt_life_yrs,
+                discount_rate=discount_rate,
+                c_deg_per_kwh=batt_degrade_cost_per_kwh,
+            )
+            records.append(
+                {
+                    "battery_capex_kwh": float(capex_kwh),
+                    "battery_kwh": float(batt_kwh),
+                    "pv_kw": result.pv_kw,
+                    "batt_kw": result.batt_kw,
+                    "total_cost": result.total_cost,
+                }
+            )
+
+    if not records:
+        return
+    df = pd.DataFrame(records)
+    tag = f"_{file_tag}" if file_tag else ""
+    csv_path = os.path.join(out_dir, f"coopt_batt_cost_heatmap_{county}{tag}.csv")
+    df.to_csv(csv_path, index=False)
+
+    try:
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        pivot = df.pivot(index="battery_kwh", columns="battery_capex_kwh", values="total_cost")
+        vals = pivot.values
+        fig, ax = plt.subplots(figsize=(9, 6), tight_layout=True)
+        im = ax.imshow(vals, origin="lower", aspect="auto", cmap="viridis")
+        ax.set_xticks(range(len(pivot.columns)))
+        ax.set_yticks(range(len(pivot.index)))
+        capex_vals = pivot.columns.tolist()
+        size_vals = pivot.index.tolist()
+        ax.set_xticklabels([f"{c:.0f}" for c in capex_vals])
+        ax.set_yticklabels([f"{r:.1f}" for r in size_vals])
+        ax.set_xlabel("Battery Capex ($/kWh)")
+        ax.set_ylabel("Battery Size (kWh)")
+        ax.set_title("Co‑opt Total Cost Heatmap")
+        cbar = fig.colorbar(im, ax=ax)
+        cbar.set_label("Annual Cost ($)")
+
+        if marker_batt_kwh is not None and marker_capex_kwh is not None and capex_vals and size_vals:
+            try:
+                capex_arr = np.array(capex_vals, dtype=float)
+                size_arr = np.array(size_vals, dtype=float)
+                x_idx = int(np.argmin(np.abs(capex_arr - float(marker_capex_kwh))))
+                y_idx = int(np.argmin(np.abs(size_arr - float(marker_batt_kwh))))
+                ax.scatter([x_idx], [y_idx], color="#e41a1c", s=70, marker="x", label="Current")
+                ax.legend(loc="upper right")
+            except Exception:
+                pass
+        fig_path = os.path.join(out_dir, f"coopt_batt_cost_heatmap_{county}{tag}.png")
+        fig.savefig(fig_path, dpi=150)
+        plt.close(fig)
+    except Exception as e:
+        raise RuntimeError(f"Failed to write battery cost heatmap plot: {e}")
+
+
+def _write_pv_batt_cost_heatmap(
+    out_dir: str,
+    county: str,
+    inputs: CooptInputs,
+    *,
+    allow_grid_charging: bool,
+    allow_batt_export: bool,
+    pv_size_values: List[float],
+    batt_size_values: List[float],
+    pv_capex_per_kw: float,
+    batt_capex_per_kwh: float,
+    batt_capex_per_kw: float,
+    pv_life_yrs: int,
+    batt_life_yrs: int,
+    discount_rate: float,
+    batt_degrade_cost_per_kwh: float,
+    marker_pv_kw: Optional[float] = None,
+    marker_batt_kwh: Optional[float] = None,
+    file_tag: Optional[str] = None,
+) -> None:
+    records = []
+    for pv_kw in pv_size_values:
+        for batt_kwh in batt_size_values:
+            result = _solve_lp(
+                inputs,
+                fixed_pv_kw=pv_kw,
+                fixed_batt_kwh=batt_kwh,
+                allow_grid_charging=allow_grid_charging,
+                allow_batt_export=allow_batt_export,
+                c_pv_kw=pv_capex_per_kw,
+                c_batt_kwh=batt_capex_per_kwh,
+                c_batt_kw=batt_capex_per_kw,
+                pv_life_yrs=pv_life_yrs,
+                batt_life_yrs=batt_life_yrs,
+                discount_rate=discount_rate,
+                c_deg_per_kwh=batt_degrade_cost_per_kwh,
+            )
+            records.append(
+                {
+                    "pv_kw": float(pv_kw),
+                    "battery_kwh": float(batt_kwh),
+                    "batt_kw": result.batt_kw,
+                    "total_cost": result.total_cost,
+                }
+            )
+
+    if not records:
+        return
+    df = pd.DataFrame(records)
+    tag = f"_{file_tag}" if file_tag else ""
+    csv_path = os.path.join(out_dir, f"coopt_pv_batt_cost_heatmap_{county}{tag}.csv")
+    df.to_csv(csv_path, index=False)
+
+    try:
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        pivot = df.pivot(index="battery_kwh", columns="pv_kw", values="total_cost")
+        vals = pivot.values
+        fig, ax = plt.subplots(figsize=(9, 6), tight_layout=True)
+        im = ax.imshow(vals, origin="lower", aspect="auto", cmap="viridis")
+        pv_vals = pivot.columns.tolist()
+        batt_vals = pivot.index.tolist()
+        ax.set_xticks(range(len(pv_vals)))
+        ax.set_yticks(range(len(batt_vals)))
+        ax.set_xticklabels([f"{c:.2f}" for c in pv_vals])
+        ax.set_yticklabels([f"{r:.1f}" for r in batt_vals])
+        ax.set_xlabel("PV Size (kW)")
+        ax.set_ylabel("Battery Size (kWh)")
+        ax.set_title("Co‑opt Total Cost Heatmap (PV × Battery)")
+        cbar = fig.colorbar(im, ax=ax)
+        cbar.set_label("Annual Cost ($)")
+
+        if marker_pv_kw is not None and marker_batt_kwh is not None and pv_vals and batt_vals:
+            try:
+                pv_arr = np.array(pv_vals, dtype=float)
+                batt_arr = np.array(batt_vals, dtype=float)
+                x_idx = int(np.argmin(np.abs(pv_arr - float(marker_pv_kw))))
+                y_idx = int(np.argmin(np.abs(batt_arr - float(marker_batt_kwh))))
+                ax.scatter([x_idx], [y_idx], color="#e41a1c", s=70, marker="x", label="Current")
+                ax.legend(loc="upper right")
+            except Exception:
+                pass
+
+        fig_path = os.path.join(out_dir, f"coopt_pv_batt_cost_heatmap_{county}{tag}.png")
+        fig.savefig(fig_path, dpi=150)
+        plt.close(fig)
+    except Exception as e:
+        raise RuntimeError(f"Failed to write PV vs battery cost heatmap plot: {e}")
 
 
 def _default_plan_for_utility(util: str) -> str:
@@ -322,6 +509,9 @@ def process(
     allow_batt_export: bool = True,
     debug_prices: bool = False,
     batt_capex_sweep: Optional[List[float]] = None,
+    batt_size_sweep: Optional[List[float]] = None,
+    pv_size_sweep: Optional[List[float]] = None,
+    pv_capex_sweep: Optional[List[float]] = None,
     discount_rate: float = 0.07,
     pv_capex_per_kw: float = 2830.0,
     batt_capex_per_kwh: float = 800.0,
@@ -378,27 +568,6 @@ def process(
         if debug_prices:
             _write_price_diagnostics(out_dir, county_slug, ts_index, p_imp, p_exp)
 
-        if batt_capex_sweep:
-            _write_batt_capex_sweep(
-                out_dir,
-                county_slug,
-                CooptInputs(
-                    load_kwh=load_kwh,
-                    pv_gen_per_kw=G,
-                    import_rates=p_imp,
-                    export_rates=p_exp,
-                ),
-                allow_grid_charging=allow_grid_charging,
-                allow_batt_export=allow_batt_export,
-                batt_capex_values=batt_capex_sweep,
-                pv_capex_per_kw=pv_capex_per_kw,
-                batt_capex_per_kw=batt_capex_per_kw,
-                pv_life_yrs=pv_life_yrs,
-                batt_life_yrs=batt_life_yrs,
-                discount_rate=discount_rate,
-                batt_degrade_cost_per_kwh=batt_degrade_cost_per_kwh,
-            )
-
         # Solve LP
         inputs = CooptInputs(
             load_kwh=load_kwh,
@@ -422,6 +591,133 @@ def process(
         # Write outputs (Step 9 compatibility)
         _write_step9_outputs(out_dir, county_slug, ts_index, load_kwh, G, result.pv_kw, result.flows)
         print(f"[step9b] {county_slug}: PV={result.pv_kw:.2f} kW, Battery={result.batt_kwh:.2f} kWh")
+
+        if batt_capex_sweep:
+            _write_batt_capex_sweep(
+                out_dir,
+                county_slug,
+                inputs,
+                allow_grid_charging=allow_grid_charging,
+                allow_batt_export=allow_batt_export,
+                batt_capex_values=batt_capex_sweep,
+                pv_capex_per_kw=pv_capex_per_kw,
+                batt_capex_per_kw=batt_capex_per_kw,
+                pv_life_yrs=pv_life_yrs,
+                batt_life_yrs=batt_life_yrs,
+                discount_rate=discount_rate,
+                batt_degrade_cost_per_kwh=batt_degrade_cost_per_kwh,
+            )
+
+        if batt_capex_sweep and batt_size_sweep:
+            _write_batt_cost_heatmap(
+                out_dir,
+                county_slug,
+                inputs,
+                allow_grid_charging=allow_grid_charging,
+                allow_batt_export=allow_batt_export,
+                batt_capex_values=batt_capex_sweep,
+                batt_size_values=batt_size_sweep,
+                pv_capex_per_kw=pv_capex_per_kw,
+                batt_capex_per_kw=batt_capex_per_kw,
+                pv_life_yrs=pv_life_yrs,
+                batt_life_yrs=batt_life_yrs,
+                discount_rate=discount_rate,
+                batt_degrade_cost_per_kwh=batt_degrade_cost_per_kwh,
+                marker_batt_kwh=result.batt_kwh,
+                marker_capex_kwh=batt_capex_per_kwh,
+            )
+
+        if pv_size_sweep and batt_size_sweep:
+            _write_pv_batt_cost_heatmap(
+                out_dir,
+                county_slug,
+                inputs,
+                allow_grid_charging=allow_grid_charging,
+                allow_batt_export=allow_batt_export,
+                pv_size_values=pv_size_sweep,
+                batt_size_values=batt_size_sweep,
+                pv_capex_per_kw=pv_capex_per_kw,
+                batt_capex_per_kwh=batt_capex_per_kwh,
+                batt_capex_per_kw=batt_capex_per_kw,
+                pv_life_yrs=pv_life_yrs,
+                batt_life_yrs=batt_life_yrs,
+                discount_rate=discount_rate,
+                batt_degrade_cost_per_kwh=batt_degrade_cost_per_kwh,
+                marker_pv_kw=result.pv_kw,
+                marker_batt_kwh=result.batt_kwh,
+            )
+
+        if pv_capex_sweep:
+            for pv_capex in pv_capex_sweep:
+                tag = _format_pv_capex_tag(pv_capex)
+                sweep_result = _solve_lp(
+                    inputs,
+                    allow_grid_charging=allow_grid_charging,
+                    allow_batt_export=allow_batt_export,
+                    c_pv_kw=pv_capex,
+                    c_batt_kwh=batt_capex_per_kwh,
+                    c_batt_kw=batt_capex_per_kw,
+                    pv_life_yrs=pv_life_yrs,
+                    batt_life_yrs=batt_life_yrs,
+                    discount_rate=discount_rate,
+                    c_deg_per_kwh=batt_degrade_cost_per_kwh,
+                )
+
+                if batt_capex_sweep:
+                    _write_batt_capex_sweep(
+                        out_dir,
+                        county_slug,
+                        inputs,
+                        allow_grid_charging=allow_grid_charging,
+                        allow_batt_export=allow_batt_export,
+                        batt_capex_values=batt_capex_sweep,
+                        pv_capex_per_kw=pv_capex,
+                        batt_capex_per_kw=batt_capex_per_kw,
+                        pv_life_yrs=pv_life_yrs,
+                        batt_life_yrs=batt_life_yrs,
+                        discount_rate=discount_rate,
+                        batt_degrade_cost_per_kwh=batt_degrade_cost_per_kwh,
+                        file_tag=tag,
+                    )
+                if batt_capex_sweep and batt_size_sweep:
+                    _write_batt_cost_heatmap(
+                        out_dir,
+                        county_slug,
+                        inputs,
+                        allow_grid_charging=allow_grid_charging,
+                        allow_batt_export=allow_batt_export,
+                        batt_capex_values=batt_capex_sweep,
+                        batt_size_values=batt_size_sweep,
+                        pv_capex_per_kw=pv_capex,
+                        batt_capex_per_kw=batt_capex_per_kw,
+                        pv_life_yrs=pv_life_yrs,
+                        batt_life_yrs=batt_life_yrs,
+                        discount_rate=discount_rate,
+                        batt_degrade_cost_per_kwh=batt_degrade_cost_per_kwh,
+                        marker_batt_kwh=sweep_result.batt_kwh,
+                        marker_capex_kwh=batt_capex_per_kwh,
+                        file_tag=tag,
+                    )
+                if pv_size_sweep and batt_size_sweep:
+                    _write_pv_batt_cost_heatmap(
+                        out_dir,
+                        county_slug,
+                        inputs,
+                        allow_grid_charging=allow_grid_charging,
+                        allow_batt_export=allow_batt_export,
+                        pv_size_values=pv_size_sweep,
+                        batt_size_values=batt_size_sweep,
+                        pv_capex_per_kw=pv_capex,
+                        batt_capex_per_kwh=batt_capex_per_kwh,
+                        batt_capex_per_kw=batt_capex_per_kw,
+                        pv_life_yrs=pv_life_yrs,
+                        batt_life_yrs=batt_life_yrs,
+                        discount_rate=discount_rate,
+                        batt_degrade_cost_per_kwh=batt_degrade_cost_per_kwh,
+                        marker_pv_kw=sweep_result.pv_kw,
+                        marker_batt_kwh=sweep_result.batt_kwh,
+                        file_tag=tag,
+                    )
 
         # Collect capacity summary for diagnostics cards
         capacity_records.append({
@@ -488,6 +784,9 @@ def main():
                    help="Disable Battery→Grid exports")
     p.add_argument("--debug-prices", action="store_true", help="Write price diagnostics CSV/plot for each county")
     p.add_argument("--batt-capex-sweep", default="", help="Comma-separated list of battery capex ($/kWh) for sweep plot")
+    p.add_argument("--batt-size-sweep", default="", help="Comma-separated list of fixed battery sizes (kWh) for heatmap")
+    p.add_argument("--pv-size-sweep", default="", help="Comma-separated list of fixed PV sizes (kW) for PV×battery heatmap")
+    p.add_argument("--pv-capex-sweep", default="", help="Comma-separated list of PV capex ($/kW) for sensitivity sweeps")
     p.add_argument("--discount-rate", type=float, default=0.07)
     p.add_argument("--pv-capex-kw", type=float, default=2830.0)
     p.add_argument("--batt-capex-kwh", type=float, default=800.0)
@@ -503,6 +802,24 @@ def main():
             sweep_vals = [float(v.strip()) for v in args.batt_capex_sweep.split(",") if v.strip()]
         except Exception:
             raise ValueError("Invalid --batt-capex-sweep list; expected comma-separated numbers.")
+    size_vals = []
+    if args.batt_size_sweep:
+        try:
+            size_vals = [float(v.strip()) for v in args.batt_size_sweep.split(",") if v.strip()]
+        except Exception:
+            raise ValueError("Invalid --batt-size-sweep list; expected comma-separated numbers.")
+    pv_vals = []
+    if args.pv_size_sweep:
+        try:
+            pv_vals = [float(v.strip()) for v in args.pv_size_sweep.split(",") if v.strip()]
+        except Exception:
+            raise ValueError("Invalid --pv-size-sweep list; expected comma-separated numbers.")
+    pv_capex_vals = []
+    if args.pv_capex_sweep:
+        try:
+            pv_capex_vals = [float(v.strip()) for v in args.pv_capex_sweep.split(",") if v.strip()]
+        except Exception:
+            raise ValueError("Invalid --pv-capex-sweep list; expected comma-separated numbers.")
 
     process(
         base_input_dir=args.base_input_dir,
@@ -515,6 +832,9 @@ def main():
         allow_batt_export=args.allow_batt_export,
         debug_prices=args.debug_prices,
         batt_capex_sweep=sweep_vals if sweep_vals else None,
+        batt_size_sweep=size_vals if size_vals else None,
+        pv_size_sweep=pv_vals if pv_vals else None,
+        pv_capex_sweep=pv_capex_vals if pv_capex_vals else None,
         discount_rate=args.discount_rate,
         pv_capex_per_kw=args.pv_capex_kw,
         batt_capex_per_kwh=args.batt_capex_kwh,

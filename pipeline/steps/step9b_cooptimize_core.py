@@ -105,6 +105,8 @@ def _ensure_pulp() -> None:
 def _solve_lp(
     inputs: CooptInputs,
     *,
+    fixed_pv_kw: float | None = None,
+    fixed_batt_kwh: float | None = None,
     allow_grid_charging: bool = False,
     allow_batt_export: bool = True,
     c_pv_kw: float = 2830.0,           # $/kW
@@ -132,8 +134,16 @@ def _solve_lp(
     prob = pulp.LpProblem("CoOptimize_PV_Battery_Dispatch", pulp.LpMinimize)
 
     # Sizing
-    PV_kw = pulp.LpVariable("PV_kw", lowBound=0, cat=pulp.LpContinuous)
-    B_E = pulp.LpVariable("B_E_kWh", lowBound=0, cat=pulp.LpContinuous)
+    if fixed_pv_kw is None:
+        PV_kw = pulp.LpVariable("PV_kw", lowBound=0, cat=pulp.LpContinuous)
+    else:
+        fixed_pv = float(fixed_pv_kw)
+        PV_kw = pulp.LpVariable("PV_kw", lowBound=fixed_pv, upBound=fixed_pv, cat=pulp.LpContinuous)
+    if fixed_batt_kwh is None:
+        B_E = pulp.LpVariable("B_E_kWh", lowBound=0, cat=pulp.LpContinuous)
+    else:
+        fixed = float(fixed_batt_kwh)
+        B_E = pulp.LpVariable("B_E_kWh", lowBound=fixed, upBound=fixed, cat=pulp.LpContinuous)
     B_P = pulp.LpVariable("B_P_kW", lowBound=0, cat=pulp.LpContinuous)
 
     # Flows per hour
