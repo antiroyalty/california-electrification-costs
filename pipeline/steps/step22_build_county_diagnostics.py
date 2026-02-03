@@ -127,7 +127,7 @@ def create_coopt_results_card(
         f"<div class='metric-block'><div class='muted'>Battery Power (co‑opt)</div><div class='metric-value'>{bat_kw_str}</div></div>"
         "<div class='metric-block' "
         "title='LP objective (annual): capex_annual + import_cost - export_credit + degradation_cost. "
-        "This is not the full household bill or LCOE.'>"
+        "This is not the full household bill.'>"
         f"<div class='muted'>Co‑opt Total Cost</div><div class='metric-value'>{total_cost_str}</div></div>"
         "<div class='metric-block' "
         "title='Upper bound estimate of annual value from shifting PV exports to higher-priced hours (24h look-ahead, PV-only, 96% RTE). "
@@ -173,6 +173,16 @@ def _find_coopt_batt_cost_heatmap_png(county_dir: str, county_slug: str) -> Opti
 
 def _find_coopt_pv_batt_cost_heatmap_png(county_dir: str, county_slug: str) -> Optional[str]:
     path = os.path.join(county_dir, f"coopt_pv_batt_cost_heatmap_{county_slug}.png")
+    return path if os.path.exists(path) else None
+
+
+def _find_coopt_batt_size_vs_capex_by_pv_png(county_dir: str, county_slug: str) -> Optional[str]:
+    path = os.path.join(county_dir, f"coopt_batt_size_vs_capex_by_pv_{county_slug}.png")
+    return path if os.path.exists(path) else None
+
+
+def _find_coopt_objective_vs_capex_by_pv_png(county_dir: str, county_slug: str) -> Optional[str]:
+    path = os.path.join(county_dir, f"coopt_objective_vs_capex_by_pv_{county_slug}.png")
     return path if os.path.exists(path) else None
 
 
@@ -227,6 +237,40 @@ def create_coopt_pv_batt_cost_heatmap_chart(
         return None
 
 
+def create_coopt_batt_size_vs_capex_by_pv_chart(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+) -> Optional[str]:
+    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+    png = _find_coopt_batt_size_vs_capex_by_pv_png(county_dir, county_slug)
+    if not png:
+        return None
+    try:
+        with open(png, "rb") as f:
+            return base64.b64encode(f.read()).decode("utf-8")
+    except Exception:
+        return None
+
+
+def create_coopt_objective_vs_capex_by_pv_chart(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+) -> Optional[str]:
+    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+    png = _find_coopt_objective_vs_capex_by_pv_png(county_dir, county_slug)
+    if not png:
+        return None
+    try:
+        with open(png, "rb") as f:
+            return base64.b64encode(f.read()).decode("utf-8")
+    except Exception:
+        return None
+
+
 def _parse_pv_capex_from_filename(path: str) -> Optional[float]:
     name = os.path.basename(path)
     m = re.search(r"_pv([0-9]+(?:p[0-9]+)?)\.png$", name)
@@ -263,16 +307,13 @@ def create_coopt_pv_capex_sweep_gallery(
     county_slug: str,
 ) -> List[dict]:
     county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
-    sweep_batt = _collect_pv_capex_sweep_images(county_dir, county_slug, "coopt_batt_capex_sweep")
     sweep_batt_cost = _collect_pv_capex_sweep_images(county_dir, county_slug, "coopt_batt_cost_heatmap")
     sweep_pv_batt = _collect_pv_capex_sweep_images(county_dir, county_slug, "coopt_pv_batt_cost_heatmap")
 
-    caps = sorted({*sweep_batt.keys(), *sweep_batt_cost.keys(), *sweep_pv_batt.keys()})
+    caps = sorted({*sweep_batt_cost.keys(), *sweep_pv_batt.keys()})
     gallery = []
     for cap in caps:
         images = {}
-        if cap in sweep_batt:
-            images["Battery Capex Sweep"] = sweep_batt[cap]
         if cap in sweep_batt_cost:
             images["Battery Cost Heatmap"] = sweep_batt_cost[cap]
         if cap in sweep_pv_batt:
@@ -1203,6 +1244,8 @@ def _dashboard_html(
     coopt_capex_sweep_b64: Optional[str] = None,
     coopt_cost_heatmap_b64: Optional[str] = None,
     coopt_pv_batt_heatmap_b64: Optional[str] = None,
+    coopt_batt_size_vs_capex_by_pv_b64: Optional[str] = None,
+    coopt_objective_vs_capex_by_pv_b64: Optional[str] = None,
     coopt_pv_capex_gallery: Optional[List[dict]] = None,
     cost_waterfall_b64: Optional[str] = None,
     price_signal_b64: Optional[str] = None,
@@ -1587,31 +1630,68 @@ def _dashboard_html(
         parts.append("<div class=\"muted\">No PV×battery heatmap available (run Step 9b with --pv-size-sweep and --batt-size-sweep).</div>")
     parts.append("</div>")
 
-    # Card 2g.2: PV Capex Sensitivity Gallery
+    # Card 2g.1b: Battery Size vs Battery Capex (PV Capex sweep)
     parts.append('<div class="card">')
-    parts.append("<h2>PV Capex Sweep — Battery Capex/Size Sensitivity</h2>")
+    parts.append("<h2>Battery Size vs Battery Capex — PV Capex Sweep</h2>")
+    if coopt_batt_size_vs_capex_by_pv_b64:
+        parts.append(
+            f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{coopt_batt_size_vs_capex_by_pv_b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{coopt_batt_size_vs_capex_by_pv_b64}\" alt=\"battery size vs capex by pv\"/></a></div>"
+        )
+    else:
+        parts.append("<div class=\"muted\">No PV capex sweep battery-size plot available (run Step 9b with --pv-capex-sweep and --batt-capex-sweep).</div>")
+    parts.append("</div>")
+
+    # Card 2g.1c: Co-Opt Objective vs Battery Capex (PV Capex sweep)
+    parts.append('<div class="card">')
+    parts.append("<h2>Co‑Opt Objective vs Battery Capex — PV Capex Sweep</h2>")
+    if coopt_objective_vs_capex_by_pv_b64:
+        parts.append(
+            f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{coopt_objective_vs_capex_by_pv_b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{coopt_objective_vs_capex_by_pv_b64}\" alt=\"objective vs capex by pv\"/></a></div>"
+        )
+    else:
+        parts.append("<div class=\"muted\">No PV capex sweep objective plot available (run Step 9b with --pv-capex-sweep and --batt-capex-sweep).</div>")
+    parts.append("</div>")
+
+    # Card 2g.2: PV × Battery Heatmaps (PV capex sweep)
+    parts.append('<div class="card">')
+    parts.append("<h2>PV × Battery Heatmaps — PV Capex Sweep</h2>")
     if coopt_pv_capex_gallery:
+        any_pv_batt = False
         for entry in coopt_pv_capex_gallery:
             cap = entry.get("capex")
+            b64 = (entry.get("images") or {}).get("PV × Battery Heatmap")
+            if not b64:
+                continue
+            any_pv_batt = True
             parts.append(f"<div class=\"muted\" style=\"font-weight:600; margin-top:8px;\">PV Capex: ${cap:,.0f}/kW</div>")
-            for label, b64 in entry.get("images", {}).items():
-                parts.append(f"<div class=\"muted\" style=\"margin-top:4px;\">{label}</div>")
-                parts.append(
-                    f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{b64}\" alt=\"{label}\"/></a></div>"
-                )
+            parts.append(
+                f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{b64}\" alt=\"PV × Battery Heatmap\"/></a></div>"
+            )
+        if not any_pv_batt:
+            parts.append("<div class=\"muted\">No PV × battery heatmaps available (run Step 9b with --pv-capex-sweep and --pv-size-sweep).</div>")
     else:
         parts.append("<div class=\"muted\">No PV capex sweep plots available (run Step 9b with --pv-capex-sweep).</div>")
     parts.append("</div>")
 
-    # Card 2k: Price Signal Overlay
+    # Card 2g.3: Battery Cost Heatmaps (PV capex sweep)
     parts.append('<div class="card">')
-    parts.append("<h2>Price Signal Overlay (PV Export Hours)</h2>")
-    if price_signal_b64:
-        parts.append(
-            f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{price_signal_b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{price_signal_b64}\" alt=\"price signal overlay\"/></a></div>"
-        )
+    parts.append("<h2>Battery Cost Heatmaps — PV Capex Sweep</h2>")
+    if coopt_pv_capex_gallery:
+        any_batt_cost = False
+        for entry in coopt_pv_capex_gallery:
+            cap = entry.get("capex")
+            b64 = (entry.get("images") or {}).get("Battery Cost Heatmap")
+            if not b64:
+                continue
+            any_batt_cost = True
+            parts.append(f"<div class=\"muted\" style=\"font-weight:600; margin-top:8px;\">PV Capex: ${cap:,.0f}/kW</div>")
+            parts.append(
+                f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{b64}\" alt=\"Battery Cost Heatmap\"/></a></div>"
+            )
+        if not any_batt_cost:
+            parts.append("<div class=\"muted\">No battery cost heatmaps available (run Step 9b with --pv-capex-sweep and --batt-size-sweep).</div>")
     else:
-        parts.append("<div class=\"muted\">No price signal plot available (run Step 9b with --debug-prices).</div>")
+        parts.append("<div class=\"muted\">No PV capex sweep plots available (run Step 9b with --pv-capex-sweep).</div>")
     parts.append("</div>")
 
     parts.append("</div>")
@@ -1707,6 +1787,17 @@ def _dashboard_html(
         )
     else:
         parts.append("<div class=\"muted\">No July exports data available</div>")
+    parts.append("</div>")
+
+    # Card: Price Signal Overlay
+    parts.append('<div class="card">')
+    parts.append("<h2>Price Signal Overlay (PV Export Hours)</h2>")
+    if price_signal_b64:
+        parts.append(
+            f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{price_signal_b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{price_signal_b64}\" alt=\"price signal overlay\"/></a></div>"
+        )
+    else:
+        parts.append("<div class=\"muted\">No price signal plot available (run Step 9b with --debug-prices).</div>")
     parts.append("</div>")
 
     parts.append("</div>")
@@ -1826,6 +1917,12 @@ def process(
             coopt_pv_batt_heatmap_b64 = create_coopt_pv_batt_cost_heatmap_chart(
                 base_input_dir, scenario, housing_type, county_slug
             )
+            coopt_batt_size_vs_capex_by_pv_b64 = create_coopt_batt_size_vs_capex_by_pv_chart(
+                base_input_dir, scenario, housing_type, county_slug
+            )
+            coopt_objective_vs_capex_by_pv_b64 = create_coopt_objective_vs_capex_by_pv_chart(
+                base_input_dir, scenario, housing_type, county_slug
+            )
             coopt_pv_capex_gallery = create_coopt_pv_capex_sweep_gallery(
                 base_input_dir, scenario, housing_type, county_slug
             )
@@ -1871,6 +1968,8 @@ def process(
                 coopt_capex_sweep_b64=coopt_capex_sweep_b64,
                 coopt_cost_heatmap_b64=coopt_cost_heatmap_b64,
                 coopt_pv_batt_heatmap_b64=coopt_pv_batt_heatmap_b64,
+                coopt_batt_size_vs_capex_by_pv_b64=coopt_batt_size_vs_capex_by_pv_b64,
+                coopt_objective_vs_capex_by_pv_b64=coopt_objective_vs_capex_by_pv_b64,
                 coopt_pv_capex_gallery=coopt_pv_capex_gallery,
                 cost_waterfall_b64=cost_waterfall_b64,
                 price_signal_b64=price_signal_b64,
@@ -1960,8 +2059,9 @@ def _gather_step18_images(output_dir: str, sha: str) -> dict:
     out = {}
     for title, path in files.items():
         out[title] = _embed_png_as_b64(path)
-    # prune empty
-    return {k: v for k, v in out.items() if v}
+    # prune empty and omit LCOE visuals to avoid confusion in diagnostics dashboard
+    out = {k: v for k, v in out.items() if v}
+    return {k: v for k, v in out.items() if "lcoe" not in k.lower()}
 
 
 if __name__ == "__main__":

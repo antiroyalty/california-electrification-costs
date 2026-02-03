@@ -315,6 +315,126 @@ def _write_batt_capex_sweep(
         raise RuntimeError(f"Failed to write battery capex sweep plot: {e}")
 
 
+def _write_batt_size_vs_capex_by_pv(
+    out_dir: str,
+    county: str,
+    pv_capex_values: List[float],
+    batt_capex_values: List[float],
+) -> None:
+    if not pv_capex_values or not batt_capex_values:
+        return
+    try:
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        pv_vals = sorted(set(float(v) for v in pv_capex_values))
+        fig, ax = plt.subplots(1, 1, figsize=(10, 6), tight_layout=True)
+        if pv_vals:
+            vmin, vmax = min(pv_vals), max(pv_vals)
+        else:
+            vmin, vmax = 0.0, 1.0
+        def _color_for_pv(val: float):
+            if vmax == vmin:
+                t = 0.6
+            else:
+                t = (float(val) - vmin) / (vmax - vmin)
+            # Map to light→dark blue for low→high PV capex
+            return plt.cm.Blues(0.3 + 0.6 * t)
+
+        for idx, pv_capex in enumerate(pv_vals):
+            tag = _format_pv_capex_tag(pv_capex)
+            csv_path = os.path.join(out_dir, f"coopt_batt_capex_sweep_{county}_{tag}.csv")
+            if not os.path.exists(csv_path):
+                raise RuntimeError(f"Missing PV capex sweep CSV: {csv_path}")
+            df = pd.read_csv(csv_path)
+            if "battery_capex_kwh" not in df.columns or "batt_kwh" not in df.columns:
+                raise RuntimeError(f"Missing columns in PV capex sweep CSV: {csv_path}")
+            df = df.sort_values("battery_capex_kwh")
+            ax.plot(
+                df["battery_capex_kwh"],
+                df["batt_kwh"],
+                label=f"PV Capex ${pv_capex:,.0f}/kW",
+                color=_color_for_pv(pv_capex),
+                linewidth=2,
+            )
+
+        ax.set_xlabel("Battery Capex ($/kWh)")
+        ax.set_ylabel("Optimal Battery Size (kWh) from LP")
+        ax.set_title("Battery Size vs Battery Capex (PV Capex Sensitivity)")
+        ax.text(
+            0.5,
+            -0.18,
+            "Each line is the LP‑optimal battery size for a fixed PV capex.",
+            transform=ax.transAxes,
+            ha="center",
+            va="top",
+            fontsize=9,
+            color="#555",
+        )
+        ax.legend(loc="best", fontsize=9)
+
+        fig_path = os.path.join(out_dir, f"coopt_batt_size_vs_capex_by_pv_{county}.png")
+        fig.savefig(fig_path, dpi=150)
+        plt.close(fig)
+    except Exception as e:
+        raise RuntimeError(f"Failed to write PV capex battery-size sweep plot: {e}")
+
+
+def _write_objective_vs_capex_by_pv(
+    out_dir: str,
+    county: str,
+    pv_capex_values: List[float],
+    batt_capex_values: List[float],
+) -> None:
+    if not pv_capex_values or not batt_capex_values:
+        return
+    try:
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        pv_vals = sorted(set(float(v) for v in pv_capex_values))
+        fig, ax = plt.subplots(1, 1, figsize=(10, 6), tight_layout=True)
+        if pv_vals:
+            vmin, vmax = min(pv_vals), max(pv_vals)
+        else:
+            vmin, vmax = 0.0, 1.0
+        def _color_for_pv(val: float):
+            if vmax == vmin:
+                t = 0.6
+            else:
+                t = (float(val) - vmin) / (vmax - vmin)
+            # Map to light→dark red for low→high PV capex
+            return plt.cm.Reds(0.3 + 0.6 * t)
+
+        for pv_capex in pv_vals:
+            tag = _format_pv_capex_tag(pv_capex)
+            csv_path = os.path.join(out_dir, f"coopt_batt_capex_sweep_{county}_{tag}.csv")
+            if not os.path.exists(csv_path):
+                raise RuntimeError(f"Missing PV capex sweep CSV: {csv_path}")
+            df = pd.read_csv(csv_path)
+            if "battery_capex_kwh" not in df.columns or "total_cost" not in df.columns:
+                raise RuntimeError(f"Missing columns in PV capex sweep CSV: {csv_path}")
+            df = df.sort_values("battery_capex_kwh")
+            ax.plot(
+                df["battery_capex_kwh"],
+                df["total_cost"],
+                label=f"PV Capex ${pv_capex:,.0f}/kW",
+                color=_color_for_pv(pv_capex),
+                linewidth=2,
+            )
+
+        ax.set_xlabel("Battery Capex ($/kWh)")
+        ax.set_ylabel("Annual Cost ($)")
+        ax.set_title("Co‑Opt Objective vs Battery Capex (PV Capex Sensitivity)")
+        ax.legend(loc="best", fontsize=9)
+
+        fig_path = os.path.join(out_dir, f"coopt_objective_vs_capex_by_pv_{county}.png")
+        fig.savefig(fig_path, dpi=150)
+        plt.close(fig)
+    except Exception as e:
+        raise RuntimeError(f"Failed to write PV capex objective sweep plot: {e}")
+
+
 def _write_batt_cost_heatmap(
     out_dir: str,
     county: str,
@@ -757,6 +877,20 @@ def process(
                         weights=sweep_weights,
                         cycle_monthly=sweep_cycle,
                     )
+
+        if pv_capex_sweep and batt_capex_sweep:
+            _write_batt_size_vs_capex_by_pv(
+                out_dir,
+                county_slug,
+                pv_capex_values=pv_capex_sweep,
+                batt_capex_values=batt_capex_sweep,
+            )
+            _write_objective_vs_capex_by_pv(
+                out_dir,
+                county_slug,
+                pv_capex_values=pv_capex_sweep,
+                batt_capex_values=batt_capex_sweep,
+            )
 
         # Collect capacity summary for diagnostics cards
         capacity_records.append({
