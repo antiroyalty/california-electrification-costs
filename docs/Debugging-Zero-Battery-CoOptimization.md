@@ -7,12 +7,76 @@
   - Check that load_kwh isn’t all zeros and G (PV per‑kW) isn’t all zeros.
   - Confirm p_imp and p_exp are in $/kWh and not accidentally reversed or scaled.
 
+  Prices are: 
+
+  $   python3 -m pipeline.steps.step9b_cooptimize_pv_battery \
+    --scenario baseline_coopt \
+    --housing-type single-family-detached \
+    --counties alameda \
+    --debug-prices
+[step9b] Price stats for alameda (import min/median/max=$0.000/0.463/0.607, export min/median/max=$0.000/0.053/0.081)
+[step9b] alameda: PV=1.51 kW, Battery=0.00 kWh
+
+Import is much greater than export, so they don't appear reversed. Is the export compensation accurate and real? Yes, that's consistent with NEM3.
+
+ python3 scripts/debug_coopt_battery_diagnostics.py \
+    --scenario baseline_coopt \
+    --housing-type single-family-detached \
+    --county alameda
+=== Co-opt PV/Battery Diagnostics ===
+Dispatch CSV: data/loadprofiles/baseline_coopt/single-family-detached/alameda/solar_storage_dispatch_profiles_alameda.csv
+Annual Load (kWh): 5,558.5
+Annual PV AC (kWh): 2,188.2
+Annual PV to Load (kWh): 1,296.2
+Annual PV to Battery (kWh): 0.0
+Annual PV to Grid (kWh): 892.0
+Hours with PV to Grid > 0: 2328
+Max PV to Grid hour (kWh): 1.117
+Annual PV surplus (kWh): 0.0
+Annual PV used onsite (kWh): 1,296.2
+Annual Grid to Load (kWh): 4,262.2
+Wrote plot: data/loadprofiles/baseline_coopt/single-family-detached/alameda/coopt_battery_debug_alameda.png
+
   Plots that immediately reveal whether battery has value
 
   1. Import vs export prices over the year (time series + histograms).
      If p_exp is often close to or above p_imp, there’s little reason to store PV.
+
+But it's not. The export price is much lower than the import price, so there should be reason to store the PV.
+
   2. PV per‑kW vs Load (hourly overlay for a representative week + monthly averages).
      If PV rarely exceeds load, there’s no surplus to store.
+
+Here's what's happening. The LP compares annualized battery cost vs the actual arbitrage value of shifting PV exports:
+
+  - Upper bound on annual savings if you could shift all exports:
+    892 kWh × (0.463 − 0.053) × 0.96 ≈ $350/year
+    (and that’s optimistic: actual savings will be lower because surplus happens when imports are often cheaper.)
+  - Annualized battery cost per kWh is high:
+    800 $/kWh × CRF(7%,15y) ≈ 800 × 0.109 = $87/year per kWh
+    So a 4 kWh battery costs ~$350/year, roughly matching the maximum possible savings.
+
+  Given partial cycling and SOC limits, the model can easily conclude battery value < annualized cost, so 0 kWh is optimal.
+
+  Probably not a bug, but should confirm with a few sensitivity checks:
+  - Make battery very cheap:
+  => If battery stays 0, then there is likely a modeling assumption issue or very low arbitrage value.
+
+  python3 -m pipeline.steps.step9b_cooptimize_pv_battery \
+      --scenario baseline_coopt \
+      --housing-type single-family-detached \
+      --counties alameda \
+      --batt-capex-kwh 50
+  [step9b] alameda: PV=2.88 kW, Battery=21.22 kWh
+
+  Sooo our battery size shot up! This suggests an "issue" with how we price the battery, and it's worth checking the assumptions. It may also be worth checking the assumptions of solar?
+
+  - Allow grid charging:
+  => If battery becomes >0 only then, it means PV surplus alone isn’t enough to justify storage.
+
+  - Also need to check price spread during export hours
+  => Compare import price at the time exports happen vs export credit at those hours. If import prices are often low at those times, the arbitrage value is much smaller than the median import price.
+
   3. PV surplus vs export credit (scatter or heatmap).
      Shows whether surplus occurs when export credits are low (battery helpful) or high (battery less useful).
   4. Arbitrage value per kWh stored:
