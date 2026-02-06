@@ -11,7 +11,8 @@ SOC_TOL = 1e-6
 
 def _find_dispatch_csvs() -> list[str]:
     pattern = os.path.join(BASE_INPUT_DIR, "*", "*", "*", "solar_storage_dispatch_profiles_*.csv")
-    return sorted(glob.glob(pattern))
+    files = sorted(glob.glob(pattern))
+    return [p for p in files if "_with_exports_" not in os.path.basename(p)]
 
 
 def _load_dispatch_df(path: str) -> pd.DataFrame:

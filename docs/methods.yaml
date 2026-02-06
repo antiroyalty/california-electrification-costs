@@ -211,10 +211,9 @@
     },
     "code": [
       "evaluations/lcoe.py:lcoe_crf_simple",
-      "helpers/plot_scenario_comparison_helper.py:collect_pv_lcoe",
-      "pipeline/steps/step22_build_county_diagnostics.py:create_lcoe_card"
+      "helpers/plot_scenario_comparison_helper.py:collect_pv_lcoe"
     ],
-    "notes": "Dashboard LCOE uses net PV capex and annual PV generation; no degradation or O&M."
+    "notes": "Used for scenario comparison LCOE summaries; no degradation or O&M."
   },
   "lcoe.lcoe_npv_from_params": {
     "title": "LCOE (NPV cost / NPV energy)",
