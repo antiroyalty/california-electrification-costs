@@ -186,6 +186,11 @@ def _find_coopt_objective_vs_capex_by_pv_png(county_dir: str, county_slug: str) 
     return path if os.path.exists(path) else None
 
 
+def _find_coopt_pv_size_vs_capex_by_pv_png(county_dir: str, county_slug: str) -> Optional[str]:
+    path = os.path.join(county_dir, f"coopt_pv_size_vs_capex_by_pv_{county_slug}.png")
+    return path if os.path.exists(path) else None
+
+
 def create_coopt_batt_capex_sweep_chart(
     base_input_dir: str,
     scenario: str,
@@ -271,6 +276,23 @@ def create_coopt_objective_vs_capex_by_pv_chart(
         return None
 
 
+def create_coopt_pv_size_vs_capex_by_pv_chart(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+) -> Optional[str]:
+    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+    png = _find_coopt_pv_size_vs_capex_by_pv_png(county_dir, county_slug)
+    if not png:
+        return None
+    try:
+        with open(png, "rb") as f:
+            return base64.b64encode(f.read()).decode("utf-8")
+    except Exception:
+        return None
+
+
 def _parse_pv_capex_from_filename(path: str) -> Optional[float]:
     name = os.path.basename(path)
     m = re.search(r"_pv([0-9]+(?:p[0-9]+)?)\.png$", name)
@@ -321,6 +343,39 @@ def create_coopt_pv_capex_sweep_gallery(
         if images:
             gallery.append({"capex": cap, "images": images})
     return gallery
+
+
+def _load_best_of_pv_capex_sweep(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+) -> List[dict]:
+    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+    pattern = os.path.join(county_dir, f"coopt_batt_capex_sweep_{county_slug}_pv*.csv")
+    rows = []
+    for path in glob.glob(pattern):
+        capex = _parse_pv_capex_from_filename(path)
+        if capex is None:
+            continue
+        try:
+            df = pd.read_csv(path)
+        except Exception:
+            continue
+        required = {"battery_capex_kwh", "pv_kw", "batt_kwh", "total_cost"}
+        if not required.issubset(set(df.columns)) or df.empty:
+            continue
+        best = df.loc[pd.to_numeric(df["total_cost"], errors="coerce").idxmin()]
+        rows.append(
+            {
+                "pv_capex": float(capex),
+                "battery_capex_kwh": float(best["battery_capex_kwh"]),
+                "pv_kw": float(best["pv_kw"]),
+                "batt_kwh": float(best["batt_kwh"]),
+                "total_cost": float(best["total_cost"]),
+            }
+        )
+    return sorted(rows, key=lambda r: r["pv_capex"])
 def _read_step9_series(path: str) -> Optional[dict]:
     try:
         # Prefer the enriched CSV written by Step 9
@@ -1246,7 +1301,9 @@ def _dashboard_html(
     coopt_pv_batt_heatmap_b64: Optional[str] = None,
     coopt_batt_size_vs_capex_by_pv_b64: Optional[str] = None,
     coopt_objective_vs_capex_by_pv_b64: Optional[str] = None,
+    coopt_pv_size_vs_capex_by_pv_b64: Optional[str] = None,
     coopt_pv_capex_gallery: Optional[List[dict]] = None,
+    coopt_best_of_summary: Optional[List[dict]] = None,
     cost_waterfall_b64: Optional[str] = None,
     price_signal_b64: Optional[str] = None,
     methods_manifest: Optional[dict] = None,
@@ -1641,6 +1698,17 @@ def _dashboard_html(
         parts.append("<div class=\"muted\">No PV capex sweep battery-size plot available (run Step 9b with --pv-capex-sweep and --batt-capex-sweep).</div>")
     parts.append("</div>")
 
+    # Card 2g.1b.1: PV Size vs Battery Capex (PV Capex sweep)
+    parts.append('<div class="card">')
+    parts.append("<h2>PV Size vs Battery Capex — PV Capex Sweep</h2>")
+    if coopt_pv_size_vs_capex_by_pv_b64:
+        parts.append(
+            f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{coopt_pv_size_vs_capex_by_pv_b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{coopt_pv_size_vs_capex_by_pv_b64}\" alt=\"pv size vs capex by pv\"/></a></div>"
+        )
+    else:
+        parts.append("<div class=\"muted\">No PV capex sweep PV-size plot available (run Step 9b with --pv-capex-sweep and --batt-capex-sweep).</div>")
+    parts.append("</div>")
+
     # Card 2g.1c: Co-Opt Objective vs Battery Capex (PV Capex sweep)
     parts.append('<div class="card">')
     parts.append("<h2>Co‑Opt Objective vs Battery Capex — PV Capex Sweep</h2>")
@@ -1650,6 +1718,29 @@ def _dashboard_html(
         )
     else:
         parts.append("<div class=\"muted\">No PV capex sweep objective plot available (run Step 9b with --pv-capex-sweep and --batt-capex-sweep).</div>")
+    parts.append("</div>")
+
+    # Card 2g.1e: Best-of Summary (PV Capex sweep)
+    parts.append('<div class="card">')
+    parts.append("<h2>Best‑of Summary — PV Capex Sweep</h2>")
+    if coopt_best_of_summary:
+        parts.append("<table class=\"kmtbl\"><thead><tr>"
+                     "<th>PV Capex ($/kW)</th><th>Best Batt Capex ($/kWh)</th>"
+                     "<th>PV Size (kW)</th><th>Battery Size (kWh)</th><th>Min Annual Cost</th>"
+                     "</tr></thead><tbody>")
+        for row in coopt_best_of_summary:
+            parts.append(
+                "<tr>"
+                f"<td>{row['pv_capex']:.0f}</td>"
+                f"<td>{row['battery_capex_kwh']:.0f}</td>"
+                f"<td>{row['pv_kw']:.2f}</td>"
+                f"<td>{row['batt_kwh']:.2f}</td>"
+                f"<td class=\"money\">${row['total_cost']:,.0f}</td>"
+                "</tr>"
+            )
+        parts.append("</tbody></table>")
+    else:
+        parts.append("<div class=\"muted\">No best‑of summary available (run Step 9b with --pv-capex-sweep and --batt-capex-sweep).</div>")
     parts.append("</div>")
 
     # Card 2g.2: PV × Battery Heatmaps (PV capex sweep)
@@ -1923,7 +2014,13 @@ def process(
             coopt_objective_vs_capex_by_pv_b64 = create_coopt_objective_vs_capex_by_pv_chart(
                 base_input_dir, scenario, housing_type, county_slug
             )
+            coopt_pv_size_vs_capex_by_pv_b64 = create_coopt_pv_size_vs_capex_by_pv_chart(
+                base_input_dir, scenario, housing_type, county_slug
+            )
             coopt_pv_capex_gallery = create_coopt_pv_capex_sweep_gallery(
+                base_input_dir, scenario, housing_type, county_slug
+            )
+            coopt_best_of_summary = _load_best_of_pv_capex_sweep(
                 base_input_dir, scenario, housing_type, county_slug
             )
             cost_waterfall_b64 = create_cost_waterfall_chart(
@@ -1970,7 +2067,9 @@ def process(
                 coopt_pv_batt_heatmap_b64=coopt_pv_batt_heatmap_b64,
                 coopt_batt_size_vs_capex_by_pv_b64=coopt_batt_size_vs_capex_by_pv_b64,
                 coopt_objective_vs_capex_by_pv_b64=coopt_objective_vs_capex_by_pv_b64,
+                coopt_pv_size_vs_capex_by_pv_b64=coopt_pv_size_vs_capex_by_pv_b64,
                 coopt_pv_capex_gallery=coopt_pv_capex_gallery,
+                coopt_best_of_summary=coopt_best_of_summary,
                 cost_waterfall_b64=cost_waterfall_b64,
                 price_signal_b64=price_signal_b64,
                 methods_manifest=methods_manifest,
