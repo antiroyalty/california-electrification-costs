@@ -191,6 +191,11 @@ def _find_coopt_pv_size_vs_capex_by_pv_png(county_dir: str, county_slug: str) ->
     return path if os.path.exists(path) else None
 
 
+def _find_coopt_batt_adoption_curve_png(county_dir: str, county_slug: str) -> Optional[str]:
+    path = os.path.join(county_dir, f"coopt_batt_adoption_curve_{county_slug}.png")
+    return path if os.path.exists(path) else None
+
+
 def create_coopt_batt_capex_sweep_chart(
     base_input_dir: str,
     scenario: str,
@@ -284,6 +289,23 @@ def create_coopt_pv_size_vs_capex_by_pv_chart(
 ) -> Optional[str]:
     county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
     png = _find_coopt_pv_size_vs_capex_by_pv_png(county_dir, county_slug)
+    if not png:
+        return None
+    try:
+        with open(png, "rb") as f:
+            return base64.b64encode(f.read()).decode("utf-8")
+    except Exception:
+        return None
+
+
+def create_coopt_batt_adoption_curve_chart(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+    county_slug: str,
+) -> Optional[str]:
+    county_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug)
+    png = _find_coopt_batt_adoption_curve_png(county_dir, county_slug)
     if not png:
         return None
     try:
@@ -1302,6 +1324,7 @@ def _dashboard_html(
     coopt_batt_size_vs_capex_by_pv_b64: Optional[str] = None,
     coopt_objective_vs_capex_by_pv_b64: Optional[str] = None,
     coopt_pv_size_vs_capex_by_pv_b64: Optional[str] = None,
+    coopt_batt_adoption_curve_b64: Optional[str] = None,
     coopt_pv_capex_gallery: Optional[List[dict]] = None,
     coopt_best_of_summary: Optional[List[dict]] = None,
     cost_waterfall_b64: Optional[str] = None,
@@ -1698,6 +1721,17 @@ def _dashboard_html(
         parts.append("<div class=\"muted\">No PV capex sweep battery-size plot available (run Step 9b with --pv-capex-sweep and --batt-capex-sweep).</div>")
     parts.append("</div>")
 
+    # Card 2g.1b.0: Battery Adoption Curve (NEM 3.0)
+    parts.append('<div class="card">')
+    parts.append("<h2>Battery Adoption Curve Under NEM 3.0</h2>")
+    if coopt_batt_adoption_curve_b64:
+        parts.append(
+            f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{coopt_batt_adoption_curve_b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{coopt_batt_adoption_curve_b64}\" alt=\"battery adoption curve\"/></a></div>"
+        )
+    else:
+        parts.append("<div class=\"muted\">No adoption curve available (run Step 9b with --batt-capex-sweep).</div>")
+    parts.append("</div>")
+
     # Card 2g.1b.1: PV Size vs Battery Capex (PV Capex sweep)
     parts.append('<div class="card">')
     parts.append("<h2>PV Size vs Battery Capex — PV Capex Sweep</h2>")
@@ -2017,6 +2051,9 @@ def process(
             coopt_pv_size_vs_capex_by_pv_b64 = create_coopt_pv_size_vs_capex_by_pv_chart(
                 base_input_dir, scenario, housing_type, county_slug
             )
+            coopt_batt_adoption_curve_b64 = create_coopt_batt_adoption_curve_chart(
+                base_input_dir, scenario, housing_type, county_slug
+            )
             coopt_pv_capex_gallery = create_coopt_pv_capex_sweep_gallery(
                 base_input_dir, scenario, housing_type, county_slug
             )
@@ -2068,6 +2105,7 @@ def process(
                 coopt_batt_size_vs_capex_by_pv_b64=coopt_batt_size_vs_capex_by_pv_b64,
                 coopt_objective_vs_capex_by_pv_b64=coopt_objective_vs_capex_by_pv_b64,
                 coopt_pv_size_vs_capex_by_pv_b64=coopt_pv_size_vs_capex_by_pv_b64,
+                coopt_batt_adoption_curve_b64=coopt_batt_adoption_curve_b64,
                 coopt_pv_capex_gallery=coopt_pv_capex_gallery,
                 coopt_best_of_summary=coopt_best_of_summary,
                 cost_waterfall_b64=cost_waterfall_b64,

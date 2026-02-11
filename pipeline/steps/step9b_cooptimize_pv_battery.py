@@ -478,6 +478,64 @@ def _write_pv_size_vs_capex_by_pv(
         raise RuntimeError(f"Failed to write PV capex PV-size sweep plot: {e}")
 
 
+def _write_batt_adoption_curve(
+    out_dir: str,
+    county: str,
+    *,
+    base_pv_capex: float,
+    reference_lines: List[tuple[float, str]],
+) -> None:
+    csv_path = os.path.join(out_dir, f"coopt_batt_capex_sweep_{county}.csv")
+    if not os.path.exists(csv_path):
+        raise RuntimeError(f"Missing base battery capex sweep CSV: {csv_path}")
+    try:
+        import matplotlib.pyplot as plt
+
+        df = pd.read_csv(csv_path)
+        required = {"battery_capex_kwh", "batt_kwh", "pv_kw"}
+        if not required.issubset(set(df.columns)):
+            raise RuntimeError(f"Missing columns in base sweep CSV: {csv_path}")
+        df = df.sort_values("battery_capex_kwh")
+
+        fig, (ax_top, ax_bottom) = plt.subplots(
+            2, 1, figsize=(10, 7), sharex=True, tight_layout=True
+        )
+
+        ax_top.plot(
+            df["battery_capex_kwh"],
+            df["batt_kwh"],
+            color="#1f77b4",
+            linewidth=2,
+            label="Optimal Battery Size (kWh)",
+        )
+        ax_top.set_ylabel("Optimal Battery Size (kWh)")
+        ax_top.set_title("Battery Adoption Curve Under NEM 3.0 — Alameda County")
+        ax_top.grid(True, alpha=0.3)
+
+        ax_bottom.plot(
+            df["battery_capex_kwh"],
+            df["pv_kw"],
+            color="#2ca02c",
+            linewidth=2,
+            label="Optimal PV Size (kW)",
+        )
+        ax_bottom.set_ylabel("Optimal PV Size (kW)")
+        ax_bottom.set_xlabel("Battery Capex ($/kWh)")
+        ax_bottom.grid(True, alpha=0.3)
+
+        for val, label in reference_lines:
+            ax_top.axvline(val, color="#ff1493", linestyle="--", linewidth=1.6, label=label)
+            ax_bottom.axvline(val, color="#ff1493", linestyle="--", linewidth=1.6, label="_nolegend_")
+
+        ax_top.legend(loc="best", fontsize=9)
+
+        fig_path = os.path.join(out_dir, f"coopt_batt_adoption_curve_{county}.png")
+        fig.savefig(fig_path, dpi=150)
+        plt.close(fig)
+    except Exception as e:
+        raise RuntimeError(f"Failed to write battery adoption curve plot: {e}")
+
+
 def _write_objective_vs_capex_by_pv(
     out_dir: str,
     county: str,
@@ -981,6 +1039,16 @@ def process(
                 batt_degrade_cost_per_kwh=batt_degrade_cost_per_kwh,
                 weights=sweep_weights,
                 cycle_monthly=sweep_cycle,
+            )
+            _write_batt_adoption_curve(
+                out_dir,
+                county_slug,
+                base_pv_capex=pv_capex_per_kw,
+                reference_lines=[
+                    (1248.0, "Powerwall 3 (pre-incentive) ~$1,248/kWh"),
+                    (874.0, "ITC only ~$874/kWh"),
+                    (724.0, "ITC + SGIP ~$724/kWh"),
+                ],
             )
 
         if batt_capex_sweep and batt_size_sweep:
