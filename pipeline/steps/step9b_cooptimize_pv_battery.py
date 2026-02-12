@@ -483,7 +483,7 @@ def _write_batt_adoption_curve(
     county: str,
     *,
     base_pv_capex: float,
-    reference_lines: List[tuple[float, str]],
+    reference_lines: List[tuple[float, str, str]],
 ) -> None:
     csv_path = os.path.join(out_dir, f"coopt_batt_capex_sweep_{county}.csv")
     if not os.path.exists(csv_path):
@@ -523,9 +523,9 @@ def _write_batt_adoption_curve(
         ax_bottom.set_xlabel("Battery Capex ($/kWh)")
         ax_bottom.grid(True, alpha=0.3)
 
-        for val, label in reference_lines:
-            ax_top.axvline(val, color="#ff1493", linestyle="--", linewidth=1.6, label=label)
-            ax_bottom.axvline(val, color="#ff1493", linestyle="--", linewidth=1.6, label="_nolegend_")
+        for val, label, color in reference_lines:
+            ax_top.axvline(val, color=color, linestyle="--", linewidth=1.6, label=label)
+            ax_bottom.axvline(val, color=color, linestyle="--", linewidth=1.6, label="_nolegend_")
 
         ax_top.legend(loc="best", fontsize=9)
 
@@ -1045,9 +1045,9 @@ def process(
                 county_slug,
                 base_pv_capex=pv_capex_per_kw,
                 reference_lines=[
-                    (1248.0, "Powerwall 3 (pre-incentive) ~$1,248/kWh"),
-                    (874.0, "ITC only ~$874/kWh"),
-                    (724.0, "ITC + SGIP ~$724/kWh"),
+                    (1248.0, "Powerwall 3 (pre-incentive) ~$1,248/kWh", "#f28e2b"),
+                    (874.0, "ITC only ~$874/kWh", "#f5a742"),
+                    (724.0, "ITC + SGIP ~$724/kWh", "#f9bf64"),
                 ],
             )
 
