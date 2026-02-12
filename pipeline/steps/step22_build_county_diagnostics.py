@@ -317,7 +317,7 @@ def create_coopt_batt_adoption_curve_chart(
 
 def _parse_pv_capex_from_filename(path: str) -> Optional[float]:
     name = os.path.basename(path)
-    m = re.search(r"_pv([0-9]+(?:p[0-9]+)?)\.png$", name)
+    m = re.search(r"_pv([0-9]+(?:p[0-9]+)?)\.(?:png|csv)$", name)
     if not m:
         return None
     token = m.group(1).replace("p", ".")
