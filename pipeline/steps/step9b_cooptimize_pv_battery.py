@@ -320,6 +320,8 @@ def _write_batt_size_vs_capex_by_pv(
     county: str,
     pv_capex_values: List[float],
     batt_capex_values: List[float],
+    *,
+    base_pv_capex: Optional[float] = None,
 ) -> None:
     if not pv_capex_values or not batt_capex_values:
         return
@@ -358,6 +360,26 @@ def _write_batt_size_vs_capex_by_pv(
                 linewidth=2,
             )
 
+        if base_pv_capex is not None:
+            base_df = None
+            base_csv = os.path.join(out_dir, f"coopt_batt_capex_sweep_{county}.csv")
+            if os.path.exists(base_csv):
+                base_df = pd.read_csv(base_csv)
+            else:
+                tag = _format_pv_capex_tag(base_pv_capex)
+                sweep_csv = os.path.join(out_dir, f"coopt_batt_capex_sweep_{county}_{tag}.csv")
+                if os.path.exists(sweep_csv):
+                    base_df = pd.read_csv(sweep_csv)
+            if base_df is not None and "battery_capex_kwh" in base_df.columns and "batt_kwh" in base_df.columns:
+                base_df = base_df.sort_values("battery_capex_kwh")
+                ax.plot(
+                    base_df["battery_capex_kwh"],
+                    base_df["batt_kwh"],
+                    label=f"Main PV Capex ${base_pv_capex:,.0f}/kW",
+                    color="#ff1493",
+                    linewidth=2.5,
+                )
+
         ax.set_xlabel("Battery Capex ($/kWh)")
         ax.set_ylabel("Optimal Battery Size (kWh) from LP")
         ax.set_title("Battery Size vs Battery Capex (PV Capex Sensitivity)")
@@ -380,11 +402,147 @@ def _write_batt_size_vs_capex_by_pv(
         raise RuntimeError(f"Failed to write PV capex battery-size sweep plot: {e}")
 
 
+def _write_pv_size_vs_capex_by_pv(
+    out_dir: str,
+    county: str,
+    pv_capex_values: List[float],
+    batt_capex_values: List[float],
+    *,
+    base_pv_capex: Optional[float] = None,
+) -> None:
+    if not pv_capex_values or not batt_capex_values:
+        return
+    try:
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        pv_vals = sorted(set(float(v) for v in pv_capex_values))
+        fig, ax = plt.subplots(1, 1, figsize=(10, 6), tight_layout=True)
+        if pv_vals:
+            vmin, vmax = min(pv_vals), max(pv_vals)
+        else:
+            vmin, vmax = 0.0, 1.0
+        def _color_for_pv(val: float):
+            if vmax == vmin:
+                t = 0.6
+            else:
+                t = (float(val) - vmin) / (vmax - vmin)
+            return plt.cm.Greens(0.3 + 0.6 * t)
+
+        for pv_capex in pv_vals:
+            tag = _format_pv_capex_tag(pv_capex)
+            csv_path = os.path.join(out_dir, f"coopt_batt_capex_sweep_{county}_{tag}.csv")
+            if not os.path.exists(csv_path):
+                raise RuntimeError(f"Missing PV capex sweep CSV: {csv_path}")
+            df = pd.read_csv(csv_path)
+            if "battery_capex_kwh" not in df.columns or "pv_kw" not in df.columns:
+                raise RuntimeError(f"Missing columns in PV capex sweep CSV: {csv_path}")
+            df = df.sort_values("battery_capex_kwh")
+            ax.plot(
+                df["battery_capex_kwh"],
+                df["pv_kw"],
+                label=f"PV Capex ${pv_capex:,.0f}/kW",
+                color=_color_for_pv(pv_capex),
+                linewidth=2,
+            )
+
+        if base_pv_capex is not None:
+            base_df = None
+            base_csv = os.path.join(out_dir, f"coopt_batt_capex_sweep_{county}.csv")
+            if os.path.exists(base_csv):
+                base_df = pd.read_csv(base_csv)
+            else:
+                tag = _format_pv_capex_tag(base_pv_capex)
+                sweep_csv = os.path.join(out_dir, f"coopt_batt_capex_sweep_{county}_{tag}.csv")
+                if os.path.exists(sweep_csv):
+                    base_df = pd.read_csv(sweep_csv)
+            if base_df is not None and "battery_capex_kwh" in base_df.columns and "pv_kw" in base_df.columns:
+                base_df = base_df.sort_values("battery_capex_kwh")
+                ax.plot(
+                    base_df["battery_capex_kwh"],
+                    base_df["pv_kw"],
+                    label=f"Main PV Capex ${base_pv_capex:,.0f}/kW",
+                    color="#ff1493",
+                    linewidth=2.5,
+                )
+
+        ax.set_xlabel("Battery Capex ($/kWh)")
+        ax.set_ylabel("Optimal PV Size (kW) from LP")
+        ax.set_title("PV Size vs Battery Capex (PV Capex Sensitivity)")
+        ax.legend(loc="best", fontsize=9)
+
+        fig_path = os.path.join(out_dir, f"coopt_pv_size_vs_capex_by_pv_{county}.png")
+        fig.savefig(fig_path, dpi=150)
+        plt.close(fig)
+    except Exception as e:
+        raise RuntimeError(f"Failed to write PV capex PV-size sweep plot: {e}")
+
+
+def _write_batt_adoption_curve(
+    out_dir: str,
+    county: str,
+    *,
+    base_pv_capex: float,
+    reference_lines: List[tuple[float, str, str]],
+) -> None:
+    csv_path = os.path.join(out_dir, f"coopt_batt_capex_sweep_{county}.csv")
+    if not os.path.exists(csv_path):
+        raise RuntimeError(f"Missing base battery capex sweep CSV: {csv_path}")
+    try:
+        import matplotlib.pyplot as plt
+
+        df = pd.read_csv(csv_path)
+        required = {"battery_capex_kwh", "batt_kwh", "pv_kw"}
+        if not required.issubset(set(df.columns)):
+            raise RuntimeError(f"Missing columns in base sweep CSV: {csv_path}")
+        df = df.sort_values("battery_capex_kwh")
+
+        fig, (ax_top, ax_bottom) = plt.subplots(
+            2, 1, figsize=(10, 7), sharex=True, tight_layout=True
+        )
+
+        ax_top.plot(
+            df["battery_capex_kwh"],
+            df["batt_kwh"],
+            color="#1f77b4",
+            linewidth=2,
+            label="Optimal Battery Size (kWh)",
+        )
+        ax_top.set_ylabel("Optimal Battery Size (kWh)")
+        ax_top.set_title("Battery Adoption Curve Under NEM 3.0 — Alameda County")
+        ax_top.grid(True, alpha=0.3)
+
+        ax_bottom.plot(
+            df["battery_capex_kwh"],
+            df["pv_kw"],
+            color="#2ca02c",
+            linewidth=2,
+            label="Optimal PV Size (kW)",
+        )
+        ax_bottom.set_ylabel("Optimal PV Size (kW)")
+        ax_bottom.set_xlabel("Battery Capex ($/kWh)")
+        ax_bottom.grid(True, alpha=0.3)
+
+        for val, label, color in reference_lines:
+            ax_top.axvline(val, color=color, linestyle="--", linewidth=1.6, label=label)
+            ax_bottom.axvline(val, color=color, linestyle="--", linewidth=1.6, label="_nolegend_")
+
+        ax_top.legend(loc="best", fontsize=9)
+
+        fig_path = os.path.join(out_dir, f"coopt_batt_adoption_curve_{county}.png")
+        fig.savefig(fig_path, dpi=150)
+        plt.close(fig)
+    except Exception as e:
+        raise RuntimeError(f"Failed to write battery adoption curve plot: {e}")
+
+
 def _write_objective_vs_capex_by_pv(
     out_dir: str,
     county: str,
     pv_capex_values: List[float],
     batt_capex_values: List[float],
+    *,
+    base_pv_capex: Optional[float] = None,
 ) -> None:
     if not pv_capex_values or not batt_capex_values:
         return
@@ -422,6 +580,26 @@ def _write_objective_vs_capex_by_pv(
                 color=_color_for_pv(pv_capex),
                 linewidth=2,
             )
+
+        if base_pv_capex is not None:
+            base_df = None
+            base_csv = os.path.join(out_dir, f"coopt_batt_capex_sweep_{county}.csv")
+            if os.path.exists(base_csv):
+                base_df = pd.read_csv(base_csv)
+            else:
+                tag = _format_pv_capex_tag(base_pv_capex)
+                sweep_csv = os.path.join(out_dir, f"coopt_batt_capex_sweep_{county}_{tag}.csv")
+                if os.path.exists(sweep_csv):
+                    base_df = pd.read_csv(sweep_csv)
+            if base_df is not None and "battery_capex_kwh" in base_df.columns and "total_cost" in base_df.columns:
+                base_df = base_df.sort_values("battery_capex_kwh")
+                ax.plot(
+                    base_df["battery_capex_kwh"],
+                    base_df["total_cost"],
+                    label=f"Main PV Capex ${base_pv_capex:,.0f}/kW",
+                    color="#ff1493",
+                    linewidth=2.5,
+                )
 
         ax.set_xlabel("Battery Capex ($/kWh)")
         ax.set_ylabel("Annual Cost ($)")
@@ -492,40 +670,94 @@ def _write_batt_cost_heatmap(
     df.to_csv(csv_path, index=False)
 
     try:
-        import matplotlib.pyplot as plt
-        import numpy as np
-
-        pivot = df.pivot(index="battery_kwh", columns="battery_capex_kwh", values="total_cost")
-        vals = pivot.values
-        fig, ax = plt.subplots(figsize=(9, 6), tight_layout=True)
-        im = ax.imshow(vals, origin="lower", aspect="auto", cmap="viridis")
-        ax.set_xticks(range(len(pivot.columns)))
-        ax.set_yticks(range(len(pivot.index)))
-        capex_vals = pivot.columns.tolist()
-        size_vals = pivot.index.tolist()
-        ax.set_xticklabels([f"{c:.0f}" for c in capex_vals])
-        ax.set_yticklabels([f"{r:.1f}" for r in size_vals])
-        ax.set_xlabel("Battery Capex ($/kWh)")
-        ax.set_ylabel("Battery Size (kWh)")
-        ax.set_title("Co‑opt Total Cost Heatmap")
-        cbar = fig.colorbar(im, ax=ax)
-        cbar.set_label("Annual Cost ($)")
-
-        if marker_batt_kwh is not None and marker_capex_kwh is not None and capex_vals and size_vals:
-            try:
-                capex_arr = np.array(capex_vals, dtype=float)
-                size_arr = np.array(size_vals, dtype=float)
-                x_idx = int(np.argmin(np.abs(capex_arr - float(marker_capex_kwh))))
-                y_idx = int(np.argmin(np.abs(size_arr - float(marker_batt_kwh))))
-                ax.scatter([x_idx], [y_idx], color="#e41a1c", s=70, marker="x", label="Current")
-                ax.legend(loc="upper right")
-            except Exception:
-                pass
-        fig_path = os.path.join(out_dir, f"coopt_batt_cost_heatmap_{county}{tag}.png")
-        fig.savefig(fig_path, dpi=150)
-        plt.close(fig)
+        _plot_batt_cost_heatmap_from_df(
+            df,
+            out_dir,
+            county,
+            tag=tag,
+            marker_batt_kwh=marker_batt_kwh,
+            marker_capex_kwh=marker_capex_kwh,
+        )
     except Exception as e:
         raise RuntimeError(f"Failed to write battery cost heatmap plot: {e}")
+
+
+def _plot_batt_cost_heatmap_from_df(
+    df: pd.DataFrame,
+    out_dir: str,
+    county: str,
+    *,
+    tag: str,
+    vmin: Optional[float] = None,
+    vmax: Optional[float] = None,
+    marker_batt_kwh: Optional[float] = None,
+    marker_capex_kwh: Optional[float] = None,
+) -> None:
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    pivot = df.pivot(index="battery_kwh", columns="battery_capex_kwh", values="total_cost")
+    vals = pivot.values
+    fig, ax = plt.subplots(figsize=(9, 6), tight_layout=True)
+    im = ax.imshow(vals, origin="lower", aspect="auto", cmap="viridis", vmin=vmin, vmax=vmax)
+    ax.set_xticks(range(len(pivot.columns)))
+    ax.set_yticks(range(len(pivot.index)))
+    capex_vals = pivot.columns.tolist()
+    size_vals = pivot.index.tolist()
+    ax.set_xticklabels([f"{c:.0f}" for c in capex_vals])
+    ax.set_yticklabels([f"{r:.1f}" for r in size_vals])
+    ax.set_xlabel("Battery Capex ($/kWh)")
+    ax.set_ylabel("Battery Size (kWh)")
+    ax.set_title("Co‑opt Total Cost Heatmap")
+    cbar = fig.colorbar(im, ax=ax)
+    cbar.set_label("Annual Cost ($)")
+
+    if marker_batt_kwh is not None and marker_capex_kwh is not None and capex_vals and size_vals:
+        try:
+            capex_arr = np.array(capex_vals, dtype=float)
+            size_arr = np.array(size_vals, dtype=float)
+            x_idx = int(np.argmin(np.abs(capex_arr - float(marker_capex_kwh))))
+            y_idx = int(np.argmin(np.abs(size_arr - float(marker_batt_kwh))))
+            ax.scatter([x_idx], [y_idx], color="#e41a1c", s=70, marker="x", label="Current")
+            ax.legend(loc="upper right")
+        except Exception:
+            pass
+    fig_path = os.path.join(out_dir, f"coopt_batt_cost_heatmap_{county}{tag}.png")
+    fig.savefig(fig_path, dpi=150)
+    plt.close(fig)
+
+
+def _rescale_batt_cost_heatmaps_by_pv(
+    out_dir: str,
+    county: str,
+    pv_capex_values: List[float],
+) -> None:
+    if not pv_capex_values:
+        return
+    csvs: List[tuple[str, pd.DataFrame]] = []
+    for pv_capex in sorted(set(float(v) for v in pv_capex_values)):
+        tag = _format_pv_capex_tag(pv_capex)
+        csv_path = os.path.join(out_dir, f"coopt_batt_cost_heatmap_{county}_{tag}.csv")
+        if not os.path.exists(csv_path):
+            raise RuntimeError(f"Missing PV capex heatmap CSV: {csv_path}")
+        df = pd.read_csv(csv_path)
+        required = {"battery_kwh", "battery_capex_kwh", "total_cost"}
+        if not required.issubset(set(df.columns)):
+            raise RuntimeError(f"Missing columns in PV capex heatmap CSV: {csv_path}")
+        csvs.append((f"_{tag}", df))
+    if not csvs:
+        return
+    vmin = min(float(df["total_cost"].min()) for _, df in csvs)
+    vmax = max(float(df["total_cost"].max()) for _, df in csvs)
+    for tag, df in csvs:
+        _plot_batt_cost_heatmap_from_df(
+            df,
+            out_dir,
+            county,
+            tag=tag,
+            vmin=vmin,
+            vmax=vmax,
+        )
 
 
 def _write_pv_batt_cost_heatmap(
@@ -586,41 +818,95 @@ def _write_pv_batt_cost_heatmap(
     df.to_csv(csv_path, index=False)
 
     try:
-        import matplotlib.pyplot as plt
-        import numpy as np
-
-        pivot = df.pivot(index="battery_kwh", columns="pv_kw", values="total_cost")
-        vals = pivot.values
-        fig, ax = plt.subplots(figsize=(9, 6), tight_layout=True)
-        im = ax.imshow(vals, origin="lower", aspect="auto", cmap="viridis")
-        pv_vals = pivot.columns.tolist()
-        batt_vals = pivot.index.tolist()
-        ax.set_xticks(range(len(pv_vals)))
-        ax.set_yticks(range(len(batt_vals)))
-        ax.set_xticklabels([f"{c:.2f}" for c in pv_vals])
-        ax.set_yticklabels([f"{r:.1f}" for r in batt_vals])
-        ax.set_xlabel("PV Size (kW)")
-        ax.set_ylabel("Battery Size (kWh)")
-        ax.set_title("Co‑opt Total Cost Heatmap (PV × Battery)")
-        cbar = fig.colorbar(im, ax=ax)
-        cbar.set_label("Annual Cost ($)")
-
-        if marker_pv_kw is not None and marker_batt_kwh is not None and pv_vals and batt_vals:
-            try:
-                pv_arr = np.array(pv_vals, dtype=float)
-                batt_arr = np.array(batt_vals, dtype=float)
-                x_idx = int(np.argmin(np.abs(pv_arr - float(marker_pv_kw))))
-                y_idx = int(np.argmin(np.abs(batt_arr - float(marker_batt_kwh))))
-                ax.scatter([x_idx], [y_idx], color="#e41a1c", s=70, marker="x", label="Current")
-                ax.legend(loc="upper right")
-            except Exception:
-                pass
-
-        fig_path = os.path.join(out_dir, f"coopt_pv_batt_cost_heatmap_{county}{tag}.png")
-        fig.savefig(fig_path, dpi=150)
-        plt.close(fig)
+        _plot_pv_batt_cost_heatmap_from_df(
+            df,
+            out_dir,
+            county,
+            tag=tag,
+            marker_pv_kw=marker_pv_kw,
+            marker_batt_kwh=marker_batt_kwh,
+        )
     except Exception as e:
         raise RuntimeError(f"Failed to write PV vs battery cost heatmap plot: {e}")
+
+
+def _plot_pv_batt_cost_heatmap_from_df(
+    df: pd.DataFrame,
+    out_dir: str,
+    county: str,
+    *,
+    tag: str,
+    vmin: Optional[float] = None,
+    vmax: Optional[float] = None,
+    marker_pv_kw: Optional[float] = None,
+    marker_batt_kwh: Optional[float] = None,
+) -> None:
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    pivot = df.pivot(index="battery_kwh", columns="pv_kw", values="total_cost")
+    vals = pivot.values
+    fig, ax = plt.subplots(figsize=(9, 6), tight_layout=True)
+    im = ax.imshow(vals, origin="lower", aspect="auto", cmap="viridis", vmin=vmin, vmax=vmax)
+    pv_vals = pivot.columns.tolist()
+    batt_vals = pivot.index.tolist()
+    ax.set_xticks(range(len(pv_vals)))
+    ax.set_yticks(range(len(batt_vals)))
+    ax.set_xticklabels([f"{c:.2f}" for c in pv_vals])
+    ax.set_yticklabels([f"{r:.1f}" for r in batt_vals])
+    ax.set_xlabel("PV Size (kW)")
+    ax.set_ylabel("Battery Size (kWh)")
+    ax.set_title("Co‑opt Total Cost Heatmap (PV × Battery)")
+    cbar = fig.colorbar(im, ax=ax)
+    cbar.set_label("Annual Cost ($)")
+
+    if marker_pv_kw is not None and marker_batt_kwh is not None and pv_vals and batt_vals:
+        try:
+            pv_arr = np.array(pv_vals, dtype=float)
+            batt_arr = np.array(batt_vals, dtype=float)
+            x_idx = int(np.argmin(np.abs(pv_arr - float(marker_pv_kw))))
+            y_idx = int(np.argmin(np.abs(batt_arr - float(marker_batt_kwh))))
+            ax.scatter([x_idx], [y_idx], color="#e41a1c", s=70, marker="x", label="Current")
+            ax.legend(loc="upper right")
+        except Exception:
+            pass
+
+    fig_path = os.path.join(out_dir, f"coopt_pv_batt_cost_heatmap_{county}{tag}.png")
+    fig.savefig(fig_path, dpi=150)
+    plt.close(fig)
+
+
+def _rescale_pv_batt_cost_heatmaps_by_pv(
+    out_dir: str,
+    county: str,
+    pv_capex_values: List[float],
+) -> None:
+    if not pv_capex_values:
+        return
+    csvs: List[tuple[str, pd.DataFrame]] = []
+    for pv_capex in sorted(set(float(v) for v in pv_capex_values)):
+        tag = _format_pv_capex_tag(pv_capex)
+        csv_path = os.path.join(out_dir, f"coopt_pv_batt_cost_heatmap_{county}_{tag}.csv")
+        if not os.path.exists(csv_path):
+            raise RuntimeError(f"Missing PV capex PV×battery heatmap CSV: {csv_path}")
+        df = pd.read_csv(csv_path)
+        required = {"pv_kw", "battery_kwh", "total_cost"}
+        if not required.issubset(set(df.columns)):
+            raise RuntimeError(f"Missing columns in PV capex PV×battery heatmap CSV: {csv_path}")
+        csvs.append((f"_{tag}", df))
+    if not csvs:
+        return
+    vmin = min(float(df["total_cost"].min()) for _, df in csvs)
+    vmax = max(float(df["total_cost"].max()) for _, df in csvs)
+    for tag, df in csvs:
+        _plot_pv_batt_cost_heatmap_from_df(
+            df,
+            out_dir,
+            county,
+            tag=tag,
+            vmin=vmin,
+            vmax=vmax,
+        )
 
 
 def _default_plan_for_utility(util: str) -> str:
@@ -754,6 +1040,16 @@ def process(
                 weights=sweep_weights,
                 cycle_monthly=sweep_cycle,
             )
+            _write_batt_adoption_curve(
+                out_dir,
+                county_slug,
+                base_pv_capex=pv_capex_per_kw,
+                reference_lines=[
+                    (1248.0, "Powerwall 3 (pre-incentive) ~$1,248/kWh", "#f28e2b"),
+                    (874.0, "ITC only ~$874/kWh", "#f5a742"),
+                    (724.0, "ITC + SGIP ~$724/kWh", "#f9bf64"),
+                ],
+            )
 
         if batt_capex_sweep and batt_size_sweep:
             _write_batt_cost_heatmap(
@@ -884,13 +1180,34 @@ def process(
                 county_slug,
                 pv_capex_values=pv_capex_sweep,
                 batt_capex_values=batt_capex_sweep,
+                base_pv_capex=pv_capex_per_kw,
+            )
+            _write_pv_size_vs_capex_by_pv(
+                out_dir,
+                county_slug,
+                pv_capex_values=pv_capex_sweep,
+                batt_capex_values=batt_capex_sweep,
+                base_pv_capex=pv_capex_per_kw,
             )
             _write_objective_vs_capex_by_pv(
                 out_dir,
                 county_slug,
                 pv_capex_values=pv_capex_sweep,
                 batt_capex_values=batt_capex_sweep,
+                base_pv_capex=pv_capex_per_kw,
             )
+            if batt_size_sweep:
+                _rescale_batt_cost_heatmaps_by_pv(
+                    out_dir,
+                    county_slug,
+                    pv_capex_values=pv_capex_sweep,
+                )
+            if pv_size_sweep and batt_size_sweep:
+                _rescale_pv_batt_cost_heatmaps_by_pv(
+                    out_dir,
+                    county_slug,
+                    pv_capex_values=pv_capex_sweep,
+                )
 
         # Collect capacity summary for diagnostics cards
         capacity_records.append({
