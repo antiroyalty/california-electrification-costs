@@ -31,3 +31,36 @@ The next update (2026 ACC) is in development but not yet published.
 The climate zones (CZ1, CZ2, CZ3A, ..., CZ16) correspond to sheets in the utility Excel files.
 `BuildingClimateZonesByZIPCode_ada.xlsx` contains the underlying ZIP-to-climate-zone lookup
 (Table 4-11: Utility Baseline Territory to Avoided Cost Calculator Climate Zone Mapping).
+
+## ZIP → County Crosswalk (Required for County Mapping)
+
+To build a county-level climate zone mapping, you need a ZIP → County crosswalk. The
+recommended source is the HUD-USPS ZIP-County Crosswalk, which provides address-ratio weights
+for ZIPs that span multiple counties.
+
+### Download (HUD-USPS ZIP-County Crosswalk)
+
+1. Go to:
+   https://www.huduser.gov/portal/datasets/usps_crosswalk.html
+2. Download the latest quarter's **ZIP-County** crosswalk file.
+3. Place the file in this folder, e.g.:
+   `data/NEM3/hud_zip_county_crosswalk.csv`
+
+### Key Columns (typical)
+
+The HUD file includes multiple rows per ZIP when a ZIP spans multiple counties, with weights:
+
+- `ZIP` (5-digit ZIP code)
+- `COUNTY` (5-digit county FIPS)
+- `RES_RATIO` (residential address share for the ZIP in that county)
+- `BUS_RATIO`, `OTH_RATIO`, `TOT_RATIO` (alternative weighting options)
+
+### Recommended Usage
+
+- Use `RES_RATIO` for residential analyses.
+- Filter the crosswalk to California counties only (FIPS state = `06`) before aggregating.
+
+### Local File Convention
+
+- Default filename: `data/NEM3/hud_zip_county_crosswalk.csv`
+- If you choose a different name, note it here so scripts can point to the correct path.
