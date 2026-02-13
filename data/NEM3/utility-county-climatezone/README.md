@@ -14,8 +14,8 @@ Accepted CSV formats
    - 12 rows (months), 24 columns (hours 0..23 or 1..24)
 
 How to generate
-- Use tools/extract_nem3_sheet_to_csv.py to extract a sheet from the utility Excel:
-  python3 tools/extract_nem3_sheet_to_csv.py \
+- Use helpers/extract_nem3_sheet_to_csv.py to extract a sheet from the utility Excel:
+  python3 helpers/extract_nem3_sheet_to_csv.py \
     --xlsx data/NEM3/PG&E_2024_ACC_12x24_Export_Rates.xlsx \
     --utility "PG&E" \
     --zone CZ3A \
