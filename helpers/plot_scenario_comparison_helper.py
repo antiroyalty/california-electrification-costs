@@ -594,6 +594,169 @@ def plot_savings_and_bills_dotline(
 
 # ---------- Recommendations ----------
 
+# ---------- Co-opt sweep comparison collection and plotting ----------
+
+COOPT_REFERENCE_PRICES: List[Tuple[float, str, str]] = [
+    (1248.0, "Powerwall 3 (pre-incentive) ~$1,248/kWh", "#f28e2b"),
+    (874.0, "ITC only ~$874/kWh", "#f5a742"),
+    (724.0, "ITC + SGIP ~$724/kWh", "#f9bf64"),
+]
+
+_SCENARIO_COLORS = [
+    "#1f77b4", "#d62728", "#2ca02c", "#9467bd",
+    "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22",
+]
+
+
+def _coopt_pv_tag(pv_capex: float) -> str:
+    """Format a PV capex value into a file tag, e.g. 2750.0 -> 'pv2750p0'."""
+    tag = f"pv{pv_capex}"
+    return tag.replace(".", "p")
+
+
+def _latest_coopt_sweep_csv(county_dir: str, slug: str) -> str:
+    """Return the most recently modified coopt_batt_capex_sweep_<slug>*.csv in county_dir."""
+    candidates = [
+        os.path.join(county_dir, f)
+        for f in os.listdir(county_dir)
+        if f.startswith(f"coopt_batt_capex_sweep_{slug}") and f.endswith(".csv")
+    ]
+    if not candidates:
+        raise FileNotFoundError(
+            f"No coopt_batt_capex_sweep_{slug}*.csv files found in {county_dir}"
+        )
+    return max(candidates, key=os.path.getmtime)
+
+
+def collect_coopt_sweep(
+    base_input_dir: str,
+    housing_type: str,
+    scenarios: Iterable[str],
+    counties: Iterable[str],
+    pv_capex: Optional[float] = None,
+) -> pd.DataFrame:
+    """Collect co-optimization capex sweep results across scenarios and counties.
+
+    File selection:
+    - If pv_capex is provided, reads coopt_batt_capex_sweep_<slug>_<pv_tag>.csv
+      (e.g. pv_capex=2750.0 → coopt_batt_capex_sweep_alameda_pv2750p0.csv).
+    - If pv_capex is None (default), automatically picks the most recently
+      modified coopt_batt_capex_sweep_<slug>*.csv in the county directory.
+
+    Returns a long DataFrame with columns:
+      scenario, county_slug, battery_capex_kwh, batt_kwh, pv_kw, total_cost
+    """
+    rows: List[Dict] = []
+    required_cols = {"battery_capex_kwh", "batt_kwh", "pv_kw", "total_cost"}
+    for scen in scenarios:
+        for county in counties:
+            slug = slugify_county_name(county)
+            county_dir = os.path.join(base_input_dir, scen, housing_type, slug)
+            if pv_capex is not None:
+                csv_path = os.path.join(county_dir, f"coopt_batt_capex_sweep_{slug}_{_coopt_pv_tag(pv_capex)}.csv")
+                _require_file(csv_path, f"Co-opt sweep CSV for scenario '{scen}', county '{slug}', pv_capex={pv_capex}")
+            else:
+                csv_path = _latest_coopt_sweep_csv(county_dir, slug)
+            sweep_df = pd.read_csv(csv_path)
+            if sweep_df.empty:
+                raise ValueError(f"Co-opt sweep CSV is empty: {csv_path}")
+            missing = required_cols - set(sweep_df.columns)
+            if missing:
+                raise KeyError(f"Co-opt sweep CSV missing columns {missing}: {csv_path}")
+            for _, row in sweep_df.iterrows():
+                rows.append({
+                    "scenario": scen,
+                    "county_slug": slug,
+                    "battery_capex_kwh": float(row["battery_capex_kwh"]),
+                    "batt_kwh": float(row["batt_kwh"]),
+                    "pv_kw": float(row["pv_kw"]),
+                    "total_cost": float(row["total_cost"]),
+                })
+    if not rows:
+        raise ValueError("No co-opt sweep rows were collected")
+    return pd.DataFrame(rows)
+
+
+def plot_coopt_sweep_comparison(
+    df: pd.DataFrame,
+    scenario_order: Optional[List[str]] = None,
+    county: Optional[str] = None,
+    colors: Optional[Dict[str, str]] = None,
+    reference_prices: Optional[List[Tuple[float, str, str]]] = None,
+    title: Optional[str] = None,
+) -> plt.Figure:
+    """Plot optimal battery and PV size vs battery capex, one line per scenario.
+
+    Two subplots (shared x-axis):
+      - Top: optimal battery size (kWh) vs battery capex ($/kWh)
+      - Bottom: optimal PV size (kW) vs battery capex ($/kWh)
+
+    Vertical reference lines mark current market price benchmarks.
+
+    If df contains multiple counties, values are averaged across counties per
+    (scenario, battery_capex_kwh) before plotting. Pass county= to restrict to
+    a single county_slug without averaging.
+    """
+    if df.empty:
+        raise ValueError("Co-opt sweep DataFrame is empty")
+
+    plot_df = df.copy()
+    if county is not None:
+        slug = slugify_county_name(county)
+        plot_df = plot_df[plot_df["county_slug"] == slug]
+        if plot_df.empty:
+            raise ValueError(f"No co-opt sweep rows for county '{slug}'")
+
+    # Average across counties if multiple remain
+    plot_df = (
+        plot_df.groupby(["scenario", "battery_capex_kwh"], as_index=False)[["batt_kwh", "pv_kw"]]
+        .mean()
+    )
+
+    if scenario_order is None:
+        scenario_order = sorted(plot_df["scenario"].unique())
+
+    if colors is None:
+        colors = {
+            scen: _SCENARIO_COLORS[i % len(_SCENARIO_COLORS)]
+            for i, scen in enumerate(scenario_order)
+        }
+
+    if reference_prices is None:
+        reference_prices = COOPT_REFERENCE_PRICES
+
+    county_label = f" — {county}" if county else ""
+    default_title = f"Optimal Solar & Storage vs Battery Capex{county_label}"
+    fig_title = title if title is not None else default_title
+
+    fig, (ax_top, ax_bottom) = plt.subplots(
+        2, 1, figsize=(10, 7), sharex=True, tight_layout=True
+    )
+
+    for scen in scenario_order:
+        sub = plot_df[plot_df["scenario"] == scen].sort_values("battery_capex_kwh")
+        if sub.empty:
+            raise ValueError(f"No co-opt sweep rows for scenario '{scen}'")
+        color = colors.get(scen, "#333333")
+        ax_top.plot(sub["battery_capex_kwh"], sub["batt_kwh"], label=scen, color=color, linewidth=2)
+        ax_bottom.plot(sub["battery_capex_kwh"], sub["pv_kw"], label=scen, color=color, linewidth=2)
+
+    for val, label, color in reference_prices:
+        ax_top.axvline(val, color=color, linestyle="--", linewidth=1.5, label=label)
+        ax_bottom.axvline(val, color=color, linestyle="--", linewidth=1.5, label="_nolegend_")
+
+    ax_top.set_ylabel("Optimal Battery Size (kWh)")
+    ax_top.set_title(fig_title)
+    ax_top.legend(loc="best", fontsize=9)
+    ax_top.grid(True, alpha=0.3)
+
+    ax_bottom.set_ylabel("Optimal PV Size (kW)")
+    ax_bottom.set_xlabel("Battery Capex ($/kWh)")
+    ax_bottom.grid(True, alpha=0.3)
+
+    return fig
+
+
 def recommended_additional_plots() -> List[str]:
     return [
         "Scenario vs. Effective Electricity Price: scatter of price vs. payback (with solar)",
