@@ -1274,94 +1274,48 @@ def process(
         print(f"[step9b] Warning: could not write/merge capacity summary CSV: {e}")
 
 
-# Where is the total cost for the co-optimized values?
 def main():
     p = argparse.ArgumentParser(description="Step 9b: Co‑optimize PV/Battery sizing and hourly dispatch")
     p.add_argument("--base-input-dir", default="data/loadprofiles")
     p.add_argument("--base-output-dir", default="data/loadprofiles")
     p.add_argument("--scenario", required=True)
-    p.add_argument("--housing-type", default="single-family-detached")
     p.add_argument("--counties", nargs="*")
-    p.add_argument("--plan", help="Override plan name for the resolved utility (e.g., E-TOU-D, TOU-D-4-9PM)")
-    p.add_argument("--allow-grid-charging", action="store_true")
-    # Battery export flags (default: enabled)
-    p.add_argument("--allow-batt-export", dest="allow_batt_export", action="store_true", default=True,
-                   help="Allow Battery→Grid exports (default: enabled)")
-    p.add_argument("--disallow-batt-export", dest="allow_batt_export", action="store_false",
-                   help="Disable Battery→Grid exports")
-    p.add_argument("--debug-prices", action="store_true", help="Write price diagnostics CSV/plot for each county")
-    p.add_argument("--batt-capex-sweep", default="", help="Comma-separated list of battery capex ($/kWh) for sweep plot")
-    p.add_argument("--batt-size-sweep", default="", help="Comma-separated list of fixed battery sizes (kWh) for heatmap")
-    p.add_argument("--pv-size-sweep", default="", help="Comma-separated list of fixed PV sizes (kW) for PV×battery heatmap")
-    p.add_argument("--pv-capex-sweep", default="", help="Comma-separated list of PV capex ($/kW) for sensitivity sweeps")
-    p.add_argument("--coarse-sweeps", action="store_true", help="Use 12x24 monthly-hourly averages for sweep plots")
     p.add_argument("--use-defaults", action="store_true",
-                   help="Fill in any unspecified sweep lists with built-in defaults "
-                        "(DEFAULT_BATT_CAPEX_SWEEP, DEFAULT_BATT_SIZE_SWEEP, DEFAULT_PV_SIZE_SWEEP)")
+                   help="Use built-in sweep values (DEFAULT_BATT_CAPEX_SWEEP, "
+                        "DEFAULT_BATT_SIZE_SWEEP, DEFAULT_PV_SIZE_SWEEP)")
+    p.add_argument("--coarse-sweeps", action="store_true",
+                   help="Use 12×24 monthly-hourly averages for sweep plots (faster)")
     p.add_argument("--discount-rate", type=float, default=0.07)
     p.add_argument("--pv-capex-kw", type=float, default=2830.0)
     p.add_argument("--batt-capex-kwh", type=float, default=800.0)
-    p.add_argument("--batt-capex-kw", type=float, default=0.0)
-    p.add_argument("--pv-life-yrs", type=int, default=25)
-    p.add_argument("--batt-life-yrs", type=int, default=15)
-    p.add_argument("--batt-degrade-cost-kwh", type=float, default=0.0)
     args = p.parse_args()
 
-    sweep_vals = []
-    if args.batt_capex_sweep:
-        try:
-            sweep_vals = [float(v.strip()) for v in args.batt_capex_sweep.split(",") if v.strip()]
-        except Exception:
-            raise ValueError("Invalid --batt-capex-sweep list; expected comma-separated numbers.")
-    size_vals = []
-    if args.batt_size_sweep:
-        try:
-            size_vals = [float(v.strip()) for v in args.batt_size_sweep.split(",") if v.strip()]
-        except Exception:
-            raise ValueError("Invalid --batt-size-sweep list; expected comma-separated numbers.")
-    pv_vals = []
-    if args.pv_size_sweep:
-        try:
-            pv_vals = [float(v.strip()) for v in args.pv_size_sweep.split(",") if v.strip()]
-        except Exception:
-            raise ValueError("Invalid --pv-size-sweep list; expected comma-separated numbers.")
-    pv_capex_vals = []
-    if args.pv_capex_sweep:
-        try:
-            pv_capex_vals = [float(v.strip()) for v in args.pv_capex_sweep.split(",") if v.strip()]
-        except Exception:
-            raise ValueError("Invalid --pv-capex-sweep list; expected comma-separated numbers.")
-
-    if args.use_defaults:
-        if not sweep_vals:
-            sweep_vals = list(DEFAULT_BATT_CAPEX_SWEEP)
-        if not size_vals:
-            size_vals = list(DEFAULT_BATT_SIZE_SWEEP)
-        if not pv_vals:
-            pv_vals = list(DEFAULT_PV_SIZE_SWEEP)
+    sweep_vals = list(DEFAULT_BATT_CAPEX_SWEEP) if args.use_defaults else None
+    size_vals  = list(DEFAULT_BATT_SIZE_SWEEP)  if args.use_defaults else None
+    pv_vals    = list(DEFAULT_PV_SIZE_SWEEP)    if args.use_defaults else None
 
     process(
         base_input_dir=args.base_input_dir,
         base_output_dir=args.base_output_dir,
         scenario=args.scenario,
-        housing_type=args.housing_type,
+        housing_type="single-family-detached",
         counties=args.counties,
-        plan_override=args.plan,
-        allow_grid_charging=args.allow_grid_charging,
-        allow_batt_export=args.allow_batt_export,
-        debug_prices=args.debug_prices,
-        batt_capex_sweep=sweep_vals if sweep_vals else None,
-        batt_size_sweep=size_vals if size_vals else None,
-        pv_size_sweep=pv_vals if pv_vals else None,
-        pv_capex_sweep=pv_capex_vals if pv_capex_vals else None,
+        plan_override=None,
+        allow_grid_charging=False,
+        allow_batt_export=True,
+        debug_prices=False,
+        batt_capex_sweep=sweep_vals,
+        batt_size_sweep=size_vals,
+        pv_size_sweep=pv_vals,
+        pv_capex_sweep=None,
         coarse_sweeps=args.coarse_sweeps,
         discount_rate=args.discount_rate,
         pv_capex_per_kw=args.pv_capex_kw,
         batt_capex_per_kwh=args.batt_capex_kwh,
-        batt_capex_per_kw=args.batt_capex_kw,
-        pv_life_yrs=args.pv_life_yrs,
-        batt_life_yrs=args.batt_life_yrs,
-        batt_degrade_cost_per_kwh=args.batt_degrade_cost_kwh,
+        batt_capex_per_kw=0.0,
+        pv_life_yrs=25,
+        batt_life_yrs=15,
+        batt_degrade_cost_per_kwh=0.0,
     )
 
 
