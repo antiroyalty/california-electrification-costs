@@ -100,6 +100,21 @@ RATE_PLANS = {
     "SDG&E": SDGE_RATE_PLANS,
 }
 
+# ---------------------------------------------------------------------------
+# Default sweep values — used when --use-defaults is passed.
+# Covers the range from very cheap future batteries to current market prices.
+# ---------------------------------------------------------------------------
+DEFAULT_BATT_CAPEX_SWEEP: List[float] = [
+    25, 50, 75, 100, 125, 150, 175, 200, 250, 300,
+    350, 400, 500, 600, 700, 750, 800, 900, 1000, 1200,
+]
+DEFAULT_BATT_SIZE_SWEEP: List[float] = [
+    0, 2, 4, 6, 8, 10, 12, 15, 20, 25, 30, 40, 50,
+]
+DEFAULT_PV_SIZE_SWEEP: List[float] = [
+    0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0,
+]
+
 
 def _format_pv_capex_tag(value: float) -> str:
     tag = f"pv{value}"
@@ -483,6 +498,7 @@ def _write_batt_adoption_curve(
     county: str,
     *,
     base_pv_capex: float,
+    scenario: str,
     reference_lines: List[tuple[float, str, str]],
 ) -> None:
     csv_path = os.path.join(out_dir, f"coopt_batt_capex_sweep_{county}.csv")
@@ -509,7 +525,7 @@ def _write_batt_adoption_curve(
             label="Optimal Battery Size (kWh)",
         )
         ax_top.set_ylabel("Optimal Battery Size (kWh)")
-        ax_top.set_title("Battery Adoption Curve Under NEM 3.0 — Alameda County")
+        ax_top.set_title(f"Battery Adoption Curve Under NEM 3.0. {scenario}. {county}.")
         ax_top.grid(True, alpha=0.3)
 
         ax_bottom.plot(
@@ -1044,6 +1060,7 @@ def process(
                 out_dir,
                 county_slug,
                 base_pv_capex=pv_capex_per_kw,
+                scenario=scenario,
                 reference_lines=[
                     (1248.0, "Powerwall 3 (pre-incentive) ~$1,248/kWh", "#f28e2b"),
                     (874.0, "ITC only ~$874/kWh", "#f5a742"),
@@ -1278,6 +1295,9 @@ def main():
     p.add_argument("--pv-size-sweep", default="", help="Comma-separated list of fixed PV sizes (kW) for PV×battery heatmap")
     p.add_argument("--pv-capex-sweep", default="", help="Comma-separated list of PV capex ($/kW) for sensitivity sweeps")
     p.add_argument("--coarse-sweeps", action="store_true", help="Use 12x24 monthly-hourly averages for sweep plots")
+    p.add_argument("--use-defaults", action="store_true",
+                   help="Fill in any unspecified sweep lists with built-in defaults "
+                        "(DEFAULT_BATT_CAPEX_SWEEP, DEFAULT_BATT_SIZE_SWEEP, DEFAULT_PV_SIZE_SWEEP)")
     p.add_argument("--discount-rate", type=float, default=0.07)
     p.add_argument("--pv-capex-kw", type=float, default=2830.0)
     p.add_argument("--batt-capex-kwh", type=float, default=800.0)
@@ -1311,6 +1331,14 @@ def main():
             pv_capex_vals = [float(v.strip()) for v in args.pv_capex_sweep.split(",") if v.strip()]
         except Exception:
             raise ValueError("Invalid --pv-capex-sweep list; expected comma-separated numbers.")
+
+    if args.use_defaults:
+        if not sweep_vals:
+            sweep_vals = list(DEFAULT_BATT_CAPEX_SWEEP)
+        if not size_vals:
+            size_vals = list(DEFAULT_BATT_SIZE_SWEEP)
+        if not pv_vals:
+            pv_vals = list(DEFAULT_PV_SIZE_SWEEP)
 
     process(
         base_input_dir=args.base_input_dir,
