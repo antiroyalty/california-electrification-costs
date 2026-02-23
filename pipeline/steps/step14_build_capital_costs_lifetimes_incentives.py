@@ -619,7 +619,6 @@ def process(
         info="starting_capital_costs_build",
         scenario=scenario, 
         housing_type=housing_type,
-        log_level="debug"
         )
 
     # 1) instantiate
@@ -679,7 +678,6 @@ def process(
         rows_ledger=len(ledger_df),
         rows_summary=len(summary),
         rows_summary_with_pv=len(summary_with_pv),
-        log_level="debug"
     )
 
     result = {

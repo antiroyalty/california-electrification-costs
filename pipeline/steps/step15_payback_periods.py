@@ -606,7 +606,6 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
 
                         log(
                             at="payback_diagnostic",
-                            log_level="debug",
                             county=county,
                             county_slug=county_slug,
                             utility=util,
@@ -677,7 +676,6 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
             info="payback_calculation_failed",
             scenario=scenario,
             error=str(e),
-            log_level="debug"
         )
         return pd.DataFrame()
 
@@ -715,7 +713,7 @@ def process(base_input_dir: str, scenario: str, housing_type: str, counties: lis
         info="starting_payback_calculations",
         scenario=scenario,
         housing_type=housing_type,
-        counties_count=len(counties)
+        counties_count=len(counties),
     )
     
     try:
