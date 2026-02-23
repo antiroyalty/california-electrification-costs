@@ -55,7 +55,6 @@ def run_step9b(scenario: str, counties: Optional[List[str]] = None) -> bool:
         sys.executable, "-m", "pipeline.steps.step9b_cooptimize_pv_battery",
         "--scenario", scenario,
         "--use-defaults",
-        "--coarse-sweeps",
     ]
     if counties:
         cmd += ["--counties"] + counties
