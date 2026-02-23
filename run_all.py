@@ -1,21 +1,19 @@
 #!/usr/bin/env python3
 """
-run_all.py — Run the full analysis pipeline for all (or selected) scenarios.
+run_all.py — Run step9b co-optimization for all (or selected) _coopt scenarios.
 
-For every scenario:        runs cost_service.py  (pipeline steps 1–22, Alameda only)
-For every _coopt scenario: additionally runs step9b with default sweeps
+By default runs only step9b with default sweeps. Pass --include-cost-service
+to also regenerate load profiles via cost_service.py first.
 
-Note: cost_service.py is currently hardcoded to Alameda County.
-      --counties only controls which counties step9b runs for.
+Note: cost_service.py is hardcoded to Alameda County.
+      --counties controls which counties step9b runs for.
 
 Usage
 -----
-  python3 run_all.py                           # all scenarios, Alameda
-  python3 run_all.py --coopt-only              # step9b only (skip cost_service)
-  python3 run_all.py --skip-coopt              # cost_service only (skip step9b)
-  python3 run_all.py --skip-cost-service       # step9b only (load profiles exist)
+  python3 run_all.py                                        # all coopt scenarios
   python3 run_all.py --scenarios baseline_coopt full_electric_ev_coopt
   python3 run_all.py --counties alameda los-angeles
+  python3 run_all.py --include-cost-service                 # also regenerate load profiles
 """
 
 import argparse
@@ -81,22 +79,10 @@ def main() -> None:
         help="County slug(s) passed to step9b (default: alameda)",
     )
     p.add_argument(
-        "--coopt-only", action="store_true",
-        help="Only run step9b for _coopt scenarios; skip cost_service entirely",
-    )
-    p.add_argument(
-        "--skip-coopt", action="store_true",
-        help="Skip step9b; only run cost_service for all scenarios",
-    )
-    p.add_argument(
-        "--skip-cost-service", action="store_true",
-        help="Skip cost_service.py (use when load profiles are already generated)",
+        "--include-cost-service", action="store_true",
+        help="Also run cost_service.py for all scenarios before step9b",
     )
     args = p.parse_args()
-
-    if args.coopt_only and args.skip_coopt:
-        print("Error: --coopt-only and --skip-coopt are mutually exclusive.")
-        sys.exit(1)
 
     # Determine which scenarios to run
     if args.scenarios:
@@ -106,24 +92,22 @@ def main() -> None:
             print(f"Available: {', '.join(SCENARIOS)}")
             sys.exit(1)
         scenarios_to_run = args.scenarios
-    elif args.coopt_only:
-        scenarios_to_run = COOPT_SCENARIOS
     else:
-        scenarios_to_run = list(SCENARIOS.keys())
+        scenarios_to_run = COOPT_SCENARIOS
 
     coopt_to_run = [s for s in scenarios_to_run if s.endswith("_coopt")]
 
     failures: List[str] = []
 
-    # Step 1: cost_service for all scenarios
-    if not args.coopt_only and not args.skip_cost_service:
+    # Step 1: cost_service (opt-in only)
+    if args.include_cost_service:
         print(f"\nRunning cost_service.py for {len(scenarios_to_run)} scenario(s)...")
         for scenario in scenarios_to_run:
             if not run_cost_service(scenario):
                 failures.append(f"cost_service: {scenario}")
 
     # Step 2: step9b for coopt scenarios
-    if not args.skip_coopt and coopt_to_run:
+    if coopt_to_run:
         print(f"\nRunning step9b for {len(coopt_to_run)} coopt scenario(s)...")
         for scenario in coopt_to_run:
             if not run_step9b(scenario, counties=args.counties):
