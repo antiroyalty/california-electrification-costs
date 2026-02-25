@@ -596,11 +596,22 @@ def plot_savings_and_bills_dotline(
 
 # ---------- Co-opt sweep comparison collection and plotting ----------
 
+# 2026 reference prices (no federal ITC; expired Dec 31, 2025)
+# Source: NREL ATB 2025 Residential Battery Storage (updated 02/26/2025),
+#         5 kW / 12.5 kWh system; $/kWh = $/kW ÷ 2.5 hr duration
 COOPT_REFERENCE_PRICES: List[Tuple[float, str, str]] = [
-    (1248.0, "Powerwall 3 (pre-incentive) ~$1,248/kWh", "#f28e2b"),
-    (874.0, "ITC only ~$874/kWh", "#f5a742"),
-    (724.0, "ITC + SGIP ~$724/kWh", "#f9bf64"),
+    (1520.0, "ATB 2025 Conservative (no ITC) ~$1,520/kWh", "#984ea3"),  # purple
+    (1320.0, "ATB 2025 Moderate (no ITC) ~$1,320/kWh",     "#ff7f00"),  # orange
+    (1000.0, "ATB 2025 Advanced (no ITC) ~$1,000/kWh",     "#4daf4a"),  # green
 ]
+
+# Shaded band from Advanced ($1,000/kWh) to Conservative ($1,520/kWh)
+# Tuple: (low, high, label, color)
+COOPT_ATB_BAND: Tuple[float, float, str, str] = (
+    1000.0, 1520.0,
+    "NREL ATB 2025 installed cost range (Advanced–Conservative, no ITC)",
+    "#aaaaaa",  # neutral gray — doesn't compete with the scenario or reference lines
+)
 
 _SCENARIO_COLORS = [
     "#1f77b4", "#d62728", "#2ca02c", "#9467bd",
@@ -683,6 +694,7 @@ def plot_coopt_sweep_comparison(
     county: Optional[str] = None,
     colors: Optional[Dict[str, str]] = None,
     reference_prices: Optional[List[Tuple[float, str, str]]] = None,
+    reference_band: Optional[Tuple[float, float, str, str]] = None,
     title: Optional[str] = None,
 ) -> plt.Figure:
     """Plot optimal battery and PV size vs battery capex, one line per scenario.
@@ -724,6 +736,8 @@ def plot_coopt_sweep_comparison(
 
     if reference_prices is None:
         reference_prices = COOPT_REFERENCE_PRICES
+    if reference_band is None:
+        reference_band = COOPT_ATB_BAND
 
     county_label = f" — {county}" if county else ""
     default_title = f"Optimal Solar & Storage vs Battery Capex{county_label}"
@@ -732,6 +746,22 @@ def plot_coopt_sweep_comparison(
     fig, (ax_top, ax_bottom) = plt.subplots(
         2, 1, figsize=(10, 7), sharex=True, tight_layout=True
     )
+
+    # Draw shaded ATB range band first so it sits behind the scenario lines
+    if reference_band is not None:
+        low, high, band_label, band_color = reference_band
+        ax_top.axvspan(low, high, alpha=0.12, color=band_color, zorder=0, label=band_label)
+        ax_bottom.axvspan(low, high, alpha=0.12, color=band_color, zorder=0, label="_nolegend_")
+        # Annotate each subplot inside the band using a blended transform
+        # (x in data coords, y in axes [0–1] coords)
+        mid = (low + high) / 2
+        for ax in (ax_top, ax_bottom):
+            ax.text(
+                mid, 0.97, "NREL ATB 2025\n(no ITC)",
+                transform=ax.get_xaxis_transform(),
+                ha="center", va="top", fontsize=7.5,
+                color=band_color, style="italic",
+            )
 
     for scen in scenario_order:
         sub = plot_df[plot_df["scenario"] == scen].sort_values("battery_capex_kwh")
