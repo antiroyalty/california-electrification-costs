@@ -1459,7 +1459,7 @@ def process(base_input_dir: str, base_output_dir: str, scenario: str,
         # Auto-open in browser
         import webbrowser
         webbrowser.open(f'file://{os.path.abspath(dashboard_path)}')
-        
+
         print(f"\nStep 16 complete! Created diagnostic dashboard:")
         print(f"  - File: {dashboard_path}")
         print(f"  - Opened in browser automatically")
