@@ -98,7 +98,7 @@ if __name__ == "__main__":
     print(f"\nRunning cost analysis for scenario: {scenario}")
     print(f"Housing type: {housing_type}")
     all_counties = norcal_counties + central_counties + socal_counties
-    current_county = ["Alpine County"]
+    current_county = ["Los Angeles County"]
     print(f"Counties: {len(all_counties)} total counties")
     print(f"Running for: {current_county}")
     print("-" * 60)

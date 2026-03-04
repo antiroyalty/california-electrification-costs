@@ -340,8 +340,16 @@ def aggregate_to_hourly(file_path, column_name):
         df = pd.read_csv(file_path, parse_dates=["timestamp"])
         if column_name not in df.columns:
             raise ValueError(f"Column '{column_name}' not found in file: {file_path}")
-        
+
         df = df.set_index("timestamp")
+
+        # Drop leading sub-hourly rows so resample doesn't create a partial first bin.
+        # Some county gas files start a few 15-min intervals before the first clean hour
+        # (e.g. 21:15 instead of 22:00), which produces 8761 bins instead of 8760.
+        first_ts = df.index[0]
+        if first_ts.minute != 0 or first_ts.second != 0:
+            df = df[df.index >= first_ts.ceil("H")]
+
         hourly_df = df.resample("H")[column_name].sum().reset_index() # Resample and reindex
 
         return hourly_df[column_name] # Return the single column of interest
