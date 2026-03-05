@@ -17,8 +17,9 @@ REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from helpers.electricity_rate_helpers import PGE_RATE_PLANS
+from helpers.electricity_rate_helpers import PGE_RATE_PLANS, SCE_RATE_PLANS
 from pipeline.steps.step9b_cooptimize_core import _hourly_import_rate
+from pipeline.steps.step12_evaluate_electricity_rates import _hourly_import_rate as _step12_rate
 
 
 def _ts(year: int, month: int, day: int, hour: int) -> pd.Timestamp:
@@ -106,3 +107,67 @@ class TestETOUD:
         # Hour 16 is NOT peak on E-TOU-D (peak only 17–19)
         ts = JULY_WEEKDAY.replace(hour=16)
         assert rate("E-TOU-D", ts) == pytest.approx(0.42966)
+
+
+# ---------------------------------------------------------------------------
+# SCE TOU-D-5-8PM winter: midPeakHours plan without a 'peak' key
+#
+# Root cause: step12._hourly_import_rate doesn't check 'midPeakHours', so winter
+# hours outside superOffPeakHours fall through to:
+#   day_rates.get('offPeak', day_rates['peak'])
+# Python evaluates day_rates['peak'] eagerly before calling .get(), even when
+# 'offPeak' is present. Since the winter plan has no 'peak' key, this crashes
+# with KeyError: 'peak'.
+#
+# Affected hours on a winter weekday: 0–7 (off-peak) and 17–23 (mid-peak + off-peak).
+# Hours 8–16 (superOffPeakHours) already return correctly.
+# ---------------------------------------------------------------------------
+
+# Jan 2 2018 = Tuesday (weekday), Jan 6 2018 = Saturday (weekend)
+SCE_JAN_WEEKDAY = pd.Timestamp(2018, 1, 2, 0)
+SCE_JAN_WEEKEND = pd.Timestamp(2018, 1, 6, 0)
+
+
+def _step12(plan_name: str, ts: pd.Timestamp) -> float:
+    """Call step12's _hourly_import_rate with an SCE plan."""
+    return _step12_rate(SCE_RATE_PLANS[plan_name], ts.to_pydatetime())
+
+
+class TestStep12SCEWinterMidPeak:
+    """SCE TOU-D-5-8PM winter uses midPeakHours/midPeak without a 'peak' key.
+
+    step12._hourly_import_rate only checks peakHours, partPeakHours, and
+    superOffPeakHours. Hours that fall outside those ranges crash at:
+      return float(day_rates.get('offPeak', day_rates['peak']))
+    because Python evaluates day_rates['peak'] eagerly even when 'offPeak' exists.
+
+    Correct expected values from electricity_rate_helpers.py:
+      superOffPeak $0.34  hours 8–16
+      midPeak      $0.61  hours 17–19
+      offPeak      $0.40  hours 0–7 and 20–23
+    """
+
+    def test_super_off_peak_hour_passes(self):
+        # Hour 10 is in superOffPeakHours [8-16]; step12 already handles this.
+        ts = SCE_JAN_WEEKDAY.replace(hour=10)
+        assert _step12("TOU-D-5-8PM", ts) == pytest.approx(0.34)
+
+    def test_overnight_off_peak_hour(self):
+        # Hour 3 is in offPeakHours [0-7]; step12 misses it and crashes.
+        ts = SCE_JAN_WEEKDAY.replace(hour=3)
+        assert _step12("TOU-D-5-8PM", ts) == pytest.approx(0.40)
+
+    def test_mid_peak_hour(self):
+        # Hour 18 is in midPeakHours [17-19]; step12 misses it and crashes.
+        ts = SCE_JAN_WEEKDAY.replace(hour=18)
+        assert _step12("TOU-D-5-8PM", ts) == pytest.approx(0.61)
+
+    def test_late_evening_off_peak_hour(self):
+        # Hour 21 is in offPeakHours [17-23] outside midPeak; step12 crashes.
+        ts = SCE_JAN_WEEKDAY.replace(hour=21)
+        assert _step12("TOU-D-5-8PM", ts) == pytest.approx(0.40)
+
+    def test_weekend_off_peak_hour(self):
+        # Same plan, weekend, hour 3 — also has no 'peak' key, should be offPeak.
+        ts = SCE_JAN_WEEKEND.replace(hour=3)
+        assert _step12("TOU-D-5-8PM", ts) == pytest.approx(0.40)
