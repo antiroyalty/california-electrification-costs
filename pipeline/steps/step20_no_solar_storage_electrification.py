@@ -33,6 +33,7 @@ from helpers.main_helpers import slugify_county_name, get_scenario_path, git_sho
 from helpers.capital_cost_map_builder import LIFETIMES
 from .step15_payback_periods import vehicle_annual_adders_from_ledger
 from scenarios import SCENARIOS
+from evaluations.eac import crf as _crf
 
 try:
     # Helper to find latest totals CSV per county
@@ -53,14 +54,6 @@ def _read_capital_ledger(base_input_dir: str, scenario: str, housing_type: str) 
         return pd.read_csv(path)
     except Exception:
         return None
-
-
-def _crf(rate: float, n_years: float) -> float:
-    if rate <= 0 or n_years <= 0:
-        return 1.0 / max(n_years, 1.0)
-    r = float(rate)
-    n = float(n_years)
-    return (r * (1 + r) ** n) / (((1 + r) ** n) - 1)
 
 
 def _read_totals_cost_default(base_input_dir: str, scenario: str, housing_type: str, county_slug: str) -> float:
