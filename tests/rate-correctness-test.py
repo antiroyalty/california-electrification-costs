@@ -10,8 +10,15 @@ Each test documents the specific tariff rule it is checking and the source.
 Run with: pytest tests/rate-correctness-test.py -v
 """
 
+import os
+import sys
+
 import pandas as pd
 import pytest
+
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
 
 from helpers.electricity_rate_helpers import PGE_RATE_PLANS, BASELINE_ALLOWANCES
 from pipeline.steps.step9b_cooptimize_core import _hourly_import_rate
