@@ -62,6 +62,7 @@ from .step9_solar_storage_dispatch_core import (
     compute_system_capacity_kW,
 )
 from .step12_evaluate_electricity_rates import calculate_nem3_annual_costs
+from evaluations.eac import crf as _crf
 
 
 # Constants
@@ -126,12 +127,6 @@ class CountyContext:
     lifetimes: Lifetimes
     discount_rate: float
     bounds: Bounds
-
-
-def _crf(r: float, n: int) -> float:
-    if r <= 0:
-        return 1.0 / max(1, n)
-    return r * (1 + r) ** n / ((1 + r) ** n - 1)
 
 
 def simulate_flows(solar_kw: float, battery_kwh: float, ctx: CountyContext) -> Tuple[List[float], List[float]]:

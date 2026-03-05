@@ -6,6 +6,8 @@ from typing import List, Optional, Tuple
 
 import pandas as pd
 
+from evaluations.eac import crf as _crf
+
 try:
     import pulp
 except Exception:
@@ -142,36 +144,68 @@ def _timestamp_index_8760(year: int = 2018) -> List[pd.Timestamp]:
 
 
 def _hourly_import_rate(plan_details: dict, ts: pd.Timestamp) -> float:
+    """Return the import rate ($/kWh) for a given timestamp.
+
+    Rate plan dicts are structured as:
+        plan_details[season]["weekdays" | "weekends"][rate_keys]
+
+    BUG HISTORY (fixed 2026-03-03, caught by rate-helpers-test.py):
+        The original code used rates.get("weekend") — singular — but every rate
+        plan in electricity_rate_helpers.py uses "weekends" — plural. The silent
+        fallback (if not day_rates: day_rates = rates) then set day_rates to the
+        season dict, which has no rate keys, so the final .get("offPeak", .get("peak",
+        0.0)) returned 0.0 for every weekend hour. Weekend import rates were zero
+        across all PGE/SCE/SDGE plans for the entire run history.
+
+        Impact: weekend solar arbitrage appeared artificially profitable in the LP
+        (zero import cost means zero savings from shifting load), so the optimizer
+        had less incentive to charge the battery on weekends. The zero export credit
+        on weekends inflated apparent savings from weekday-only dispatch. The effect
+        is partially self-canceling but not zero — results from any run before this
+        fix should be treated as having incorrect weekend rate assumptions.
+    """
     month = ts.month
-    # Season mapping: consistent with step12 (Jun-Sep = summer)
     season = "summer" if 6 <= month <= 9 else "winter"
-    rates = plan_details.get(season, {})
-    # day type (weekday/weekend) structure if available
-    day_rates = rates.get("weekend") if ts.weekday() >= 5 else rates.get("weekdays")
-    if not day_rates:
+    rates = plan_details.get(season)
+    if rates is None:
+        raise KeyError(
+            f"Season '{season}' not found in rate plan. "
+            f"Available keys: {list(plan_details.keys())}"
+        )
+
+    day_type = "weekends" if ts.weekday() >= 5 else "weekdays"
+    if day_type in rates:
+        day_rates = rates[day_type]
+    elif "weekdays" in rates or "weekends" in rates:
+        # The plan has a weekday/weekend split but the requested key is missing.
+        # This is the class of bug described above — fail loudly instead of
+        # silently returning 0.
+        raise KeyError(
+            f"Rate plan has a weekday/weekend split but '{day_type}' key not found. "
+            f"Available keys in '{season}': {list(rates.keys())}. "
+            f"Check for 'weekdays'/'weekends' key name typos in electricity_rate_helpers.py."
+        )
+    else:
+        # Plan has no day-type split; season-level rates apply directly.
         day_rates = rates
+
     h = ts.hour
-    # Common structures across PGE/SCE/SDGE helpers
-    if "peakHours" in day_rates and h in day_rates.get("peakHours", []):
-        return float(day_rates.get("peak", 0.0))
-    if "partPeakHours" in day_rates and h in day_rates.get("partPeakHours", []):
-        return float(day_rates.get("partPeak", 0.0))
-    if "onPeakHours" in day_rates and h in day_rates.get("onPeakHours", []):
-        return float(day_rates.get("onPeak", 0.0))
-    if "midPeakHours" in day_rates and h in day_rates.get("midPeakHours", []):
-        return float(day_rates.get("midPeak", 0.0))
-    if "superOffPeakHours" in day_rates and h in day_rates.get("superOffPeakHours", []):
-        return float(day_rates.get("superOffPeak", 0.0))
-    return float(day_rates.get("offPeak", day_rates.get("peak", 0.0)))
-
-
-def _crf(discount_rate: float, years: int) -> float:
-    r = float(discount_rate)
-    n = int(years)
-    if r <= 0:
-        return 1.0 / max(n, 1)
-    a = (1 + r) ** n
-    return r * a / (a - 1)
+    if "peakHours" in day_rates and h in day_rates["peakHours"]:
+        return float(day_rates["peak"])
+    if "partPeakHours" in day_rates and h in day_rates["partPeakHours"]:
+        return float(day_rates["partPeak"])
+    if "onPeakHours" in day_rates and h in day_rates["onPeakHours"]:
+        return float(day_rates["onPeak"])
+    if "midPeakHours" in day_rates and h in day_rates["midPeakHours"]:
+        return float(day_rates["midPeak"])
+    if "superOffPeakHours" in day_rates and h in day_rates["superOffPeakHours"]:
+        return float(day_rates["superOffPeak"])
+    if "offPeak" not in day_rates and "peak" not in day_rates:
+        raise KeyError(
+            f"No fallback rate key ('offPeak' or 'peak') found in {day_type}/{season} "
+            f"rates at hour {h}. Available keys: {list(day_rates.keys())}"
+        )
+    return float(day_rates.get("offPeak", day_rates["peak"]))
 
 
 def _ensure_pulp() -> None:
