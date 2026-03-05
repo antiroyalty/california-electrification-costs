@@ -50,6 +50,12 @@ class TestAnnuityFactor:
         # Spreading the same NPV over more years reduces the annual payment.
         assert annuity_factor(0.07, 30) < annuity_factor(0.07, 25)
 
+    def test_matches_eac_crf(self):
+        """evaluations.npv.annuity_factor and evaluations.eac.crf must agree."""
+        from evaluations.eac import crf
+        for r, n in [(0.07, 25), (0.05, 15), (0.10, 30)]:
+            assert annuity_factor(r, n) == pytest.approx(crf(r, n), rel=1e-10)
+
 
 # ---------------------------------------------------------------------------
 # npv
