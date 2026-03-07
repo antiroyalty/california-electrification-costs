@@ -28,6 +28,22 @@ def _plan_pref_from(rate_plans: Optional[Dict[str, Dict[str, str]]]) -> Optional
         return None
 
 
+def _is_coopt_scenario(name: str) -> bool:
+    return str(name).endswith("_coopt")
+
+
+def _cross_scenario_list(current_scenario: str) -> List[str]:
+    """Return cross-scenario set aligned to the current scenario family."""
+    want_coopt = _is_coopt_scenario(current_scenario)
+    return [s for s in SCENARIOS.keys() if _is_coopt_scenario(s) == want_coopt]
+
+
+def _vehicle_compare_pair(current_scenario: str) -> List[str]:
+    if _is_coopt_scenario(current_scenario):
+        return ["baseline_ice_car_coopt", "baseline_ev_car_coopt"]
+    return ["baseline_ice_car", "baseline_ev_car"]
+
+
 def run(cfg: Config) -> None:
     """Run Module 4: visualize and compare results (Steps 15, 16, 18–22)."""
     c_list: List[str] = list(cfg.counties)
@@ -79,13 +95,13 @@ def run(cfg: Config) -> None:
     #     # Non-fatal — continue with other visualizations
     #     print(f"[Step16] Warning: map generation failed: {e}")
 
-    # 18) Cross-scenario EAC (use all scenarios)
+    # 18) Cross-scenario EAC (stay within current scenario family: coopt vs non-coopt)
     log_step(18)
     Step18CrossScenarioComparisons.process(
         cfg.base_input_dir,
         cfg.output_dir,
         cfg.housing_type,
-        list(SCENARIOS.keys()),
+        _cross_scenario_list(cfg.scenario),
         c_list,
         plan_preference=plan_preference,
         electricity_variant=cfg.electricity_variant,
@@ -97,7 +113,7 @@ def run(cfg: Config) -> None:
         cfg.base_input_dir,
         cfg.output_dir,
         cfg.housing_type,
-        ["baseline_ice_car", "baseline_ev_car"],
+        _vehicle_compare_pair(cfg.scenario),
         c_list,
         plan_preference=plan_preference,
         electricity_variant=cfg.electricity_variant,
