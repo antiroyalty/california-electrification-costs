@@ -200,12 +200,14 @@ def _hourly_import_rate(plan_details: dict, ts: pd.Timestamp) -> float:
         return float(day_rates["midPeak"])
     if "superOffPeakHours" in day_rates and h in day_rates["superOffPeakHours"]:
         return float(day_rates["superOffPeak"])
-    if "offPeak" not in day_rates and "peak" not in day_rates:
-        raise KeyError(
-            f"No fallback rate key ('offPeak' or 'peak') found in {day_type}/{season} "
-            f"rates at hour {h}. Available keys: {list(day_rates.keys())}"
-        )
-    return float(day_rates.get("offPeak", day_rates["peak"]))
+    if "offPeak" in day_rates:
+        return float(day_rates["offPeak"])
+    if "peak" in day_rates:
+        return float(day_rates["peak"])
+    raise KeyError(
+        f"No fallback rate key ('offPeak' or 'peak') found in {day_type}/{season} "
+        f"rates at hour {h}. Available keys: {list(day_rates.keys())}"
+    )
 
 
 def _ensure_pulp() -> None:
