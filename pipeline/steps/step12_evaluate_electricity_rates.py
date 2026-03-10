@@ -109,9 +109,9 @@ def calculate_annual_costs_electricity(load_profile, utility, rate_plan_name):
         energy_cost = hourly_load * rate
         annual_costs[rate_plan_name] += energy_cost
 
-        # Include fixed charges if available (spread monthly)
+        # Include fixed charges if available (daily charge spread across 24 hours)
         fixed_charge = dayotw_rates.get("fixedCharge", 0.0)
-        annual_costs[rate_plan_name] += fixed_charge / 12
+        annual_costs[rate_plan_name] += fixed_charge / 24
 
     return annual_costs
 

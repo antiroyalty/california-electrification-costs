@@ -260,28 +260,28 @@ SCE_RATE_PLANS = {
                     "offPeak": 0.34,
                     "peakHours": list(range(16, 21)),  # 4:00 pm to 9:00 pm
                     "offPeakHours": [h for h in range(24) if h not in range(16, 21)],
-                    "fixedCharge": 0.03,         # Daily basic charge
+                    "fixedCharge": 0.70,         # Daily basic charge
                 },
                 "weekends": {
                     "peak": 0.46,
                     "offPeak": 0.34,
                     "peakHours": list(range(16, 21)),
                     "offPeakHours": [h for h in range(24) if h not in range(16, 21)],
-                    "fixedCharge": 0.03,         # Daily basic charge
+                    "fixedCharge": 0.70,         # Daily basic charge
                 },
                 "weekdaysAfterBaselineCredit": {
                     "peak": 0.48,
                     "offPeak": 0.24,
                     "peakHours": list(range(16, 21)),
                     "offPeakHours": [h for h in range(24) if h not in range(16, 21)],
-                    "fixedCharge": 0.03,         # Daily basic charge
+                    "fixedCharge": 0.70,         # Daily basic charge
                 },
                 "weekendAfterBaselineCredit": {
                     "peak": 0.36,
                     "offPeak": 0.24,
                     "peakHours": list(range(16, 21)),
                     "offPeakHours": [h for h in range(24) if h not in range(16, 21)],
-                    "fixedCharge": 0.03,         # Daily basic charge
+                    "fixedCharge": 0.70,         # Daily basic charge
                 },
             },
             "winter": { # October - May
@@ -292,7 +292,7 @@ SCE_RATE_PLANS = {
                     "peakHours": [16, 17, 18, 19, 20], # Evening
                     "offPeakHours": [21, 22, 23, 24, 1, 2, 3, 4, 5, 6, 7], # Night time
                     "superOffPeakHours": [8, 9, 10, 11, 12, 13, 14, 15], # Sunshine hours
-                    "fixedCharge": 0.03,         # Daily basic charge
+                    "fixedCharge": 0.70,         # Daily basic charge
                 },
                 "weekends": { # Same as weekdays in the winter
                     "peak": 0.51,
@@ -301,7 +301,7 @@ SCE_RATE_PLANS = {
                     "peakHours": [16, 17, 18, 19, 20], # Evening
                     "offPeakHours": [21, 22, 23, 24, 1, 2, 3, 4, 5, 6, 7], # Night time
                     "superOffPeakHours": [8, 9, 10, 11, 12, 13, 14, 15], # Sunshine hours
-                    "fixedCharge": 0.03,         # Daily basic charge
+                    "fixedCharge": 0.70,         # Daily basic charge
                 },
                 "weekdaysAfterBaselineCredit": {
                     "peak": 0.41,
@@ -310,7 +310,7 @@ SCE_RATE_PLANS = {
                     "peakHours": [16, 17, 18, 19, 20], # Evening
                     "offPeakHours": [21, 22, 23, 24, 1, 2, 3, 4, 5, 6, 7], # Night time
                     "superOffPeakHours": [8, 9, 10, 11, 12, 13, 14, 15], # Sunshine hours
-                    "fixedCharge": 0.03,         # Daily basic charge
+                    "fixedCharge": 0.70,         # Daily basic charge
                 },
                 "weekendsAfterBaselineCredit": { # Same as weekdaysAfterBaselineCredit in the winter
                     "peak": 0.41,
@@ -319,10 +319,10 @@ SCE_RATE_PLANS = {
                     "peakHours": [16, 17, 18, 19, 20], # Evening
                     "offPeakHours": [21, 22, 23, 24, 1, 2, 3, 4, 5, 6, 7], # Night time
                     "superOffPeakHours": [8, 9, 10, 11, 12, 13, 14, 15], # Sunshine hours
-                    "fixedCharge": 0.03,         # Daily basic charge
+                    "fixedCharge": 0.70,         # Daily basic charge
                 }
             },
-            "fixedCharge": 0.03,         # Daily basic charge
+            "fixedCharge": 0.70,         # Daily basic charge
             "minimumDailyCharge": 0.35,  # Minimum daily charge
             "baseline_credit": 0.09,
         },
@@ -334,28 +334,28 @@ SCE_RATE_PLANS = {
                 "offPeak": 0.34,   # Off-peak rate
                 "peakHours": list(range(17, 20)),  # 5:00–8:00 p.m.
                 "offPeakHours": [h for h in range(24) if h not in range(17, 20)],
-                "fixedCharge": 0.03,
+                "fixedCharge": 0.79,
             },
             "weekends": {
                 "peak": 0.54,
                 "offPeak": 0.34,
                 "peakHours": list(range(17, 20)),
                 "offPeakHours": [h for h in range(24) if h not in range(17, 20)],
-                "fixedCharge": 0.03,
+                "fixedCharge": 0.79,
             },
             "weekdaysAfterBaselineCredit": {
                 "peak": 0.64,
                 "offPeak": 0.24,
                 "peakHours": [17, 18, 19],  # 5:00–8:00 p.m.
                 "offPeakHours": [h for h in range(24) if h not in [17, 18, 19]],
-                "fixedCharge": 0.03,
+                "fixedCharge": 0.79,
             },
             "weekendAfterBaselineCredit": {
                 "peak": 0.44,
                 "offPeak": 0.24,
                 "peakHours": [17, 18, 19],
                 "offPeakHours": [h for h in range(24) if h not in [17, 18, 19]],
-                "fixedCharge": 0.03,
+                "fixedCharge": 0.79,
             },
         },
         "winter": { # October - May
@@ -366,7 +366,7 @@ SCE_RATE_PLANS = {
                 "offPeakHours": list(range(0, 8)) + list(range(17, 24)),
                 "midPeakHours": list(range(17, 20)),
                 "superOffPeakHours": list(range(8, 17)),
-                "fixedCharge": 0.03,
+                "fixedCharge": 0.79,
             },
             "weekends": {
                 "midPeak": 0.60,         # Applies from 5:00 p.m. to 8:00 p.m.
@@ -375,7 +375,7 @@ SCE_RATE_PLANS = {
                 "offPeakHours": list(range(0, 8)) + list(range(17, 24)),
                 "midPeakHours": list(range(17, 20)),
                 "superOffPeakHours": list(range(8, 17)),
-                "fixedCharge": 0.03,
+                "fixedCharge": 0.79,
             },
             "weekdaysAfterBaselineCredit": {
                 "midPeak": 0.50,
@@ -384,7 +384,7 @@ SCE_RATE_PLANS = {
                 "offPeakHours": list(range(0, 8)) + list(range(17, 24)),
                 "midPeakHours": list(range(17, 20)),
                 "superOffPeakHours": list(range(8, 17)),
-                "fixedCharge": 0.03,
+                "fixedCharge": 0.79,
             },
             "weekendAfterBaselineCredit": {
                 "midPeak": 0.50,
@@ -393,7 +393,7 @@ SCE_RATE_PLANS = {
                 "offPeakHours": list(range(0, 8)) + list(range(17, 24)),
                 "midPeakHours": list(range(17, 20)),
                 "superOffPeakHours": list(range(8, 17)),
-                "fixedCharge": 0.03,
+                "fixedCharge": 0.79,
             },
         },
         "minimumDailyCharge": 0.35,
@@ -406,14 +406,14 @@ SCE_RATE_PLANS = {
                 "offPeak": 0.26,
                 "peakHours": list(range(16, 21)),  # 4:00 pm to 9:00 pm
                 "offPeakHours": [h for h in range(24) if h not in range(16, 21)],
-                "fixedCharge": 0.53, # Aka Daily Basic Charge
+                "fixedCharge": 0.79, # Aka Daily Basic Charge
             },
             "weekends": {
                 "peak": 0.40,
                 "offPeak": 0.26,
                 "peakHours": list(range(16, 21)),
                 "offPeakHours": [h for h in range(24) if h not in range(16, 21)],
-                "fixedCharge": 0.53, # Aka Daily Basic Charge
+                "fixedCharge": 0.79, # Aka Daily Basic Charge
             }
         },
         "winter": {
@@ -424,7 +424,7 @@ SCE_RATE_PLANS = {
                 "peakHours": [16, 17, 18, 19, 20], # Evening
                 "offPeakHours": [21, 22, 23, 24, 1, 2, 3, 4, 5, 6, 7], # Night time
                 "superOffPeakHours": [8, 9, 10, 11, 12, 13, 14, 15], # Sunshine hours
-                "fixedCharge": 0.53, # Aka Daily Basic Charge
+                "fixedCharge": 0.79, # Aka Daily Basic Charge
             },
             "weekends": { # same as weekdays
                 "peak": 0.56,
@@ -433,7 +433,7 @@ SCE_RATE_PLANS = {
                 "peakHours": [16, 17, 18, 19, 20], # Evening
                 "offPeakHours": [21, 22, 23, 24, 1, 2, 3, 4, 5, 6, 7], # Night time
                 "superOffPeakHours": [8, 9, 10, 11, 12, 13, 14, 15], # Sunshine hours
-                "fixedCharge": 0.53, # Aka Daily Basic Charge
+                "fixedCharge": 0.79, # Aka Daily Basic Charge
             }
         },
         "minimumDailyCharge": 0,
