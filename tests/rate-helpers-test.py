@@ -142,36 +142,36 @@ class TestStep12SCEWinterMidPeak:
       return float(day_rates.get('offPeak', day_rates['peak']))
     because Python evaluates day_rates['peak'] eagerly even when 'offPeak' exists.
 
-    Correct expected values from electricity_rate_helpers.py:
-      superOffPeak $0.34  hours 8–16
-      midPeak      $0.61  hours 17–19
-      offPeak      $0.40  hours 0–7 and 20–23
+    Correct expected values from data/utility-rates/sce/tou-d-5-to-8-winter.png:
+      superOffPeak $0.32  hours 8–16
+      midPeak      $0.60  hours 17–19
+      offPeak      $0.38  hours 0–7 and 20–23
     """
 
     def test_super_off_peak_hour_passes(self):
         # Hour 10 is in superOffPeakHours [8-16]; step12 already handles this.
         ts = SCE_JAN_WEEKDAY.replace(hour=10)
-        assert _step12("TOU-D-5-8PM", ts) == pytest.approx(0.34)
+        assert _step12("TOU-D-5-8PM", ts) == pytest.approx(0.32)
 
     def test_overnight_off_peak_hour(self):
         # Hour 3 is in offPeakHours [0-7]; step12 misses it and crashes.
         ts = SCE_JAN_WEEKDAY.replace(hour=3)
-        assert _step12("TOU-D-5-8PM", ts) == pytest.approx(0.40)
+        assert _step12("TOU-D-5-8PM", ts) == pytest.approx(0.38)
 
     def test_mid_peak_hour(self):
         # Hour 18 is in midPeakHours [17-19]; step12 misses it and crashes.
         ts = SCE_JAN_WEEKDAY.replace(hour=18)
-        assert _step12("TOU-D-5-8PM", ts) == pytest.approx(0.61)
+        assert _step12("TOU-D-5-8PM", ts) == pytest.approx(0.60)
 
     def test_late_evening_off_peak_hour(self):
-        # Hour 21 is in offPeakHours [17-23] outside midPeak; step12 crashes.
+        # Hour 21 is in offPeakHours [20-23] outside midPeak; step12 crashes.
         ts = SCE_JAN_WEEKDAY.replace(hour=21)
-        assert _step12("TOU-D-5-8PM", ts) == pytest.approx(0.40)
+        assert _step12("TOU-D-5-8PM", ts) == pytest.approx(0.38)
 
     def test_weekend_off_peak_hour(self):
         # Same plan, weekend, hour 3 — also has no 'peak' key, should be offPeak.
         ts = SCE_JAN_WEEKEND.replace(hour=3)
-        assert _step12("TOU-D-5-8PM", ts) == pytest.approx(0.40)
+        assert _step12("TOU-D-5-8PM", ts) == pytest.approx(0.38)
 
 
 # ---------------------------------------------------------------------------
