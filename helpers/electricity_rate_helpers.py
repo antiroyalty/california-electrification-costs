@@ -256,29 +256,29 @@ SCE_RATE_PLANS = {
     "TOU-D-4-9PM": {
             "summer": { # June - September
                 "weekdays": {
-                    "peak": 0.59,
-                    "offPeak": 0.36,
+                    "peak": 0.58,
+                    "offPeak": 0.34,
                     "peakHours": list(range(16, 21)),  # 4:00 pm to 9:00 pm
                     "offPeakHours": [h for h in range(24) if h not in range(16, 21)],
                     "fixedCharge": 0.03,         # Daily basic charge
                 },
                 "weekends": {
-                    "peak": 0.48,
-                    "offPeak": 0.36,
+                    "peak": 0.46,
+                    "offPeak": 0.34,
                     "peakHours": list(range(16, 21)),
                     "offPeakHours": [h for h in range(24) if h not in range(16, 21)],
                     "fixedCharge": 0.03,         # Daily basic charge
                 },
                 "weekdaysAfterBaselineCredit": {
-                    "peak": 0.50,
-                    "offPeak": 0.27,
+                    "peak": 0.48,
+                    "offPeak": 0.24,
                     "peakHours": list(range(16, 21)),
                     "offPeakHours": [h for h in range(24) if h not in range(16, 21)],
                     "fixedCharge": 0.03,         # Daily basic charge
                 },
                 "weekendAfterBaselineCredit": {
-                    "peak": 0.39,
-                    "offPeak": 0.27,
+                    "peak": 0.36,
+                    "offPeak": 0.24,
                     "peakHours": list(range(16, 21)),
                     "offPeakHours": [h for h in range(24) if h not in range(16, 21)],
                     "fixedCharge": 0.03,         # Daily basic charge
@@ -286,36 +286,36 @@ SCE_RATE_PLANS = {
             },
             "winter": { # October - May
                 "weekdays": {
-                    "peak": 0.52,
-                    "offPeak": 0.39,
-                    "superOffPeak": 0.35,
+                    "peak": 0.51,
+                    "offPeak": 0.37,
+                    "superOffPeak": 0.33,
                     "peakHours": [16, 17, 18, 19, 20], # Evening
                     "offPeakHours": [21, 22, 23, 24, 1, 2, 3, 4, 5, 6, 7], # Night time
                     "superOffPeakHours": [8, 9, 10, 11, 12, 13, 14, 15], # Sunshine hours
                     "fixedCharge": 0.03,         # Daily basic charge
                 },
                 "weekends": { # Same as weekdays in the winter
-                    "peak": 0.52,
-                    "offPeak": 0.39,
-                    "superOffPeak": 0.35,
+                    "peak": 0.51,
+                    "offPeak": 0.37,
+                    "superOffPeak": 0.33,
                     "peakHours": [16, 17, 18, 19, 20], # Evening
                     "offPeakHours": [21, 22, 23, 24, 1, 2, 3, 4, 5, 6, 7], # Night time
                     "superOffPeakHours": [8, 9, 10, 11, 12, 13, 14, 15], # Sunshine hours
                     "fixedCharge": 0.03,         # Daily basic charge
                 },
                 "weekdaysAfterBaselineCredit": {
-                    "peak": 0.43,
-                    "offPeak": 0.30,
-                    "superOffPeak": 0.26,
+                    "peak": 0.41,
+                    "offPeak": 0.27,
+                    "superOffPeak": 0.23,
                     "peakHours": [16, 17, 18, 19, 20], # Evening
                     "offPeakHours": [21, 22, 23, 24, 1, 2, 3, 4, 5, 6, 7], # Night time
                     "superOffPeakHours": [8, 9, 10, 11, 12, 13, 14, 15], # Sunshine hours
                     "fixedCharge": 0.03,         # Daily basic charge
                 },
                 "weekendsAfterBaselineCredit": { # Same as weekdaysAfterBaselineCredit in the winter
-                    "peak": 0.43,
-                    "offPeak": 0.30,
-                    "superOffPeak": 0.26,
+                    "peak": 0.41,
+                    "offPeak": 0.27,
+                    "superOffPeak": 0.23,
                     "peakHours": [16, 17, 18, 19, 20], # Evening
                     "offPeakHours": [21, 22, 23, 24, 1, 2, 3, 4, 5, 6, 7], # Night time
                     "superOffPeakHours": [8, 9, 10, 11, 12, 13, 14, 15], # Sunshine hours
@@ -331,28 +331,28 @@ SCE_RATE_PLANS = {
         "summer": { # June - September
             "weekdays": {
                 "peak": 0.74,      # Highest rate during peak period
-                "offPeak": 0.36,   # Off-peak rate
+                "offPeak": 0.34,   # Off-peak rate
                 "peakHours": list(range(17, 20)),  # 5:00–8:00 p.m.
                 "offPeakHours": [h for h in range(24) if h not in range(17, 20)],
                 "fixedCharge": 0.03,
             },
             "weekends": {
-                "peak": 0.55,
-                "offPeak": 0.36,
+                "peak": 0.54,
+                "offPeak": 0.34,
                 "peakHours": list(range(17, 20)),
                 "offPeakHours": [h for h in range(24) if h not in range(17, 20)],
                 "fixedCharge": 0.03,
             },
             "weekdaysAfterBaselineCredit": {
-                "peak": 0.65,      # Lower peak rate
-                "offPeak": 0.27,   # Lower off-peak rate
+                "peak": 0.64,
+                "offPeak": 0.24,
                 "peakHours": [17, 18, 19],  # 5:00–8:00 p.m.
                 "offPeakHours": [h for h in range(24) if h not in [17, 18, 19]],
                 "fixedCharge": 0.03,
             },
             "weekendAfterBaselineCredit": {
-                "peak": 0.46,
-                "offPeak": 0.27,
+                "peak": 0.44,
+                "offPeak": 0.24,
                 "peakHours": [17, 18, 19],
                 "offPeakHours": [h for h in range(24) if h not in [17, 18, 19]],
                 "fixedCharge": 0.03,
@@ -360,36 +360,36 @@ SCE_RATE_PLANS = {
         },
         "winter": { # October - May
             "weekdays": {
-                "midPeak": 0.61,         # Applies from 8:00 a.m. to 5:00 p.m.
-                "offPeak": 0.40,         # Applies during hours outside mid‑peak
-                "superOffPeak": 0.34,    # Lowest rate during qualifying conditions
+                "midPeak": 0.60,         # Applies from 5:00 p.m. to 8:00 p.m.
+                "offPeak": 0.38,         # Applies during hours outside mid‑peak
+                "superOffPeak": 0.32,    # Lowest rate during qualifying conditions
                 "offPeakHours": list(range(0, 8)) + list(range(17, 24)),
                 "midPeakHours": list(range(17, 20)),
                 "superOffPeakHours": list(range(8, 17)),
                 "fixedCharge": 0.03,
             },
             "weekends": {
-                "midPeak": 0.61,         # Applies from 8:00 am to 5:00 pm
-                "offPeak": 0.40,         # Applies during hours outside mid‑peak
-                "superOffPeak": 0.34,    # Lowest rate during qualifying conditions
+                "midPeak": 0.60,         # Applies from 5:00 p.m. to 8:00 p.m.
+                "offPeak": 0.38,         # Applies during hours outside mid‑peak
+                "superOffPeak": 0.32,    # Lowest rate during qualifying conditions
                 "offPeakHours": list(range(0, 8)) + list(range(17, 24)),
                 "midPeakHours": list(range(17, 20)),
                 "superOffPeakHours": list(range(8, 17)),
                 "fixedCharge": 0.03,
             },
             "weekdaysAfterBaselineCredit": {
-                "midPeak": 0.52,         # Applies from 8:00 am to 5:00 pm
-                "offPeak": 0.31,         # 8pm - 8am (Overnight)
-                "superOffPeak": 0.25,    # 8am - 5pm (Sunshine hours)
+                "midPeak": 0.50,
+                "offPeak": 0.28,
+                "superOffPeak": 0.22,
                 "offPeakHours": list(range(0, 8)) + list(range(17, 24)),
                 "midPeakHours": list(range(17, 20)),
                 "superOffPeakHours": list(range(8, 17)),
                 "fixedCharge": 0.03,
             },
             "weekendAfterBaselineCredit": {
-                "midPeak": 0.52,         # Applies from 8:00 am to 5:00 pm
-                "offPeak": 0.31,         # 8pm - 8am (Overnight)
-                "superOffPeak": 0.25,    # 8am - 5pm (Sunshine hours)
+                "midPeak": 0.50,
+                "offPeak": 0.28,
+                "superOffPeak": 0.22,
                 "offPeakHours": list(range(0, 8)) + list(range(17, 24)),
                 "midPeakHours": list(range(17, 20)),
                 "superOffPeakHours": list(range(8, 17)),
@@ -402,14 +402,14 @@ SCE_RATE_PLANS = {
     "TOU-D-PRIME": {
         "summer": {
             "weekdays": {
-                "peak": 0.53,
-                "offPeak": 0.24,
+                "peak": 0.59,
+                "offPeak": 0.26,
                 "peakHours": list(range(16, 21)),  # 4:00 pm to 9:00 pm
                 "offPeakHours": [h for h in range(24) if h not in range(16, 21)],
                 "fixedCharge": 0.53, # Aka Daily Basic Charge
             },
             "weekends": {
-                "peak": 0.38,
+                "peak": 0.40,
                 "offPeak": 0.26,
                 "peakHours": list(range(16, 21)),
                 "offPeakHours": [h for h in range(24) if h not in range(16, 21)],
@@ -418,18 +418,18 @@ SCE_RATE_PLANS = {
         },
         "winter": {
             "weekdays": {
-                "peak": 0.53,
+                "peak": 0.56,
                 "offPeak": 0.24,
-                "superOffPeak": 0.24, # Same as offpeak in April 2025
+                "superOffPeak": 0.24, # Same as offpeak
                 "peakHours": [16, 17, 18, 19, 20], # Evening
                 "offPeakHours": [21, 22, 23, 24, 1, 2, 3, 4, 5, 6, 7], # Night time
                 "superOffPeakHours": [8, 9, 10, 11, 12, 13, 14, 15], # Sunshine hours
                 "fixedCharge": 0.53, # Aka Daily Basic Charge
             },
-            "weekends": { # same as weekdays April 2025
-                "peak": 0.53,
+            "weekends": { # same as weekdays
+                "peak": 0.56,
                 "offPeak": 0.24,
-                "superOffPeak": 0.24, # Same as offpeak in April 2025
+                "superOffPeak": 0.24, # Same as offpeak
                 "peakHours": [16, 17, 18, 19, 20], # Evening
                 "offPeakHours": [21, 22, 23, 24, 1, 2, 3, 4, 5, 6, 7], # Night time
                 "superOffPeakHours": [8, 9, 10, 11, 12, 13, 14, 15], # Sunshine hours
