@@ -98,6 +98,8 @@ def calculate_annual_costs_electricity(load_profile, utility, rate_plan_name):
 
         if hour in dayotw_rates.get("peakHours", []):
             rate = dayotw_rates.get("peak", 0.0)
+        elif "midPeakHours" in dayotw_rates and hour in dayotw_rates["midPeakHours"]:
+            rate = dayotw_rates["midPeak"]
         elif "partPeakHours" in dayotw_rates and hour in dayotw_rates.get("partPeakHours", []):
             rate = dayotw_rates["partPeak"]
         elif "superOffPeakHours" in dayotw_rates and hour in dayotw_rates.get("superOffPeakHours", []):

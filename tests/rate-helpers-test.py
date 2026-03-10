@@ -381,6 +381,8 @@ class TestSCEAnnualBillVsPNG:
 # /24, these tests would fail with values 2× too high ($576 instead of $288).
 # ---------------------------------------------------------------------------
 
+YEAR_2023 = pd.date_range("2023-01-01", periods=8760, freq="h")
+FLAT_LOAD_8760 = [1.0] * 8760
 ZERO_LOAD_8760 = [0.0] * 8760
 
 
@@ -416,3 +418,55 @@ class TestSCEFixedCharges:
     def test_annual_fixed_tou_d_prime_zero_load(self):
         result = calculate_annual_costs_electricity(ZERO_LOAD_8760, "SCE", "TOU-D-PRIME")
         assert result["TOU-D-PRIME"] == pytest.approx(0.79 * 365, abs=0.01)
+
+
+# ---------------------------------------------------------------------------
+# Combined annual bill: flat 1 kWh/hr load, energy + fixed charges
+#
+# calculate_annual_costs_electricity uses 2023 as the base year for weekday
+# determination (line 84), so expected values are computed with YEAR_2023.
+# Season is month-based (Jun–Sep = summer) and is year-independent.
+#
+# Expected = PNG energy total (2023 calendar) + fixedCharge × 365
+#
+# These are the integration-level tests: they exercise the full billing
+# function (not just the rate lookup helper) with a realistic non-zero load.
+# ---------------------------------------------------------------------------
+
+class TestSCEFullAnnualBill:
+    """Full annual bill (energy + fixed) via calculate_annual_costs_electricity.
+
+    Load: flat 1 kWh/hr for all 8760 hours of 2023.
+    Expected energy from PNG source-of-truth functions evaluated on 2023 calendar.
+    Expected fixed = fixedCharge_per_day × 365.
+    """
+
+    def test_tou_d_4_9pm_full_bill(self):
+        expected_energy = sum(_png_rate_4_9pm(ts) for ts in YEAR_2023)
+        expected_total = expected_energy + 0.70 * 365
+        result = calculate_annual_costs_electricity(FLAT_LOAD_8760, "SCE", "TOU-D-4-9PM")
+        actual = result["TOU-D-4-9PM"]
+        assert actual == pytest.approx(expected_total, abs=0.01), (
+            f"TOU-D-4-9PM full bill: code ${actual:.2f} vs expected ${expected_total:.2f} "
+            f"(energy ${expected_energy:.2f} + fixed ${0.70 * 365:.2f}, diff ${actual - expected_total:+.2f})"
+        )
+
+    def test_tou_d_5_8pm_full_bill(self):
+        expected_energy = sum(_png_rate_5_8pm(ts) for ts in YEAR_2023)
+        expected_total = expected_energy + 0.79 * 365
+        result = calculate_annual_costs_electricity(FLAT_LOAD_8760, "SCE", "TOU-D-5-8PM")
+        actual = result["TOU-D-5-8PM"]
+        assert actual == pytest.approx(expected_total, abs=0.01), (
+            f"TOU-D-5-8PM full bill: code ${actual:.2f} vs expected ${expected_total:.2f} "
+            f"(energy ${expected_energy:.2f} + fixed ${0.79 * 365:.2f}, diff ${actual - expected_total:+.2f})"
+        )
+
+    def test_tou_d_prime_full_bill(self):
+        expected_energy = sum(_png_rate_prime(ts) for ts in YEAR_2023)
+        expected_total = expected_energy + 0.79 * 365
+        result = calculate_annual_costs_electricity(FLAT_LOAD_8760, "SCE", "TOU-D-PRIME")
+        actual = result["TOU-D-PRIME"]
+        assert actual == pytest.approx(expected_total, abs=0.01), (
+            f"TOU-D-PRIME full bill: code ${actual:.2f} vs expected ${expected_total:.2f} "
+            f"(energy ${expected_energy:.2f} + fixed ${0.79 * 365:.2f}, diff ${actual - expected_total:+.2f})"
+        )
