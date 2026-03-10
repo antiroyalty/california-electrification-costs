@@ -20,7 +20,11 @@ if REPO_ROOT not in sys.path:
 
 from helpers.electricity_rate_helpers import PGE_RATE_PLANS, SCE_RATE_PLANS
 from pipeline.steps.step9b_cooptimize_core import _hourly_import_rate
-from pipeline.steps.step12_evaluate_electricity_rates import _hourly_import_rate as _step12_rate
+from pipeline.steps.step12_evaluate_electricity_rates import (
+    _hourly_import_rate as _step12_rate,
+    _estimate_monthly_fixed_from_plan,
+    calculate_annual_costs_electricity,
+)
 
 
 def _ts(year: int, month: int, day: int, hour: int) -> pd.Timestamp:
@@ -354,3 +358,61 @@ class TestSCEAnnualBillVsPNG:
             f"TOU-D-PRIME step9b: code ${actual:.2f} vs PNG ${expected:.2f} "
             f"(diff ${actual - expected:+.2f})"
         )
+
+
+# ---------------------------------------------------------------------------
+# Fixed charge tests
+#
+# Two billing paths each use fixedCharge differently:
+#
+#   _estimate_monthly_fixed_from_plan (NEM3 path in calculate_nem3_annual_costs):
+#       returns fixedCharge_per_day × days_in_month
+#
+#   calculate_annual_costs_electricity (non-NEM3 path):
+#       adds fixedCharge / 24 per hourly slot → fixedCharge × 365 per year
+#
+# Source: data/utility-rates/sce/*.png
+#   TOU-D-4-9PM  $0.70/day
+#   TOU-D-5-8PM  $0.79/day
+#   TOU-D-PRIME  $0.79/day
+#
+# Zero-load fixture: passing all-zero consumption to calculate_annual_costs_electricity
+# isolates fixed charges from energy charges. If the formula were /12 instead of
+# /24, these tests would fail with values 2× too high ($576 instead of $288).
+# ---------------------------------------------------------------------------
+
+ZERO_LOAD_8760 = [0.0] * 8760
+
+
+class TestSCEFixedCharges:
+
+    # --- NEM3 path: _estimate_monthly_fixed_from_plan ---
+
+    def test_monthly_fixed_tou_d_4_9pm(self):
+        plan = SCE_RATE_PLANS["TOU-D-4-9PM"]
+        assert _estimate_monthly_fixed_from_plan(plan, 2018, 6) == pytest.approx(0.70 * 30)  # June (30 days)
+        assert _estimate_monthly_fixed_from_plan(plan, 2018, 7) == pytest.approx(0.70 * 31)  # July (31 days)
+
+    def test_monthly_fixed_tou_d_5_8pm(self):
+        plan = SCE_RATE_PLANS["TOU-D-5-8PM"]
+        assert _estimate_monthly_fixed_from_plan(plan, 2018, 6) == pytest.approx(0.79 * 30)
+        assert _estimate_monthly_fixed_from_plan(plan, 2018, 7) == pytest.approx(0.79 * 31)
+
+    def test_monthly_fixed_tou_d_prime(self):
+        plan = SCE_RATE_PLANS["TOU-D-PRIME"]
+        assert _estimate_monthly_fixed_from_plan(plan, 2018, 6) == pytest.approx(0.79 * 30)
+        assert _estimate_monthly_fixed_from_plan(plan, 2018, 7) == pytest.approx(0.79 * 31)
+
+    # --- Non-NEM3 path: calculate_annual_costs_electricity, zero load ---
+
+    def test_annual_fixed_tou_d_4_9pm_zero_load(self):
+        result = calculate_annual_costs_electricity(ZERO_LOAD_8760, "SCE", "TOU-D-4-9PM")
+        assert result["TOU-D-4-9PM"] == pytest.approx(0.70 * 365, abs=0.01)
+
+    def test_annual_fixed_tou_d_5_8pm_zero_load(self):
+        result = calculate_annual_costs_electricity(ZERO_LOAD_8760, "SCE", "TOU-D-5-8PM")
+        assert result["TOU-D-5-8PM"] == pytest.approx(0.79 * 365, abs=0.01)
+
+    def test_annual_fixed_tou_d_prime_zero_load(self):
+        result = calculate_annual_costs_electricity(ZERO_LOAD_8760, "SCE", "TOU-D-PRIME")
+        assert result["TOU-D-PRIME"] == pytest.approx(0.79 * 365, abs=0.01)
