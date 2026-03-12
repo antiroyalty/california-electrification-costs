@@ -48,39 +48,39 @@ def rate(plan: str, ts: pd.Timestamp) -> float:
 
 class TestETOUC:
     def test_peak_hour_weekday_july(self):
-        # 6 pm (hour 18) on a weekday in July: on-peak $0.60729
+        # 6 pm (hour 18) on a weekday in July: on-peak 52¢ (March 2026 tariff)
         ts = JULY_WEEKDAY.replace(hour=18)
-        assert rate("E-TOU-C", ts) == pytest.approx(0.60729)
+        assert rate("E-TOU-C", ts) == pytest.approx(0.52)
 
     def test_peak_hour_weekend_july(self):
         # E-TOU-C charges peak on weekends too — same rate structure as weekdays
         ts = JULY_WEEKEND.replace(hour=18)
-        assert rate("E-TOU-C", ts) == pytest.approx(0.60729)
+        assert rate("E-TOU-C", ts) == pytest.approx(0.52)
 
     def test_off_peak_hour_weekday_july(self):
-        # 10 am (hour 10) on a weekday in July: off-peak $0.50429
+        # 10 am (hour 10) on a weekday in July: off-peak 40¢ (above-baseline)
         ts = JULY_WEEKDAY.replace(hour=10)
-        assert rate("E-TOU-C", ts) == pytest.approx(0.50429)
+        assert rate("E-TOU-C", ts) == pytest.approx(0.40)
 
     def test_boundary_hour_16_is_peak(self):
         # First peak hour (hour 16 = 4 pm): should be peak
         ts = JULY_WEEKDAY.replace(hour=16)
-        assert rate("E-TOU-C", ts) == pytest.approx(0.60729)
+        assert rate("E-TOU-C", ts) == pytest.approx(0.52)
 
     def test_boundary_hour_15_is_off_peak(self):
         # Last off-peak hour before peak (hour 15 = 3 pm): should be off-peak
         ts = JULY_WEEKDAY.replace(hour=15)
-        assert rate("E-TOU-C", ts) == pytest.approx(0.50429)
+        assert rate("E-TOU-C", ts) == pytest.approx(0.40)
 
     def test_winter_peak_rate(self):
-        # Winter peak (hour 18 weekday): $0.49312
+        # Winter peak (hour 18 weekday): 40¢ (March 2026 tariff, MEDIUM confidence)
         ts = JAN_WEEKDAY.replace(hour=18)
-        assert rate("E-TOU-C", ts) == pytest.approx(0.49312)
+        assert rate("E-TOU-C", ts) == pytest.approx(0.40)
 
     def test_winter_off_peak_rate(self):
-        # Winter off-peak (hour 10 weekday): $0.46312
+        # Winter off-peak (hour 10 weekday): 37¢ (March 2026 tariff, MEDIUM confidence)
         ts = JAN_WEEKDAY.replace(hour=10)
-        assert rate("E-TOU-C", ts) == pytest.approx(0.46312)
+        assert rate("E-TOU-C", ts) == pytest.approx(0.37)
 
 
 # ---------------------------------------------------------------------------
@@ -89,29 +89,29 @@ class TestETOUC:
 
 class TestETOUD:
     def test_peak_hour_weekday_july(self):
-        # 6 pm (hour 18) weekday July: on-peak $0.56462
+        # 6 pm (hour 18) weekday July: on-peak 48¢ (March 2026 tariff)
         ts = JULY_WEEKDAY.replace(hour=18)
-        assert rate("E-TOU-D", ts) == pytest.approx(0.56462)
+        assert rate("E-TOU-D", ts) == pytest.approx(0.48)
 
     def test_no_peak_on_weekend_july(self):
-        # E-TOU-D has no weekend peak — 6 pm Saturday should be off-peak $0.42966
+        # E-TOU-D has no weekend peak — 6 pm Saturday should be off-peak 34¢
         ts = JULY_WEEKEND.replace(hour=18)
-        assert rate("E-TOU-D", ts) == pytest.approx(0.42966)
+        assert rate("E-TOU-D", ts) == pytest.approx(0.34)
 
     def test_off_peak_weekday_july(self):
-        # 10 am weekday July: off-peak $0.42966
+        # 10 am weekday July: off-peak 34¢
         ts = JULY_WEEKDAY.replace(hour=10)
-        assert rate("E-TOU-D", ts) == pytest.approx(0.42966)
+        assert rate("E-TOU-D", ts) == pytest.approx(0.34)
 
     def test_boundary_hour_17_is_peak(self):
         # First peak hour on E-TOU-D (hour 17 = 5 pm)
         ts = JULY_WEEKDAY.replace(hour=17)
-        assert rate("E-TOU-D", ts) == pytest.approx(0.56462)
+        assert rate("E-TOU-D", ts) == pytest.approx(0.48)
 
     def test_boundary_hour_16_is_off_peak(self):
         # Hour 16 is NOT peak on E-TOU-D (peak only 17–19)
         ts = JULY_WEEKDAY.replace(hour=16)
-        assert rate("E-TOU-D", ts) == pytest.approx(0.42966)
+        assert rate("E-TOU-D", ts) == pytest.approx(0.34)
 
 
 # ---------------------------------------------------------------------------
@@ -469,4 +469,268 @@ class TestSCEFullAnnualBill:
         assert actual == pytest.approx(expected_total, abs=0.01), (
             f"TOU-D-PRIME full bill: code ${actual:.2f} vs expected ${expected_total:.2f} "
             f"(energy ${expected_energy:.2f} + fixed ${0.79 * 365:.2f}, diff ${actual - expected_total:+.2f})"
+        )
+
+
+# ---------------------------------------------------------------------------
+# PGE BOE annual bill: code rates vs. PDF source-of-truth (March 1, 2026)
+#
+# Source: data/utility-rates/pge/pge-residential-electric-rate-plan-pricing.pdf
+# Effective: March 1, 2026
+#
+# Strategy: identical to SCE BOE tests — flat 1 kWh/hr for every hour of 2018,
+# sum code _hourly_import_rate vs. sum of PDF reference function.
+#
+# IMPORTANT: All PGE tests are EXPECTED TO FAIL because the codebase rates are
+# from a significantly older tariff. These tests DOCUMENT the discrepancies;
+# do not fix rates until the paper's rate vintage methodology is resolved.
+#
+# Rate parsing notes:
+#   E-TOU-C: above-baseline rates used as primary (code charges all consumption
+#             at the above-baseline rate; baseline_credit key is never applied).
+#   E-TOU-D: single tier (no baseline distinction in PDF).
+#   E-ELEC:  three tiers: peak / partial-peak / off-peak.
+#   EV2-A:   three tiers: peak / partial-peak / off-peak.
+#
+# Winter rate confidence:
+#   E-TOU-C winter: MEDIUM — PDF text extraction ambiguous; 40¢/37¢ is best read.
+#   E-TOU-D winter: MEDIUM — 39¢/35¢ is best read; could be 48¢/34¢.
+#   E-ELEC winter peak (4-9pm): MEDIUM — 32¢ is best read but not clearly labeled.
+#   EV2-A winter off-peak: MEDIUM — 23¢ is best read; could be 24¢.
+#
+# Both rate functions tested:
+#   step9b._hourly_import_rate — LP optimizer import cost
+#   step12._hourly_import_rate — billing
+# ---------------------------------------------------------------------------
+
+def _pge_summer(ts: pd.Timestamp) -> bool:
+    """PGE summer: June 1 – Sept 30 (months 6–9)."""
+    return 6 <= ts.month <= 9
+
+
+def _pdf_rate_e_tou_c(ts: pd.Timestamp) -> float:
+    """PDF source-of-truth rates for E-TOU-C (March 1, 2026).
+
+    Peak 4–9 pm every day (weekdays and weekends).
+    Using above-baseline rates — code models all consumption at above-baseline
+    rate (baseline_credit key is never applied in _hourly_import_rate).
+
+    Summer (Jun–Sep):
+      Peak (4–9pm, every day):   52¢  (above baseline; below baseline = 44¢)
+      Off-Peak (all other hours): 40¢  (above baseline; below baseline = 32¢)
+    Winter (Oct–May):
+      Peak (4–9pm, every day):   40¢  (above baseline; below baseline = 32¢)
+      Off-Peak (all other hours): 37¢  (above baseline; below baseline = 29¢)
+    Baseline credit = 8¢ in all seasons and tiers.
+    """
+    h = ts.hour
+    is_peak = h in range(16, 21)
+    if _pge_summer(ts):
+        return 0.52 if is_peak else 0.40
+    return 0.40 if is_peak else 0.37
+
+
+def _pdf_rate_e_tou_d(ts: pd.Timestamp) -> float:
+    """PDF source-of-truth rates for E-TOU-D (March 1, 2026).
+
+    Peak 5–8 pm weekdays only. Weekends: all off-peak.
+
+    Summer (Jun–Sep):
+      Weekday peak (5–8pm):       48¢
+      All other hours:             34¢
+    Winter (Oct–May):
+      Weekday peak (5–8pm):       39¢
+      All other hours:             35¢
+    """
+    h = ts.hour
+    is_weekday_peak = (ts.weekday() < 5) and (h in [17, 18, 19])
+    if _pge_summer(ts):
+        return 0.48 if is_weekday_peak else 0.34
+    return 0.39 if is_weekday_peak else 0.35
+
+
+def _pdf_rate_e_elec(ts: pd.Timestamp) -> float:
+    """PDF source-of-truth rates for E-ELEC (March 1, 2026).
+
+    Three tiers: peak (4–9pm), partial-peak (3–4pm and 9pm–midnight),
+    off-peak (all other hours). Every day (weekdays and weekends).
+    Base Services Charge applies separately (not modeled here).
+
+    Summer (Jun–Sep):
+      Peak (4–9pm):                    55¢
+      Partial-Peak (3–4pm, 9pm–midnight): 39¢
+      Off-Peak (12am–3pm):              33¢
+    Winter (Oct–May):  [winter peak MEDIUM confidence; partial/off-peak HIGH]
+      Peak (4–9pm):                    32¢
+      Partial-Peak (3–4pm, 9pm–midnight): 30¢
+      Off-Peak (12am–3pm):              28¢
+    """
+    h = ts.hour
+    if h in range(16, 21):          # peak 4–9pm
+        return 0.55 if _pge_summer(ts) else 0.32
+    if h in [15, 21, 22, 23]:       # partial-peak 3–4pm and 9pm–midnight
+        return 0.39 if _pge_summer(ts) else 0.30
+    return 0.33 if _pge_summer(ts) else 0.28  # off-peak
+
+
+def _pdf_rate_ev_b(ts: pd.Timestamp) -> float:
+    """PDF source-of-truth rates for EV-B (March 1, 2026).
+
+    Peak 2–9 pm (hours 14–20) every day.
+    Partial-peak 7 am–2 pm and 9–11 pm (hours 7–13, 21–22) every day.
+    Off-peak midnight–7 am and 11 pm–midnight (hours 0–6, 23).
+
+    Summer (Jun–Sep):
+      Peak (2–9pm):                    62¢
+      Partial-Peak (7am–2pm, 9–11pm):  38¢
+      Off-Peak (midnight–7am, 11pm–midnight): 26¢
+    Winter (Oct–May):
+      Peak (2–9pm):                    44¢
+      Partial-Peak (7am–2pm, 9–11pm):  31¢
+      Off-Peak (midnight–7am, 11pm–midnight): 24¢
+    """
+    h = ts.hour
+    if h in range(14, 21):                    # peak 2–9pm
+        return 0.62 if _pge_summer(ts) else 0.44
+    if h in list(range(7, 14)) + [21, 22]:    # partial-peak 7am–2pm and 9–11pm
+        return 0.38 if _pge_summer(ts) else 0.31
+    return 0.26 if _pge_summer(ts) else 0.24  # off-peak
+
+
+def _pdf_rate_ev2a(ts: pd.Timestamp) -> float:
+    """PDF source-of-truth rates for EV2-A (March 1, 2026).
+
+    Three tiers: peak (4–9pm), partial-peak (3–4pm and 9pm–midnight),
+    off-peak (all other hours). Every day (weekdays and weekends).
+
+    Summer (Jun–Sep):
+      Peak (4–9pm):                    54¢
+      Partial-Peak (3–4pm, 9pm–midnight): 43¢
+      Off-Peak (12am–3pm):              23¢
+    Winter (Oct–May):
+      Peak (4–9pm):                    41¢
+      Partial-Peak (3–4pm, 9pm–midnight): 39¢
+      Off-Peak (12am–3pm):              23¢  [MEDIUM confidence; could be 24¢]
+    """
+    h = ts.hour
+    if h in range(16, 21):          # peak 4–9pm
+        return 0.54 if _pge_summer(ts) else 0.41
+    if h in [15, 21, 22, 23]:       # partial-peak 3–4pm and 9pm–midnight
+        return 0.43 if _pge_summer(ts) else 0.39
+    return 0.23                     # off-peak (same summer/winter)
+
+
+class TestPGEAnnualBillVsPDF:
+    """Annual electricity cost (flat 1 kWh/hr, 2018) via code vs. PDF tariff.
+
+    Source of truth: data/utility-rates/pge/pge-residential-electric-rate-plan-pricing.pdf
+    Effective: March 1, 2026.
+
+    ALL TESTS IN THIS CLASS ARE EXPECTED TO FAIL. The codebase PGE rates are
+    from a significantly older tariff (likely pre-2024 restructuring). These
+    tests document the size and direction of the discrepancy.
+
+    Do not update rates until the paper's rate vintage question is resolved:
+    the simulation uses 2018 NREL load data, so "which year's tariff applies?"
+    is a methodological decision, not just a data correction.
+    """
+
+    # --- E-TOU-C ---
+
+    def test_e_tou_c_step9b(self):
+        expected = sum(_pdf_rate_e_tou_c(ts) for ts in YEAR_2018)
+        plan = PGE_RATE_PLANS["E-TOU-C"]
+        actual = sum(_hourly_import_rate(plan, ts) for ts in YEAR_2018)
+        assert actual == pytest.approx(expected, abs=0.01), (
+            f"E-TOU-C step9b: code ${actual:.2f} vs PDF ${expected:.2f} "
+            f"(diff ${actual - expected:+.2f})"
+        )
+
+    def test_e_tou_c_step12(self):
+        expected = sum(_pdf_rate_e_tou_c(ts) for ts in YEAR_2018)
+        plan = PGE_RATE_PLANS["E-TOU-C"]
+        actual = sum(_step12_rate(plan, ts.to_pydatetime()) for ts in YEAR_2018)
+        assert actual == pytest.approx(expected, abs=0.01), (
+            f"E-TOU-C step12: code ${actual:.2f} vs PDF ${expected:.2f} "
+            f"(diff ${actual - expected:+.2f})"
+        )
+
+    # --- E-TOU-D ---
+
+    def test_e_tou_d_step9b(self):
+        expected = sum(_pdf_rate_e_tou_d(ts) for ts in YEAR_2018)
+        plan = PGE_RATE_PLANS["E-TOU-D"]
+        actual = sum(_hourly_import_rate(plan, ts) for ts in YEAR_2018)
+        assert actual == pytest.approx(expected, abs=0.01), (
+            f"E-TOU-D step9b: code ${actual:.2f} vs PDF ${expected:.2f} "
+            f"(diff ${actual - expected:+.2f})"
+        )
+
+    def test_e_tou_d_step12(self):
+        expected = sum(_pdf_rate_e_tou_d(ts) for ts in YEAR_2018)
+        plan = PGE_RATE_PLANS["E-TOU-D"]
+        actual = sum(_step12_rate(plan, ts.to_pydatetime()) for ts in YEAR_2018)
+        assert actual == pytest.approx(expected, abs=0.01), (
+            f"E-TOU-D step12: code ${actual:.2f} vs PDF ${expected:.2f} "
+            f"(diff ${actual - expected:+.2f})"
+        )
+
+    # --- E-ELEC ---
+
+    def test_e_elec_step9b(self):
+        expected = sum(_pdf_rate_e_elec(ts) for ts in YEAR_2018)
+        plan = PGE_RATE_PLANS["E-ELEC"]
+        actual = sum(_hourly_import_rate(plan, ts) for ts in YEAR_2018)
+        assert actual == pytest.approx(expected, abs=0.01), (
+            f"E-ELEC step9b: code ${actual:.2f} vs PDF ${expected:.2f} "
+            f"(diff ${actual - expected:+.2f})"
+        )
+
+    def test_e_elec_step12(self):
+        expected = sum(_pdf_rate_e_elec(ts) for ts in YEAR_2018)
+        plan = PGE_RATE_PLANS["E-ELEC"]
+        actual = sum(_step12_rate(plan, ts.to_pydatetime()) for ts in YEAR_2018)
+        assert actual == pytest.approx(expected, abs=0.01), (
+            f"E-ELEC step12: code ${actual:.2f} vs PDF ${expected:.2f} "
+            f"(diff ${actual - expected:+.2f})"
+        )
+
+    # --- EV2-A ---
+
+    def test_ev2a_step9b(self):
+        expected = sum(_pdf_rate_ev2a(ts) for ts in YEAR_2018)
+        plan = PGE_RATE_PLANS["EV2-A"]
+        actual = sum(_hourly_import_rate(plan, ts) for ts in YEAR_2018)
+        assert actual == pytest.approx(expected, abs=0.01), (
+            f"EV2-A step9b: code ${actual:.2f} vs PDF ${expected:.2f} "
+            f"(diff ${actual - expected:+.2f})"
+        )
+
+    def test_ev2a_step12(self):
+        expected = sum(_pdf_rate_ev2a(ts) for ts in YEAR_2018)
+        plan = PGE_RATE_PLANS["EV2-A"]
+        actual = sum(_step12_rate(plan, ts.to_pydatetime()) for ts in YEAR_2018)
+        assert actual == pytest.approx(expected, abs=0.01), (
+            f"EV2-A step12: code ${actual:.2f} vs PDF ${expected:.2f} "
+            f"(diff ${actual - expected:+.2f})"
+        )
+
+    # --- EV-B ---
+
+    def test_ev_b_step9b(self):
+        expected = sum(_pdf_rate_ev_b(ts) for ts in YEAR_2018)
+        plan = PGE_RATE_PLANS["EV-B"]
+        actual = sum(_hourly_import_rate(plan, ts) for ts in YEAR_2018)
+        assert actual == pytest.approx(expected, abs=0.01), (
+            f"EV-B step9b: code ${actual:.2f} vs PDF ${expected:.2f} "
+            f"(diff ${actual - expected:+.2f})"
+        )
+
+    def test_ev_b_step12(self):
+        expected = sum(_pdf_rate_ev_b(ts) for ts in YEAR_2018)
+        plan = PGE_RATE_PLANS["EV-B"]
+        actual = sum(_step12_rate(plan, ts.to_pydatetime()) for ts in YEAR_2018)
+        assert actual == pytest.approx(expected, abs=0.01), (
+            f"EV-B step12: code ${actual:.2f} vs PDF ${expected:.2f} "
+            f"(diff ${actual - expected:+.2f})"
         )
