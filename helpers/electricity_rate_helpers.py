@@ -175,7 +175,10 @@ PGE_RATE_PLANS ={
         "EV2-A": {  # https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_EV2%20(Sch).pdf EV2 bills are issued as EV2-A
             # Rates updated to March 1, 2026 (AB 205 restructuring).
             # Source: data/utility-rates/pge/pge-residential-electric-rate-plan-pricing.pdf
-            # fixedCharge not updated — new BSC amount not shown in this PDF document.
+            # fixedCharge = Base Services Charge, Tier 3 ($0.79343/day), per ELEC_SCHEDS_EV2 (Sch).pdf.
+            # Tier 3 is the standard rate for customers who don't qualify for CARE (Tier 1) or FERA (Tier 2).
+            # The paper models homeowners installing solar — higher-income assumption → Tier 3.
+            # Tier 1: $0.19713/day, Tier 2: $0.39688/day, Tier 3: $0.79343/day (March 1, 2026).
             "summer": {
                 "weekdays": {
                     "peak": 0.54,         # Peak rate ($ per kWh)
@@ -184,16 +187,16 @@ PGE_RATE_PLANS ={
                     "peakHours": [16, 17, 18, 19, 20],
                     "partPeakHours": [15, 21, 22, 23],
                     "offPeakHours": [h for h in range(24) if h not in [15, 16, 17, 18, 19, 20, 21, 22, 23]],
-                    "fixedCharge": 0.39167,
+                    "fixedCharge": 0.79343,  # Base Services Charge, Tier 3
                 },
-                "weekends": { # same as weekdays for EV2-A
+                "weekends": { # same as weekdays for EV2-A (peak every day per tariff)
                     "peak": 0.54,         # Peak rate ($ per kWh)
                     "partPeak": 0.43,     # Partial-Peak rate ($ per kWh)
                     "offPeak": 0.23,      # Off-Peak rate ($ per kWh)
                     "peakHours": [16, 17, 18, 19, 20],
                     "partPeakHours": [15, 21, 22, 23],
                     "offPeakHours": [h for h in range(24) if h not in [15, 16, 17, 18, 19, 20, 21, 22, 23]],
-                    "fixedCharge": 0.39167,
+                    "fixedCharge": 0.79343,
                 },
             },
             "winter": {
@@ -204,7 +207,7 @@ PGE_RATE_PLANS ={
                     "peakHours": [16, 17, 18, 19, 20],
                     "partPeakHours": [15, 21, 22, 23],
                     "offPeakHours": [h for h in range(24) if h not in [15, 16, 17, 18, 19, 20, 21, 22, 23]],
-                    "fixedCharge": 0.39167,
+                    "fixedCharge": 0.79343,
                 },
                 "weekends": {
                     "peak": 0.41,         # Peak rate ($ per kWh)
@@ -213,18 +216,19 @@ PGE_RATE_PLANS ={
                     "peakHours": [16, 17, 18, 19, 20],
                     "partPeakHours": [15, 21, 22, 23],
                     "offPeakHours": [h for h in range(24) if h not in [15, 16, 17, 18, 19, 20, 21, 22, 23]],
-                    "fixedCharge": 0.39167,
+                    "fixedCharge": 0.79343,
                 },
             },
-            # "fixedCharge": 0.39167, # Delivery Minimum Bill Amount per meter per day:
         },
         "EV-B": {  # https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_EV%20(Sch).pdf
             # Rates: March 1, 2026.
             # Source: data/utility-rates/pge/pge-residential-electric-rate-plan-pricing.pdf
-            # Peak 2–9 pm (hours 14–20) every day.
-            # Partial-peak 7 am–2 pm and 9–11 pm (hours 7–13, 21–22) every day.
-            # Off-peak midnight–7 am and 11 pm–midnight (hours 0–6, 23).
-            # fixedCharge: not shown in PDF — set to 0.00 until verified from tariff schedule.
+            # Weekday peak: 2–9 pm (hours 14–20).
+            # Weekday partial-peak: 7 am–2 pm and 9–11 pm (hours 7–13, 21–22).
+            # Weekend peak: 3–7 pm (hours 15–18). NO partial-peak on weekends.
+            # Off-peak: all other hours.
+            # Meter charge: $0.04928/day (flat; not income-tiered like EV2-A/E-ELEC).
+            # Source for meter charge + weekend time periods: ELEC_SCHEDS_EV (Sch).pdf
             "summer": {
                 "weekdays": {
                     "peak": 0.62,
@@ -233,16 +237,14 @@ PGE_RATE_PLANS ={
                     "peakHours": list(range(14, 21)),       # 2:00 p.m. to 9:00 p.m.
                     "partPeakHours": list(range(7, 14)) + [21, 22],  # 7 am–2 pm and 9–11 pm
                     "offPeakHours": list(range(0, 7)) + [23],        # midnight–7 am and 11 pm–midnight
-                    "fixedCharge": 0.00,
+                    "fixedCharge": 0.04928,  # Total Meter Charge Per Day (flat)
                 },
-                "weekends": {  # same as weekdays for EV-B
+                "weekends": {  # Weekend peak is 3–7 pm only; no partial-peak
                     "peak": 0.62,
-                    "partPeak": 0.38,
                     "offPeak": 0.26,
-                    "peakHours": list(range(14, 21)),
-                    "partPeakHours": list(range(7, 14)) + [21, 22],
-                    "offPeakHours": list(range(0, 7)) + [23],
-                    "fixedCharge": 0.00,
+                    "peakHours": list(range(15, 19)),                 # 3:00 p.m. to 7:00 p.m.
+                    "offPeakHours": [h for h in range(24) if h not in range(15, 19)],
+                    "fixedCharge": 0.04928,
                 },
             },
             "winter": {
@@ -253,16 +255,14 @@ PGE_RATE_PLANS ={
                     "peakHours": list(range(14, 21)),
                     "partPeakHours": list(range(7, 14)) + [21, 22],
                     "offPeakHours": list(range(0, 7)) + [23],
-                    "fixedCharge": 0.00,
+                    "fixedCharge": 0.04928,
                 },
-                "weekends": {  # same as weekdays for EV-B
+                "weekends": {  # Weekend peak is 3–7 pm only; no partial-peak
                     "peak": 0.44,
-                    "partPeak": 0.31,
                     "offPeak": 0.24,
-                    "peakHours": list(range(14, 21)),
-                    "partPeakHours": list(range(7, 14)) + [21, 22],
-                    "offPeakHours": list(range(0, 7)) + [23],
-                    "fixedCharge": 0.00,
+                    "peakHours": list(range(15, 19)),
+                    "offPeakHours": [h for h in range(24) if h not in range(15, 19)],
+                    "fixedCharge": 0.04928,
                 },
             },
         },
@@ -270,7 +270,9 @@ PGE_RATE_PLANS ={
             # Rates updated to March 1, 2026 (AB 205 restructuring).
             # Source: data/utility-rates/pge/pge-residential-electric-rate-plan-pricing.pdf
             # Winter peak (4-9pm) MEDIUM confidence — not clearly labeled in PDF; 32¢ is best read.
-            # fixedCharge not updated — PDF notes "includes a Base Services Charge" but doesn't give amount.
+            # fixedCharge = Base Services Charge, Tier 3 ($0.79343/day), per ELEC_SCHEDS_E-ELEC.pdf.
+            # Same tier structure as EV2-A; Tier 3 used (standard non-CARE/FERA customer).
+            # Tier 1: $0.19713/day, Tier 2: $0.39688/day, Tier 3: $0.79343/day (March 1, 2026).
             "summer": {
                 "weekdays": {
                     "peak": 0.55,         # Peak rate (4:00–9:00 p.m.)
@@ -279,7 +281,7 @@ PGE_RATE_PLANS ={
                     "peakHours": [16, 17, 18, 19, 20],
                     "partPeakHours": [15, 21, 22, 23],
                     "offPeakHours": [h for h in range(24) if h not in [15, 16, 17, 18, 19, 20, 21, 22, 23]],
-                    "fixedCharge": 0.49281 # Base Services Charge per meter per day
+                    "fixedCharge": 0.79343,  # Base Services Charge, Tier 3
                 },
                 "weekends": { # same as weekdays
                     "peak": 0.55,         # Peak rate (4:00–9:00 p.m.)
@@ -288,7 +290,7 @@ PGE_RATE_PLANS ={
                     "peakHours": [16, 17, 18, 19, 20],
                     "partPeakHours": [15, 21, 22, 23],
                     "offPeakHours": [h for h in range(24) if h not in [15, 16, 17, 18, 19, 20, 21, 22, 23]],
-                    "fixedCharge": 0.49281 # Base Services Charge per meter per day
+                    "fixedCharge": 0.79343,
                 },
             },
             "winter": {
@@ -299,7 +301,7 @@ PGE_RATE_PLANS ={
                     "peakHours": [16, 17, 18, 19, 20],
                     "partPeakHours": [15, 21, 22, 23],
                     "offPeakHours": [h for h in range(24) if h not in [15, 16, 17, 18, 19, 20, 21, 22, 23]],
-                    "fixedCharge": 0.49281 # Base Services Charge per meter per day
+                    "fixedCharge": 0.79343,
                 },
                 "weekends": { # same as weekdays
                     "peak": 0.32,         # Peak rate (4:00–9:00 p.m.) [MEDIUM confidence]
@@ -308,7 +310,7 @@ PGE_RATE_PLANS ={
                     "peakHours": [16, 17, 18, 19, 20],
                     "partPeakHours": [15, 21, 22, 23],
                     "offPeakHours": [h for h in range(24) if h not in [15, 16, 17, 18, 19, 20, 21, 22, 23]],
-                    "fixedCharge": 0.49281,
+                    "fixedCharge": 0.79343,
                 },
             }
         },

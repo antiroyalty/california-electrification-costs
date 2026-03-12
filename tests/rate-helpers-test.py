@@ -576,25 +576,29 @@ def _pdf_rate_e_elec(ts: pd.Timestamp) -> float:
 def _pdf_rate_ev_b(ts: pd.Timestamp) -> float:
     """PDF source-of-truth rates for EV-B (March 1, 2026).
 
-    Peak 2–9 pm (hours 14–20) every day.
-    Partial-peak 7 am–2 pm and 9–11 pm (hours 7–13, 21–22) every day.
-    Off-peak midnight–7 am and 11 pm–midnight (hours 0–6, 23).
+    Weekday peak: 2–9 pm (hours 14–20).
+    Weekday partial-peak: 7 am–2 pm and 9–11 pm (hours 7–13, 21–22).
+    Weekday off-peak: midnight–7 am, 11 pm–midnight (hours 0–6, 23).
 
-    Summer (Jun–Sep):
-      Peak (2–9pm):                    62¢
-      Partial-Peak (7am–2pm, 9–11pm):  38¢
-      Off-Peak (midnight–7am, 11pm–midnight): 26¢
-    Winter (Oct–May):
-      Peak (2–9pm):                    44¢
-      Partial-Peak (7am–2pm, 9–11pm):  31¢
-      Off-Peak (midnight–7am, 11pm–midnight): 24¢
+    Weekend peak: 3–7 pm (hours 15–18) only. NO partial-peak on weekends.
+    Weekend off-peak: all other hours.
+
+    Source: ELEC_SCHEDS_EV (Sch).pdf Special Condition 1.
+
+    Summer (Jun–Sep):  Peak 62¢, Partial-Peak 38¢ (weekdays only), Off-Peak 26¢
+    Winter (Oct–May):  Peak 44¢, Partial-Peak 31¢ (weekdays only), Off-Peak 24¢
     """
     h = ts.hour
-    if h in range(14, 21):                    # peak 2–9pm
-        return 0.62 if _pge_summer(ts) else 0.44
-    if h in list(range(7, 14)) + [21, 22]:    # partial-peak 7am–2pm and 9–11pm
-        return 0.38 if _pge_summer(ts) else 0.31
-    return 0.26 if _pge_summer(ts) else 0.24  # off-peak
+    if ts.weekday() >= 5:  # weekend
+        if h in range(15, 19):            # weekend peak 3–7 pm
+            return 0.62 if _pge_summer(ts) else 0.44
+        return 0.26 if _pge_summer(ts) else 0.24  # weekend off-peak (no partial-peak)
+    else:  # weekday
+        if h in range(14, 21):                    # weekday peak 2–9pm
+            return 0.62 if _pge_summer(ts) else 0.44
+        if h in list(range(7, 14)) + [21, 22]:    # weekday partial-peak 7am–2pm and 9–11pm
+            return 0.38 if _pge_summer(ts) else 0.31
+        return 0.26 if _pge_summer(ts) else 0.24  # weekday off-peak
 
 
 def _pdf_rate_ev2a(ts: pd.Timestamp) -> float:
@@ -626,13 +630,9 @@ class TestPGEAnnualBillVsPDF:
     Source of truth: data/utility-rates/pge/pge-residential-electric-rate-plan-pricing.pdf
     Effective: March 1, 2026.
 
-    ALL TESTS IN THIS CLASS ARE EXPECTED TO FAIL. The codebase PGE rates are
-    from a significantly older tariff (likely pre-2024 restructuring). These
-    tests document the size and direction of the discrepancy.
-
-    Do not update rates until the paper's rate vintage question is resolved:
-    the simulation uses 2018 NREL load data, so "which year's tariff applies?"
-    is a methodological decision, not just a data correction.
+    Rates were updated to match the March 2026 tariff (AB 205 restructuring) on 2026-03-11.
+    Rate vintage decision: use most modern available rates for all utilities; load profiles
+    from 2018 NREL data do not change the appropriate rate reference.
     """
 
     # --- E-TOU-C ---
