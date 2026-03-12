@@ -96,28 +96,37 @@ def run(cfg: Config) -> None:
     #     print(f"[Step16] Warning: map generation failed: {e}")
 
     # 18) Cross-scenario EAC (stay within current scenario family: coopt vs non-coopt)
+    # Non-fatal: requires all sibling scenarios to have electricity results. Skips
+    # gracefully when run before all scenarios are available; succeeds once they are.
     log_step(18)
-    Step18CrossScenarioComparisons.process(
-        cfg.base_input_dir,
-        cfg.output_dir,
-        cfg.housing_type,
-        _cross_scenario_list(cfg.scenario),
-        c_list,
-        plan_preference=plan_preference,
-        electricity_variant=cfg.electricity_variant,
-    )
+    try:
+        Step18CrossScenarioComparisons.process(
+            cfg.base_input_dir,
+            cfg.output_dir,
+            cfg.housing_type,
+            _cross_scenario_list(cfg.scenario),
+            c_list,
+            plan_preference=plan_preference,
+            electricity_variant=cfg.electricity_variant,
+        )
+    except Exception as e:
+        print(f"[Step18] Skipped (missing sibling scenario data): {e}")
 
     # 19) EV vs ICE comparison
+    # Non-fatal: requires both baseline_ice_car and baseline_ev_car results to exist.
     log_step(19)
-    Step19CompareTwoScenarios.process(
-        cfg.base_input_dir,
-        cfg.output_dir,
-        cfg.housing_type,
-        _vehicle_compare_pair(cfg.scenario),
-        c_list,
-        plan_preference=plan_preference,
-        electricity_variant=cfg.electricity_variant,
-    )
+    try:
+        Step19CompareTwoScenarios.process(
+            cfg.base_input_dir,
+            cfg.output_dir,
+            cfg.housing_type,
+            _vehicle_compare_pair(cfg.scenario),
+            c_list,
+            plan_preference=plan_preference,
+            electricity_variant=cfg.electricity_variant,
+        )
+    except Exception as e:
+        print(f"[Step19] Skipped (missing sibling scenario data): {e}")
 
     # 20) No-solar EAC for the current scenario
     log_step(20)
