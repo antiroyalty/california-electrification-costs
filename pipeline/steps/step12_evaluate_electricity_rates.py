@@ -81,7 +81,7 @@ def calculate_annual_costs_electricity(load_profile, utility, rate_plan_name):
 
     for hour_index, hourly_load in enumerate(load_profile):
         season = get_season(hour_index)
-        current_datetime = datetime(year=2023, month=1, day=1) + timedelta(hours=hour_index)
+        current_datetime = datetime(year=2018, month=1, day=1) + timedelta(hours=hour_index)
         hour = current_datetime.hour
 
         # Determine whether the current day is a weekday (Monday-Friday) or weekend (Saturday-Sunday)
