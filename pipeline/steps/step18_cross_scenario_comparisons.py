@@ -48,6 +48,15 @@ from helpers.main_helpers import get_scenario_path
 from scenarios import SCENARIOS
 
 
+def _is_coopt_scenario(name: str) -> bool:
+    return str(name).endswith("_coopt")
+
+
+def _default_scenarios() -> List[str]:
+    """Default to standard (non-coopt) scenarios for cross-scenario plots."""
+    return [s for s in SCENARIOS.keys() if not _is_coopt_scenario(s)]
+
+
 
 
 def _discover_counties(base_input_dir: str, housing_type: str, scenarios: List[str]) -> List[str]:
@@ -72,7 +81,7 @@ def main() -> None:
     parser.add_argument(
         "--scenarios",
         nargs="*",
-        help="Scenarios to include (default: all from scenarios.py)",
+        help="Scenarios to include (default: non-coopt scenarios from scenarios.py)",
     )
     parser.add_argument("--counties", nargs="*", help="Counties (names or slugs). If omitted, use --all-counties or default to Alameda County")
     parser.add_argument("--all-counties", action="store_true", help="Use all available counties under the provided scenarios")
@@ -88,11 +97,11 @@ def main() -> None:
     base_input_dir = args.base_input_dir
     output_dir = args.output_dir
     housing_type = args.housing_type
-    # Use all scenarios from scenarios.py when none provided
+    # Use default non-coopt scenarios when none provided
     if args.scenarios:
         scenarios = list(dict.fromkeys(args.scenarios))  # preserve order, dedup
     else:
-        scenarios = list(SCENARIOS.keys())
+        scenarios = _default_scenarios()
 
     # Include all scenarios, including baseline_ice_car, so Vehicle O&M (gasoline) can be shown in EAC.
     os.makedirs(output_dir, exist_ok=True)

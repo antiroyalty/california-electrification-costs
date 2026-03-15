@@ -86,24 +86,29 @@ BASELINE_ALLOWANCES = {
 
 PGE_RATE_PLANS ={
         "E-TOU-C": { # https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_E-TOU-C.pdf
+            # Rates updated to March 1, 2026 (AB 205 restructuring).
+            # Source: data/utility-rates/pge/pge-residential-electric-rate-plan-pricing.pdf
+            # Above-baseline rates used as primary (baseline_credit subtracted for below-baseline usage).
+            # Summer: peak above 52¢, peak below 44¢, off-peak above 40¢, off-peak below 32¢ → credit = 8¢
+            # Winter: peak above 40¢, peak below 32¢, off-peak above 37¢, off-peak below 29¢ → credit = 8¢
             "summer": {
                 "weekdays": {
-                    "peak": 0.60729,
-                    "offPeak": 0.50429,
+                    "peak": 0.52,
+                    "offPeak": 0.40,
                     "peakHours": list(range(16, 21)),  # 4:00 p.m. to 9:00 p.m.
                     "offPeakHours": [h for h in range(24) if h not in range(16, 21)],
-                    "baseline_credit": 0.10135,
+                    "baseline_credit": 0.08,
                     # Defaulting to territory T baseline allowance;
                     # In practice this should be chosen per the customer's territory
                     "baseline_allowance": BASELINE_ALLOWANCES["PGE"]["E-TOU-C"]["territories"]["T"]["summer"],
                     "fixedCharge": 0.00,
                 },
                 "weekends": { # same as weekdays for E-TOU-C
-                    "peak": 0.60729,
-                    "offPeak": 0.50429,
+                    "peak": 0.52,
+                    "offPeak": 0.40,
                     "peakHours": list(range(16, 21)),  # 4:00 p.m. to 9:00 p.m.
                     "offPeakHours": [h for h in range(24) if h not in range(16, 21)],
-                    "baseline_credit": 0.10135,
+                    "baseline_credit": 0.08,
                     # Defaulting to territory T baseline allowance;
                     # In practice this should be chosen per the customer's territory
                     "baseline_allowance": BASELINE_ALLOWANCES["PGE"]["E-TOU-C"]["territories"]["T"]["summer"],
@@ -112,37 +117,39 @@ PGE_RATE_PLANS ={
             },
             "winter": {
                 "weekdays": {
-                    "peak": 0.49312,
-                    "offPeak": 0.46312,
+                    "peak": 0.40,
+                    "offPeak": 0.37,
                     "peakHours": list(range(16, 21)),
                     "offPeakHours": [h for h in range(24) if h not in range(16, 21)],
-                    "baseline_credit": 0.10135,
+                    "baseline_credit": 0.08,
                     "baseline_allowance": BASELINE_ALLOWANCES["PGE"]["E-TOU-C"]["territories"]["T"]["winter"],
                     "fixedCharge": 0.00,
                 },
                 "weekends": { # same as weekdays for E-TOU-C
-                    "peak": 0.49312,
-                    "offPeak": 0.46312,
+                    "peak": 0.40,
+                    "offPeak": 0.37,
                     "peakHours": list(range(16, 21)),
                     "offPeakHours": [h for h in range(24) if h not in range(16, 21)],
-                    "baseline_credit": 0.10135,
+                    "baseline_credit": 0.08,
                     "baseline_allowance": BASELINE_ALLOWANCES["PGE"]["E-TOU-C"]["territories"]["T"]["winter"],
                     "fixedCharge": 0.00,
                 }
             },
         },
         "E-TOU-D": { # https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_E-TOU-D.pdf
+            # Rates updated to March 1, 2026 (AB 205 restructuring).
+            # Source: data/utility-rates/pge/pge-residential-electric-rate-plan-pricing.pdf
             "summer": {
                 "weekdays": {
-                    "peak": 0.56462, 
-                    "offPeak": 0.42966, 
-                    "peakHours": [17, 18, 19], 
+                    "peak": 0.48,
+                    "offPeak": 0.34,
+                    "peakHours": [17, 18, 19],
                     "offPeakHours": [h for h in range(24) if h not in [17, 18, 19]],
                     "fixedCharge": 0.00,
                 },
                 "weekends": { # different from weekdays
                     "peak": 0,
-                    "offPeak": 0.42966,
+                    "offPeak": 0.34,
                     "peakHours": [],
                     "offPeakHours": [h for h in range(24)], # everything is off peak on the weekends
                     "fixedCharge": 0.00,
@@ -150,103 +157,160 @@ PGE_RATE_PLANS ={
             },
             "winter": {
                 "weekdays": {
-                    "peak": 0.47502, 
-                    "offPeak": 0.43641, 
-                    "peakHours": [17, 18, 19], 
+                    "peak": 0.39,
+                    "offPeak": 0.35,
+                    "peakHours": [17, 18, 19],
                     "offPeakHours": [h for h in range(24) if h not in [17, 18, 19]],
                     "fixedCharge": 0.00,
                 },
                 "weekends": { # different from weekdays
-                    "peak": 0, 
-                    "offPeak": 0.43641, 
-                    "peakHours": [], 
+                    "peak": 0,
+                    "offPeak": 0.35,
+                    "peakHours": [],
                     "offPeakHours": [h for h in range(24)], # everything is off peak on the weekends
                     "fixedCharge": 0.00,
                 },
             },
         },
         "EV2-A": {  # https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_EV2%20(Sch).pdf EV2 bills are issued as EV2-A
+            # Rates updated to March 1, 2026 (AB 205 restructuring).
+            # Source: data/utility-rates/pge/pge-residential-electric-rate-plan-pricing.pdf
+            # fixedCharge = Base Services Charge, Tier 3 ($0.79343/day), per ELEC_SCHEDS_EV2 (Sch).pdf.
+            # Tier 3 is the standard rate for customers who don't qualify for CARE (Tier 1) or FERA (Tier 2).
+            # The paper models homeowners installing solar — higher-income assumption → Tier 3.
+            # Tier 1: $0.19713/day, Tier 2: $0.39688/day, Tier 3: $0.79343/day (March 1, 2026).
             "summer": {
                 "weekdays": {
-                    "peak": 0.61590,      # Peak rate ($ per kWh)
-                    "partPeak": 0.50541,  # Partial-Peak rate ($ per kWh)
-                    "offPeak": 0.30339,   # Off-Peak rate ($ per kWh)
+                    "peak": 0.54,         # Peak rate ($ per kWh)
+                    "partPeak": 0.43,     # Partial-Peak rate ($ per kWh)
+                    "offPeak": 0.23,      # Off-Peak rate ($ per kWh)
                     "peakHours": [16, 17, 18, 19, 20],
                     "partPeakHours": [15, 21, 22, 23],
                     "offPeakHours": [h for h in range(24) if h not in [15, 16, 17, 18, 19, 20, 21, 22, 23]],
-                    "fixedCharge": 0.39167,
+                    "fixedCharge": 0.79343,  # Base Services Charge, Tier 3
                 },
-                "weekends": { # same as weekdays for EV2-A
-                    "peak": 0.61590,      # Peak rate ($ per kWh)
-                    "partPeak": 0.50541,  # Partial-Peak rate ($ per kWh)
-                    "offPeak": 0.30339,   # Off-Peak rate ($ per kWh)
+                "weekends": { # same as weekdays for EV2-A (peak every day per tariff)
+                    "peak": 0.54,         # Peak rate ($ per kWh)
+                    "partPeak": 0.43,     # Partial-Peak rate ($ per kWh)
+                    "offPeak": 0.23,      # Off-Peak rate ($ per kWh)
                     "peakHours": [16, 17, 18, 19, 20],
                     "partPeakHours": [15, 21, 22, 23],
                     "offPeakHours": [h for h in range(24) if h not in [15, 16, 17, 18, 19, 20, 21, 22, 23]],
-                    "fixedCharge": 0.39167,
+                    "fixedCharge": 0.79343,
                 },
             },
             "winter": {
                 "weekdays": {
-                    "peak": 0.48879,      # Peak rate ($ per kWh)
-                    "partPeak": 0.47209,  # Partial-Peak rate ($ per kWh)
-                    "offPeak": 0.30339,   # Off-Peak rate ($ per kWh)
+                    "peak": 0.41,         # Peak rate ($ per kWh)
+                    "partPeak": 0.39,     # Partial-Peak rate ($ per kWh)
+                    "offPeak": 0.23,      # Off-Peak rate ($ per kWh)
                     "peakHours": [16, 17, 18, 19, 20],
                     "partPeakHours": [15, 21, 22, 23],
                     "offPeakHours": [h for h in range(24) if h not in [15, 16, 17, 18, 19, 20, 21, 22, 23]],
-                    "fixedCharge": 0.39167,
+                    "fixedCharge": 0.79343,
                 },
                 "weekends": {
-                    "peak": 0.48879,      # Peak rate ($ per kWh)
-                    "partPeak": 0.47209,  # Partial-Peak rate ($ per kWh)
-                    "offPeak": 0.30339,   # Off-Peak rate ($ per kWh)
+                    "peak": 0.41,         # Peak rate ($ per kWh)
+                    "partPeak": 0.39,     # Partial-Peak rate ($ per kWh)
+                    "offPeak": 0.23,      # Off-Peak rate ($ per kWh)
                     "peakHours": [16, 17, 18, 19, 20],
                     "partPeakHours": [15, 21, 22, 23],
                     "offPeakHours": [h for h in range(24) if h not in [15, 16, 17, 18, 19, 20, 21, 22, 23]],
-                    "fixedCharge": 0.39167,
+                    "fixedCharge": 0.79343,
                 },
             },
-            # "fixedCharge": 0.39167, # Delivery Minimum Bill Amount per meter per day:
         },
-        "E-ELEC": { # https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_E-ELEC.pdf
+        "EV-B": {  # https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_EV%20(Sch).pdf
+            # Rates: March 1, 2026.
+            # Source: data/utility-rates/pge/pge-residential-electric-rate-plan-pricing.pdf
+            # Weekday peak: 2–9 pm (hours 14–20).
+            # Weekday partial-peak: 7 am–2 pm and 9–11 pm (hours 7–13, 21–22).
+            # Weekend peak: 3–7 pm (hours 15–18). NO partial-peak on weekends.
+            # Off-peak: all other hours.
+            # Meter charge: $0.04928/day (flat; not income-tiered like EV2-A/E-ELEC).
+            # Source for meter charge + weekend time periods: ELEC_SCHEDS_EV (Sch).pdf
             "summer": {
                 "weekdays": {
-                    "peak": 0.60728,
-                    "partPeak": 0.44540, 
-                    "offPeak": 0.38872,   
-                    "peakHours": [16, 17, 18, 19, 20],
-                    "partPeakHours": [15, 21, 22, 23],
-                    "offPeakHours": [h for h in range(24) if h not in [15, 16, 17, 18, 19, 20, 21, 22, 23]],
-                    "fixedCharge": 0.49281 # Base Services Charge per meter per day
+                    "peak": 0.62,
+                    "partPeak": 0.38,
+                    "offPeak": 0.26,
+                    "peakHours": list(range(14, 21)),       # 2:00 p.m. to 9:00 p.m.
+                    "partPeakHours": list(range(7, 14)) + [21, 22],  # 7 am–2 pm and 9–11 pm
+                    "offPeakHours": list(range(0, 7)) + [23],        # midnight–7 am and 11 pm–midnight
+                    "fixedCharge": 0.04928,  # Total Meter Charge Per Day (flat)
                 },
-                "weekends": { # same as weekdays
-                    "peak": 0.60728,      # Peak rate (4:00–9:00 p.m.)
-                    "partPeak": 0.44540,  # Partial-Peak rate (3:00–4:00 p.m. and 9:00–12:00 a.m.)
-                    "offPeak": 0.38872,   # Off-Peak rate (all other hours)
-                    "peakHours": [16, 17, 18, 19, 20],
-                    "partPeakHours": [15, 21, 22, 23],
-                    "offPeakHours": [h for h in range(24) if h not in [15, 16, 17, 18, 19, 20, 21, 22, 23]],
-                    "fixedCharge": 0.49281 # Base Services Charge per meter per day
+                "weekends": {  # Weekend peak is 3–7 pm only; no partial-peak
+                    "peak": 0.62,
+                    "offPeak": 0.26,
+                    "peakHours": list(range(15, 19)),                 # 3:00 p.m. to 7:00 p.m.
+                    "offPeakHours": [h for h in range(24) if h not in range(15, 19)],
+                    "fixedCharge": 0.04928,
                 },
             },
             "winter": {
                 "weekdays": {
-                    "peak": 0.37577,      # Peak rate (4:00–9:00 p.m.)
-                    "partPeak": 0.35368,  # Partial-Peak rate (3:00–4:00 p.m. and 9:00–12:00 a.m.)
-                    "offPeak": 0.33982,   # Off-Peak rate (all other hours)
+                    "peak": 0.44,
+                    "partPeak": 0.31,
+                    "offPeak": 0.24,
+                    "peakHours": list(range(14, 21)),
+                    "partPeakHours": list(range(7, 14)) + [21, 22],
+                    "offPeakHours": list(range(0, 7)) + [23],
+                    "fixedCharge": 0.04928,
+                },
+                "weekends": {  # Weekend peak is 3–7 pm only; no partial-peak
+                    "peak": 0.44,
+                    "offPeak": 0.24,
+                    "peakHours": list(range(15, 19)),
+                    "offPeakHours": [h for h in range(24) if h not in range(15, 19)],
+                    "fixedCharge": 0.04928,
+                },
+            },
+        },
+        "E-ELEC": { # https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_E-ELEC.pdf
+            # Rates updated to March 1, 2026 (AB 205 restructuring).
+            # Source: data/utility-rates/pge/pge-residential-electric-rate-plan-pricing.pdf
+            # Winter peak (4-9pm) MEDIUM confidence — not clearly labeled in PDF; 32¢ is best read.
+            # fixedCharge = Base Services Charge, Tier 3 ($0.79343/day), per ELEC_SCHEDS_E-ELEC.pdf.
+            # Same tier structure as EV2-A; Tier 3 used (standard non-CARE/FERA customer).
+            # Tier 1: $0.19713/day, Tier 2: $0.39688/day, Tier 3: $0.79343/day (March 1, 2026).
+            "summer": {
+                "weekdays": {
+                    "peak": 0.55,         # Peak rate (4:00–9:00 p.m.)
+                    "partPeak": 0.39,     # Partial-Peak rate (3:00–4:00 p.m. and 9:00–12:00 a.m.)
+                    "offPeak": 0.33,      # Off-Peak rate (all other hours)
                     "peakHours": [16, 17, 18, 19, 20],
                     "partPeakHours": [15, 21, 22, 23],
                     "offPeakHours": [h for h in range(24) if h not in [15, 16, 17, 18, 19, 20, 21, 22, 23]],
-                    "fixedCharge": 0.49281 # Base Services Charge per meter per day
+                    "fixedCharge": 0.79343,  # Base Services Charge, Tier 3
                 },
                 "weekends": { # same as weekdays
-                    "peak": 0.37577,      # Peak rate (4:00–9:00 p.m.)
-                    "partPeak": 0.35368,  # Partial-Peak rate (3:00–4:00 p.m. and 9:00–12:00 a.m.)
-                    "offPeak": 0.33982,   # Off-Peak rate (all other hours)
+                    "peak": 0.55,         # Peak rate (4:00–9:00 p.m.)
+                    "partPeak": 0.39,     # Partial-Peak rate (3:00–4:00 p.m. and 9:00–12:00 a.m.)
+                    "offPeak": 0.33,      # Off-Peak rate (all other hours)
                     "peakHours": [16, 17, 18, 19, 20],
                     "partPeakHours": [15, 21, 22, 23],
                     "offPeakHours": [h for h in range(24) if h not in [15, 16, 17, 18, 19, 20, 21, 22, 23]],
-                    "fixedCharge": 0.49281,
+                    "fixedCharge": 0.79343,
+                },
+            },
+            "winter": {
+                "weekdays": {
+                    "peak": 0.32,         # Peak rate (4:00–9:00 p.m.) [MEDIUM confidence]
+                    "partPeak": 0.30,     # Partial-Peak rate (3:00–4:00 p.m. and 9:00–12:00 a.m.)
+                    "offPeak": 0.28,      # Off-Peak rate (all other hours)
+                    "peakHours": [16, 17, 18, 19, 20],
+                    "partPeakHours": [15, 21, 22, 23],
+                    "offPeakHours": [h for h in range(24) if h not in [15, 16, 17, 18, 19, 20, 21, 22, 23]],
+                    "fixedCharge": 0.79343,
+                },
+                "weekends": { # same as weekdays
+                    "peak": 0.32,         # Peak rate (4:00–9:00 p.m.) [MEDIUM confidence]
+                    "partPeak": 0.30,     # Partial-Peak rate (3:00–4:00 p.m. and 9:00–12:00 a.m.)
+                    "offPeak": 0.28,      # Off-Peak rate (all other hours)
+                    "peakHours": [16, 17, 18, 19, 20],
+                    "partPeakHours": [15, 21, 22, 23],
+                    "offPeakHours": [h for h in range(24) if h not in [15, 16, 17, 18, 19, 20, 21, 22, 23]],
+                    "fixedCharge": 0.79343,
                 },
             }
         },
@@ -256,73 +320,73 @@ SCE_RATE_PLANS = {
     "TOU-D-4-9PM": {
             "summer": { # June - September
                 "weekdays": {
-                    "peak": 0.59,
-                    "offPeak": 0.36,
+                    "peak": 0.58,
+                    "offPeak": 0.34,
                     "peakHours": list(range(16, 21)),  # 4:00 pm to 9:00 pm
                     "offPeakHours": [h for h in range(24) if h not in range(16, 21)],
-                    "fixedCharge": 0.03,         # Daily basic charge
+                    "fixedCharge": 0.70,         # Daily basic charge
                 },
                 "weekends": {
-                    "peak": 0.48,
-                    "offPeak": 0.36,
+                    "peak": 0.46,
+                    "offPeak": 0.34,
                     "peakHours": list(range(16, 21)),
                     "offPeakHours": [h for h in range(24) if h not in range(16, 21)],
-                    "fixedCharge": 0.03,         # Daily basic charge
+                    "fixedCharge": 0.70,         # Daily basic charge
                 },
                 "weekdaysAfterBaselineCredit": {
-                    "peak": 0.50,
-                    "offPeak": 0.27,
+                    "peak": 0.48,
+                    "offPeak": 0.24,
                     "peakHours": list(range(16, 21)),
                     "offPeakHours": [h for h in range(24) if h not in range(16, 21)],
-                    "fixedCharge": 0.03,         # Daily basic charge
+                    "fixedCharge": 0.70,         # Daily basic charge
                 },
                 "weekendAfterBaselineCredit": {
-                    "peak": 0.39,
-                    "offPeak": 0.27,
+                    "peak": 0.36,
+                    "offPeak": 0.24,
                     "peakHours": list(range(16, 21)),
                     "offPeakHours": [h for h in range(24) if h not in range(16, 21)],
-                    "fixedCharge": 0.03,         # Daily basic charge
+                    "fixedCharge": 0.70,         # Daily basic charge
                 },
             },
             "winter": { # October - May
                 "weekdays": {
-                    "peak": 0.52,
-                    "offPeak": 0.39,
-                    "superOffPeak": 0.35,
+                    "peak": 0.51,
+                    "offPeak": 0.37,
+                    "superOffPeak": 0.33,
                     "peakHours": [16, 17, 18, 19, 20], # Evening
                     "offPeakHours": [21, 22, 23, 24, 1, 2, 3, 4, 5, 6, 7], # Night time
                     "superOffPeakHours": [8, 9, 10, 11, 12, 13, 14, 15], # Sunshine hours
-                    "fixedCharge": 0.03,         # Daily basic charge
+                    "fixedCharge": 0.70,         # Daily basic charge
                 },
                 "weekends": { # Same as weekdays in the winter
-                    "peak": 0.52,
-                    "offPeak": 0.39,
-                    "superOffPeak": 0.35,
+                    "peak": 0.51,
+                    "offPeak": 0.37,
+                    "superOffPeak": 0.33,
                     "peakHours": [16, 17, 18, 19, 20], # Evening
                     "offPeakHours": [21, 22, 23, 24, 1, 2, 3, 4, 5, 6, 7], # Night time
                     "superOffPeakHours": [8, 9, 10, 11, 12, 13, 14, 15], # Sunshine hours
-                    "fixedCharge": 0.03,         # Daily basic charge
+                    "fixedCharge": 0.70,         # Daily basic charge
                 },
                 "weekdaysAfterBaselineCredit": {
-                    "peak": 0.43,
-                    "offPeak": 0.30,
-                    "superOffPeak": 0.26,
+                    "peak": 0.41,
+                    "offPeak": 0.27,
+                    "superOffPeak": 0.23,
                     "peakHours": [16, 17, 18, 19, 20], # Evening
                     "offPeakHours": [21, 22, 23, 24, 1, 2, 3, 4, 5, 6, 7], # Night time
                     "superOffPeakHours": [8, 9, 10, 11, 12, 13, 14, 15], # Sunshine hours
-                    "fixedCharge": 0.03,         # Daily basic charge
+                    "fixedCharge": 0.70,         # Daily basic charge
                 },
                 "weekendsAfterBaselineCredit": { # Same as weekdaysAfterBaselineCredit in the winter
-                    "peak": 0.43,
-                    "offPeak": 0.30,
-                    "superOffPeak": 0.26,
+                    "peak": 0.41,
+                    "offPeak": 0.27,
+                    "superOffPeak": 0.23,
                     "peakHours": [16, 17, 18, 19, 20], # Evening
                     "offPeakHours": [21, 22, 23, 24, 1, 2, 3, 4, 5, 6, 7], # Night time
                     "superOffPeakHours": [8, 9, 10, 11, 12, 13, 14, 15], # Sunshine hours
-                    "fixedCharge": 0.03,         # Daily basic charge
+                    "fixedCharge": 0.70,         # Daily basic charge
                 }
             },
-            "fixedCharge": 0.03,         # Daily basic charge
+            "fixedCharge": 0.70,         # Daily basic charge
             "minimumDailyCharge": 0.35,  # Minimum daily charge
             "baseline_credit": 0.09,
         },
@@ -331,69 +395,69 @@ SCE_RATE_PLANS = {
         "summer": { # June - September
             "weekdays": {
                 "peak": 0.74,      # Highest rate during peak period
-                "offPeak": 0.36,   # Off-peak rate
+                "offPeak": 0.34,   # Off-peak rate
                 "peakHours": list(range(17, 20)),  # 5:00–8:00 p.m.
                 "offPeakHours": [h for h in range(24) if h not in range(17, 20)],
-                "fixedCharge": 0.03,
+                "fixedCharge": 0.79,
             },
             "weekends": {
-                "peak": 0.55,
-                "offPeak": 0.36,
+                "peak": 0.54,
+                "offPeak": 0.34,
                 "peakHours": list(range(17, 20)),
                 "offPeakHours": [h for h in range(24) if h not in range(17, 20)],
-                "fixedCharge": 0.03,
+                "fixedCharge": 0.79,
             },
             "weekdaysAfterBaselineCredit": {
-                "peak": 0.65,      # Lower peak rate
-                "offPeak": 0.27,   # Lower off-peak rate
+                "peak": 0.64,
+                "offPeak": 0.24,
                 "peakHours": [17, 18, 19],  # 5:00–8:00 p.m.
                 "offPeakHours": [h for h in range(24) if h not in [17, 18, 19]],
-                "fixedCharge": 0.03,
+                "fixedCharge": 0.79,
             },
             "weekendAfterBaselineCredit": {
-                "peak": 0.46,
-                "offPeak": 0.27,
+                "peak": 0.44,
+                "offPeak": 0.24,
                 "peakHours": [17, 18, 19],
                 "offPeakHours": [h for h in range(24) if h not in [17, 18, 19]],
-                "fixedCharge": 0.03,
+                "fixedCharge": 0.79,
             },
         },
         "winter": { # October - May
             "weekdays": {
-                "midPeak": 0.61,         # Applies from 8:00 a.m. to 5:00 p.m.
-                "offPeak": 0.40,         # Applies during hours outside mid‑peak
-                "superOffPeak": 0.34,    # Lowest rate during qualifying conditions
+                "midPeak": 0.60,         # Applies from 5:00 p.m. to 8:00 p.m.
+                "offPeak": 0.38,         # Applies during hours outside mid‑peak
+                "superOffPeak": 0.32,    # Lowest rate during qualifying conditions
                 "offPeakHours": list(range(0, 8)) + list(range(17, 24)),
                 "midPeakHours": list(range(17, 20)),
                 "superOffPeakHours": list(range(8, 17)),
-                "fixedCharge": 0.03,
+                "fixedCharge": 0.79,
             },
             "weekends": {
-                "midPeak": 0.61,         # Applies from 8:00 am to 5:00 pm
-                "offPeak": 0.40,         # Applies during hours outside mid‑peak
-                "superOffPeak": 0.34,    # Lowest rate during qualifying conditions
+                "midPeak": 0.60,         # Applies from 5:00 p.m. to 8:00 p.m.
+                "offPeak": 0.38,         # Applies during hours outside mid‑peak
+                "superOffPeak": 0.32,    # Lowest rate during qualifying conditions
                 "offPeakHours": list(range(0, 8)) + list(range(17, 24)),
                 "midPeakHours": list(range(17, 20)),
                 "superOffPeakHours": list(range(8, 17)),
-                "fixedCharge": 0.03,
+                "fixedCharge": 0.79,
             },
             "weekdaysAfterBaselineCredit": {
-                "midPeak": 0.52,         # Applies from 8:00 am to 5:00 pm
-                "offPeak": 0.31,         # 8pm - 8am (Overnight)
-                "superOffPeak": 0.25,    # 8am - 5pm (Sunshine hours)
+                "midPeak": 0.50,
+                "offPeak": 0.28,
+                "superOffPeak": 0.22,
                 "offPeakHours": list(range(0, 8)) + list(range(17, 24)),
                 "midPeakHours": list(range(17, 20)),
                 "superOffPeakHours": list(range(8, 17)),
-                "fixedCharge": 0.03,
+                "fixedCharge": 0.79,
             },
             "weekendAfterBaselineCredit": {
-                "midPeak": 0.52,         # Applies from 8:00 am to 5:00 pm
-                "offPeak": 0.31,         # 8pm - 8am (Overnight)
-                "superOffPeak": 0.25,    # 8am - 5pm (Sunshine hours)
+                "midPeak": 0.50,
+                "offPeak": 0.28,
+                "superOffPeak": 0.22,
                 "offPeakHours": list(range(0, 8)) + list(range(17, 24)),
                 "midPeakHours": list(range(17, 20)),
                 "superOffPeakHours": list(range(8, 17)),
-                "fixedCharge": 0.03,
+                "fixedCharge": 0.79,
             },
         },
         "minimumDailyCharge": 0.35,
@@ -402,38 +466,38 @@ SCE_RATE_PLANS = {
     "TOU-D-PRIME": {
         "summer": {
             "weekdays": {
-                "peak": 0.53,
-                "offPeak": 0.24,
+                "peak": 0.59,
+                "offPeak": 0.26,
                 "peakHours": list(range(16, 21)),  # 4:00 pm to 9:00 pm
                 "offPeakHours": [h for h in range(24) if h not in range(16, 21)],
-                "fixedCharge": 0.53, # Aka Daily Basic Charge
+                "fixedCharge": 0.79, # Aka Daily Basic Charge
             },
             "weekends": {
-                "peak": 0.38,
+                "peak": 0.40,
                 "offPeak": 0.26,
                 "peakHours": list(range(16, 21)),
                 "offPeakHours": [h for h in range(24) if h not in range(16, 21)],
-                "fixedCharge": 0.53, # Aka Daily Basic Charge
+                "fixedCharge": 0.79, # Aka Daily Basic Charge
             }
         },
         "winter": {
             "weekdays": {
-                "peak": 0.53,
+                "peak": 0.56,
                 "offPeak": 0.24,
-                "superOffPeak": 0.24, # Same as offpeak in April 2025
+                "superOffPeak": 0.24, # Same as offpeak
                 "peakHours": [16, 17, 18, 19, 20], # Evening
                 "offPeakHours": [21, 22, 23, 24, 1, 2, 3, 4, 5, 6, 7], # Night time
                 "superOffPeakHours": [8, 9, 10, 11, 12, 13, 14, 15], # Sunshine hours
-                "fixedCharge": 0.53, # Aka Daily Basic Charge
+                "fixedCharge": 0.79, # Aka Daily Basic Charge
             },
-            "weekends": { # same as weekdays April 2025
-                "peak": 0.53,
+            "weekends": { # same as weekdays
+                "peak": 0.56,
                 "offPeak": 0.24,
-                "superOffPeak": 0.24, # Same as offpeak in April 2025
+                "superOffPeak": 0.24, # Same as offpeak
                 "peakHours": [16, 17, 18, 19, 20], # Evening
                 "offPeakHours": [21, 22, 23, 24, 1, 2, 3, 4, 5, 6, 7], # Night time
                 "superOffPeakHours": [8, 9, 10, 11, 12, 13, 14, 15], # Sunshine hours
-                "fixedCharge": 0.53, # Aka Daily Basic Charge
+                "fixedCharge": 0.79, # Aka Daily Basic Charge
             }
         },
         "minimumDailyCharge": 0,

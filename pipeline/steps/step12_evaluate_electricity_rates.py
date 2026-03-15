@@ -59,8 +59,8 @@ def select_rate_section(plan_details, season, dt):
     if not season_rates:
         return None
 
-    if "weekdays" in season_rates or "weekend" in season_rates:
-        return season_rates.get("weekend") if is_weekend(dt) else season_rates.get("weekdays")
+    if "weekdays" in season_rates or "weekends" in season_rates:
+        return season_rates.get("weekends") if is_weekend(dt) else season_rates.get("weekdays")
     return season_rates
 
 def get_hourly_rate(rate_section, hour):
@@ -81,11 +81,11 @@ def calculate_annual_costs_electricity(load_profile, utility, rate_plan_name):
 
     for hour_index, hourly_load in enumerate(load_profile):
         season = get_season(hour_index)
-        current_datetime = datetime(year=2023, month=1, day=1) + timedelta(hours=hour_index)
+        current_datetime = datetime(year=2018, month=1, day=1) + timedelta(hours=hour_index)
         hour = current_datetime.hour
 
         # Determine whether the current day is a weekday (Monday-Friday) or weekend (Saturday-Sunday)
-        dayotw_type = "weekdays" # if current_datetime.weekday() < 5 else "weekends"
+        dayotw_type = "weekends" if is_weekend(current_datetime) else "weekdays"
 
         # Retrieve the seasonal rates and then the appropriate day type rates
         season_rates = plan_details.get(season)
@@ -98,6 +98,8 @@ def calculate_annual_costs_electricity(load_profile, utility, rate_plan_name):
 
         if hour in dayotw_rates.get("peakHours", []):
             rate = dayotw_rates.get("peak", 0.0)
+        elif "midPeakHours" in dayotw_rates and hour in dayotw_rates["midPeakHours"]:
+            rate = dayotw_rates["midPeak"]
         elif "partPeakHours" in dayotw_rates and hour in dayotw_rates.get("partPeakHours", []):
             rate = dayotw_rates["partPeak"]
         elif "superOffPeakHours" in dayotw_rates and hour in dayotw_rates.get("superOffPeakHours", []):
@@ -109,30 +111,59 @@ def calculate_annual_costs_electricity(load_profile, utility, rate_plan_name):
         energy_cost = hourly_load * rate
         annual_costs[rate_plan_name] += energy_cost
 
-        # Include fixed charges if available (spread monthly)
+        # Include fixed charges if available (daily charge spread across 24 hours)
         fixed_charge = dayotw_rates.get("fixedCharge", 0.0)
-        annual_costs[rate_plan_name] += fixed_charge / 12
+        annual_costs[rate_plan_name] += fixed_charge / 24
 
     return annual_costs
 
 
 def _hourly_import_rate(plan_details, dt: datetime) -> float:
+    """Return the import rate ($/kWh) for a given datetime.
+
+    BUG HISTORY (fixed 2026-03-03, same root cause as step9b_cooptimize_core.py):
+        Used 'weekend' (singular) instead of 'weekends' (plural). Silent fallback
+        returned 0.0 for all weekend hours across all rate plans.
+    """
     season = 'summer' if 6 <= dt.month <= 9 else 'winter'
     season_rates = plan_details.get(season)
     if not season_rates:
-        return 0.0
-    day_rates = season_rates.get('weekend') if is_weekend(dt) else season_rates.get('weekdays')
-    if not day_rates:
-        # flat seasonal structure
+        raise KeyError(
+            f"Season '{season}' not found in rate plan. "
+            f"Available keys: {list(plan_details.keys())}"
+        )
+
+    day_type = 'weekends' if is_weekend(dt) else 'weekdays'
+    if day_type in season_rates:
+        day_rates = season_rates[day_type]
+    elif 'weekdays' in season_rates or 'weekends' in season_rates:
+        raise KeyError(
+            f"Rate plan has a weekday/weekend split but '{day_type}' key not found. "
+            f"Available keys in '{season}': {list(season_rates.keys())}. "
+            f"Check for 'weekdays'/'weekends' key name typos in electricity_rate_helpers.py."
+        )
+    else:
         day_rates = season_rates
+
     h = dt.hour
-    if 'peakHours' in day_rates and h in day_rates.get('peakHours', []):
-        return float(day_rates.get('peak', 0.0))
-    if 'partPeakHours' in day_rates and h in day_rates.get('partPeakHours', []):
-        return float(day_rates.get('partPeak', 0.0))
-    if 'superOffPeakHours' in day_rates and h in day_rates.get('superOffPeakHours', []):
-        return float(day_rates.get('superOffPeak', 0.0))
-    return float(day_rates.get('offPeak', day_rates.get('peak', 0.0)))
+    if 'peakHours' in day_rates and h in day_rates['peakHours']:
+        return float(day_rates['peak'])
+    if 'onPeakHours' in day_rates and h in day_rates['onPeakHours']:
+        return float(day_rates['onPeak'])
+    if 'midPeakHours' in day_rates and h in day_rates['midPeakHours']:
+        return float(day_rates['midPeak'])
+    if 'partPeakHours' in day_rates and h in day_rates['partPeakHours']:
+        return float(day_rates['partPeak'])
+    if 'superOffPeakHours' in day_rates and h in day_rates['superOffPeakHours']:
+        return float(day_rates['superOffPeak'])
+    if 'offPeak' in day_rates:
+        return float(day_rates['offPeak'])
+    if 'peak' in day_rates:
+        return float(day_rates['peak'])
+    raise KeyError(
+        f"No fallback rate key ('offPeak' or 'peak') found in {day_type}/{season} "
+        f"rates at hour {h}. Available keys: {list(day_rates.keys())}"
+    )
 
 
 def _estimate_monthly_fixed_from_plan(plan_details, year: int, month: int) -> float:
@@ -140,7 +171,7 @@ def _estimate_monthly_fixed_from_plan(plan_details, year: int, month: int) -> fl
     # Try weekdays summer first, else any season
     season = 'summer' if 6 <= month <= 9 else 'winter'
     rates = plan_details.get(season, {})
-    day_rates = rates.get('weekdays', rates.get('weekend', rates))
+    day_rates = rates.get('weekdays', rates.get('weekends', rates))
     per_day = float(day_rates.get('fixedCharge', 0.0))
     # Days in month
     days = 30

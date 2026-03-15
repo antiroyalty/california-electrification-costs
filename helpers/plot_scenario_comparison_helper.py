@@ -800,15 +800,6 @@ def recommended_additional_plots() -> List[str]:
 
 # ---------- Equivalent Annual Cost (EAC) collection and plotting ----------
 
-def _crf(rate: float, n_years: float) -> float:
-    """Capital Recovery Factor."""
-    if rate <= 0 or n_years <= 0:
-        return 1.0 / max(n_years, 1.0)
-    r = rate
-    n = float(n_years)
-    return (r * (1 + r) ** n) / (((1 + r) ** n) - 1)
-
-
 def _read_capital_ledger(base_input_dir: str, scenario: str, housing_type: str) -> pd.DataFrame:
     cap_dir = os.path.join(base_input_dir, "capital_costs")
     fname = f"capital_costs_{scenario}_{housing_type.replace('-', '_')}.csv"

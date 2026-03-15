@@ -28,6 +28,22 @@ def _plan_pref_from(rate_plans: Optional[Dict[str, Dict[str, str]]]) -> Optional
         return None
 
 
+def _is_coopt_scenario(name: str) -> bool:
+    return str(name).endswith("_coopt")
+
+
+def _cross_scenario_list(current_scenario: str) -> List[str]:
+    """Return cross-scenario set aligned to the current scenario family."""
+    want_coopt = _is_coopt_scenario(current_scenario)
+    return [s for s in SCENARIOS.keys() if _is_coopt_scenario(s) == want_coopt]
+
+
+def _vehicle_compare_pair(current_scenario: str) -> List[str]:
+    if _is_coopt_scenario(current_scenario):
+        return ["baseline_ice_car_coopt", "baseline_ev_car_coopt"]
+    return ["baseline_ice_car", "baseline_ev_car"]
+
+
 def run(cfg: Config) -> None:
     """Run Module 4: visualize and compare results (Steps 15, 16, 18–22)."""
     c_list: List[str] = list(cfg.counties)
@@ -79,29 +95,38 @@ def run(cfg: Config) -> None:
     #     # Non-fatal — continue with other visualizations
     #     print(f"[Step16] Warning: map generation failed: {e}")
 
-    # 18) Cross-scenario EAC (use all scenarios)
+    # 18) Cross-scenario EAC (stay within current scenario family: coopt vs non-coopt)
+    # Non-fatal: requires all sibling scenarios to have electricity results. Skips
+    # gracefully when run before all scenarios are available; succeeds once they are.
     log_step(18)
-    Step18CrossScenarioComparisons.process(
-        cfg.base_input_dir,
-        cfg.output_dir,
-        cfg.housing_type,
-        list(SCENARIOS.keys()),
-        c_list,
-        plan_preference=plan_preference,
-        electricity_variant=cfg.electricity_variant,
-    )
+    try:
+        Step18CrossScenarioComparisons.process(
+            cfg.base_input_dir,
+            cfg.output_dir,
+            cfg.housing_type,
+            _cross_scenario_list(cfg.scenario),
+            c_list,
+            plan_preference=plan_preference,
+            electricity_variant=cfg.electricity_variant,
+        )
+    except Exception as e:
+        print(f"[Step18] Skipped (missing sibling scenario data): {e}")
 
     # 19) EV vs ICE comparison
+    # Non-fatal: requires both baseline_ice_car and baseline_ev_car results to exist.
     log_step(19)
-    Step19CompareTwoScenarios.process(
-        cfg.base_input_dir,
-        cfg.output_dir,
-        cfg.housing_type,
-        ["baseline_ice_car", "baseline_ev_car"],
-        c_list,
-        plan_preference=plan_preference,
-        electricity_variant=cfg.electricity_variant,
-    )
+    try:
+        Step19CompareTwoScenarios.process(
+            cfg.base_input_dir,
+            cfg.output_dir,
+            cfg.housing_type,
+            _vehicle_compare_pair(cfg.scenario),
+            c_list,
+            plan_preference=plan_preference,
+            electricity_variant=cfg.electricity_variant,
+        )
+    except Exception as e:
+        print(f"[Step19] Skipped (missing sibling scenario data): {e}")
 
     # 20) No-solar EAC for the current scenario
     log_step(20)

@@ -30,6 +30,7 @@ from helpers.capital_cost_map_builder import LIFETIMES
 from appliances.battery_storage import BatteryStorageAppliance
 from appliances.electric_base import IncentiveScenario
 from step15_payback_periods import vehicle_annual_adders_from_ledger
+from evaluations.eac import crf as _crf
 
 
 @dataclass
@@ -58,14 +59,6 @@ def _temp_battery_capacity_kwh(kwh: float):
         yield
     finally:
         setattr(diy, 'BATTERY_CAPACITY_KWH', prev)
-
-
-def _crf(rate: float, n_years: float) -> float:
-    if rate <= 0 or n_years <= 0:
-        return 1.0 / max(n_years, 1.0)
-    r = float(rate)
-    n = float(n_years)
-    return (r * (1 + r) ** n) / (((1 + r) ** n) - 1)
 
 
 def _collect_metrics(load_profile: List[float], pv: List[float], bd: List[float], gtl: List[float], gtb: List[float], ptb: List[float]) -> Dict[str, float]:

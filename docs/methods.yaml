@@ -105,6 +105,19 @@
       "evaluations/eac.py:EACComponents"
     ]
   },
+  "eac.alpha_batt_npv": {
+    "title": "Battery Capex Coefficient under NPV Framing",
+    "formula": "alpha_batt = (1 + (1+r)^(-n_batt)) / PVA(r, N)",
+    "assumptions": {
+      "derivation": "Over a horizon N, a battery with lifetime n_batt < N requires replacement at t=n_batt. K_batt = 1 + (1+r)^(-n_batt) is the present value of both purchases. Dividing by PVA(r,N) = (1-(1+r)^(-N))/r converts to annual-equivalent cost.",
+      "vs_crf": "alpha_batt > CRF(r, n_batt) because CRF prices only one battery purchase. At r=0.07, n_batt=15, N=25: alpha_batt=0.1169 vs CRF=0.1098 (+6.4%).",
+      "pv_unchanged": "For PV, n_pv = N = 25, so K_pv = 1 and alpha_pv = 1/PVA = CRF(r, N). No change to PV coefficient."
+    },
+    "code": [
+      "evaluations/eac.py:alpha_batt_npv",
+      "pipeline/steps/step9b_cooptimize_core.py:_solve_lp"
+    ]
+  },
   "eac.compute_eac_from_inputs": {
     "title": "Equivalent Annual Cost (EAC)",
     "formula": "EAC = annualized_capex_pv + annualized_capex_storage + annualized_capex_electric + annualized_capex_gas + annual_bill_electric + annual_bill_gas + vehicle_om",
@@ -112,7 +125,8 @@
       "discount_rate": "0.07 real (default unless overridden)",
       "lifetimes": "solar=25, storage=15, appliance rows use lifetime_years (default 15 if missing)",
       "incentives": "full/half/no incentives applied to PV/storage capex",
-      "capital_recovery_factor": "CRF = r(1+r)^n / ((1+r)^n - 1)"
+      "capital_recovery_factor": "CRF = r(1+r)^n / ((1+r)^n - 1)",
+      "npv_framing": "When npv_framing=True, storage uses alpha_batt_npv instead of CRF — see eac.alpha_batt_npv"
     },
     "data_sources": {
       "capex_ledger": "capital_costs_<scenario>_<housing>.csv",

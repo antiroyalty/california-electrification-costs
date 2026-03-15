@@ -6,6 +6,8 @@ from typing import List, Optional, Tuple
 
 import pandas as pd
 
+from evaluations.eac import crf as _crf
+
 try:
     import pulp
 except Exception:
@@ -57,42 +59,155 @@ class CooptResult:
     flows: FlowSeries
 
 
+# Battery operating parameters — shared between LP constraints and post-solve verification.
+# If these change, both the LP and the invariant checks change together.
+_SOC_MIN_FR = 0.20
+_SOC_MAX_FR = 0.90
+_RTE = 0.96  # Round-trip efficiency
+
+
+def _verify_invariants(
+    result: CooptResult,
+    inputs: CooptInputs,
+    *,
+    tol: float = 1e-3,
+) -> None:
+    """Assert post-solve invariants on extracted float values.
+
+    The LP constraints guarantee these hold in the solver model. This function
+    verifies that the extracted floats satisfy them too — catching any floating
+    point gaps between the model and the solution values.
+
+    Raises AssertionError with a descriptive message if any invariant is violated.
+    """
+    f = result.flows
+    H = len(inputs.load_kwh)
+
+    for h in range(H):
+        # 1. Load balance: every kWh of load must be served by exactly one source.
+        served = f.pv_to_load[h] + f.batt_to_load[h] + f.grid_to_load[h]
+        assert abs(served - inputs.load_kwh[h]) <= tol, (
+            f"Load balance violated at hour {h}: "
+            f"served={served:.4f} kWh, load={inputs.load_kwh[h]:.4f} kWh"
+        )
+
+        # 2. Non-negative flows: all physical flows must be >= 0.
+        for name, val in [
+            ("pv_to_load", f.pv_to_load[h]),
+            ("pv_to_batt", f.pv_to_batt[h]),
+            ("pv_to_grid", f.pv_to_grid[h]),
+            ("batt_to_load", f.batt_to_load[h]),
+            ("batt_to_grid", f.batt_to_grid[h]),
+            ("grid_to_load", f.grid_to_load[h]),
+            ("grid_to_batt", f.grid_to_batt[h]),
+        ]:
+            assert val >= -tol, (
+                f"Negative flow {name}[{h}] = {val:.6f}"
+            )
+
+        # 3. PV generation bound: total PV output cannot exceed available generation.
+        pv_out = f.pv_to_load[h] + f.pv_to_batt[h] + f.pv_to_grid[h]
+        pv_avail = result.pv_kw * inputs.pv_gen_per_kw[h]
+        assert pv_out <= pv_avail + tol, (
+            f"PV output exceeds generation at hour {h}: "
+            f"output={pv_out:.4f} kWh, available={pv_avail:.4f} kWh"
+        )
+
+        # 4. Battery SOC bounds.
+        if result.batt_kwh > tol:
+            soc_min = result.batt_kwh * _SOC_MIN_FR
+            soc_max = result.batt_kwh * _SOC_MAX_FR
+            assert f.soc[h] >= soc_min - tol, (
+                f"SOC below minimum at hour {h}: soc={f.soc[h]:.4f}, min={soc_min:.4f}"
+            )
+            assert f.soc[h] <= soc_max + tol, (
+                f"SOC above maximum at hour {h}: soc={f.soc[h]:.4f}, max={soc_max:.4f}"
+            )
+
+    # 5. Financial reconciliation: total cost must equal the sum of its components.
+    expected_total = (
+        result.capex_annual
+        + result.import_cost
+        - result.export_credit
+        + result.degradation_cost
+    )
+    assert abs(result.total_cost - expected_total) <= tol, (
+        f"Financial reconciliation failed: "
+        f"total={result.total_cost:.4f}, "
+        f"capex + imports - exports + degradation={expected_total:.4f}"
+    )
+
+
 def _timestamp_index_8760(year: int = 2018) -> List[pd.Timestamp]:
     start = datetime(year=year, month=1, day=1)
     return [start + timedelta(hours=h) for h in range(8760)]
 
 
 def _hourly_import_rate(plan_details: dict, ts: pd.Timestamp) -> float:
+    """Return the import rate ($/kWh) for a given timestamp.
+
+    Rate plan dicts are structured as:
+        plan_details[season]["weekdays" | "weekends"][rate_keys]
+
+    BUG HISTORY (fixed 2026-03-03, caught by rate-helpers-test.py):
+        The original code used rates.get("weekend") — singular — but every rate
+        plan in electricity_rate_helpers.py uses "weekends" — plural. The silent
+        fallback (if not day_rates: day_rates = rates) then set day_rates to the
+        season dict, which has no rate keys, so the final .get("offPeak", .get("peak",
+        0.0)) returned 0.0 for every weekend hour. Weekend import rates were zero
+        across all PGE/SCE/SDGE plans for the entire run history.
+
+        Impact: weekend solar arbitrage appeared artificially profitable in the LP
+        (zero import cost means zero savings from shifting load), so the optimizer
+        had less incentive to charge the battery on weekends. The zero export credit
+        on weekends inflated apparent savings from weekday-only dispatch. The effect
+        is partially self-canceling but not zero — results from any run before this
+        fix should be treated as having incorrect weekend rate assumptions.
+    """
     month = ts.month
-    # Season mapping: consistent with step12 (Jun-Sep = summer)
     season = "summer" if 6 <= month <= 9 else "winter"
-    rates = plan_details.get(season, {})
-    # day type (weekday/weekend) structure if available
-    day_rates = rates.get("weekend") if ts.weekday() >= 5 else rates.get("weekdays")
-    if not day_rates:
+    rates = plan_details.get(season)
+    if rates is None:
+        raise KeyError(
+            f"Season '{season}' not found in rate plan. "
+            f"Available keys: {list(plan_details.keys())}"
+        )
+
+    day_type = "weekends" if ts.weekday() >= 5 else "weekdays"
+    if day_type in rates:
+        day_rates = rates[day_type]
+    elif "weekdays" in rates or "weekends" in rates:
+        # The plan has a weekday/weekend split but the requested key is missing.
+        # This is the class of bug described above — fail loudly instead of
+        # silently returning 0.
+        raise KeyError(
+            f"Rate plan has a weekday/weekend split but '{day_type}' key not found. "
+            f"Available keys in '{season}': {list(rates.keys())}. "
+            f"Check for 'weekdays'/'weekends' key name typos in electricity_rate_helpers.py."
+        )
+    else:
+        # Plan has no day-type split; season-level rates apply directly.
         day_rates = rates
+
     h = ts.hour
-    # Common structures across PGE/SCE/SDGE helpers
-    if "peakHours" in day_rates and h in day_rates.get("peakHours", []):
-        return float(day_rates.get("peak", 0.0))
-    if "partPeakHours" in day_rates and h in day_rates.get("partPeakHours", []):
-        return float(day_rates.get("partPeak", 0.0))
-    if "onPeakHours" in day_rates and h in day_rates.get("onPeakHours", []):
-        return float(day_rates.get("onPeak", 0.0))
-    if "midPeakHours" in day_rates and h in day_rates.get("midPeakHours", []):
-        return float(day_rates.get("midPeak", 0.0))
-    if "superOffPeakHours" in day_rates and h in day_rates.get("superOffPeakHours", []):
-        return float(day_rates.get("superOffPeak", 0.0))
-    return float(day_rates.get("offPeak", day_rates.get("peak", 0.0)))
-
-
-def _crf(discount_rate: float, years: int) -> float:
-    r = float(discount_rate)
-    n = int(years)
-    if r <= 0:
-        return 1.0 / max(n, 1)
-    a = (1 + r) ** n
-    return r * a / (a - 1)
+    if "peakHours" in day_rates and h in day_rates["peakHours"]:
+        return float(day_rates["peak"])
+    if "partPeakHours" in day_rates and h in day_rates["partPeakHours"]:
+        return float(day_rates["partPeak"])
+    if "onPeakHours" in day_rates and h in day_rates["onPeakHours"]:
+        return float(day_rates["onPeak"])
+    if "midPeakHours" in day_rates and h in day_rates["midPeakHours"]:
+        return float(day_rates["midPeak"])
+    if "superOffPeakHours" in day_rates and h in day_rates["superOffPeakHours"]:
+        return float(day_rates["superOffPeak"])
+    if "offPeak" in day_rates:
+        return float(day_rates["offPeak"])
+    if "peak" in day_rates:
+        return float(day_rates["peak"])
+    raise KeyError(
+        f"No fallback rate key ('offPeak' or 'peak') found in {day_type}/{season} "
+        f"rates at hour {h}. Available keys: {list(day_rates.keys())}"
+    )
 
 
 def _ensure_pulp() -> None:
@@ -170,13 +285,10 @@ def _solve_lp(
         soc_pv = [pulp.LpVariable(f"soc_pv_{h}", lowBound=0) for h in range(H)]
         soc_grid = [pulp.LpVariable(f"soc_grid_{h}", lowBound=0) for h in range(H)]
 
-    # Battery parameters (align with Step 9 defaults)
-    SOC_MIN_FR = 0.20
-    SOC_MAX_FR = 0.90
+    # Battery parameters — use module-level constants so LP and verifier stay in sync.
     from math import sqrt
-    RTE = 0.96
-    ETA_CH = sqrt(RTE)
-    ETA_DIS = sqrt(RTE)
+    ETA_CH = sqrt(_RTE)
+    ETA_DIS = sqrt(_RTE)
 
     # PV availability and load balance
     for h in range(H):
@@ -228,13 +340,23 @@ def _solve_lp(
                 - (1.0 / ETA_DIS) * (batt2load[h] + batt2grid[h])
             )
         # SOC bounds depend on capacity
-        prob += soc[h] >= B_E * SOC_MIN_FR
-        prob += soc[h] <= B_E * SOC_MAX_FR
+        prob += soc[h] >= B_E * _SOC_MIN_FR
+        prob += soc[h] <= B_E * _SOC_MAX_FR
 
-    # Annualized capex
-    crf_pv = _crf(discount_rate, pv_life_yrs)
-    crf_batt = _crf(discount_rate, batt_life_yrs)
-    capex_annual = PV_kw * c_pv_kw * crf_pv + B_E * c_batt_kwh * crf_batt + B_P * c_batt_kw * crf_batt
+    # Annualized capex (NPV framing, $/year equivalent over horizon N = pv_life_yrs).
+    #
+    # PV: paid once at t=0; lifetime = horizon, so K_pv = 1 and alpha_pv = 1/PVA = CRF(r, N).
+    # Battery: paid at t=0 AND replaced at t=n_batt within the horizon, so
+    #   K_batt = 1 + (1+r)^(-n_batt)   [PV of two purchases]
+    #   alpha_batt = K_batt / PVA(r, N)
+    # alpha_batt > CRF(r, n_batt) because CRF would amortize only one purchase over n_batt years
+    # and ignore the replacement cost. The difference is the discounted cost of the second battery.
+    r = float(discount_rate)
+    N = int(pv_life_yrs)
+    pva_n = ((1 - (1 + r) ** (-N)) / r) if r > 0 else float(N)
+    alpha_pv = 1.0 / pva_n
+    alpha_batt = (1.0 + (1.0 + r) ** (-batt_life_yrs)) / pva_n
+    capex_annual = PV_kw * c_pv_kw * alpha_pv + B_E * c_batt_kwh * alpha_batt + B_P * c_batt_kw * alpha_batt
 
     # Operating bill (imports - exports) + degradation
     energy_cost = pulp.lpSum([
@@ -289,7 +411,7 @@ def _solve_lp(
         grid_to_batt=[float(v.value()) for v in grid2batt],
         soc=[float(v.value()) for v in soc],
     )
-    return CooptResult(
+    result = CooptResult(
         pv_kw=pv_kw_val,
         batt_kwh=b_e_val,
         batt_kw=b_p_val,
@@ -300,6 +422,8 @@ def _solve_lp(
         degradation_cost=degradation_cost_val,
         flows=flows,
     )
+    _verify_invariants(result, inputs)
+    return result
 
 
 def build_monthly_hourly_inputs(
