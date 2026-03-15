@@ -2,8 +2,9 @@
 Rate correctness tests for electricity_rate_helpers.py and the LP import rate function.
 
 These tests encode rate values that were hand-verified against official PG&E tariff PDFs
-(April 2025 tariff sheets). They serve as a permanent regression guard: if any rate value
-or peak-hour definition changes without an explicit tariff update, these tests will fail.
+(March 2026 tariff sheets, effective March 1, 2026). They serve as a permanent regression
+guard: if any rate value or peak-hour definition changes without an explicit tariff update,
+these tests will fail.
 
 Each test documents the specific tariff rule it is checking and the source.
 
@@ -90,63 +91,72 @@ class TestETOUDStructure:
 
 
 # ---------------------------------------------------------------------------
-# E-TOU-C rate values (hand-verified against April 2025 PG&E tariff sheet)
+# E-TOU-C rate values (hand-verified against March 2026 PG&E tariff sheet)
+# Source: data/utility-rates/pge/pge-residential-electric-rate-plan-pricing.pdf
+# Effective: March 1, 2026
+# The code models all consumption at the above-baseline rate.
 # ---------------------------------------------------------------------------
 
 class TestETOUCRates:
 
     def test_summer_weekday_peak_rate(self, etou_c):
+        # Summer peak (4–9pm every day): above-baseline 52¢
         rate = _hourly_import_rate(etou_c, TUESDAY_JULY_6PM)
-        assert rate == pytest.approx(0.60729)
+        assert rate == pytest.approx(0.52)
 
     def test_summer_weekend_peak_rate_matches_weekday(self, etou_c):
-        # E-TOU-C applies the same peak rate on weekends.
+        # E-TOU-C applies the same peak rate on weekends: above-baseline 52¢
         rate = _hourly_import_rate(etou_c, SATURDAY_JULY_6PM)
-        assert rate == pytest.approx(0.60729)
+        assert rate == pytest.approx(0.52)
 
     def test_summer_off_peak_rate(self, etou_c):
-        # 3pm is before the 4pm peak window.
+        # 3pm is before the 4pm peak window: above-baseline off-peak 40¢
         rate = _hourly_import_rate(etou_c, TUESDAY_JULY_3PM)
-        assert rate == pytest.approx(0.50429)
+        assert rate == pytest.approx(0.40)
 
     def test_winter_weekday_peak_rate(self, etou_c):
+        # Winter peak (4–9pm every day): above-baseline 40¢
         rate = _hourly_import_rate(etou_c, TUESDAY_JAN_6PM)
-        assert rate == pytest.approx(0.49312)
+        assert rate == pytest.approx(0.40)
 
 
 # ---------------------------------------------------------------------------
-# E-TOU-D rate values (hand-verified against April 2025 PG&E tariff sheet)
+# E-TOU-D rate values (hand-verified against March 2026 PG&E tariff sheet)
+# Source: data/utility-rates/pge/pge-residential-electric-rate-plan-pricing.pdf
+# Effective: March 1, 2026
 # ---------------------------------------------------------------------------
 
 class TestETOUDRates:
 
     def test_summer_weekday_peak_rate(self, etou_d):
+        # Summer peak (5–8pm weekdays): 48¢
         rate = _hourly_import_rate(etou_d, TUESDAY_JULY_6PM)
-        assert rate == pytest.approx(0.56462)
+        assert rate == pytest.approx(0.48)
 
     def test_summer_weekend_is_always_off_peak(self, etou_d):
-        # 6pm Saturday: no peak for E-TOU-D on weekends.
+        # 6pm Saturday: no peak for E-TOU-D on weekends; off-peak 34¢
         rate = _hourly_import_rate(etou_d, SATURDAY_JULY_6PM)
-        assert rate == pytest.approx(0.42966)
+        assert rate == pytest.approx(0.34)
 
     def test_summer_off_peak_before_peak_window(self, etou_d):
-        # 3pm Tuesday: off-peak because E-TOU-D peak starts at 5pm.
+        # 3pm Tuesday: off-peak because E-TOU-D peak starts at 5pm; 34¢
         rate = _hourly_import_rate(etou_d, TUESDAY_JULY_3PM)
-        assert rate == pytest.approx(0.42966)
+        assert rate == pytest.approx(0.34)
 
     def test_summer_peak_starts_at_5pm(self, etou_d):
-        # Hour 17 = 5pm = first peak hour.
+        # Hour 17 = 5pm = first peak hour: 48¢
         rate = _hourly_import_rate(etou_d, TUESDAY_JULY_5PM)
-        assert rate == pytest.approx(0.56462)
+        assert rate == pytest.approx(0.48)
 
     def test_summer_peak_ends_before_8pm(self, etou_d):
-        # Hour 20 = 8pm = outside peak window [17, 18, 19].
+        # Hour 20 = 8pm = outside peak window [17, 18, 19]; off-peak 34¢
         rate = _hourly_import_rate(etou_d, TUESDAY_JULY_8PM)
-        assert rate == pytest.approx(0.42966)
+        assert rate == pytest.approx(0.34)
 
     def test_winter_weekday_peak_rate(self, etou_d):
+        # Winter peak (5–8pm weekdays): 39¢
         rate = _hourly_import_rate(etou_d, TUESDAY_JAN_6PM)
-        assert rate == pytest.approx(0.47502)
+        assert rate == pytest.approx(0.39)
 
 
 # ---------------------------------------------------------------------------
