@@ -239,7 +239,7 @@ def calculate_nem3_annual_costs(
         leftover_credit = max(0.0, (carry_credit + export_credit) - energy_charge)
 
         # Fixed and minimum charges (prefer explicit options; otherwise infer per plan)
-        fixed = opts.fixed_charge_monthly or _estimate_monthly_fixed_from_plan(plan_details, ts.dt.year.iloc[0], int(month))
+        fixed = opts.fixed_charge_monthly or _estimate_monthly_fixed_from_plan(plan_details, ts[0].year, int(month))
         minimum = opts.minimum_bill_monthly or 0.0
         month_subtotal = energy_net + nbc_charge + fixed
         month_total = max(month_subtotal, minimum)
