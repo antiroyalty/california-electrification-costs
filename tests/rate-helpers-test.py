@@ -436,13 +436,17 @@ class TestSCEFixedCharges:
 class TestSCEFullAnnualBill:
     """Full annual bill (energy + fixed) via calculate_annual_costs_electricity.
 
-    Load: flat 1 kWh/hr for all 8760 hours of 2023.
-    Expected energy from PNG source-of-truth functions evaluated on 2023 calendar.
+    Load: flat 1 kWh/hr for all 8760 hours.
+    Expected energy from PNG source-of-truth functions evaluated on the 2018 calendar.
     Expected fixed = fixedCharge_per_day × 365.
+
+    calculate_annual_costs_electricity uses 2018 as the base year for weekday
+    determination (step12 line 84: datetime(year=2018, month=1, day=1)), matching
+    the NREL load profile year. Expected values must use YEAR_2018 to match.
     """
 
     def test_tou_d_4_9pm_full_bill(self):
-        expected_energy = sum(_png_rate_4_9pm(ts) for ts in YEAR_2023)
+        expected_energy = sum(_png_rate_4_9pm(ts) for ts in YEAR_2018)
         expected_total = expected_energy + 0.70 * 365
         result = calculate_annual_costs_electricity(FLAT_LOAD_8760, "SCE", "TOU-D-4-9PM")
         actual = result["TOU-D-4-9PM"]
@@ -452,7 +456,7 @@ class TestSCEFullAnnualBill:
         )
 
     def test_tou_d_5_8pm_full_bill(self):
-        expected_energy = sum(_png_rate_5_8pm(ts) for ts in YEAR_2023)
+        expected_energy = sum(_png_rate_5_8pm(ts) for ts in YEAR_2018)
         expected_total = expected_energy + 0.79 * 365
         result = calculate_annual_costs_electricity(FLAT_LOAD_8760, "SCE", "TOU-D-5-8PM")
         actual = result["TOU-D-5-8PM"]
@@ -462,7 +466,7 @@ class TestSCEFullAnnualBill:
         )
 
     def test_tou_d_prime_full_bill(self):
-        expected_energy = sum(_png_rate_prime(ts) for ts in YEAR_2023)
+        expected_energy = sum(_png_rate_prime(ts) for ts in YEAR_2018)
         expected_total = expected_energy + 0.79 * 365
         result = calculate_annual_costs_electricity(FLAT_LOAD_8760, "SCE", "TOU-D-PRIME")
         actual = result["TOU-D-PRIME"]
