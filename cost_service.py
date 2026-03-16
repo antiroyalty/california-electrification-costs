@@ -106,7 +106,7 @@ if __name__ == "__main__":
     cost_service = CostService(
         scenario,
         housing_type,
-        counties=current_county,
+        counties=all_counties,
         rate_plans=rate_plans,
         input_dir=input_dir,
         output_dir=output_dir,
