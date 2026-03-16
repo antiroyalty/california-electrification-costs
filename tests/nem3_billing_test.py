@@ -36,6 +36,7 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 from helpers.electricity_rate_helpers import PGE_RATE_PLANS
+from helpers.nem3_export_rates import NEM3Options
 from pipeline.steps.step12_evaluate_electricity_rates import (
     _hourly_import_rate as _step12_rate,
     calculate_annual_costs_electricity,
@@ -456,4 +457,213 @@ class TestCostReconciliationNaNPropagation:
         assert pd.isna(totals.loc["scenario_b", col]), (
             f"scenario_b is missing gas data — total should be NaN (detectable gap), "
             f"not 0 (silent wrong value). Got {totals.loc['scenario_b', col]}."
+        )
+
+
+# ---------------------------------------------------------------------------
+# SCE NEM3 BOE cross-check
+# ---------------------------------------------------------------------------
+
+
+class TestNEM3BOECrossCheckSCE:
+    """SCE equivalent of TestNEM3BOECrossCheck (Test 5) for LA County.
+
+    With zero exports, the NEM3 annual bill must match the retail annual bill
+    within $1/year for each SCE plan. This is the Duncan test for SCE territory.
+
+    Uses real LA County load data (default.electricity.kwh — no solar, no storage).
+    Timestamps are set to YEAR_2018 to match the year used by both billing
+    functions for weekday/season determination.
+
+    If this fails, there is a systematic discrepancy between the two billing
+    paths for SCE that is unrelated to export compensation — every SCE NEM3
+    number in the paper would have a systematic error.
+
+    Note: calculate_annual_costs_electricity and calculate_nem3_annual_costs use
+    different rate-dispatch code paths. Both are exercised here:
+      - calculate_annual_costs_electricity: dayotw_rates dict lookups (step12 lines 99–108)
+      - calculate_nem3_annual_costs: _hourly_import_rate helper
+    Any divergence between these paths for SCE plans would show up here.
+    """
+
+    LOAD_PATH = os.path.join(
+        REPO_ROOT,
+        "data", "loadprofiles", "baseline_coopt",
+        "single-family-detached", "los-angeles",
+        "loadprofiles_for_rates_los-angeles.csv",
+    )
+
+    @pytest.fixture(scope="class")
+    def la_default_load(self):
+        df = pd.read_csv(self.LOAD_PATH)
+        return df["default.electricity.kwh"].values[:8760].tolist()
+
+    @pytest.mark.parametrize("plan", ["TOU-D-4-9PM", "TOU-D-5-8PM", "TOU-D-PRIME"])
+    def test_boe_nem3_no_exports_matches_retail(self, la_default_load, plan):
+        load = la_default_load
+        zeros = [0.0] * len(load)
+
+        retail = calculate_annual_costs_electricity(load, "SCE", plan)[plan]
+        nem3 = calculate_nem3_annual_costs(
+            YEAR_2018, load, zeros, "SCE", plan,
+            export_table=_zeros_acc_table(),
+        )[plan]
+
+        assert nem3 == pytest.approx(retail, abs=1.0), (
+            f"SCE {plan}: NEM3 (no exports) ${nem3:.2f} vs retail ${retail:.2f} "
+            f"(diff ${nem3 - retail:+.2f}). "
+            f"With zero exports, both billing paths must agree within $1/yr."
+        )
+
+
+# ---------------------------------------------------------------------------
+# G7: NEM3 year-end carry drop
+# ---------------------------------------------------------------------------
+
+_JAN_TO_NOV_TS = pd.date_range("2018-01-01", periods=8016, freq="h")  # Jan–Nov: 334 days
+_DEC_TS        = pd.date_range("2018-12-01", periods=744,  freq="h")  # Dec: 31 days
+
+
+class TestNEM3YearEndCarryDrop:
+    """G7: Unused export credit remaining in December is dropped at year-end.
+
+    NEM3 carry-forward logic: each month's surplus export credit rolls to the
+    next month. After December there is no next month, so any remaining credit
+    is discarded — no NSC (Net Surplus Compensation) payout is modeled
+    (nsc_dollars_per_kwh = 0.0 by default).
+
+    This simplification is conservative: it makes NEM3 look slightly worse
+    (households that over-generate in fall/winter get nothing for surplus).
+
+    The test verifies that the year-end surplus does NOT reduce the annual
+    total (no phantom refund). If the carry were accidentally paid out,
+    full_year_with_dec_exports would be lower than expected.
+
+    Uses E-TOU-D (zero fixed charge) to keep arithmetic clean.
+    """
+
+    ACC_RATE = 0.10  # generous ACC rate → large export credit in December
+
+    def _dec_acc_table(self):
+        table = _zeros_acc_table()
+        table[12] = [self.ACC_RATE] * 24
+        return table
+
+    def test_december_surplus_carry_is_dropped(self):
+        # Jan–Nov: 0.5 kWh/hr imports, no exports (builds up the baseline cost)
+        # December: 0.5 kWh/hr imports, 5.0 kWh/hr exports → export_credit >> energy_charge
+        #   Dec energy_charge ≈ 744 × 0.5 × 0.35 ≈ $130 (E-TOU-D winter off-peak)
+        #   Dec export_credit = 744 × 5.0 × 0.10 = $372 → surplus ≈ $242 dropped at year-end
+        all_ts  = _JAN_TO_NOV_TS.append(_DEC_TS)
+        imports = [0.5] * 8760
+        exports = [0.0] * 8016 + [5.0] * 744
+
+        full_with_exports = calculate_nem3_annual_costs(
+            all_ts, imports, exports, "PG&E", "E-TOU-D",
+            export_table=self._dec_acc_table(),
+        )["E-TOU-D"]
+
+        # Reference: same year but with no December exports (Dec energy charge intact)
+        full_no_exports = calculate_nem3_annual_costs(
+            all_ts, imports, [0.0] * 8760, "PG&E", "E-TOU-D",
+            export_table=_zeros_acc_table(),
+        )["E-TOU-D"]
+
+        # December standalone energy charge (no exports, no fixed → just energy)
+        dec_energy_only = calculate_nem3_annual_costs(
+            _DEC_TS, [0.5] * 744, [0.0] * 744, "PG&E", "E-TOU-D",
+            export_table=_zeros_acc_table(),
+        )["E-TOU-D"]
+
+        # Correct: full_with_exports = full_no_exports - dec_energy_only
+        #   (December energy is offset by exports; surplus carry is dropped, not refunded)
+        # Wrong (if NSC payout): full_with_exports < full_no_exports - dec_energy_only
+        expected = full_no_exports - dec_energy_only
+        assert full_with_exports == pytest.approx(expected, abs=0.50), (
+            f"Full year with Dec exports: ${full_with_exports:.2f}. "
+            f"Full year no exports: ${full_no_exports:.2f}. "
+            f"Dec energy: ${dec_energy_only:.2f}. "
+            f"Expected (carry dropped): ${expected:.2f}. "
+            f"If lower, December surplus was incorrectly paid out as NSC."
+        )
+
+
+# ---------------------------------------------------------------------------
+# G8: NEM3 NBC charge path
+# ---------------------------------------------------------------------------
+
+
+class TestNEM3NBCCharges:
+    """G8: Non-Bypassable Charges (NBCs) accumulate on imports and cannot be
+    offset by export credits.
+
+    NBCs = 0.0 by default in the pipeline (NEM3Options.nbc_dollars_per_kwh = 0.0).
+    This test exercises the NBC code path by passing NEM3Options explicitly.
+
+    In step12 calculate_nem3_annual_costs:
+        energy_charge += kwh_imp * max(0.0, irate - opts.nbc_dollars_per_kwh)
+        nbc_charge    += kwh_imp * max(0.0, opts.nbc_dollars_per_kwh)
+        ...
+        month_total = energy_net + nbc_charge + fixed
+
+    Export credits offset energy_charge only. nbc_charge accumulates regardless.
+
+    These tests must pass before NBC rates are set to real values in
+    default_options_for_utility() — they lock in the intended behavior.
+    """
+
+    NBC_RATE = 0.03  # $/kWh, representative of real PGE NBC
+
+    def test_nbc_accrues_on_imports(self):
+        """With imports and no exports, NBC charge = imports × nbc_rate."""
+        # Single July Sunday hour: 1 kWh imported at E-TOU-D off-peak
+        ts = [pd.Timestamp(2018, 7, 1, 10)]  # July 1 = Sunday, hour 10: summer off-peak
+        plan = PGE_RATE_PLANS["E-TOU-D"]
+        irate = _step12_rate(plan, ts[0].to_pydatetime())
+
+        opts = NEM3Options(nbc_dollars_per_kwh=self.NBC_RATE)
+        result = calculate_nem3_annual_costs(
+            ts, [1.0], [0.0], "PG&E", "E-TOU-D",
+            options=opts, export_table=_zeros_acc_table(),
+        )["E-TOU-D"]
+
+        # energy_charge = 1 × (irate - NBC); nbc_charge = 1 × NBC
+        # total = energy_charge + nbc_charge = irate (NBC splits the charge, not adds to it)
+        assert result == pytest.approx(irate, abs=0.001), (
+            f"1 kWh at {irate:.4f}/kWh with NBC={self.NBC_RATE}: "
+            f"expected total ${irate:.4f} (NBC splits charge, not adds to it), "
+            f"got ${result:.4f}"
+        )
+
+    def test_nbc_not_offset_by_export_credits(self):
+        """Export credits offset energy_charge only — NBC charge persists even when
+        exports fully cover the energy portion.
+
+        Setup: 100 kWh imported, 300 kWh exported at a generous ACC rate.
+        The export credit exceeds the energy charge (energy_net = $0, carry builds).
+        But nbc_charge = 100 × 0.03 = $3 must still appear in the monthly total.
+        """
+        ts = [pd.Timestamp(2018, 7, 1, 10)]  # July Sunday off-peak
+        plan = PGE_RATE_PLANS["E-TOU-D"]
+        irate = _step12_rate(plan, ts[0].to_pydatetime())
+
+        acc = _zeros_acc_table()
+        acc[7][10] = irate * 5  # export credit = 5× energy charge → well above energy
+
+        opts = NEM3Options(nbc_dollars_per_kwh=self.NBC_RATE)
+        result = calculate_nem3_annual_costs(
+            ts, [100.0], [300.0], "PG&E", "E-TOU-D",
+            options=opts, export_table=acc,
+        )["E-TOU-D"]
+
+        # energy_charge = 100 × (irate - 0.03)
+        # export_credit = 300 × (irate × 5) >> energy_charge → energy_net = $0
+        # nbc_charge    = 100 × 0.03 = $3.00  ← cannot be offset
+        # month_total   = $0 + $3.00 (no fixed on E-TOU-D)
+        expected_nbc = 100.0 * self.NBC_RATE
+        assert result == pytest.approx(expected_nbc, abs=0.001), (
+            f"100 kWh import with large export credit: energy_net=$0, "
+            f"but NBC=${expected_nbc:.2f} must still be charged. "
+            f"Got ${result:.4f}. "
+            f"If $0.00: NBC was incorrectly offset by export credit."
         )
