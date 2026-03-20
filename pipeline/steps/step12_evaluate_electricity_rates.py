@@ -74,14 +74,17 @@ def get_hourly_rate(rate_section, hour):
         return rate_section["offPeak"]
 
 # TODO: Implement minimum daily charge, baseline credits
-def calculate_annual_costs_electricity(load_profile, utility, rate_plan_name):
+def calculate_annual_costs_electricity(load_profile, utility, rate_plan_name, timestamps=None):
     annual_costs = defaultdict(float)
     # Now plan_details has a nested structure: season -> {weekdays, weekends}
     plan_details = RATE_PLANS[utility][rate_plan_name]
 
     for hour_index, hourly_load in enumerate(load_profile):
-        season = get_season(hour_index)
-        current_datetime = datetime(year=2018, month=1, day=1) + timedelta(hours=hour_index)
+        if timestamps is not None:
+            current_datetime = pd.Timestamp(timestamps[hour_index]).to_pydatetime()
+        else:
+            current_datetime = datetime(year=2018, month=1, day=1) + timedelta(hours=hour_index)
+        season = 'summer' if 6 <= current_datetime.month <= 9 else 'winter'
         hour = current_datetime.hour
 
         # Determine whether the current day is a weekday (Monday-Friday) or weekend (Saturday-Sunday)
@@ -260,9 +263,13 @@ def process_county_scenario_from_series(file_path, county, utility, selected_rat
     file = os.path.join(file_path, county, f"{INPUT_FILE_NAME}_{county}.csv")
     if not os.path.exists(file):
         raise FileNotFoundError(f"File not found: {file}")
-    df = pd.read_csv(file, usecols=[column_name])
+    cols = [column_name]
+    if 'timestamp' not in cols:
+        cols = ['timestamp', column_name]
+    df = pd.read_csv(file, usecols=cols)
     load_profile = df[column_name].astype(float).tolist()
-    return calculate_annual_costs_electricity(load_profile, utility, selected_rate_plan)
+    timestamps = pd.to_datetime(df['timestamp']).values if 'timestamp' in df.columns else None
+    return calculate_annual_costs_electricity(load_profile, utility, selected_rate_plan, timestamps=timestamps)
 
 
 def process_county_scenario_nem3(file_path, county, utility, selected_rate_plan):
