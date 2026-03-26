@@ -294,6 +294,7 @@ class TestACCRatesForAlameda:
         return [table[month][hour] for month in range(1, 13) for hour in range(24)]
 
     def test_all_acc_rates_are_non_negative(self, alameda_rates):
+        """All 288 ACC rate entries for Alameda are non-negative."""
         negatives = [(i, v) for i, v in enumerate(alameda_rates) if v < 0.0]
         assert not negatives, (
             f"Found {len(negatives)} negative ACC rates (first: {negatives[0]}). "

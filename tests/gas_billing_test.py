@@ -94,6 +94,7 @@ class TestGasSeasonCategorization:
         (12, "winter_onpeak"),
     ])
     def test_month_to_season(self, month, expected):
+        """correctly maps all 12 months to their gas billing season."""
         assert categorize_season(month) == expected, (
             f"Month {month}: expected '{expected}', "
             f"got '{categorize_season(month)}'"
