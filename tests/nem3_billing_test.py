@@ -89,6 +89,7 @@ class TestNEM3NoSolarEqualsRetail:
 
     @pytest.mark.parametrize("plan", ["E-TOU-C", "E-TOU-D", "EV2-A", "EV-B", "E-ELEC"])
     def test_nem3_no_exports_matches_retail(self, alameda_default_load, plan):
+        """NEM3 bill with zero exports matches the retail bill within $1/yr for each PGE plan."""
         load = alameda_default_load
         zeros = [0.0] * len(load)
 
@@ -128,6 +129,7 @@ class TestNEM3CarryForward:
         return table
 
     def test_carry_reduces_february_bill(self):
+        """excess January export credit carries forward and reduces February's bill by the correct amount."""
         all_ts = self.JAN_TS.append(self.FEB_TS)
         flat_import = [0.5] * len(all_ts)
         exports = [2.0] * 744 + [0.0] * 672
@@ -205,6 +207,7 @@ class TestNEM3ExportCreditRate:
     """
 
     def test_correct_acc_rate_applied(self):
+        """export credit uses the ACC rate at the exact month and hour of the export, not a different slot."""
         # Nonzero ACC rate at month=7 (July), hour=14 only
         acc = _zeros_acc_table()
         acc_rate = 0.08
@@ -274,6 +277,7 @@ class TestNEM3FixedCharges:
     EXPECTED_ANNUAL = EV2A_FIXED_PER_DAY * 365  # $289.60
 
     def test_zero_load_zero_export_bill_equals_fixed_charges(self):
+        """with zero load and zero exports, annual NEM3 bill equals fixed charges only ($289.60/yr for EV2-A)."""
         result = calculate_nem3_annual_costs(
             YEAR_2018,
             ZEROS_8760,
@@ -337,6 +341,7 @@ class TestNEM3BOECrossCheck:
 
     @pytest.mark.parametrize("plan", ["E-TOU-C", "E-TOU-D", "EV2-A", "EV-B", "E-ELEC"])
     def test_boe_nem3_no_exports_matches_retail(self, alameda_default_load, plan):
+        """NEM3 bill with zero exports matches the retail bill within $1/yr (PGE BOE cross-check)."""
         load = alameda_default_load
         zeros = [0.0] * len(load)
 
@@ -362,6 +367,7 @@ class TestCostReconciliationArithmetic:
     """Test 6: calculate_total_annual_costs correctly adds electricity and gas."""
 
     def test_single_plan_adds_correctly(self):
+        """electricity + gas totals are computed correctly for a single plan pair."""
         idx = ["baseline", "baseline.solarstorage"]
         elec = pd.DataFrame(index=idx, data={
             "electricity.PG&E.E-TOU-D": [2000.0, 1500.0],
@@ -401,6 +407,7 @@ class TestCostReconciliationNEM3Column:
     """
 
     def test_nem3_column_naming_and_values(self):
+        """NEM3 electricity columns produce correctly named total columns, and NaN propagates for rows without solar."""
         idx = ["baseline_coopt", "baseline_coopt.solarstorage"]
         elec = pd.DataFrame(index=idx, data={
             "electricity.PG&E.E-TOU-D":      [3000.0, 2500.0],
@@ -436,6 +443,7 @@ class TestCostReconciliationNaNPropagation:
     """
 
     def test_missing_gas_row_produces_nan_total(self):
+        """missing gas data for a scenario produces NaN in the total column, not a silent $0."""
         elec = pd.DataFrame(
             index=["scenario_a", "scenario_b"],
             data={"electricity.PG&E.E-TOU-D": [1000.0, 2000.0]},
@@ -500,6 +508,7 @@ class TestNEM3BOECrossCheckSCE:
 
     @pytest.mark.parametrize("plan", ["TOU-D-4-9PM", "TOU-D-5-8PM", "TOU-D-PRIME"])
     def test_boe_nem3_no_exports_matches_retail(self, la_default_load, plan):
+        """NEM3 bill with zero exports matches the retail bill within $1/yr for each SCE plan."""
         load = la_default_load
         zeros = [0.0] * len(load)
 
@@ -550,6 +559,7 @@ class TestNEM3YearEndCarryDrop:
         return table
 
     def test_december_surplus_carry_is_dropped(self):
+        """unused December export credit is dropped at year-end, not paid out as a surplus refund."""
         # Jan–Nov: 0.5 kWh/hr imports, no exports (builds up the baseline cost)
         # December: 0.5 kWh/hr imports, 5.0 kWh/hr exports → export_credit >> energy_charge
         #   Dec energy_charge ≈ 744 × 0.5 × 0.35 ≈ $130 (E-TOU-D winter off-peak)
@@ -615,7 +625,7 @@ class TestNEM3NBCCharges:
     NBC_RATE = 0.03  # $/kWh, representative of real PGE NBC
 
     def test_nbc_accrues_on_imports(self):
-        """With imports and no exports, NBC charge = imports × nbc_rate."""
+        """NBC charge accrues on all import kWh and splits the total charge rather than adding to it."""
         # Single July Sunday hour: 1 kWh imported at E-TOU-D off-peak
         ts = [pd.Timestamp(2018, 7, 1, 10)]  # July 1 = Sunday, hour 10: summer off-peak
         plan = PGE_RATE_PLANS["E-TOU-D"]
