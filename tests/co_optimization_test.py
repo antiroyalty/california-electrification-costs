@@ -56,6 +56,7 @@ def coopt_capacity_files() -> list[str]:
 
 
 def test_coopt_capacity_columns_present(coopt_capacity_files: list[str]) -> None:
+    """every co-optimization capacity CSV contains all required output columns."""
     for path in coopt_capacity_files:
         df = _load_capacity_df(path)
         missing = [c for c in REQUIRED_COLUMNS if c not in df.columns]
@@ -64,6 +65,7 @@ def test_coopt_capacity_columns_present(coopt_capacity_files: list[str]) -> None
 
 
 def test_coopt_cost_components_reconcile(coopt_capacity_files: list[str]) -> None:
+    """Coopt Total Cost equals capex + import cost - export credit + degradation cost in every row."""
     tol = 1e-2
     for path in coopt_capacity_files:
         df = _load_capacity_df(path)
@@ -78,6 +80,7 @@ def test_coopt_cost_components_reconcile(coopt_capacity_files: list[str]) -> Non
 
 
 def test_coopt_power_capacity_non_negative(coopt_capacity_files: list[str]) -> None:
+    """battery power capacity (kW) is non-negative in every row — the LP cannot size a negative inverter."""
     for path in coopt_capacity_files:
         df = _load_capacity_df(path)
         batt_kw = _numeric_series(df, "Battery Power Capacity (kW)", path)
