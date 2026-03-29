@@ -1,3 +1,22 @@
+"""Ballpark sanity checks for load profile outputs and the methods manifest.
+
+Two concerns are tested here:
+
+1. Methods manifest integrity: docs/methods.yaml must load cleanly and all
+   code references it declares (file:symbol pairs) must point to real files
+   and symbols in the repo.
+
+2. Load profile plausibility for Alameda County: the combined_profiles CSVs
+   produced by the pipeline must satisfy energy-conservation invariants:
+   - Baseline electricity is ~5,558 kWh/yr (within 20% of RECS/EIA benchmarks)
+   - Electrified scenarios have strictly higher electricity loads than baseline
+   - Reduced-gas scenarios have strictly lower gas loads than baseline
+   - All profiles are exactly 8,760 rows with non-negative, non-null values
+
+These tests use Alameda County as the single representative county because it
+is the primary validation county throughout the paper. If a scenario's CSVs
+are missing (e.g., a partial run), the test skips rather than fails.
+"""
 import json
 import os
 import sys
@@ -23,12 +42,14 @@ def _load_manifest() -> dict:
 
 
 def test_methods_manifest_loads() -> None:
+    """docs/methods.yaml loads as a non-empty dict."""
     manifest = _load_manifest()
     assert isinstance(manifest, dict)
     assert manifest, "methods manifest is empty"
 
 
 def test_methods_manifest_code_refs_exist() -> None:
+    """every file:symbol code reference in docs/methods.yaml points to a real file and symbol."""
     manifest = _load_manifest()
     root = _repo_root()
     for key, entry in manifest.items():
@@ -83,6 +104,7 @@ def _annual_sum(df: pd.DataFrame, column: str) -> float:
 
 
 def test_alameda_baseline_electricity_ballpark() -> None:
+    """Alameda baseline annual electricity consumption is ~5,558 kWh (within 20% of EIA/RECS benchmark)."""
     df = _load_combined_df("baseline")
     if df is None:
         pytest.skip("Baseline combined profiles not found for Alameda County.")
@@ -92,6 +114,7 @@ def test_alameda_baseline_electricity_ballpark() -> None:
 
 
 def test_electricity_increases_for_electrified_scenarios() -> None:
+    """every scenario with more electric appliances than baseline has a strictly higher annual electricity load."""
     base_df = _load_combined_df("baseline")
     if base_df is None:
         pytest.skip("Baseline combined profiles not found for Alameda County.")
@@ -116,6 +139,7 @@ def test_electricity_increases_for_electrified_scenarios() -> None:
 
 
 def test_gas_decreases_for_reduced_gas_scenarios() -> None:
+    """every scenario with fewer gas appliances than baseline has a strictly lower annual gas consumption."""
     base_df = _load_combined_df("baseline")
     if base_df is None:
         pytest.skip("Baseline combined profiles not found for Alameda County.")
@@ -140,6 +164,7 @@ def test_gas_decreases_for_reduced_gas_scenarios() -> None:
 
 
 def test_combined_profiles_shape_and_non_negative() -> None:
+    """combined load profiles for every available scenario have exactly 8,760 rows with non-negative, non-null electricity and gas values."""
     scenarios = list(SCENARIOS.keys())
     checked = 0
     for scen in scenarios:
