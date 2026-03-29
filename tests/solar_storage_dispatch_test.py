@@ -44,6 +44,7 @@ def dispatch_files() -> list[str]:
 # Relational laws for solar + storage dispatch
 
 def test_pv_and_battery_flows_do_not_exceed_load(dispatch_files: list[str]) -> None:
+    """PV-to-load, battery-to-load, and grid-to-load never individually exceed the load in any timestep."""
     for path in dispatch_files:
         df = _load_dispatch_df(path)
         load = _numeric_series(df, "Load Profile", path)
@@ -56,6 +57,7 @@ def test_pv_and_battery_flows_do_not_exceed_load(dispatch_files: list[str]) -> N
 
 
 def test_pv_to_battery_and_grid_do_not_exceed_pv(dispatch_files: list[str]) -> None:
+    """PV export to battery and to grid never exceeds total PV generation in any timestep."""
     for path in dispatch_files:
         df = _load_dispatch_df(path)
         pv_to_batt = _numeric_series(df, "System to Battery", path)
@@ -85,6 +87,7 @@ def test_pv_to_battery_and_grid_do_not_exceed_pv(dispatch_files: list[str]) -> N
 
 
 def test_grid_equals_load_when_no_solar_or_battery(dispatch_files: list[str]) -> None:
+    """grid-to-load equals the full load in every timestep when no PV or battery flows are present."""
     checked = 0
     for path in dispatch_files:
         df = _load_dispatch_df(path)
@@ -110,6 +113,7 @@ def test_grid_equals_load_when_no_solar_or_battery(dispatch_files: list[str]) ->
 
 
 def test_load_balance_per_timestep(dispatch_files: list[str]) -> None:
+    """PV-to-load + battery-to-load + grid-to-load equals the load profile in every timestep (energy conservation)."""
     for path in dispatch_files:
         df = _load_dispatch_df(path)
         load = _numeric_series(df, "Load Profile", path)
@@ -122,6 +126,7 @@ def test_load_balance_per_timestep(dispatch_files: list[str]) -> None:
 
 
 def test_pv_allocation_balance_per_timestep(dispatch_files: list[str]) -> None:
+    """total PV allocation (to load + battery + grid) never exceeds PV generation in any timestep."""
     for path in dispatch_files:
         df = _load_dispatch_df(path)
         pv_to_load = _numeric_series(df, "System to Load", path)
@@ -144,6 +149,7 @@ def test_pv_allocation_balance_per_timestep(dispatch_files: list[str]) -> None:
 
 
 def test_battery_soc_bounds(dispatch_files: list[str]) -> None:
+    """battery state of charge stays within 0–100% (or 0–1.0) in every timestep."""
     for path in dispatch_files:
         df = pd.read_csv(path)
         if "Battery SOC" not in df.columns:
