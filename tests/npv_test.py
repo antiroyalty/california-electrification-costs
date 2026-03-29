@@ -33,6 +33,8 @@ class TestAnnuityFactor:
         assert annuity_factor(0.0, 25) == pytest.approx(1 / 25)
 
     def test_zero_years_returns_one(self):
+        # A zero-year horizon means the entire cost is due immediately,
+        # so the annuity factor collapses to 1.0 (no spreading over time).
         assert annuity_factor(0.07, 0) == pytest.approx(1.0)
 
     def test_known_value_7pct_25yr(self):
@@ -83,11 +85,13 @@ class TestNPV:
         assert npv(0.07, [-5000.0]) == pytest.approx(-5000.0)
 
     def test_profitable_investment_has_positive_npv(self):
+        """$100 upfront cost recovered by $50/yr for 3 years at 7% yields positive NPV."""
         # $100 upfront, $50/yr for 3 years at 7%.
         result = npv(0.07, [-100.0, 50.0, 50.0, 50.0])
         assert result > 0
 
     def test_losing_investment_has_negative_npv(self):
+        """$1,000 upfront cost with only $1/yr returns for 3 years yields negative NPV."""
         # $1000 upfront, $1/yr for 3 years — clearly losing money.
         result = npv(0.07, [-1000.0, 1.0, 1.0, 1.0])
         assert result < 0
@@ -118,6 +122,14 @@ class TestNPVAndAnnuityFactorConsistency:
 # ---------------------------------------------------------------------------
 
 class TestPaperRelevantNPV:
+    """NPV calculations reproduce the paper's full-electrification result.
+
+    The paper uses a 7% real discount rate over a 25-year horizon. The
+    reference case is full electrification + EV + co-optimization in Alameda
+    County, which yields ~$2,516/yr in annual savings over the baseline.
+    These tests confirm that the NPV machinery produces the correct sign,
+    direction, and definition of savings for that scenario.
+    """
 
     def test_positive_npv_for_full_electrification(self):
         # $2,516/yr savings over 25 years at 7% with plausible net capex
@@ -137,6 +149,7 @@ class TestPaperRelevantNPV:
         )
 
     def test_higher_savings_gives_higher_npv(self):
+        """reducing scenario cost (higher annual savings) strictly increases NPV."""
         base_kwargs = dict(
             baseline_cost=15135.0,
             scenario_cost=12619.0,
@@ -157,6 +170,7 @@ class TestPaperRelevantNPV:
         )
 
     def test_annual_savings_definition_is_correct(self):
+        """annual_savings equals baseline_cost minus scenario_solar_cost (the post-solar scenario cost)."""
         # Annual savings for full electrification = baseline_cost - scenario_solar_cost
         result = compute_npv_details_from_inputs(
             baseline_cost=15135.0,
