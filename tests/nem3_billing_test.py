@@ -84,6 +84,8 @@ class TestNEM3NoSolarEqualsRetail:
 
     @pytest.fixture(scope="class")
     def alameda_default_load(self):
+        if not os.path.exists(self.LOAD_PATH):
+            pytest.skip(f"Load profile not found: {self.LOAD_PATH}")
         df = pd.read_csv(self.LOAD_PATH)
         return df["default.electricity.kwh"].values[:8760].tolist()
 
