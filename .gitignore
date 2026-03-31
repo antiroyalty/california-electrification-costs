@@ -1,5 +1,18 @@
 data/*
 !data/NEM3/
+# Load profiles committed for CI testing (nem3_billing_test.py)
+!data/loadprofiles/
+data/loadprofiles/*
+!data/loadprofiles/baseline_coopt/
+data/loadprofiles/baseline_coopt/*
+!data/loadprofiles/baseline_coopt/single-family-detached/
+data/loadprofiles/baseline_coopt/single-family-detached/*
+!data/loadprofiles/baseline_coopt/single-family-detached/alameda/
+data/loadprofiles/baseline_coopt/single-family-detached/alameda/*
+!data/loadprofiles/baseline_coopt/single-family-detached/alameda/loadprofiles_for_rates_alameda.csv
+!data/loadprofiles/baseline_coopt/single-family-detached/los-angeles/
+data/loadprofiles/baseline_coopt/single-family-detached/los-angeles/*
+!data/loadprofiles/baseline_coopt/single-family-detached/los-angeles/loadprofiles_for_rates_los-angeles.csv
 __pycache__
 reference
 wip-outputs
