@@ -738,3 +738,265 @@ class TestPGEAnnualBillVsPDF:
             f"EV-B step12: code ${actual:.2f} vs PDF ${expected:.2f} "
             f"(diff ${actual - expected:+.2f})"
         )
+
+
+# ---------------------------------------------------------------------------
+# PGE full annual bill: calculate_annual_costs_electricity (energy + fixed)
+#
+# This tests the FULL billing function, not just the rate lookup helper.
+# calculate_annual_costs_electricity has a separate rate-dispatch path
+# (lines 99–108 in step12) that handles midPeakHours/partPeakHours/etc.
+# via dayotw_rates dict lookups. The TestPGEAnnualBillVsPDF tests above only
+# exercise _hourly_import_rate — if the billing function's dispatch path
+# diverges from the helper, those tests would not catch it.
+#
+# Strategy: identical to TestSCEFullAnnualBill — flat 1 kWh/hr, 8760 hours.
+# Expected = PDF energy total (YEAR_2018 calendar) + fixedCharge_per_day × 365.
+#
+# Fixed charges per day (March 2026 tariff, AB 205 restructuring):
+#   E-TOU-C:  $0.00/day
+#   E-TOU-D:  $0.00/day
+#   EV2-A:    $0.79343/day (Base Services Charge, Tier 3)
+#   EV-B:     $0.04928/day (Total Meter Charge)
+#   E-ELEC:   $0.79343/day (Base Services Charge, Tier 3)
+# ---------------------------------------------------------------------------
+
+
+class TestPGEFullAnnualBill:
+    """Full annual bill (energy + fixed) via calculate_annual_costs_electricity for PGE.
+
+    Exercises the complete billing code path for each PGE plan, not just the
+    rate lookup helper. Flat 1 kWh/hr load for all 8760 hours of 2018.
+    Expected = PDF energy total + fixedCharge_per_day × 365.
+
+    A FAILURE here means calculate_annual_costs_electricity disagrees with the
+    tariff PDF on the energy total, OR the fixed charge is being accumulated
+    incorrectly (e.g. /12 instead of /24 per hour).
+    """
+
+    def test_e_tou_c_full_bill(self):
+        expected = sum(_pdf_rate_e_tou_c(ts) for ts in YEAR_2018) + 0.00 * 365
+        result = calculate_annual_costs_electricity(FLAT_LOAD_8760, "PG&E", "E-TOU-C")
+        actual = result["E-TOU-C"]
+        assert actual == pytest.approx(expected, abs=0.01), (
+            f"E-TOU-C full bill: code ${actual:.2f} vs expected ${expected:.2f} "
+            f"(diff ${actual - expected:+.2f})"
+        )
+
+    def test_e_tou_d_full_bill(self):
+        expected = sum(_pdf_rate_e_tou_d(ts) for ts in YEAR_2018) + 0.00 * 365
+        result = calculate_annual_costs_electricity(FLAT_LOAD_8760, "PG&E", "E-TOU-D")
+        actual = result["E-TOU-D"]
+        assert actual == pytest.approx(expected, abs=0.01), (
+            f"E-TOU-D full bill: code ${actual:.2f} vs expected ${expected:.2f} "
+            f"(diff ${actual - expected:+.2f})"
+        )
+
+    def test_ev2a_full_bill(self):
+        expected = sum(_pdf_rate_ev2a(ts) for ts in YEAR_2018) + 0.79343 * 365
+        result = calculate_annual_costs_electricity(FLAT_LOAD_8760, "PG&E", "EV2-A")
+        actual = result["EV2-A"]
+        assert actual == pytest.approx(expected, abs=0.01), (
+            f"EV2-A full bill: code ${actual:.2f} vs expected ${expected:.2f} "
+            f"(energy + ${0.79343 * 365:.2f} fixed, diff ${actual - expected:+.2f})"
+        )
+
+    def test_ev_b_full_bill(self):
+        expected = sum(_pdf_rate_ev_b(ts) for ts in YEAR_2018) + 0.04928 * 365
+        result = calculate_annual_costs_electricity(FLAT_LOAD_8760, "PG&E", "EV-B")
+        actual = result["EV-B"]
+        assert actual == pytest.approx(expected, abs=0.01), (
+            f"EV-B full bill: code ${actual:.2f} vs expected ${expected:.2f} "
+            f"(energy + ${0.04928 * 365:.2f} fixed, diff ${actual - expected:+.2f})"
+        )
+
+    def test_e_elec_full_bill(self):
+        expected = sum(_pdf_rate_e_elec(ts) for ts in YEAR_2018) + 0.79343 * 365
+        result = calculate_annual_costs_electricity(FLAT_LOAD_8760, "PG&E", "E-ELEC")
+        actual = result["E-ELEC"]
+        assert actual == pytest.approx(expected, abs=0.01), (
+            f"E-ELEC full bill: code ${actual:.2f} vs expected ${expected:.2f} "
+            f"(energy + ${0.79343 * 365:.2f} fixed, diff ${actual - expected:+.2f})"
+        )
+
+
+# ---------------------------------------------------------------------------
+# G4: PGE fixed charges — NEM3 path (_estimate_monthly_fixed_from_plan)
+#     and retail path (calculate_annual_costs_electricity, zero load)
+#
+# Same structure as TestSCEFixedCharges. PGE fixed charges post-AB 205
+# (March 1, 2026):
+#   E-TOU-C: $0.00/day
+#   E-TOU-D: $0.00/day
+#   EV2-A:   $0.79343/day  (Base Services Charge, Tier 3)
+#   EV-B:    $0.04928/day  (Total Meter Charge)
+#   E-ELEC:  $0.79343/day  (Base Services Charge, Tier 3)
+# ---------------------------------------------------------------------------
+
+
+class TestPGEFixedCharges:
+    """PGE fixed charge accuracy in both billing code paths.
+
+    NEM3 path uses _estimate_monthly_fixed_from_plan (per-month × days).
+    Retail path uses fixedCharge / 24 per hourly slot (× 8760 = × 365/day).
+    Both should yield fixedCharge_per_day × 365 for a full year.
+    """
+
+    # --- NEM3 path: _estimate_monthly_fixed_from_plan ---
+
+    def test_monthly_fixed_ev2a_june(self):
+        plan = PGE_RATE_PLANS["EV2-A"]
+        assert _estimate_monthly_fixed_from_plan(plan, 2018, 6) == pytest.approx(0.79343 * 30)
+
+    def test_monthly_fixed_ev2a_july(self):
+        plan = PGE_RATE_PLANS["EV2-A"]
+        assert _estimate_monthly_fixed_from_plan(plan, 2018, 7) == pytest.approx(0.79343 * 31)
+
+    def test_monthly_fixed_ev_b_june(self):
+        plan = PGE_RATE_PLANS["EV-B"]
+        assert _estimate_monthly_fixed_from_plan(plan, 2018, 6) == pytest.approx(0.04928 * 30)
+
+    def test_monthly_fixed_ev_b_july(self):
+        plan = PGE_RATE_PLANS["EV-B"]
+        assert _estimate_monthly_fixed_from_plan(plan, 2018, 7) == pytest.approx(0.04928 * 31)
+
+    def test_monthly_fixed_e_elec_july(self):
+        plan = PGE_RATE_PLANS["E-ELEC"]
+        assert _estimate_monthly_fixed_from_plan(plan, 2018, 7) == pytest.approx(0.79343 * 31)
+
+    def test_monthly_fixed_e_tou_c_is_zero(self):
+        plan = PGE_RATE_PLANS["E-TOU-C"]
+        assert _estimate_monthly_fixed_from_plan(plan, 2018, 7) == pytest.approx(0.0)
+
+    # --- Retail path: calculate_annual_costs_electricity, zero load ---
+
+    def test_annual_fixed_ev2a_zero_load(self):
+        result = calculate_annual_costs_electricity(ZERO_LOAD_8760, "PG&E", "EV2-A")
+        assert result["EV2-A"] == pytest.approx(0.79343 * 365, abs=0.01)
+
+    def test_annual_fixed_ev_b_zero_load(self):
+        result = calculate_annual_costs_electricity(ZERO_LOAD_8760, "PG&E", "EV-B")
+        assert result["EV-B"] == pytest.approx(0.04928 * 365, abs=0.01)
+
+    def test_annual_fixed_e_elec_zero_load(self):
+        result = calculate_annual_costs_electricity(ZERO_LOAD_8760, "PG&E", "E-ELEC")
+        assert result["E-ELEC"] == pytest.approx(0.79343 * 365, abs=0.01)
+
+    def test_annual_fixed_e_tou_c_zero_load_is_zero(self):
+        result = calculate_annual_costs_electricity(ZERO_LOAD_8760, "PG&E", "E-TOU-C")
+        assert result["E-TOU-C"] == pytest.approx(0.0, abs=0.01)
+
+
+# ---------------------------------------------------------------------------
+# G5: E-TOU-D weekday/weekend split in calculate_annual_costs_electricity
+#
+# E-TOU-D peak: 5–8 pm (hours 17, 18, 19) on WEEKDAYS only.
+# Weekend hours 17–19 are off-peak (34¢ summer, 35¢ winter).
+#
+# A load placed only at weekend peak hours must be billed at the off-peak rate.
+# A load placed only at weekday peak hours must be billed at the peak rate.
+# If the weekday/weekend split is broken, both loads would get the same rate.
+# ---------------------------------------------------------------------------
+
+
+class TestETOUDWeekdayWeekendSplit:
+    """E-TOU-D: peak rate applies only on weekdays; weekends are always off-peak.
+
+    This confirms the dayotw_type branching in calculate_annual_costs_electricity
+    (step12 lines 88–97) correctly distinguishes weekday from weekend.
+    """
+
+    # Build loads that fire at weekend 17-19 and weekday 17-19 respectively
+    @staticmethod
+    def _build_load(weekday_only: bool) -> list:
+        load = []
+        for ts in YEAR_2018:
+            is_peak_hour = ts.hour in [17, 18, 19]
+            is_weekday = ts.weekday() < 5
+            if is_peak_hour and (is_weekday if weekday_only else not is_weekday):
+                load.append(1.0)
+            else:
+                load.append(0.0)
+        return load
+
+    def test_weekend_peak_hours_billed_at_off_peak_rate(self):
+        """Load only at weekend 5–8 pm: must be off-peak (34¢ summer, 35¢ winter)."""
+        load = self._build_load(weekday_only=False)  # weekend hours 17-19 only
+        result = calculate_annual_costs_electricity(load, "PG&E", "E-TOU-D")["E-TOU-D"]
+
+        expected = sum(
+            _pdf_rate_e_tou_d(ts)
+            for ts in YEAR_2018
+            if ts.weekday() >= 5 and ts.hour in [17, 18, 19]
+        )
+        assert result == pytest.approx(expected, abs=0.01), (
+            f"Weekend 5–8 pm load: code ${result:.2f} vs off-peak expected ${expected:.2f}. "
+            f"If result is higher, weekend hours are being charged the peak rate."
+        )
+
+    def test_weekday_peak_hours_billed_at_peak_rate(self):
+        """Load only at weekday 5–8 pm: must be peak (48¢ summer, 39¢ winter)."""
+        load = self._build_load(weekday_only=True)   # weekday hours 17-19 only
+        result = calculate_annual_costs_electricity(load, "PG&E", "E-TOU-D")["E-TOU-D"]
+
+        expected = sum(
+            _pdf_rate_e_tou_d(ts)
+            for ts in YEAR_2018
+            if ts.weekday() < 5 and ts.hour in [17, 18, 19]
+        )
+        assert result == pytest.approx(expected, abs=0.01), (
+            f"Weekday 5–8 pm load: code ${result:.2f} vs peak expected ${expected:.2f}. "
+            f"If result is lower, weekday hours are not getting the peak rate."
+        )
+
+    def test_weekend_and_weekday_peak_rates_differ(self):
+        """Direct check: weekend and weekday peak-hour rates are different."""
+        # Same number of hours but on weekends vs weekdays
+        weekend_load = self._build_load(weekday_only=False)
+        weekday_load = self._build_load(weekday_only=True)
+
+        weekend_cost = calculate_annual_costs_electricity(weekend_load, "PG&E", "E-TOU-D")["E-TOU-D"]
+        weekday_cost = calculate_annual_costs_electricity(weekday_load, "PG&E", "E-TOU-D")["E-TOU-D"]
+
+        assert weekday_cost > weekend_cost, (
+            f"Weekday peak-hour load (${weekday_cost:.2f}) should cost more than "
+            f"weekend peak-hour load (${weekend_cost:.2f}) because E-TOU-D has no "
+            f"weekend peak. If equal, the weekday/weekend split is broken."
+        )
+
+
+# ---------------------------------------------------------------------------
+# G6: step9b vs step12 rate parity for PGE
+#
+# The LP optimizer (step9b._hourly_import_rate) and the billing function
+# (step12._hourly_import_rate) must agree on every rate for every hour.
+# If they diverge, the optimizer is minimizing a different cost than what
+# gets billed — the paper's dispatch profiles are not optimal for the actual
+# billing rates.
+# ---------------------------------------------------------------------------
+
+
+class TestPGERateParity:
+    """step9b and step12 rate functions must agree for every hour and every PGE plan.
+
+    Both functions are already tested independently against tariff PDFs
+    (TestPGEAnnualBillVsPDF). This test asserts they equal each other directly,
+    hour by hour, so any divergence is caught regardless of the PDF reference.
+    """
+
+    @pytest.mark.parametrize("plan_name", ["E-TOU-C", "E-TOU-D", "EV2-A", "EV-B", "E-ELEC"])
+    def test_step9b_matches_step12_all_hours(self, plan_name):
+        plan = PGE_RATE_PLANS[plan_name]
+        mismatches = []
+        for ts in YEAR_2018:
+            r9b = _hourly_import_rate(plan, ts)
+            r12 = _step12_rate(plan, ts.to_pydatetime())
+            if abs(r9b - r12) > 1e-9:
+                mismatches.append((ts, r9b, r12))
+
+        assert len(mismatches) == 0, (
+            f"{plan_name}: {len(mismatches)} hour(s) where step9b ≠ step12. "
+            f"First mismatch: {mismatches[0][0]} "
+            f"step9b={mismatches[0][1]:.6f} step12={mismatches[0][2]:.6f}. "
+            f"Optimizer and biller use different cost signals for these hours."
+        )

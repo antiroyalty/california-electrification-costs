@@ -12,12 +12,16 @@ TZ_TARGET_LOCAL = 'America/Los_Angeles'
 END_USE_COLUMNS = {
     "cooling": [
         'out.electricity.cooling.energy_consumption',
-        'out.electricity.cooling_fans_pumps.energy_consumption',
+        # cooling_fans_pumps moved to "appliances" so it is always included,
+        # even for no-AC households (fans run for air circulation regardless).
     ],
     "appliances": [
         'out.electricity.ceiling_fan.energy_consumption',
         'out.electricity.clothes_dryer.energy_consumption',
+        'out.electricity.cooling_fans_pumps.energy_consumption',  # HVAC fan, not AC compressor
         'out.electricity.dishwasher.energy_consumption',
+        'out.electricity.heating_fans_pumps.energy_consumption',  # furnace blower (electric even for gas heat)
+        'out.electricity.lighting_exterior.energy_consumption',
         'out.electricity.lighting_interior.energy_consumption',
         'out.electricity.lighting_garage.energy_consumption',
         'out.electricity.mech_vent.energy_consumption',

@@ -59,20 +59,16 @@ def parse_arguments():
     parser = argparse.ArgumentParser(
         description="Run cost analysis for residential electrification scenarios in California",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""Available scenarios:
-  - baseline
-  - heat_pump
-  - induction_stove
-  - heat_pump_and_induction_stove
-  - water_heating
-  - heat_pump_and_induction_stove_and_water_heating
-
-Example usage:
-  python3 cost_service.py heat_pump_and_induction_stove
-  python3 cost_service.py water_heating
-  python3 cost_service.py baseline""",
+        epilog="""Example usage:
+  python3 cost_service.py baseline
+  python3 cost_service.py baseline_coopt --full_sweep""",
     )
     parser.add_argument("scenario", help="Electrification scenario to analyze")
+    parser.add_argument(
+        "--full_sweep",
+        action="store_true",
+        help="Run the complete co-optimization pipeline end-to-end. Requires a _coopt scenario.",
+    )
     return parser.parse_args()
 
 
@@ -85,6 +81,10 @@ if __name__ == "__main__":
         print(f"Available scenarios: {', '.join(SCENARIOS.keys())}")
         sys.exit(1)
 
+    if args.full_sweep and not scenario.endswith("_coopt"):
+        print(f"Error: --full_sweep requires a _coopt scenario (e.g. '{scenario}_coopt')")
+        sys.exit(1)
+
     housing_type = "single-family-detached"
     input_dir = "data"
     output_dir = "data/loadprofiles"
@@ -95,18 +95,17 @@ if __name__ == "__main__":
         "SDG&E": {"electricity": "TOU-DR1", "gas": "GR"},
     }
 
+    all_counties = norcal_counties + central_counties + socal_counties
+
     print(f"\nRunning cost analysis for scenario: {scenario}")
     print(f"Housing type: {housing_type}")
-    all_counties = norcal_counties + central_counties + socal_counties
-    current_county = ["Alameda County"]
-    print(f"Counties: {len(all_counties)} total counties")
-    print(f"Running for: {current_county}")
+    print(f"Counties: {len(all_counties)} total")
     print("-" * 60)
 
     cost_service = CostService(
         scenario,
         housing_type,
-        counties=current_county,
+        counties=all_counties,
         rate_plans=rate_plans,
         input_dir=input_dir,
         output_dir=output_dir,

@@ -1,4 +1,5 @@
 # PG&E October 2024 Gas Rate Structure
+import calendar
 import os
 import pandas as pd
 from typing import Any
@@ -35,6 +36,20 @@ def utility_to_county_territory_mapping(utility):
         case _:
             raise ValueError(f"Unknown utility: {utility}")
 
+# Months belonging to each gas billing season.
+# Note: gas summer (Apr–Oct) differs from electricity summer (Jun–Sep).
+_GAS_SEASON_MONTHS = {
+    "summer":         [4, 5, 6, 7, 8, 9, 10],
+    "winter_offpeak": [11, 2, 3],
+    "winter_onpeak":  [12, 1],
+}
+
+
+def _days_in_season(season: str, year: int = 2018) -> int:
+    """Return the number of calendar days in a gas billing season for a given year."""
+    return sum(calendar.monthrange(year, m)[1] for m in _GAS_SEASON_MONTHS[season])
+
+
 def categorize_season(month_number):
     # TODO, Ana: Make sure that these season categorizations are the same for each utility
     # ie, each peak / offpeak period corresponds to the right seasons here
@@ -62,11 +77,14 @@ def calculate_annual_costs_gas(load_profile_df, territory, load_type, utility, r
     total_cost = 0.0
     
     for season, therms_used in seasonal_therms.items():
-        # Retrieve the baseline allowance for the season
+        # Baseline allowance is in therms/day; scale to the full season length
+        # before comparing to the seasonal total. Without this, any load above
+        # the daily value (e.g., > 0.49 therms) would be incorrectly billed at
+        # the excess rate — including fully-electrified low-gas households.
+        daily_baseline = BASELINE_ALLOWANCES[utility][rate_plan]["territories"][territory][season]
+        seasonal_allowance = daily_baseline * _days_in_season(season)
 
-        baseline = BASELINE_ALLOWANCES[utility][rate_plan]["territories"][territory][season]
-        
-        if therms_used <= baseline:
+        if therms_used <= seasonal_allowance:
             rate = GAS_RATE_PLANS[utility][rate_plan]["baseline"]["total_charge"]
         else:
             rate = GAS_RATE_PLANS[utility][rate_plan]["excess"]["total_charge"]

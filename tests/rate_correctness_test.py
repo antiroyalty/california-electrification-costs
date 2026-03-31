@@ -58,13 +58,16 @@ class TestETOUCStructure:
     """E-TOU-C: peak hours are 4-9pm (hours 16-20) every day including weekends."""
 
     def test_weekday_peak_hours_are_4_to_9pm(self, etou_c):
+        """defines summer weekday peak as hours 16–20 (4–9 pm)."""
         assert etou_c["summer"]["weekdays"]["peakHours"] == [16, 17, 18, 19, 20]
 
     def test_weekend_peak_hours_are_same_as_weekday(self, etou_c):
+        """applies the same peak hours on weekends as weekdays — E-TOU-C makes no weekend exception."""
         # E-TOU-C does NOT distinguish weekday vs weekend for peak hours.
         assert etou_c["summer"]["weekends"]["peakHours"] == [16, 17, 18, 19, 20]
 
     def test_winter_peak_hours_unchanged(self, etou_c):
+        """keeps the same 4–9 pm peak window in winter as in summer."""
         assert etou_c["winter"]["weekdays"]["peakHours"] == [16, 17, 18, 19, 20]
 
 
@@ -77,16 +80,20 @@ class TestETOUDStructure:
     """E-TOU-D: peak hours are 5-8pm (hours 17-19) on weekdays only. No weekend peak."""
 
     def test_weekday_peak_hours_are_5_to_8pm(self, etou_d):
+        """defines summer weekday peak as hours 17–19 (5–8 pm), narrower than E-TOU-C."""
         assert etou_d["summer"]["weekdays"]["peakHours"] == [17, 18, 19]
 
     def test_weekend_has_no_peak(self, etou_d):
+        """has no peak period on weekends — all weekend hours are off-peak."""
         # Critical: E-TOU-D has no weekend peak period.
         assert etou_d["summer"]["weekends"]["peakHours"] == []
 
     def test_winter_weekday_peak_hours_unchanged(self, etou_d):
+        """keeps the same 5–8 pm weekday peak window in winter as in summer."""
         assert etou_d["winter"]["weekdays"]["peakHours"] == [17, 18, 19]
 
     def test_winter_weekend_has_no_peak(self, etou_d):
+        """has no weekend peak in winter, consistent with summer weekend behaviour."""
         assert etou_d["winter"]["weekends"]["peakHours"] == []
 
 
@@ -98,23 +105,32 @@ class TestETOUDStructure:
 # ---------------------------------------------------------------------------
 
 class TestETOUCRates:
+    """E-TOU-C rate values hand-verified against the March 2026 PG&E tariff sheet.
+
+    Source: data/utility-rates/pge/pge-residential-electric-rate-plan-pricing.pdf
+    Effective: March 1, 2026. The model uses above-baseline rates throughout.
+    """
 
     def test_summer_weekday_peak_rate(self, etou_c):
+        """charges 52¢/kWh during summer peak hours (4–9 pm) on a weekday."""
         # Summer peak (4–9pm every day): above-baseline 52¢
         rate = _hourly_import_rate(etou_c, TUESDAY_JULY_6PM)
         assert rate == pytest.approx(0.52)
 
     def test_summer_weekend_peak_rate_matches_weekday(self, etou_c):
+        """charges the same 52¢/kWh peak rate on a summer weekend as on a weekday."""
         # E-TOU-C applies the same peak rate on weekends: above-baseline 52¢
         rate = _hourly_import_rate(etou_c, SATURDAY_JULY_6PM)
         assert rate == pytest.approx(0.52)
 
     def test_summer_off_peak_rate(self, etou_c):
+        """charges 40¢/kWh at 3 pm in summer — before the 4 pm peak window opens."""
         # 3pm is before the 4pm peak window: above-baseline off-peak 40¢
         rate = _hourly_import_rate(etou_c, TUESDAY_JULY_3PM)
         assert rate == pytest.approx(0.40)
 
     def test_winter_weekday_peak_rate(self, etou_c):
+        """charges 40¢/kWh during winter peak hours (4–9 pm) on a weekday."""
         # Winter peak (4–9pm every day): above-baseline 40¢
         rate = _hourly_import_rate(etou_c, TUESDAY_JAN_6PM)
         assert rate == pytest.approx(0.40)
@@ -127,33 +143,44 @@ class TestETOUCRates:
 # ---------------------------------------------------------------------------
 
 class TestETOUDRates:
+    """E-TOU-D rate values hand-verified against the March 2026 PG&E tariff sheet.
+
+    Source: data/utility-rates/pge/pge-residential-electric-rate-plan-pricing.pdf
+    Effective: March 1, 2026.
+    """
 
     def test_summer_weekday_peak_rate(self, etou_d):
+        """charges 48¢/kWh during summer peak hours (5–8 pm) on a weekday."""
         # Summer peak (5–8pm weekdays): 48¢
         rate = _hourly_import_rate(etou_d, TUESDAY_JULY_6PM)
         assert rate == pytest.approx(0.48)
 
     def test_summer_weekend_is_always_off_peak(self, etou_d):
+        """charges the off-peak rate (34¢/kWh) at 6 pm on a summer Saturday — no weekend peak."""
         # 6pm Saturday: no peak for E-TOU-D on weekends; off-peak 34¢
         rate = _hourly_import_rate(etou_d, SATURDAY_JULY_6PM)
         assert rate == pytest.approx(0.34)
 
     def test_summer_off_peak_before_peak_window(self, etou_d):
+        """charges 34¢/kWh at 3 pm on a summer weekday — peak window does not open until 5 pm."""
         # 3pm Tuesday: off-peak because E-TOU-D peak starts at 5pm; 34¢
         rate = _hourly_import_rate(etou_d, TUESDAY_JULY_3PM)
         assert rate == pytest.approx(0.34)
 
     def test_summer_peak_starts_at_5pm(self, etou_d):
+        """charges the peak rate (48¢/kWh) at exactly 5 pm — the first hour of the peak window."""
         # Hour 17 = 5pm = first peak hour: 48¢
         rate = _hourly_import_rate(etou_d, TUESDAY_JULY_5PM)
         assert rate == pytest.approx(0.48)
 
     def test_summer_peak_ends_before_8pm(self, etou_d):
+        """charges the off-peak rate (34¢/kWh) at 8 pm — the peak window closes before this hour."""
         # Hour 20 = 8pm = outside peak window [17, 18, 19]; off-peak 34¢
         rate = _hourly_import_rate(etou_d, TUESDAY_JULY_8PM)
         assert rate == pytest.approx(0.34)
 
     def test_winter_weekday_peak_rate(self, etou_d):
+        """charges 39¢/kWh during winter peak hours (5–8 pm) on a weekday."""
         # Winter peak (5–8pm weekdays): 39¢
         rate = _hourly_import_rate(etou_d, TUESDAY_JAN_6PM)
         assert rate == pytest.approx(0.39)
@@ -169,14 +196,20 @@ class TestBaselineAllowances:
     baseline credits for Alameda County."""
 
     def test_territory_T_summer_baseline(self):
+        """sets the territory T summer baseline allowance at 6.5 kWh/day."""
         assert BASELINE_ALLOWANCES["PGE"]["E-TOU-C"]["territories"]["T"]["summer"] == 6.5
 
     def test_territory_V_alameda_summer_baseline(self):
-        # Alameda is territory V. The model defaults to T (6.5), not V (7.1).
-        # This test documents the gap — it is not a bug, it is a known simplification.
+        """sets the territory V (Alameda) summer baseline allowance at 7.1 kWh/day.
+
+        The model defaults to territory T (6.5 kWh/day) rather than V (7.1 kWh/day).
+        This test documents the known simplification — using T slightly underestimates
+        baseline credits for Alameda County customers.
+        """
         assert BASELINE_ALLOWANCES["PGE"]["E-TOU-C"]["territories"]["V"]["summer"] == 7.1
 
     def test_territory_T_is_lower_than_V(self):
+        """has a lower baseline allowance for territory T than territory V, confirming the conservative direction of the simplification."""
         t = BASELINE_ALLOWANCES["PGE"]["E-TOU-C"]["territories"]["T"]["summer"]
         v = BASELINE_ALLOWANCES["PGE"]["E-TOU-C"]["territories"]["V"]["summer"]
         assert t < v, (
