@@ -143,6 +143,180 @@ def create_coopt_results_card(
     )
 
 
+def _append_image_card(
+    parts: List[str],
+    *,
+    title: str,
+    image_b64: Optional[str],
+    alt: str,
+    missing_message: str,
+) -> None:
+    parts.append('<div class="card">')
+    parts.append(f"<h2>{title}</h2>")
+    if image_b64:
+        parts.append(
+            f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{image_b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{image_b64}\" alt=\"{alt}\"/></a></div>"
+        )
+    else:
+        parts.append(f"<div class=\"muted\">{missing_message}</div>")
+    parts.append("</div>")
+
+
+def _append_coopt_best_of_summary_card(
+    parts: List[str],
+    coopt_best_of_summary: Optional[List[dict]],
+) -> None:
+    parts.append('<div class="card">')
+    parts.append("<h2>Best‑of Summary — PV Capex Sweep</h2>")
+    if coopt_best_of_summary:
+        parts.append(
+            "<table class=\"kmtbl\"><thead><tr>"
+            "<th>PV Capex ($/kW)</th><th>Best Batt Capex ($/kWh)</th>"
+            "<th>PV Size (kW)</th><th>Battery Size (kWh)</th><th>Min Annual Cost</th>"
+            "</tr></thead><tbody>"
+        )
+        for row in coopt_best_of_summary:
+            parts.append(
+                "<tr>"
+                f"<td>{row['pv_capex']:.0f}</td>"
+                f"<td>{row['battery_capex_kwh']:.0f}</td>"
+                f"<td>{row['pv_kw']:.2f}</td>"
+                f"<td>{row['batt_kwh']:.2f}</td>"
+                f"<td class=\"money\">${row['total_cost']:,.0f}</td>"
+                "</tr>"
+            )
+        parts.append("</tbody></table>")
+    else:
+        parts.append("<div class=\"muted\">No best‑of summary available (run Step 9b with --pv-capex-sweep and --batt-capex-sweep).</div>")
+    parts.append("</div>")
+
+
+def _append_coopt_pv_capex_gallery_card(
+    parts: List[str],
+    *,
+    title: str,
+    coopt_pv_capex_gallery: Optional[List[dict]],
+    image_key: str,
+    alt: str,
+    missing_image_message: str,
+) -> None:
+    parts.append('<div class="card">')
+    parts.append(f"<h2>{title}</h2>")
+    if coopt_pv_capex_gallery:
+        any_images = False
+        for entry in coopt_pv_capex_gallery:
+            cap = entry.get("capex")
+            b64 = (entry.get("images") or {}).get(image_key)
+            if not b64:
+                continue
+            any_images = True
+            parts.append(
+                f"<div class=\"muted\" style=\"font-weight:600; margin-top:8px;\">PV Capex: ${cap:,.0f}/kW</div>"
+            )
+            parts.append(
+                f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{b64}\" alt=\"{alt}\"/></a></div>"
+            )
+        if not any_images:
+            parts.append(f"<div class=\"muted\">{missing_image_message}</div>")
+    else:
+        parts.append("<div class=\"muted\">No PV capex sweep plots available (run Step 9b with --pv-capex-sweep).</div>")
+    parts.append("</div>")
+
+
+def _append_coopt_diagnostic_cards(
+    parts: List[str],
+    *,
+    coopt_capex_sweep_b64: Optional[str],
+    coopt_cost_heatmap_b64: Optional[str],
+    coopt_pv_batt_heatmap_b64: Optional[str],
+    coopt_batt_size_vs_capex_by_pv_b64: Optional[str],
+    coopt_batt_adoption_curve_b64: Optional[str],
+    coopt_pv_size_vs_capex_by_pv_b64: Optional[str],
+    coopt_objective_vs_capex_by_pv_b64: Optional[str],
+    coopt_best_of_summary: Optional[List[dict]],
+    coopt_pv_capex_gallery: Optional[List[dict]],
+) -> None:
+    parts.append('<details class="card" style="grid-column: 1 / -1;">')
+    parts.append("<summary>Diagnostic Detail: Capex Sweeps & Heatmaps</summary>")
+    parts.append(
+        "<div class=\"muted\" style=\"margin:8px 0 12px;\">"
+        "Supporting co-optimization diagnostics used for debugging and sensitivity inspection."
+        " These are not the headline research findings."
+        "</div>"
+    )
+    parts.append('<div class="section-grid">')
+
+    _append_image_card(
+        parts,
+        title="Battery Capex Sweep — Co‑opt (Step 9b)",
+        image_b64=coopt_capex_sweep_b64,
+        alt="coopt battery capex sweep",
+        missing_message="No sweep plot available (run Step 9b with --batt-capex-sweep).",
+    )
+    _append_image_card(
+        parts,
+        title="Cost Heatmap — Battery Size × Capex (Co‑opt)",
+        image_b64=coopt_cost_heatmap_b64,
+        alt="coopt cost heatmap",
+        missing_message="No heatmap available (run Step 9b with --batt-capex-sweep and --batt-size-sweep).",
+    )
+    _append_image_card(
+        parts,
+        title="Cost Heatmap — PV Size × Battery Size (Co‑opt)",
+        image_b64=coopt_pv_batt_heatmap_b64,
+        alt="coopt pv vs battery heatmap",
+        missing_message="No PV×battery heatmap available (run Step 9b with --pv-size-sweep and --batt-size-sweep).",
+    )
+    _append_image_card(
+        parts,
+        title="Battery Size vs Battery Capex — PV Capex Sweep",
+        image_b64=coopt_batt_size_vs_capex_by_pv_b64,
+        alt="battery size vs capex by pv",
+        missing_message="No PV capex sweep battery-size plot available (run Step 9b with --pv-capex-sweep and --batt-capex-sweep).",
+    )
+    _append_image_card(
+        parts,
+        title="Battery Adoption Curve Under NEM 3.0",
+        image_b64=coopt_batt_adoption_curve_b64,
+        alt="battery adoption curve",
+        missing_message="No adoption curve available (run Step 9b with --batt-capex-sweep).",
+    )
+    _append_image_card(
+        parts,
+        title="PV Size vs Battery Capex — PV Capex Sweep",
+        image_b64=coopt_pv_size_vs_capex_by_pv_b64,
+        alt="pv size vs capex by pv",
+        missing_message="No PV capex sweep PV-size plot available (run Step 9b with --pv-capex-sweep and --batt-capex-sweep).",
+    )
+    _append_image_card(
+        parts,
+        title="Co‑Opt Objective vs Battery Capex — PV Capex Sweep",
+        image_b64=coopt_objective_vs_capex_by_pv_b64,
+        alt="objective vs capex by pv",
+        missing_message="No PV capex sweep objective plot available (run Step 9b with --pv-capex-sweep and --batt-capex-sweep).",
+    )
+    _append_coopt_best_of_summary_card(parts, coopt_best_of_summary)
+    _append_coopt_pv_capex_gallery_card(
+        parts,
+        title="PV × Battery Heatmaps — PV Capex Sweep",
+        coopt_pv_capex_gallery=coopt_pv_capex_gallery,
+        image_key="PV × Battery Heatmap",
+        alt="PV × Battery Heatmap",
+        missing_image_message="No PV × battery heatmaps available (run Step 9b with --pv-capex-sweep and --pv-size-sweep).",
+    )
+    _append_coopt_pv_capex_gallery_card(
+        parts,
+        title="Battery Cost Heatmaps — PV Capex Sweep",
+        coopt_pv_capex_gallery=coopt_pv_capex_gallery,
+        image_key="Battery Cost Heatmap",
+        alt="Battery Cost Heatmap",
+        missing_image_message="No battery cost heatmaps available (run Step 9b with --pv-capex-sweep and --batt-size-sweep).",
+    )
+
+    parts.append("</div>")
+    parts.append("</details>")
+
+
 # ---------- Solar + storage deployment figure (from Step 9 outputs) ----------
 
 
@@ -1677,147 +1851,18 @@ def _dashboard_html(
         parts.append('<div class="muted">N/A</div>')
     parts.append("</div>")
 
-    # Card 2f: Co-Optimization Battery Capex Sweep
-    parts.append('<div class="card">')
-    parts.append("<h2>Battery Capex Sweep — Co‑opt (Step 9b)</h2>")
-    if coopt_capex_sweep_b64:
-        parts.append(
-            f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{coopt_capex_sweep_b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{coopt_capex_sweep_b64}\" alt=\"coopt battery capex sweep\"/></a></div>"
-        )
-    else:
-        parts.append("<div class=\"muted\">No sweep plot available (run Step 9b with --batt-capex-sweep).</div>")
-    parts.append("</div>")
-
-    # Card 2g: Co-Optimization Cost Heatmap (Capex x Battery Size)
-    parts.append('<div class="card">')
-    parts.append("<h2>Cost Heatmap — Battery Size × Capex (Co‑opt)</h2>")
-    if coopt_cost_heatmap_b64:
-        parts.append(
-            f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{coopt_cost_heatmap_b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{coopt_cost_heatmap_b64}\" alt=\"coopt cost heatmap\"/></a></div>"
-        )
-    else:
-        parts.append("<div class=\"muted\">No heatmap available (run Step 9b with --batt-capex-sweep and --batt-size-sweep).</div>")
-    parts.append("</div>")
-
-    # Card 2g.1: Co-Optimization PV × Battery Cost Heatmap
-    parts.append('<div class="card">')
-    parts.append("<h2>Cost Heatmap — PV Size × Battery Size (Co‑opt)</h2>")
-    if coopt_pv_batt_heatmap_b64:
-        parts.append(
-            f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{coopt_pv_batt_heatmap_b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{coopt_pv_batt_heatmap_b64}\" alt=\"coopt pv vs battery heatmap\"/></a></div>"
-        )
-    else:
-        parts.append("<div class=\"muted\">No PV×battery heatmap available (run Step 9b with --pv-size-sweep and --batt-size-sweep).</div>")
-    parts.append("</div>")
-
-    # Card 2g.1b: Battery Size vs Battery Capex (PV Capex sweep)
-    parts.append('<div class="card">')
-    parts.append("<h2>Battery Size vs Battery Capex — PV Capex Sweep</h2>")
-    if coopt_batt_size_vs_capex_by_pv_b64:
-        parts.append(
-            f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{coopt_batt_size_vs_capex_by_pv_b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{coopt_batt_size_vs_capex_by_pv_b64}\" alt=\"battery size vs capex by pv\"/></a></div>"
-        )
-    else:
-        parts.append("<div class=\"muted\">No PV capex sweep battery-size plot available (run Step 9b with --pv-capex-sweep and --batt-capex-sweep).</div>")
-    parts.append("</div>")
-
-    # Card 2g.1b.0: Battery Adoption Curve (NEM 3.0)
-    parts.append('<div class="card">')
-    parts.append("<h2>Battery Adoption Curve Under NEM 3.0</h2>")
-    if coopt_batt_adoption_curve_b64:
-        parts.append(
-            f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{coopt_batt_adoption_curve_b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{coopt_batt_adoption_curve_b64}\" alt=\"battery adoption curve\"/></a></div>"
-        )
-    else:
-        parts.append("<div class=\"muted\">No adoption curve available (run Step 9b with --batt-capex-sweep).</div>")
-    parts.append("</div>")
-
-    # Card 2g.1b.1: PV Size vs Battery Capex (PV Capex sweep)
-    parts.append('<div class="card">')
-    parts.append("<h2>PV Size vs Battery Capex — PV Capex Sweep</h2>")
-    if coopt_pv_size_vs_capex_by_pv_b64:
-        parts.append(
-            f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{coopt_pv_size_vs_capex_by_pv_b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{coopt_pv_size_vs_capex_by_pv_b64}\" alt=\"pv size vs capex by pv\"/></a></div>"
-        )
-    else:
-        parts.append("<div class=\"muted\">No PV capex sweep PV-size plot available (run Step 9b with --pv-capex-sweep and --batt-capex-sweep).</div>")
-    parts.append("</div>")
-
-    # Card 2g.1c: Co-Opt Objective vs Battery Capex (PV Capex sweep)
-    parts.append('<div class="card">')
-    parts.append("<h2>Co‑Opt Objective vs Battery Capex — PV Capex Sweep</h2>")
-    if coopt_objective_vs_capex_by_pv_b64:
-        parts.append(
-            f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{coopt_objective_vs_capex_by_pv_b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{coopt_objective_vs_capex_by_pv_b64}\" alt=\"objective vs capex by pv\"/></a></div>"
-        )
-    else:
-        parts.append("<div class=\"muted\">No PV capex sweep objective plot available (run Step 9b with --pv-capex-sweep and --batt-capex-sweep).</div>")
-    parts.append("</div>")
-
-    # Card 2g.1e: Best-of Summary (PV Capex sweep)
-    parts.append('<div class="card">')
-    parts.append("<h2>Best‑of Summary — PV Capex Sweep</h2>")
-    if coopt_best_of_summary:
-        parts.append("<table class=\"kmtbl\"><thead><tr>"
-                     "<th>PV Capex ($/kW)</th><th>Best Batt Capex ($/kWh)</th>"
-                     "<th>PV Size (kW)</th><th>Battery Size (kWh)</th><th>Min Annual Cost</th>"
-                     "</tr></thead><tbody>")
-        for row in coopt_best_of_summary:
-            parts.append(
-                "<tr>"
-                f"<td>{row['pv_capex']:.0f}</td>"
-                f"<td>{row['battery_capex_kwh']:.0f}</td>"
-                f"<td>{row['pv_kw']:.2f}</td>"
-                f"<td>{row['batt_kwh']:.2f}</td>"
-                f"<td class=\"money\">${row['total_cost']:,.0f}</td>"
-                "</tr>"
-            )
-        parts.append("</tbody></table>")
-    else:
-        parts.append("<div class=\"muted\">No best‑of summary available (run Step 9b with --pv-capex-sweep and --batt-capex-sweep).</div>")
-    parts.append("</div>")
-
-    # Card 2g.2: PV × Battery Heatmaps (PV capex sweep)
-    parts.append('<div class="card">')
-    parts.append("<h2>PV × Battery Heatmaps — PV Capex Sweep</h2>")
-    if coopt_pv_capex_gallery:
-        any_pv_batt = False
-        for entry in coopt_pv_capex_gallery:
-            cap = entry.get("capex")
-            b64 = (entry.get("images") or {}).get("PV × Battery Heatmap")
-            if not b64:
-                continue
-            any_pv_batt = True
-            parts.append(f"<div class=\"muted\" style=\"font-weight:600; margin-top:8px;\">PV Capex: ${cap:,.0f}/kW</div>")
-            parts.append(
-                f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{b64}\" alt=\"PV × Battery Heatmap\"/></a></div>"
-            )
-        if not any_pv_batt:
-            parts.append("<div class=\"muted\">No PV × battery heatmaps available (run Step 9b with --pv-capex-sweep and --pv-size-sweep).</div>")
-    else:
-        parts.append("<div class=\"muted\">No PV capex sweep plots available (run Step 9b with --pv-capex-sweep).</div>")
-    parts.append("</div>")
-
-    # Card 2g.3: Battery Cost Heatmaps (PV capex sweep)
-    parts.append('<div class="card">')
-    parts.append("<h2>Battery Cost Heatmaps — PV Capex Sweep</h2>")
-    if coopt_pv_capex_gallery:
-        any_batt_cost = False
-        for entry in coopt_pv_capex_gallery:
-            cap = entry.get("capex")
-            b64 = (entry.get("images") or {}).get("Battery Cost Heatmap")
-            if not b64:
-                continue
-            any_batt_cost = True
-            parts.append(f"<div class=\"muted\" style=\"font-weight:600; margin-top:8px;\">PV Capex: ${cap:,.0f}/kW</div>")
-            parts.append(
-                f"<div class=\"imgwrap\"><a href=\"data:image/png;base64,{b64}\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"data:image/png;base64,{b64}\" alt=\"Battery Cost Heatmap\"/></a></div>"
-            )
-        if not any_batt_cost:
-            parts.append("<div class=\"muted\">No battery cost heatmaps available (run Step 9b with --pv-capex-sweep and --batt-size-sweep).</div>")
-    else:
-        parts.append("<div class=\"muted\">No PV capex sweep plots available (run Step 9b with --pv-capex-sweep).</div>")
-    parts.append("</div>")
+    _append_coopt_diagnostic_cards(
+        parts,
+        coopt_capex_sweep_b64=coopt_capex_sweep_b64,
+        coopt_cost_heatmap_b64=coopt_cost_heatmap_b64,
+        coopt_pv_batt_heatmap_b64=coopt_pv_batt_heatmap_b64,
+        coopt_batt_size_vs_capex_by_pv_b64=coopt_batt_size_vs_capex_by_pv_b64,
+        coopt_batt_adoption_curve_b64=coopt_batt_adoption_curve_b64,
+        coopt_pv_size_vs_capex_by_pv_b64=coopt_pv_size_vs_capex_by_pv_b64,
+        coopt_objective_vs_capex_by_pv_b64=coopt_objective_vs_capex_by_pv_b64,
+        coopt_best_of_summary=coopt_best_of_summary,
+        coopt_pv_capex_gallery=coopt_pv_capex_gallery,
+    )
 
     parts.append("</div>")
     parts.append("</details>")
