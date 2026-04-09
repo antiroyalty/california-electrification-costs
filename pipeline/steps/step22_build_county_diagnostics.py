@@ -236,7 +236,7 @@ def _append_coopt_diagnostic_cards(
     coopt_best_of_summary: Optional[List[dict]],
     coopt_pv_capex_gallery: Optional[List[dict]],
 ) -> None:
-    parts.append('<details class="card">')
+    parts.append('<details class="card" style="grid-column: 1 / -1;">')
     parts.append("<summary>Diagnostic Detail: Capex Sweeps & Heatmaps</summary>")
     parts.append(
         "<div class=\"muted\" style=\"margin:8px 0 12px;\">"
