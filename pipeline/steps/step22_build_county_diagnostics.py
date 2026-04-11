@@ -615,6 +615,120 @@ def _read_step9_series(path: str) -> Optional[dict]:
 
 
 
+def create_executive_summary_card(
+    scenario: str,
+    county_slug: str,
+    npv_details: Optional[dict],
+) -> str:
+    """Render a plain-English headline card summarising the key result for this county+scenario.
+
+    Shows:
+    - Annual bill with full electrification + solar vs gas baseline (savings or extra cost)
+    - Simple payback period for the full investment
+    - 25-year NPV
+    - Colour-coded verdict (green = saves money, amber = marginal, red = costs more)
+    """
+    if not npv_details:
+        return ""
+
+    county_title = county_slug.replace("-", " ").title()
+    scen_title = scenario.replace("_", " ").title()
+
+    baseline = npv_details.get("baseline_cost")
+    solar_cost = npv_details.get("scenario_solar_cost")
+    ae = npv_details.get("all_electrification", {})
+    ss = npv_details.get("solar_storage", {})
+
+    annual_savings = ae.get("annual_savings")  # baseline - scenario_solar_cost
+    net_capex = ae.get("net_capex")
+    npv_val = ae.get("npv")
+
+    # Fall back to solar+storage-only numbers if full-electrification capex is unavailable
+    if annual_savings is None:
+        annual_savings = ss.get("annual_savings")
+    if net_capex is None:
+        net_capex = ss.get("net_capex")
+    if npv_val is None:
+        npv_val = ss.get("npv")
+
+    def fmt_usd(v):
+        if v is None:
+            return "N/A"
+        sign = "+" if v >= 0 else "-"
+        return f"{sign}${abs(v):,.0f}"
+
+    def fmt_usd_abs(v):
+        if v is None:
+            return "N/A"
+        return f"${v:,.0f}"
+
+    # Payback (simple, undiscounted)
+    payback_str = "N/A"
+    if net_capex is not None and annual_savings is not None and annual_savings > 0:
+        payback_yr = net_capex / annual_savings
+        payback_str = f"{payback_yr:.1f} years"
+    elif annual_savings is not None and annual_savings <= 0:
+        payback_str = "Never (no net savings)"
+
+    # Verdict colour
+    if annual_savings is not None and annual_savings > 200:
+        verdict_color = "#1a7a4a"
+        verdict_bg = "#eaffea"
+        verdict_text = "Cost-saving"
+        verdict_icon = "✓"
+    elif annual_savings is not None and annual_savings > -200:
+        verdict_color = "#8a6200"
+        verdict_bg = "#fffbea"
+        verdict_text = "Near break-even"
+        verdict_icon = "~"
+    else:
+        verdict_color = "#b00020"
+        verdict_bg = "#fff0f0"
+        verdict_text = "Higher cost than baseline"
+        verdict_icon = "!"
+
+    savings_label = "Annual savings vs gas baseline" if annual_savings is not None and annual_savings >= 0 else "Annual extra cost vs gas baseline"
+    savings_display = fmt_usd(annual_savings) if annual_savings is not None else "N/A"
+
+    horizon = npv_details.get("horizon_years", 25)
+    rate = npv_details.get("discount_rate", 0.07)
+
+    return f"""
+    <div style="background:{verdict_bg}; border-left:6px solid {verdict_color}; border-radius:8px;
+                padding:20px 24px; margin-bottom:18px; box-shadow:0 1px 3px rgba(0,0,0,.08);">
+      <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px;">
+        <span style="font-size:28px; color:{verdict_color}; font-weight:900; line-height:1;">{verdict_icon}</span>
+        <div>
+          <div style="font-size:20px; font-weight:700; color:{verdict_color};">{verdict_text}</div>
+          <div style="color:#555; font-size:13px;">{county_title} County — {scen_title} scenario</div>
+        </div>
+      </div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:16px;">
+        <div style="background:white; border-radius:6px; padding:12px 16px; text-align:center;">
+          <div style="font-size:22px; font-weight:700; color:{verdict_color};">{savings_display}/yr</div>
+          <div style="font-size:12px; color:#666; margin-top:4px;">{savings_label}</div>
+        </div>
+        <div style="background:white; border-radius:6px; padding:12px 16px; text-align:center;">
+          <div style="font-size:22px; font-weight:700; color:#2c5aa0;">{payback_str}</div>
+          <div style="font-size:12px; color:#666; margin-top:4px;">Simple payback period</div>
+        </div>
+        <div style="background:white; border-radius:6px; padding:12px 16px; text-align:center;">
+          <div style="font-size:22px; font-weight:700; color:#2c5aa0;">{fmt_usd(npv_val)}</div>
+          <div style="font-size:12px; color:#666; margin-top:4px;">{horizon}-yr NPV ({rate:.0%} discount rate)</div>
+        </div>
+        <div style="background:white; border-radius:6px; padding:12px 16px; text-align:center;">
+          <div style="font-size:22px; font-weight:700; color:#555;">{fmt_usd_abs(baseline)}/yr</div>
+          <div style="font-size:12px; color:#666; margin-top:4px;">Gas baseline annual cost</div>
+        </div>
+        <div style="background:white; border-radius:6px; padding:12px 16px; text-align:center;">
+          <div style="font-size:22px; font-weight:700; color:#555;">{fmt_usd_abs(solar_cost)}/yr</div>
+          <div style="font-size:12px; color:#666; margin-top:4px;">Annual cost with solar+storage</div>
+        </div>
+      </div>
+    </div>
+    """
+
+
 def create_npv_card(npv_details: Optional[dict]) -> str:
     if not npv_details:
         return "<div class='muted'>No NPV data available</div>"
@@ -1593,9 +1707,13 @@ def _dashboard_html(
                 <h1>County Diagnostics</h1>
                 <div class="muted">{county_title} — {scen_title} — {housing_type}</div>
             </div>
-            <div class="grid">
         """
     )
+
+    # Executive summary card — shown before the grid so it's the first thing visible
+    parts.append(create_executive_summary_card(scenario, county_slug, npv_details))
+
+    parts.append('<div class="grid">')
 
     # Energy flows section
     parts.append('<details class="section">')
