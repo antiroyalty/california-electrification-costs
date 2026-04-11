@@ -619,6 +619,7 @@ def create_executive_summary_card(
     scenario: str,
     county_slug: str,
     npv_details: Optional[dict],
+    assets_info: Optional[dict] = None,
 ) -> str:
     """Render a plain-English headline card summarising the key result for this county+scenario.
 
@@ -626,6 +627,7 @@ def create_executive_summary_card(
     - Annual bill with full electrification + solar vs gas baseline (savings or extra cost)
     - Simple payback period for the full investment
     - 25-year NPV
+    - Solar system size (kW) and battery size (kWh)
     - Colour-coded verdict (green = saves money, amber = marginal, red = costs more)
     """
     if not npv_details:
@@ -693,6 +695,12 @@ def create_executive_summary_card(
     horizon = npv_details.get("horizon_years", 25)
     rate = npv_details.get("discount_rate", 0.07)
 
+    # Solar and battery sizes
+    solar_kw = assets_info.get("Solar Capacity (kW)") if assets_info else None
+    batt_kwh = assets_info.get("Battery Capacity (kWh)") if assets_info else None
+    solar_str = f"{float(solar_kw):.1f} kW" if solar_kw is not None else "N/A"
+    batt_str = f"{float(batt_kwh):.1f} kWh" if batt_kwh is not None else "N/A"
+
     return f"""
     <div style="background:{verdict_bg}; border-left:6px solid {verdict_color}; border-radius:8px;
                 padding:20px 24px; margin-bottom:18px; box-shadow:0 1px 3px rgba(0,0,0,.08);">
@@ -723,6 +731,14 @@ def create_executive_summary_card(
         <div style="background:white; border-radius:6px; padding:12px 16px; text-align:center;">
           <div style="font-size:22px; font-weight:700; color:#555;">{fmt_usd_abs(solar_cost)}/yr</div>
           <div style="font-size:12px; color:#666; margin-top:4px;">Annual cost with solar+storage</div>
+        </div>
+        <div style="background:white; border-radius:6px; padding:12px 16px; text-align:center;">
+          <div style="font-size:22px; font-weight:700; color:#555;">{solar_str}</div>
+          <div style="font-size:12px; color:#666; margin-top:4px;">Solar system size</div>
+        </div>
+        <div style="background:white; border-radius:6px; padding:12px 16px; text-align:center;">
+          <div style="font-size:22px; font-weight:700; color:#555;">{batt_str}</div>
+          <div style="font-size:12px; color:#666; margin-top:4px;">Battery capacity</div>
         </div>
       </div>
     </div>
@@ -1711,7 +1727,7 @@ def _dashboard_html(
     )
 
     # Executive summary card — shown before the grid so it's the first thing visible
-    parts.append(create_executive_summary_card(scenario, county_slug, npv_details))
+    parts.append(create_executive_summary_card(scenario, county_slug, npv_details, assets_info))
 
     parts.append('<div class="grid">')
 
