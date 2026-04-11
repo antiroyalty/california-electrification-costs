@@ -621,6 +621,7 @@ def create_executive_summary_card(
     county_slug: str,
     npv_details: Optional[dict],
     assets_info: Optional[dict] = None,
+    statewide_savings: Optional[dict] = None,
 ) -> str:
     """Render a plain-English headline card summarising the key result for this county+scenario.
 
@@ -696,6 +697,25 @@ def create_executive_summary_card(
     horizon = npv_details.get("horizon_years", 25)
     rate = npv_details.get("discount_rate", 0.07)
 
+    # Statewide percentile context
+    state_context_html = ""
+    if statewide_savings and len(statewide_savings) >= 3:
+        all_savings = sorted(statewide_savings.values())
+        n = len(all_savings)
+        median_savings = all_savings[n // 2] if n % 2 == 1 else (all_savings[n // 2 - 1] + all_savings[n // 2]) / 2
+        this_savings = statewide_savings.get(county_slug)
+        if this_savings is not None and annual_savings is not None:
+            # Percentile rank: fraction of counties with savings <= this county's savings
+            rank = sum(1 for v in all_savings if v <= this_savings)
+            pct = round(100 * rank / n)
+            pct_label = f"{pct}th" if 4 <= pct <= 20 else {1: "1st", 2: "2nd", 3: "3rd"}.get(pct % 10, f"{pct}th")
+            state_context_html = (
+                f"<div style='margin-top:10px; font-size:13px; color:#555;'>"
+                f"Statewide context ({n} counties): median savings <strong>${median_savings:,.0f}/yr</strong> — "
+                f"this county ranks <strong>{pct_label} percentile</strong>"
+                f"</div>"
+            )
+
     # Solar and battery sizes
     solar_kw = assets_info.get("Solar Capacity (kW)") if assets_info else None
     batt_kwh = assets_info.get("Battery Capacity (kWh)") if assets_info else None
@@ -742,6 +762,7 @@ def create_executive_summary_card(
           <div style="font-size:12px; color:#666; margin-top:4px;">Battery capacity</div>
         </div>
       </div>
+      {state_context_html}
     </div>
     """
 
@@ -1636,6 +1657,7 @@ def _dashboard_html(
     price_signal_b64: Optional[str] = None,
     methods_manifest: Optional[dict] = None,
     npv_details: Optional[dict] = None,
+    statewide_savings: Optional[dict] = None,
 ) -> str:
     scen_title = scenario.replace("_", " ").title()
     county_title = county_slug.replace("-", " ").title()
@@ -1728,7 +1750,7 @@ def _dashboard_html(
     )
 
     # Executive summary card — shown before the grid so it's the first thing visible
-    parts.append(create_executive_summary_card(scenario, county_slug, npv_details, assets_info))
+    parts.append(create_executive_summary_card(scenario, county_slug, npv_details, assets_info, statewide_savings))
 
     parts.append('<div class="grid">')
 
@@ -2152,6 +2174,8 @@ def process(
     written: List[str] = []
     sha = git_short_sha()
     methods_manifest = _load_methods_manifest()
+    # Compute statewide savings distribution once so each county page can show its percentile rank
+    statewide_savings = compute_statewide_savings_distribution(base_input_dir, scenario, housing_type)
     # Normalize input counties to slugs
     county_slugs = [slugify_county_name(c) for c in counties]
     for county_slug in county_slugs:
@@ -2292,6 +2316,7 @@ def process(
                 price_signal_b64=price_signal_b64,
                 methods_manifest=methods_manifest,
                 npv_details=npv_details,
+                statewide_savings=statewide_savings,
             )
             out_path = os.path.join(
                 output_dir,
