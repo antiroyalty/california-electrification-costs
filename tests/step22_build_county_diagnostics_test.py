@@ -9,11 +9,52 @@ REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
+import pipeline.steps.step22_build_county_diagnostics as _step22
+
 from helpers.main_helpers import slugify_county_name
 from pipeline.steps.step22_build_county_diagnostics import (
     create_coopt_results_card,
     create_executive_summary_card,
 )
+
+
+# ---------------------------------------------------------------------------
+# Module-level name resolution — catches "used but never imported" NameErrors
+# ---------------------------------------------------------------------------
+
+class TestStep22NameResolution:
+    """Every name called from process() must exist in the module namespace.
+
+    This test class exists solely to catch the class of bug where a function
+    is invoked inside process() but was never imported or defined — which
+    produces a NameError at runtime rather than an ImportError at load time.
+    """
+
+    _REQUIRED_NAMES = [
+        # called unconditionally before the per-county loop
+        "git_short_sha",
+        "_load_methods_manifest",
+        "compute_statewide_savings_distribution",
+        "slugify_county_name",
+        # called inside the per-county loop
+        "_collect_county_data",
+        "build_dashboard",
+        "_write_dashboard",
+        # public API exercised by other tests
+        "create_executive_summary_card",
+        "create_coopt_results_card",
+    ]
+
+    def test_all_names_exist_in_module(self):
+        missing = [n for n in self._REQUIRED_NAMES if not hasattr(_step22, n)]
+        assert not missing, f"step22 is missing these names: {missing}"
+
+    def test_all_names_are_callable(self):
+        not_callable = [
+            n for n in self._REQUIRED_NAMES
+            if hasattr(_step22, n) and not callable(getattr(_step22, n))
+        ]
+        assert not not_callable, f"step22 names exist but are not callable: {not_callable}"
 
 
 # ---------------------------------------------------------------------------
