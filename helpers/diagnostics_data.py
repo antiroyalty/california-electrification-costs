@@ -734,6 +734,45 @@ def compute_cost_breakdowns(
     }
 
 
+def compute_statewide_savings_distribution(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+) -> dict:
+    """Return {county_slug: annual_savings} for all counties with data.
+
+    annual_savings = baseline_cost - scenario_solar_cost, i.e. how much a
+    household saves per year by adopting the scenario with solar+storage
+    compared to the gas baseline.  Counties where the required cost files are
+    missing are omitted from the result.
+    """
+    scenario_dir = os.path.join(base_input_dir, scenario, housing_type)
+    if not os.path.isdir(scenario_dir):
+        return {}
+
+    result: dict = {}
+    try:
+        county_slugs = [
+            d for d in os.listdir(scenario_dir)
+            if os.path.isdir(os.path.join(scenario_dir, d)) and not d.startswith(".")
+            and d.upper() != "CAPITAL_COSTS"
+        ]
+    except Exception:
+        return {}
+
+    for slug in county_slugs:
+        baseline_cost = read_total_annual_cost(
+            base_input_dir, "baseline", housing_type, slug, with_solar=False
+        )
+        scenario_solar_cost = read_total_annual_cost(
+            base_input_dir, scenario, housing_type, slug, with_solar=True
+        )
+        if baseline_cost is not None and scenario_solar_cost is not None:
+            result[slug] = baseline_cost - scenario_solar_cost
+
+    return result
+
+
 def compute_assets_info(
     base_input_dir: str,
     scenario: str,
