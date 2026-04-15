@@ -47,6 +47,7 @@ from helpers.diagnostics_data import (
     compute_energy_flow_metrics_without,
     compute_key_metrics,
     compute_npv_details,
+    compute_statewide_savings_distribution,
     lookup_pv_size_kw,
     read_coopt_capacities,
 )
