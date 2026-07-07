@@ -509,49 +509,63 @@ SDGE_RATE_PLANS = {
     # Updated 2026-07-07 from SDG&E's official Schedule TOU-DR1 Total Rates
     # Table, effective 1/1/2026: https://www.sdge.com/sites/default/files/regulatory/1-1-26%20Schedule%20TOU-DR1%20Total%20Rates%20Table.pdf
     # Previous values were sourced from a consumer-facing marketing page, not
-    # the tariff, and were also identical for summer and winter — the real
+    # the tariff, and were also identical for summer and winter. The real
     # tariff has a meaningfully different (lower) winter rate.
+    #
+    # Same day, found and fixed while adding tests/rate_helpers_test.py's
+    # TestSDGE* classes, two separate pre-existing bugs unrelated to the rate
+    # values above:
+    #   1. superOffPeakHours listed 24 instead of 0 for midnight. datetime.hour
+    #      is always 0-23, so 24 never matched, and midnight was silently
+    #      billed at the off-peak rate instead. Fixed.
+    #   2. No "fixedCharge" key existed at all, so SDG&E's $0.79343/day Base
+    #      Services Charge was silently $0, undercounting every SDG&E bill by
+    #      about $290/year. Fixed.
+    #
     # "peak"/"offPeak"/"superOffPeak" below is the tariff's below-130%-baseline
-    # rate; "...AfterBaselineCredit" is the above-baseline rate. Note: as of
-    # this edit, nothing in the pipeline actually reads the
-    # "AfterBaselineCredit" tier (no usage-vs-baseline check exists for SDG&E,
-    # unlike PG&E's E-TOU-C) — every kWh is billed at the below-baseline rate
-    # regardless of usage. Kept both tiers here, correct and documented, but
-    # this is a separate, real modeling simplification worth flagging, not
-    # something this rate update fixes.
+    # rate; "...AfterBaselineCredit" is the above-baseline rate. Note: nothing
+    # in the pipeline actually reads the "AfterBaselineCredit" tier (no
+    # usage-vs-baseline check exists for SDG&E, unlike PG&E's E-TOU-C). Every
+    # kWh is billed at the below-baseline rate regardless of usage. Kept both
+    # tiers here, correct and documented, but this is a separate, real
+    # modeling simplification, not something fixed today.
     "TOU-DR1": {
         "summer": {
             "weekdays": {
                 "peak": 0.587, # SDGE Also has a CCA customer plan, but I don't model this because SDGE only has partial information (SDGE delivery charges only). "CCA customers must also pay for electric generation at prices determined by the CCA. For CCA electric generation prices, please contact your CCA."
                 "offPeak": 0.367,
                 "superOffPeak": 0.279,
-                "superOffPeakHours": [24, 1, 2, 3, 4, 5, 10, 11, 12, 13],
+                "superOffPeakHours": [0, 1, 2, 3, 4, 5, 10, 11, 12, 13],
                 "peakHours": [16, 17, 18, 19, 20],
                 "offPeakHours": [6, 7, 8, 9, 14, 15],
+                "fixedCharge": 0.79343,  # Base Services Charge, per SDG&E Schedule TOU-DR1, effective 1/1/2026
             },
             "weekends": {
                 "peak": 0.587, # prices same as weekday, hours are different
                 "offPeak": 0.367,
                 "superOffPeak": 0.279,
-                "superOffPeakHours": [24, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+                "superOffPeakHours": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
                 "peakHours": [16, 17, 18, 19, 20],
                 "offPeakHours": [14, 15, 21, 22, 23],
+                "fixedCharge": 0.79343,  # Base Services Charge, per SDG&E Schedule TOU-DR1, effective 1/1/2026
             },
             "weekdaysAfterBaselineCredit": {
                 "peak": 0.697,
                 "offPeak": 0.476,
                 "superOffPeak": 0.388,
-                "superOffPeakHours": [24, 1, 2, 3, 4, 5, 10, 11, 12, 13], # Same hours as below baseline credit
+                "superOffPeakHours": [0, 1, 2, 3, 4, 5, 10, 11, 12, 13], # Same hours as below baseline credit
                 "peakHours": [16, 17, 18, 19, 20],
                 "offPeakHours": [6, 7, 8, 9, 14, 15],
+                "fixedCharge": 0.79343,  # Base Services Charge, per SDG&E Schedule TOU-DR1, effective 1/1/2026
             },
             "weekendsAfterBaselineCredit": {
                 "peak": 0.697,
                 "offPeak": 0.476,
                 "superOffPeak": 0.388,
-                "superOffPeakHours": [24, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+                "superOffPeakHours": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
                 "peakHours": [16, 17, 18, 19, 20],
                 "offPeakHours": [14, 15, 21, 22, 23],
+                "fixedCharge": 0.79343,  # Base Services Charge, per SDG&E Schedule TOU-DR1, effective 1/1/2026
             },
         },
         "winter": { # No longer identical to summer as of the 1/1/2026 tariff. There are exceptions for March and April but hard to implement
@@ -559,33 +573,37 @@ SDGE_RATE_PLANS = {
                 "peak": 0.513, # SDGE Also has a CCA customer plan, but I don't model this because SDGE only has partial information (SDGE delivery charges only). "CCA customers must also pay for electric generation at prices determined by the CCA. For CCA electric generation prices, please contact your CCA."
                 "offPeak": 0.431,
                 "superOffPeak": 0.340,
-                "superOffPeakHours": [24, 1, 2, 3, 4, 5, 10, 11, 12, 13],
+                "superOffPeakHours": [0, 1, 2, 3, 4, 5, 10, 11, 12, 13],
                 "peakHours": [16, 17, 18, 19, 20],
                 "offPeakHours": [6, 7, 8, 9, 14, 15],
+                "fixedCharge": 0.79343,  # Base Services Charge, per SDG&E Schedule TOU-DR1, effective 1/1/2026
             },
             "weekends": {
                 "peak": 0.513, # prices same as weekday, hours are different
                 "offPeak": 0.431,
                 "superOffPeak": 0.340,
-                "superOffPeakHours": [24, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+                "superOffPeakHours": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
                 "peakHours": [16, 17, 18, 19, 20],
                 "offPeakHours": [14, 15, 21, 22, 23],
+                "fixedCharge": 0.79343,  # Base Services Charge, per SDG&E Schedule TOU-DR1, effective 1/1/2026
             },
             "weekdaysAfterBaselineCredit": {
                 "peak": 0.622,
                 "offPeak": 0.540,
                 "superOffPeak": 0.449,
-                "superOffPeakHours": [24, 1, 2, 3, 4, 5, 10, 11, 12, 13], # Same hours as below baseline credit
+                "superOffPeakHours": [0, 1, 2, 3, 4, 5, 10, 11, 12, 13], # Same hours as below baseline credit
                 "peakHours": [16, 17, 18, 19, 20],
                 "offPeakHours": [6, 7, 8, 9, 14, 15],
+                "fixedCharge": 0.79343,  # Base Services Charge, per SDG&E Schedule TOU-DR1, effective 1/1/2026
             },
             "weekendsAfterBaselineCredit": {
                 "peak": 0.622,
                 "offPeak": 0.540,
                 "superOffPeak": 0.449,
-                "superOffPeakHours": [24, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+                "superOffPeakHours": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
                 "peakHours": [16, 17, 18, 19, 20],
                 "offPeakHours": [14, 15, 21, 22, 23],
+                "fixedCharge": 0.79343,  # Base Services Charge, per SDG&E Schedule TOU-DR1, effective 1/1/2026
             },
         },
     },
