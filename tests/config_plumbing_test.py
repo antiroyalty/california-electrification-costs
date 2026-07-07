@@ -1,4 +1,4 @@
-git"""Regression tests for Config parameters actually reaching the steps that use them.
+"""Regression tests for Config parameters actually reaching the steps that use them.
 
 Found tonight: `Config.discount_rate` had a correct default and was correctly
 used *inside* step9b's LP and step18's EAC collection — but the module-level
