@@ -268,7 +268,7 @@ ul.sub-limitations li{ font-size:14.5px; color:var(--ink-soft); font-weight:400;
   <div class="callout"><strong>On the discount-rate boundary:</strong> the sensitivity only becomes visible in non-PG&amp;E territory. One reading: SCE and SDG&amp;E&rsquo;s rate structures reward battery dispatch enough that a low enough cost of capital tips the LP toward building some, while PG&amp;E&rsquo;s NEM 3.0 export economics don&rsquo;t, at any rate tested. Worth a sentence in the paper as a boundary condition, not a caveat on the headline claim: at any discount rate a real household or utility program would use (typically 5-10% real), the battery conclusion is unchanged.</div>
 
   <div class="fig-pending">
-    <span class="tag">Figure not yet built</span>
+    <span class="tag">Figure TBD</span>
     <p><strong>Statewide threshold map or distribution.</strong> Same battery-capex sweep, run for all 47 counties instead of 4. For example, a county choropleth or sorted strip plot of &ldquo;$/kWh threshold where battery enters the solution,&rdquo; showing whether climate zone or utility territory shifts the number.</p>
     <p>Scoped and timed today: full 8760-hour fidelity across the remaining 43 counties &asymp; 11 hours of compute; a coarser monthly-representative-hour approximation (already built into the tool) &asymp; 1 hour. Deferred to a dedicated session rather than run unattended tonight.</p>
   </div>
@@ -276,7 +276,7 @@ ul.sub-limitations li{ font-size:14.5px; color:var(--ink-soft); font-weight:400;
   <div class="sources">
     <h3>Tests backing this claim</h3>
     <ul>
-      <li><code>TestLPSizingPriceMatchesReportingPrice</code> (3 tests, <code>lp_cooptimize_test.py</code>). The exact bug found in this audit: proves the optimizer sizes PV and battery against the same $/kW and $/kWh price the report shows, not a stale hardcoded one.</li>
+      <li><code>TestLPSizingPriceMatchesReportingPrice</code> (3 tests, <code>lp_cooptimize_test.py</code>). Proves the optimizer sizes PV and battery against the same $/kW and $/kWh price the report shows, not a stale hardcoded one.</li>
       <li><code>TestBatteryStorageCost</code> and <code>TestSolarPanelCost</code> (<code>capital_costs_test.py</code>). The two prices themselves match their cited sources (NREL ATB, CPUC), not a made-up number.</li>
       <li><code>TestCapexMatchesEvaluationsPrimitives</code> (<code>lp_cooptimize_test.py</code>). The annualization math (CRF, NPV) inside the LP matches the standalone formula used everywhere else in the pipeline.</li>
       <li><code>TestLPBatteryRespondsToPriceSignal</code> (3 tests, <code>lp_cooptimize_test.py</code>). Battery dispatch responds the way basic economics predicts, a check that the LP isn&rsquo;t just returning zero by construction.</li>
@@ -298,7 +298,7 @@ ul.sub-limitations li{ font-size:14.5px; color:var(--ink-soft); font-weight:400;
 <section class="claim" id="claim-2">
   <div class="claim-head"><span class="claim-num">CLAIM 2</span></div>
   <h2 class="claim-title">Full electrification with properly-sized solar beats staying on gas. It wins in 46 of 47 California counties</h2>
-  <p class="claim-sub">Statewide median savings: <strong>14.7%</strong> annualized cost, relative to staying on gas with solar. The one exception is Alpine County, at &minus;3.4%. It&rsquo;s explained, not anomalous: it has the highest heat-pump installation cost of any county in the dataset.</p>
+  <p class="claim-sub">Statewide median savings: <strong>14.7%</strong> annualized cost, relative to staying on gas with solar. The one exception is Alpine County, because it has the highest heat-pump installation cost of any county in the dataset.</p>
 
   <div class="stat-row">
     <div class="stat"><span class="num">14.7%</span><span class="lbl">median savings vs. gas, across 47 counties</span></div>
@@ -314,8 +314,8 @@ ul.sub-limitations li{ font-size:14.5px; color:var(--ink-soft); font-weight:400;
   </div>
 
   <div class="fig-pending">
-    <span class="tag">Figure not yet built</span>
-    <p><strong>Statewide savings distribution.</strong> The strip plot and table just below are the data for this chart. A polished version would be a sorted horizontal bar chart with Alpine&rsquo;s negative bar called out and a labeled 0% reference line, publication-ready for the paper.</p>
+    <span class="tag">Figure TBD</span>
+    <p><strong>Statewide savings distribution.</strong> The strip plot and table just below are the data for this chart. A polished version would be a sorted horizontal bar chart with Alpine&rsquo;s negative bar called out and a labeled 0% reference line.</p>
   </div>
 
   <p class="subhead" style="margin-top:8px;">Savings vs. gas, all 47 counties (sorted)</p>
@@ -465,7 +465,7 @@ ul.sub-limitations li{ font-size:14.5px; color:var(--ink-soft); font-weight:400;
   </div>
 
   <div class="fig-pending">
-    <span class="tag">Figure not yet built</span>
+    <span class="tag">Figure TBD</span>
     <p><strong>Distribution of co-optimization savings.</strong> A histogram or box plot of the $271&ndash;$826/yr savings across all 47 counties would make this the tightest, most visual claim in the paper. Every county lands on the same side of zero.</p>
     <p>In the meantime, see Claim 2&rsquo;s four county figures above: in each, the gap between the second bar (fixed-PV electrification) and third bar (co-optimized electrification) <em>is</em> this claim.</p>
   </div>
