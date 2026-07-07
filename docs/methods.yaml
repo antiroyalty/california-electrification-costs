@@ -251,5 +251,74 @@
     "code": [
       "evaluations/lcoe.py:lcoe_from_schedules"
     ]
+  },
+  "appliances.solar_system": {
+    "title": "Solar PV Installed Cost",
+    "formula": "total_cost = capacity_kw * 1000 * $3.30/W",
+    "data_sources": {
+      "rate": "$3.30/W, CPUC-adopted 2023 California solar cost (docs.cpuc.ca.gov/PublishedDocs/Published/G000/M499/K921/499921246.PDF). Reconciles NREL ATB ($2.34/W, too low) vs. LBNL Tracking the Sun 2019 ($3.80/W, too high); accounts for panel upgrades, delays, inflation."
+    },
+    "assumptions": {
+      "sizing_vs_reporting": "SolarSystemAppliance.per_kw_cost() is the single source of truth for this rate — the LP's sizing objective (step9b) must use the same value the reporting layer (step14) uses, or the LP optimizes against a price it isn't actually charged. Bug found and fixed 2026-07-06."
+    },
+    "code": [
+      "appliances/solar_system.py:SolarSystemAppliance",
+      "appliances/solar_system.py:per_kw_cost"
+    ]
+  },
+  "appliances.battery_storage": {
+    "title": "Battery Storage Installed Cost",
+    "formula": "total_cost = num_units * $18,258 (12.5 kWh/unit)",
+    "data_sources": {
+      "rate": "NREL ATB 2024 moderate scenario, residential 5kW/12.5kWh system, as used in CEC-200-2024-011 (energy.ca.gov/sites/default/files/2024-07/CEC-200-2024-011.pdf). ATB via atb.nrel.gov/electricity/2024/data."
+    },
+    "assumptions": {
+      "sizing_vs_reporting": "BatteryStorageAppliance.per_kwh_cost() is the single source of truth for this rate — see appliances.solar_system note. Bug found and fixed 2026-07-06: LP previously sized against a stale $800/kWh default while this reporting rate was ~$1,461/kWh gross."
+    },
+    "code": [
+      "appliances/battery_storage.py:BatteryStorageAppliance",
+      "appliances/battery_storage.py:per_kwh_cost"
+    ]
+  },
+  "appliances.electric_heating": {
+    "title": "Heat Pump Space Heating Installed Cost (per county)",
+    "formula": "base_cost = County_Median_HPSH_Stats.csv[county]['Total Project Cost per Unit ($)']",
+    "data_sources": {
+      "source": "TECH Clean California program data (CEC), filtered to ducted systems only (AHRI types without the '-O' suffix). Contractor/turnkey cost, not equipment-only. See Simon La Vieille, 'EV Integration to Ana's Project' (Aug 2025), section 'Heat Pump - Space Heater'.",
+      "file": "data/County_Median_HPSH_Stats.csv",
+      "missing_counties": "3 of the pipeline's 47 counties (mono, plumas, sierra) absent from source; filled with the median of counties present (computed in for_county(), not hardcoded)."
+    },
+    "code": [
+      "appliances/electric_heating.py:for_county"
+    ]
+  },
+  "appliances.electric_water_heating": {
+    "title": "Heat Pump Water Heater Installed Cost (per county)",
+    "formula": "base_cost = County_Median_HPWH_Stats.csv[county]['Total Project Cost per Unit ($)']",
+    "data_sources": {
+      "source": "TECH Clean California program data (CEC), Single Family installs of Heat Pump Water Heater / Split System HPWH / 120V and 240V integrated HPWH. Contractor/turnkey cost. See Simon La Vieille, 'EV Integration to Ana's Project' (Aug 2025), section 'Heat Pump Water Heater'.",
+      "file": "data/County_Median_HPWH_Stats.csv",
+      "missing_counties": "9 of the pipeline's 47 counties absent from source; filled with the median of counties present (computed in for_county(), not hardcoded)."
+    },
+    "code": [
+      "appliances/electric_water_heating.py:for_county"
+    ]
+  },
+  "appliances.carb_appliance_costs": {
+    "title": "Induction Stove / Gas Appliance Installed Costs",
+    "formula": "base_cost_2023 = (capital + installation + other)_2022 * 1.034",
+    "data_sources": {
+      "source": "CARB appliance comparison data ('Cristina's approach'), 3.4% CPI-U inflation applied to bring 2022 figures to 2023. See Simon La Vieille, 'EV Integration to Ana's Project' (Aug 2025), section 'Rest of the Values'.",
+      "induction_stove": "$2,400 + $1,380 + $340 = $4,120 (2022) -> $4,260.08 (2023)",
+      "gas_stove": "$1,600 + $890 + $220 = $2,710 (2022) -> $2,802.14 (2023)",
+      "gas_water_heater": "$900 + $1,200 + $90 = $2,190 (2022) -> $2,264.46 (2023)",
+      "gas_heating": "$4,500 + $4,180 + $770 = $9,450 (2022) -> $9,771.30 (2023) — reported as 'Gas HVAC' in the source; confirm scope (heating-only vs. full HVAC incl. AC) matches intended use."
+    },
+    "code": [
+      "appliances/electric_cooking.py:ElectricCookingAppliance",
+      "appliances/gas_stove.py:GasStoveAppliance",
+      "appliances/gas_water_heating.py:GasWaterHeatingAppliance",
+      "appliances/gas_heating.py:GasHeatingAppliance"
+    ]
   }
 }

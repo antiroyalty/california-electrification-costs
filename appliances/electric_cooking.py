@@ -10,8 +10,12 @@ from typing import Dict
 from appliances.electric_base import ElectricAppliance, Incentive, IncentiveScenario
 
 class ElectricCookingAppliance(ElectricAppliance):
-    def __init__(self, 
+    def __init__(self,
                  cooking_type: str = "induction",
+                 # CARB appliance comparison data ("Cristina's approach" — see Simon La
+                 # Vieille, "EV Integration to Ana's Project," Aug 2025): capital $2,400 +
+                 # installation $1,380 + other $340 = $4,120 (2022), inflated 3.4% CPI-U
+                 # to 2023 = $4,260.08.
                  base_cost: float = 4260.08,
                  lifetime_years: int = 15):
         super().__init__(f"electric_{cooking_type}_cooking", base_cost, lifetime_years)
