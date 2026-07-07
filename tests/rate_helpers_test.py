@@ -18,7 +18,7 @@ REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from helpers.electricity_rate_helpers import PGE_RATE_PLANS, SCE_RATE_PLANS
+from helpers.electricity_rate_helpers import PGE_RATE_PLANS, SCE_RATE_PLANS, SDGE_RATE_PLANS
 from pipeline.steps.step9b_cooptimize_core import _hourly_import_rate
 from pipeline.steps.step12_evaluate_electricity_rates import (
     _hourly_import_rate as _step12_rate,
@@ -999,4 +999,185 @@ class TestPGERateParity:
             f"First mismatch: {mismatches[0][0]} "
             f"step9b={mismatches[0][1]:.6f} step12={mismatches[0][2]:.6f}. "
             f"Optimizer and biller use different cost signals for these hours."
+        )
+
+
+# ---------------------------------------------------------------------------
+# SDG&E: TOU-DR1
+#
+# Added 2026-07-07, the same day SDGE_RATE_PLANS['TOU-DR1'] was corrected
+# against SDG&E's official tariff (previously sourced from a consumer
+# marketing page, not the tariff itself). Before this file, SDG&E had zero
+# rate-correctness test coverage, unlike PG&E and SCE, which both have
+# dedicated parity tests against the utility's own published rate documents.
+#
+# Source of truth: SDG&E Schedule TOU-DR1 Total Rates Table, effective
+# 1/1/2026: https://www.sdge.com/sites/default/files/regulatory/1-1-26%20Schedule%20TOU-DR1%20Total%20Rates%20Table.pdf
+#
+# TOU-DR1 is the plan actually used for San Diego throughout the pipeline
+# (pipeline/sensitivity_runner.py DEFAULT_RATE_PLANS, and step9b/step12's
+# default SDG&E plan preference).
+# ---------------------------------------------------------------------------
+
+def _sdge_summer(ts: pd.Timestamp) -> bool:
+    return 6 <= ts.month <= 9
+
+
+def _pdf_rate_tou_dr1(ts: pd.Timestamp) -> float:
+    """Tariff source-of-truth for TOU-DR1's below-baseline rate.
+
+    Summer: Peak 58.7c, Off-Peak 36.7c, Super-Off-Peak 27.9c
+    Winter: Peak 51.3c, Off-Peak 43.1c, Super-Off-Peak 34.0c
+    Peak hours: 4-9 pm (16-20), both weekdays and weekends.
+    Super-off-peak (as coded): weekdays hours 1-5 and 10-13; weekends hours
+    1-13. All other hours are off-peak.
+
+    Note: the tariff's stated super-off-peak window starts at midnight, but
+    SDGE_RATE_PLANS encodes that boundary hour as 24 instead of 0, which
+    never matches a real datetime.hour (always 0-23). This reference
+    function deliberately encodes the *coded* (buggy) hour list, not the
+    tariff's stated one, for the rate-value parity tests below, whose job is
+    to check the dollar values, not the hour classification. The hour
+    classification bug itself is proven separately in
+    TestSDGEMidnightHourBug.
+    """
+    h = ts.hour
+    is_weekend = ts.weekday() >= 5
+    super_off_peak_hours = set(range(1, 14)) if is_weekend else {1, 2, 3, 4, 5, 10, 11, 12, 13}
+    if _sdge_summer(ts):
+        if 16 <= h <= 20:
+            return 0.587
+        if h in super_off_peak_hours:
+            return 0.279
+        return 0.367
+    else:
+        if 16 <= h <= 20:
+            return 0.513
+        if h in super_off_peak_hours:
+            return 0.340
+        return 0.431
+
+
+def _sdge_step9b(ts: pd.Timestamp) -> float:
+    return _hourly_import_rate(SDGE_RATE_PLANS["TOU-DR1"], ts)
+
+
+def _sdge_step12(ts: pd.Timestamp) -> float:
+    return _step12_rate(SDGE_RATE_PLANS["TOU-DR1"], ts.to_pydatetime())
+
+
+class TestSDGETOUDR1Structure:
+    def test_peak_hours_are_4_to_9pm(self):
+        plan = SDGE_RATE_PLANS["TOU-DR1"]
+        assert plan["summer"]["weekdays"]["peakHours"] == [16, 17, 18, 19, 20]
+
+    def test_weekend_peak_hours_match_weekday(self):
+        # TOU-DR1 charges peak on weekends too, same hours as weekdays.
+        plan = SDGE_RATE_PLANS["TOU-DR1"]
+        assert plan["summer"]["weekends"]["peakHours"] == plan["summer"]["weekdays"]["peakHours"]
+
+    def test_winter_rates_differ_from_summer(self):
+        # Regression guard: before the 2026-07-07 fix, winter and summer were
+        # coded identically, which was wrong per the real tariff.
+        plan = SDGE_RATE_PLANS["TOU-DR1"]
+        assert plan["summer"]["weekdays"]["peak"] != plan["winter"]["weekdays"]["peak"]
+
+
+class TestSDGEMidnightHourBug:
+    """Proves a real, pre-existing bug: midnight (hour 0) falls through to
+    the off-peak rate instead of super-off-peak, because
+    SDGE_RATE_PLANS['TOU-DR1']['*']['*']['superOffPeakHours'] lists 24
+    instead of 0. datetime.hour is always 0-23, so 24 never matches.
+
+    This is not part of the 2026-07-07 rate-value fix. Found while adding
+    this test file. Left failing, on purpose, as a proven, precise record of
+    the bug rather than a passing test written around it.
+    """
+
+    def test_midnight_should_be_super_off_peak_summer(self):
+        ts = pd.Timestamp(2018, 7, 3, 0)  # Tuesday, July, midnight
+        plan = SDGE_RATE_PLANS["TOU-DR1"]
+        actual = _hourly_import_rate(plan, ts)
+        assert actual == pytest.approx(0.279), (
+            f"Midnight should bill at the super-off-peak rate (27.9c), got {actual:.3f}. "
+            f"This fails today because superOffPeakHours lists 24 instead of 0."
+        )
+
+    def test_midnight_should_be_super_off_peak_winter(self):
+        ts = pd.Timestamp(2018, 1, 2, 0)  # Tuesday, January, midnight
+        plan = SDGE_RATE_PLANS["TOU-DR1"]
+        actual = _hourly_import_rate(plan, ts)
+        assert actual == pytest.approx(0.340), (
+            f"Midnight should bill at the super-off-peak rate (34.0c), got {actual:.3f}. "
+            f"This fails today because superOffPeakHours lists 24 instead of 0."
+        )
+
+
+class TestSDGEAnnualBillVsPDF:
+    """Annual electricity cost (flat 1 kWh/hr, 2018) via code vs. the tariff PDF.
+
+    Mirrors TestSCEAnnualBillVsPNG / TestPGEAnnualBillVsPDF. A FAILURE means
+    the codebase rate values no longer match the cited tariff.
+    """
+
+    def test_tou_dr1_step9b(self):
+        expected = sum(_pdf_rate_tou_dr1(ts) for ts in YEAR_2018)
+        actual = sum(_sdge_step9b(ts) for ts in YEAR_2018)
+        assert actual == pytest.approx(expected, abs=0.01), (
+            f"TOU-DR1 step9b: code ${actual:.2f} vs PDF ${expected:.2f} "
+            f"(diff ${actual - expected:+.2f})"
+        )
+
+    def test_tou_dr1_step12(self):
+        expected = sum(_pdf_rate_tou_dr1(ts) for ts in YEAR_2018)
+        actual = sum(_sdge_step12(ts) for ts in YEAR_2018)
+        assert actual == pytest.approx(expected, abs=0.01), (
+            f"TOU-DR1 step12: code ${actual:.2f} vs PDF ${expected:.2f} "
+            f"(diff ${actual - expected:+.2f})"
+        )
+
+
+class TestSDGERateParity:
+    """step9b and step12 rate functions must agree for every hour, mirroring
+    TestPGERateParity. If they diverge, the LP optimizer is dispatching
+    against a different price than what gets billed.
+    """
+
+    def test_step9b_matches_step12_all_hours(self):
+        plan = SDGE_RATE_PLANS["TOU-DR1"]
+        mismatches = []
+        for ts in YEAR_2018:
+            r9b = _hourly_import_rate(plan, ts)
+            r12 = _step12_rate(plan, ts.to_pydatetime())
+            if abs(r9b - r12) > 1e-9:
+                mismatches.append((ts, r9b, r12))
+
+        assert len(mismatches) == 0, (
+            f"TOU-DR1: {len(mismatches)} hour(s) where step9b != step12. "
+            f"First mismatch: {mismatches[0][0]} "
+            f"step9b={mismatches[0][1]:.6f} step12={mismatches[0][2]:.6f}."
+        )
+
+
+class TestSDGEFixedCharges:
+    """Mirrors TestSCEFixedCharges. SDG&E's tariff has a Base Services
+    Charge of $0.79343/day for TOU-DR1, the same figure PG&E charges under
+    E-ELEC. SDGE_RATE_PLANS currently has no 'fixedCharge' key at all for
+    TOU-DR1, so this defaults to $0.00/day: a real, material undercount of
+    roughly $290/year per household, found while adding this test file, not
+    part of the 2026-07-07 rate-value fix. Left failing, on purpose.
+    """
+
+    def test_monthly_fixed_tou_dr1(self):
+        plan = SDGE_RATE_PLANS["TOU-DR1"]
+        assert _estimate_monthly_fixed_from_plan(plan, 2018, 7) == pytest.approx(0.79343 * 31), (
+            "TOU-DR1 is missing a 'fixedCharge' key (SDG&E's $0.79343/day Base "
+            "Services Charge), so monthly fixed charges are silently $0."
+        )
+
+    def test_annual_fixed_tou_dr1_zero_load(self):
+        result = calculate_annual_costs_electricity(ZERO_LOAD_8760, "SDG&E", "TOU-DR1")
+        assert result["TOU-DR1"] == pytest.approx(0.79343 * 365, abs=0.01), (
+            "TOU-DR1 is missing a 'fixedCharge' key, so a zero-load annual bill "
+            "should still be $0.79343 x 365 but is currently $0."
         )
