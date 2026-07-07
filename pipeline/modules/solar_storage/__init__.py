@@ -9,6 +9,9 @@ from helpers.main_helpers import log_step, slugify_county_name
 from pipeline.steps import step8_get_weather_files as WeatherFiles
 from pipeline.steps import step9_my_own_solar_storage as Step9MyOwnSolarStorage
 from pipeline.steps import step9b_cooptimize_pv_battery as Step9bCoopt
+from appliances.solar_system import SolarSystemAppliance
+from appliances.battery_storage import BatteryStorageAppliance
+from appliances.electric_base import IncentiveScenario
 
 
 def _is_coopt_scenario(name: str) -> bool:
@@ -42,6 +45,12 @@ def run(cfg: Config) -> None:
     # 9) PV/Storage modeling
     log_step(9)
     if _is_coopt_scenario(cfg.scenario):
+        # The LP's sizing decision should reflect what the modeled
+        # decision-maker actually pays under the incentive scenario being
+        # run — not a fixed default that only matches full_incentives.
+        # See step9b_cooptimize_pv_battery.py for the full note
+        # (2026-07-07 refinement).
+        incentive_scenario = IncentiveScenario(cfg.incentive)
         Step9bCoopt.process(
             base_input_dir=base_dir,
             base_output_dir=base_dir,
@@ -51,6 +60,8 @@ def run(cfg: Config) -> None:
             allow_grid_charging=False,
             allow_batt_export=True,
             discount_rate=cfg.discount_rate,
+            pv_capex_per_kw=SolarSystemAppliance.per_kw_cost_net(incentive_scenario),
+            batt_capex_per_kwh=BatteryStorageAppliance.per_kwh_cost_net(incentive_scenario),
         )
     else:
         Step9MyOwnSolarStorage.process(
