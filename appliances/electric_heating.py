@@ -5,6 +5,19 @@ from appliances.electric_base import ElectricAppliance, IncentiveScenario
 from helpers.main_helpers import slugify_county_name
 
 class ElectricHeatingAppliance(ElectricAppliance):
+    """County-aware heat pump space heating appliance.
+
+    Cost data source: TECH Clean California program data (CEC), filtered to
+    ducted systems only (AHRI types without the "-O" suffix — see Simon La
+    Vieille, "EV Integration to Ana's Project," Aug 2025). Values are
+    contractor/turnkey costs (equipment + installation), not equipment-only.
+    3 of the pipeline's 47 counties (mono, plumas, sierra) are absent from
+    the source data; those use the median of the counties present, per the
+    same report's documented approach ("take the state median to fill in
+    the gaps") — computed here, not hardcoded, so it stays correct if the
+    source data is refreshed.
+    """
+
     CONFIG_PATH = os.path.join(
         os.path.dirname(__file__), "..", "data", "County_Median_HPSH_Stats.csv"
     )
@@ -55,6 +68,14 @@ class ElectricHeatingAppliance(ElectricAppliance):
         return cls._CONFIG_DF
 
     @classmethod
+    def _state_median_row(cls, df: pd.DataFrame) -> pd.Series:
+        """Median of all counties present, for counties missing from the source data."""
+        return pd.Series({
+            cls.CAPITAL_COST_COLUMN_NAME: df[cls.CAPITAL_COST_COLUMN_NAME].median(),
+            cls.INCENTIVE_COLUMN_NAME: df[cls.INCENTIVE_COLUMN_NAME].median(),
+        })
+
+    @classmethod
     def for_county(cls, county_slug: str, heating_type: str = "heat_pump") -> "ElectricHeatingAppliance":
         """
         Factory that reads county-specific base_cost from CSV.
@@ -64,14 +85,8 @@ class ElectricHeatingAppliance(ElectricAppliance):
 
         if county_slug in df.index:
             row = df.loc[county_slug]
-        elif "statewide" in df.index:
-            row = df.loc["statewide"]
         else:
-            # final fallback
-            row = pd.Series({
-                cls.CAPITAL_COST_COLUMN_NAME: 19000.0,
-                cls.INCENTIVE_COLUMN_NAME: 0.0,
-            })
+            row = cls._state_median_row(df)
 
         base_cost = float(row[cls.CAPITAL_COST_COLUMN_NAME])
         inst = cls(heating_type=heating_type, base_cost=base_cost, lifetime_years=15)
@@ -91,8 +106,10 @@ class ElectricHeatingAppliance(ElectricAppliance):
         
         # Add county-specific incentives from CSV data
         df = self._load_config()
-        key = self.county_slug if (self.county_slug in df.index) else ("statewide" if "statewide" in df.index else df.index[0])
-        csv_inc_full = float(df.loc[key, self.INCENTIVE_COLUMN_NAME])
+        if self.county_slug in df.index:
+            csv_inc_full = float(df.loc[self.county_slug, self.INCENTIVE_COLUMN_NAME])
+        else:
+            csv_inc_full = float(self._state_median_row(df)[self.INCENTIVE_COLUMN_NAME])
 
         # Apply scenario multiplier to CSV incentives
         if scenario == IncentiveScenario.FULL_INCENTIVES:

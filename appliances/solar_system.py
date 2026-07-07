@@ -32,7 +32,27 @@ class SolarSystemAppliance(ElectricAppliance):
             source_url="https://www.energy.gov/eere/solar/homeowners-guide-federal-tax-credit-solar-photovoltaics"
         )
         self.add_incentive(federal_tax_credit)
-    
+
+    @classmethod
+    def per_kw_cost(cls) -> float:
+        """Gross (pre-incentive) $/kW, derived from the same unit economics as
+        every other capex figure for this appliance — the single number any
+        caller (the LP's sizing objective, step14's reporting) should use for
+        PV cost per kW, so sizing and reporting can't silently diverge."""
+        unit = cls(capacity_kw=1.0)
+        return unit.base_cost
+
+    @classmethod
+    def per_kw_cost_net(cls, scenario: IncentiveScenario) -> float:
+        """Net (after-incentive) $/kW under the given incentive scenario.
+
+        Use this — not per_kw_cost() — for a sizing decision meant to reflect
+        what the modeled decision-maker actually pays, e.g. the LP's default
+        sizing signal, which should match whichever incentive scenario is the
+        one actually being reported (2026-07-07)."""
+        unit = cls(capacity_kw=1.0)
+        return unit.get_net_cost(scenario)
+
     def get_cost_breakdown(self, scenario: IncentiveScenario = IncentiveScenario.FULL_INCENTIVES) -> Dict:
         """Return detailed cost breakdown for solar system."""
         total_incentives = self.calculate_total_incentives(scenario)

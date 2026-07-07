@@ -18,6 +18,8 @@ import os
 import sys
 from unittest.mock import patch
 
+import pytest
+
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
@@ -46,6 +48,39 @@ def test_solar_storage_module_passes_discount_rate_to_lp():
         "otherwise the LP always sizes PV/battery at its own hardcoded default "
         "regardless of what Config specifies."
     )
+
+
+def test_solar_storage_module_sizes_against_net_cost_for_the_configured_incentive_scenario():
+    """2026-07-07 refinement: the LP's sizing price must reflect the actual
+    incentive scenario Config specifies, not always full_incentives. Uses a
+    non-default scenario (no_incentives) specifically so this can't pass by
+    coincidentally matching the common-case default."""
+    import pipeline.modules.solar_storage as mod
+    from appliances.solar_system import SolarSystemAppliance
+    from appliances.battery_storage import BatteryStorageAppliance
+    from appliances.electric_base import IncentiveScenario
+
+    cfg = Config(
+        scenario="baseline_coopt",
+        housing_type="single-family-detached",
+        counties=["Alameda County"],
+        incentive="no_incentives",
+    )
+
+    with patch.object(mod, "WeatherFiles"), patch.object(mod, "Step9bCoopt") as mock_step9b:
+        mod.run(cfg)
+
+    _, kwargs = mock_step9b.process.call_args
+    expected_pv = SolarSystemAppliance.per_kw_cost_net(IncentiveScenario.NO_INCENTIVES)
+    expected_batt = BatteryStorageAppliance.per_kwh_cost_net(IncentiveScenario.NO_INCENTIVES)
+    assert kwargs.get("pv_capex_per_kw") == pytest.approx(expected_pv), (
+        "mod_solar_storage.run() must size PV against cfg.incentive's net cost, "
+        "not a fixed full_incentives assumption."
+    )
+    assert kwargs.get("batt_capex_per_kwh") == pytest.approx(expected_batt)
+    # no_incentives means net == gross (nothing subtracted)
+    assert expected_pv == pytest.approx(SolarSystemAppliance.per_kw_cost())
+    assert expected_batt == pytest.approx(BatteryStorageAppliance.per_kwh_cost())
 
 
 def test_rates_capital_module_passes_nbc_override_to_step12():

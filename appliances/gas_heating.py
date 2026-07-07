@@ -26,7 +26,13 @@ class GasHeatingAppliance(GasAppliance):
         
         Args:
             heating_type: Type of gas heating system (default: "furnace")
-            base_cost: Base equipment and installation cost in dollars
+            base_cost: Base equipment and installation cost in dollars.
+                CARB appliance comparison data ("Cristina's approach" — see Simon
+                La Vieille, "EV Integration to Ana's Project," Aug 2025): capital
+                $4,500 + installation $4,180 + other $770 = $9,450 (2022), inflated
+                3.4% CPI-U to 2023 = $9,771.30. This is "Gas HVAC" in that report —
+                confirm it's the intended comparison point if the paper ever
+                narrows scope to heating-only (vs. full HVAC).
             lifetime_years: Expected equipment lifetime in years
             efficiency: Gas furnace efficiency (typically ~83% AFUE)
         """

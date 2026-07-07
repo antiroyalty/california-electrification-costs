@@ -27,7 +27,11 @@ class GasWaterHeatingAppliance(GasAppliance):
         
         Args:
             heater_type: Type of gas water heating system (default: "tank")
-            base_cost: Base equipment and installation cost in dollars
+            base_cost: Base equipment and installation cost in dollars.
+                CARB appliance comparison data ("Cristina's approach" — see Simon
+                La Vieille, "EV Integration to Ana's Project," Aug 2025): capital
+                $900 + installation $1,200 + other $90 = $2,190 (2022), inflated
+                3.4% CPI-U to 2023 = $2,264.46.
             lifetime_years: Expected equipment lifetime in years
             efficiency: Gas water heater efficiency (typically ~83% AFUE)
             capacity_gallons: Water heater tank capacity in gallons

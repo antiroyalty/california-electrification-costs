@@ -310,12 +310,13 @@ def build_pv_storage_adjustments_df(
     # Pre-create one battery unit to derive per‑kWh economics
     bat_unit = BatteryStorageAppliance(num_units=1, lifetime_years=15)
     unit_kwh = float(getattr(bat_unit, 'capacity_kwh', 12.5) or 12.5)
-    unit_capex = float(bat_unit.base_cost)
     unit_net_full = float(bat_unit.get_net_cost(IncentiveScenario.FULL_INCENTIVES))
     unit_net_half = float(bat_unit.get_net_cost(IncentiveScenario.HALF_INCENTIVES))
     unit_net_none = float(bat_unit.get_net_cost(IncentiveScenario.NO_INCENTIVES))
 
-    per_kwh_capex = unit_capex / unit_kwh if unit_kwh > 0 else 0.0
+    # Same rate the LP's sizing objective uses (BatteryStorageAppliance.per_kwh_cost) —
+    # sizing and reporting must agree on this number, not derive it independently.
+    per_kwh_capex = BatteryStorageAppliance.per_kwh_cost()
     per_kwh_net_full = unit_net_full / unit_kwh if unit_kwh > 0 else 0.0
     per_kwh_net_half = unit_net_half / unit_kwh if unit_kwh > 0 else 0.0
     per_kwh_net_none = unit_net_none / unit_kwh if unit_kwh > 0 else 0.0

@@ -1,315 +1,269 @@
 """Capital cost sanity checks against published market prices and research estimates.
 
-Tests verify that the equipment cost assumptions in the pipeline are within
-real-world installed cost ranges. These are not regression tests — they compare
-against independently published price data from LBNL, NREL, and DOE so that
-model assumptions remain grounded in market reality.
+These tests validate the values production code actually uses — the appliance
+classes in appliances/ — not the data/loadprofiles/CAPITAL_COST_DEFINITIONS/
+CSV, which despite looking like documentation is never read by any
+production code path (confirmed 2026-07-06: no import references it anywhere).
+Testing that file gave false confidence — solar, battery, heat pump, and
+induction stove numbers it validated were not the numbers used to build the
+paper's results.
 
 Sources:
-  LBNL Tracking the Sun 2023:
-    CA residential solar installed cost: median $3.9/W-DC; range $2.5–$5.5/W-DC.
-    https://emp.lbl.gov/tracking-the-sun
+  LBNL Tracking the Sun 2023 (cited in CPUC's solar cost report, see below):
+    CA residential solar installed cost: ~$3.80/W-DC (2019 estimate, judged
+    too high by CPUC's own analysis).
 
-  NREL Annual Technology Baseline (ATB) 2024:
-    Residential battery storage: $800–$1,500/kWh installed (includes inverter, BOS).
-    https://atb.nrel.gov/electricity/2024/residential_battery_storage
+  CPUC, "adopted 2023 cost of solar in California"
+    (docs.cpuc.ca.gov/PublishedDocs/Published/G000/M499/K921/499921246.PDF):
+    $3.30/W-DC, reconciling NREL ATB ($2.34/W, judged too low) against LBNL
+    Tracking the Sun ($3.80/W, judged too high); accounts for panel upgrades,
+    delays, and inflation. This is the rate appliances/solar_system.py uses.
 
-  DOE Building Technologies Office / NEEP Cold Climate Heat Pump report (2022):
-    Whole-home air source heat pump (ASHP): $4,000–$20,000 installed.
-    Heat pump water heater (HPWH): $1,000–$5,000 installed.
-    https://neep.org/initiatives/high-efficiency-products/ashp
+  NREL Annual Technology Baseline (ATB) 2024, moderate scenario, via CEC
+    report CEC-200-2024-011 (energy.ca.gov/sites/default/files/2024-07/CEC-200-2024-011.pdf):
+    Residential 5kW/12.5kWh battery system: $18,258 installed (2023 value).
+    This is the rate appliances/battery_storage.py uses.
 
-  DOE / Rewiring America (2022):
-    Induction range/cooktop: $800–$3,500 installed.
-    Gas furnace (baseline replacement): $2,000–$8,000 installed.
-    Gas water heater: $500–$2,500 installed.
-    https://www.rewiringamerica.org/electrification-handbook
+  TECH Clean California program data (CEC), per Simon La Vieille, "EV
+  Integration to Ana's Project" (Aug 2025):
+    Heat pump space heating (ducted systems only, AHRI types without "-O"
+    suffix) and heat pump water heater (Single Family HPWH installs) county
+    median contractor/turnkey costs. Source of data/County_Median_HPSH_Stats.csv
+    and data/County_Median_HPWH_Stats.csv.
 
-  CEC TECH Clean California Initiative (CRIS 2025):
-    Provides California-specific cost data used in the CRIS_2025 methodology rows.
-    https://www.tech-clean-california.com/
+  CARB appliance comparison data ("Cristina's approach"), same report,
+  section "Rest of the Values": induction stove, gas stove, gas water
+  heater, gas heating — each is capital + installation + other (2022),
+  inflated 3.4% CPI-U (BLS) to 2023.
 
-The capital costs CSV contains rows for two methodologies:
-  NEW       — costs from consumer/installer quotes (Tesla, EnergySage, Rewiring America)
-  CRIS_2025 — costs from CARB/CEC TECH California program data
-  BASELINE  — costs for gas appliances retained in baseline scenario
-
-All appliance_id values and their market price bounds are documented per test.
+Because HPSH/HPWH costs are contractor/turnkey (not equipment-only) and
+HPSH is filtered to ducted systems specifically, these run at or above
+generic national ranges (e.g. DOE/NEEP's $4,000-$20,000 ASHP figure, which
+likely includes cheaper ductless mini-splits) — that's an expected
+consequence of the methodology, not a red flag, so bounds here are wider
+than a naive DOE-range check would suggest.
 """
-import glob
 import os
 import sys
 
-import pandas as pd
 import pytest
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-CAPITAL_COST_DIR = os.path.join(REPO_ROOT, "data", "loadprofiles", "CAPITAL_COST_DEFINITIONS")
+from appliances.solar_system import SolarSystemAppliance
+from appliances.battery_storage import BatteryStorageAppliance
+from appliances.electric_heating import ElectricHeatingAppliance
+from appliances.electric_water_heating import ElectricWaterHeatingAppliance
+from appliances.electric_cooking import ElectricCookingAppliance
+from appliances.gas_stove import GasStoveAppliance
+from appliances.gas_water_heating import GasWaterHeatingAppliance
+from appliances.gas_heating import GasHeatingAppliance
+from helpers.main_helpers import norcal_counties, central_counties, socal_counties, slugify_county_name
 
 
-def _load_capital_costs() -> pd.DataFrame | None:
-    files = sorted(glob.glob(os.path.join(CAPITAL_COST_DIR, "capital_costs_definitions_*.csv")))
-    if not files:
-        return None
-    df = pd.read_csv(files[-1])
-    df = df.set_index("appliance_id")
-    return df
+PIPELINE_COUNTY_SLUGS = sorted({
+    slugify_county_name(c) for c in norcal_counties + central_counties + socal_counties
+})
 
-
-def _get_cost(df: pd.DataFrame, appliance_id: str) -> float | None:
-    if appliance_id not in df.index:
-        return None
-    return float(df.loc[appliance_id, "cost_per_unit"])
-
-
-# ---------------------------------------------------------------------------
-# Solar panels
-# ---------------------------------------------------------------------------
 
 class TestSolarPanelCost:
-    """Solar panel cost per watt is within the LBNL Tracking the Sun 2023 range.
+    """Solar panel cost per watt matches the CPUC-adopted 2023 CA rate."""
 
-    Source: LBNL Tracking the Sun 2023, California residential systems:
-      Median installed cost: $3.9/W-DC (all-in: hardware + labor + permitting + design).
-      5th–95th percentile range: ~$2.5–$5.5/W-DC.
-      Costs have declined ~50% since 2012, with modest decline continuing.
-      https://emp.lbl.gov/tracking-the-sun
-
-    The model uses $2.80/W-DC (below median, consistent with a competitive quote
-    from a national installer like Tesla or EnergySage marketplace). This is on
-    the lower end of LBNL's range but within the observed market distribution.
-    Values below $2.00/W are no longer realistic for all-in installed cost
-    (even wholesale hardware alone exceeds $0.30/W-DC in 2024).
-    """
-
-    SOLAR_COST_LOWER_PER_W = 2.00   # $/W-DC — below market for all-in installed cost
-    SOLAR_COST_UPPER_PER_W = 6.00   # $/W-DC — above 95th percentile, LBNL 2023
-
-    def test_solar_cost_per_watt_in_market_range(self) -> None:
-        """solar panel installed cost is $2.00–$6.00/W-DC (LBNL Tracking the Sun 2023 range)."""
-        df = _load_capital_costs()
-        if df is None:
-            pytest.skip("Capital costs CSV not found — run step14 or check CAPITAL_COST_DEFINITIONS/.")
-        cost_per_w = _get_cost(df, "solar_panels")
-        if cost_per_w is None:
-            pytest.skip("'solar_panels' not in capital costs — appliance_id may have changed.")
-        assert self.SOLAR_COST_LOWER_PER_W <= cost_per_w <= self.SOLAR_COST_UPPER_PER_W, (
-            f"Solar installed cost: ${cost_per_w:.2f}/W-DC. "
-            f"Expected ${self.SOLAR_COST_LOWER_PER_W}–${self.SOLAR_COST_UPPER_PER_W}/W-DC. "
-            f"LBNL Tracking the Sun 2023: CA median $3.9/W-DC, range $2.5–$5.5/W-DC. "
-            f"Below ${self.SOLAR_COST_LOWER_PER_W}/W: unrealistically cheap for all-in cost. "
-            f"Above ${self.SOLAR_COST_UPPER_PER_W}/W: above 95th percentile — check source."
+    def test_solar_cost_per_kw_matches_cpuc_rate(self) -> None:
+        cost_per_kw = SolarSystemAppliance.per_kw_cost()
+        assert cost_per_kw == pytest.approx(3300.0), (
+            f"Solar installed cost: ${cost_per_kw:,.2f}/kW. Expected $3,300/kW "
+            f"(CPUC-adopted 2023 CA rate, $3.30/W). If this changed intentionally, "
+            f"update this test and docs/methods.yaml together."
         )
 
-
-# ---------------------------------------------------------------------------
-# Battery storage
-# ---------------------------------------------------------------------------
 
 class TestBatteryStorageCost:
-    """Battery storage cost per kWh is within NREL ATB 2024 residential range.
+    """Battery storage cost per kWh matches the NREL ATB 2024 / CEC report rate."""
 
-    Source: NREL Annual Technology Baseline 2024, residential battery storage:
-      Installed cost range: $800–$1,500/kWh (includes inverter, BOS, labor).
-      https://atb.nrel.gov/electricity/2024/residential_battery_storage
-
-    Tesla Powerwall 3 (13.5 kWh usable, 11.5 kW continuous): $11,500 hardware
-    + installation brings all-in cost to ~$13,000–$18,000 → ~$960–$1,330/kWh.
-    The model uses $16,853 total / 13.5 kWh = $1,248/kWh, consistent with
-    premium installation in a high-cost-of-living market.
-    """
-
-    BATTERY_COST_LOWER_PER_KWH = 700    # $/kWh — below NREL lower bound
-    BATTERY_COST_UPPER_PER_KWH = 1_700  # $/kWh — above premium all-in installed cost
-
-    def test_battery_cost_per_kwh_in_market_range(self) -> None:
-        """battery storage installed cost is $700–$1,700/kWh (NREL ATB 2024 residential range)."""
-        df = _load_capital_costs()
-        if df is None:
-            pytest.skip("Capital costs CSV not found.")
-        if "battery_storage" not in df.index:
-            pytest.skip("'battery_storage' not in capital costs.")
-        row = df.loc["battery_storage"]
-        total_cost = float(row["cost_per_unit"])
-        capacity_kwh = float(row["capacity"]) if pd.notna(row["capacity"]) else None
-        if capacity_kwh is None or capacity_kwh <= 0:
-            pytest.skip("Battery capacity (kWh) not specified in capital costs.")
-        cost_per_kwh = total_cost / capacity_kwh
-        assert self.BATTERY_COST_LOWER_PER_KWH <= cost_per_kwh <= self.BATTERY_COST_UPPER_PER_KWH, (
-            f"Battery installed cost: ${cost_per_kwh:.0f}/kWh "
-            f"(${total_cost:,.0f} total / {capacity_kwh:.1f} kWh usable). "
-            f"Expected ${self.BATTERY_COST_LOWER_PER_KWH:,}–${self.BATTERY_COST_UPPER_PER_KWH:,}/kWh. "
-            f"NREL ATB 2024 residential: $800–$1,500/kWh installed. "
-            f"Tesla Powerwall 3 all-in: ~$960–$1,330/kWh depending on installation."
+    def test_battery_cost_per_kwh_matches_atb_rate(self) -> None:
+        cost_per_kwh = BatteryStorageAppliance.per_kwh_cost()
+        assert cost_per_kwh == pytest.approx(1460.64, rel=1e-3), (
+            f"Battery installed cost: ${cost_per_kwh:,.2f}/kWh "
+            f"(expected $18,258 / 12.5 kWh = $1,460.64/kWh, NREL ATB 2024 moderate "
+            f"scenario via CEC-200-2024-011). If this changed intentionally, "
+            f"update this test and docs/methods.yaml together."
         )
 
+    def test_lp_sizing_price_matches_this_reporting_price(self) -> None:
+        """Regression for the 2026-07-06/07 bugs: the LP must size against the
+        same rate this appliance class reports for the actual scenario being
+        modeled — net of full_incentives (Config's default), not a stale
+        independent default and not the unincentivized gross price."""
+        from appliances.electric_base import IncentiveScenario
+        from pipeline.steps.step9b_cooptimize_core import _DEFAULT_BATT_CAPEX_PER_KWH
+        expected = BatteryStorageAppliance.per_kwh_cost_net(IncentiveScenario.FULL_INCENTIVES)
+        assert _DEFAULT_BATT_CAPEX_PER_KWH == pytest.approx(expected)
 
-# ---------------------------------------------------------------------------
-# Heat pump: space heating
-# ---------------------------------------------------------------------------
 
 class TestHeatPumpSpaceCost:
-    """Heat pump space heating installed cost is within DOE/NEEP field-study range.
+    """Heat pump space heating cost per county (TECH Clean California, ducted-only).
 
     Source: DOE Building Technologies Office & NEEP cold climate ASHP report (2022):
-      Whole-home air source heat pump installed cost: $4,000–$20,000.
-      Median for a 3-ton system (appropriate for a typical SF home): ~$12,000–$15,000.
-      CEC TECH California CRIS 2025 data: $11,261 for a 3-ton system.
+      Whole-home air source heat pump installed cost: $4,000-$20,000.
       https://neep.org/initiatives/high-efficiency-products/ashp
+    CEC TECH California CRIS 2025 data point: $11,261 for a 3-ton system
+      (see data/loadprofiles/CAPITAL_COST_DEFINITIONS/*.csv, heat_pump_space_cris row —
+      that file isn't read by production code, but this specific figure is a
+      useful independent cross-check).
 
-    The model has two rows for heat pump space heating:
-      heat_pump_space      (NEW methodology): $19,000 — high end but within range
-      heat_pump_space_cris (CRIS_2025):      $11,261 — close to median
-    Both should fall within the documented installed-cost range.
+    This pipeline's actual data is filtered to ducted systems only and reports
+    contractor/turnkey cost (equipment + install) — both push county medians
+    above DOE's range and above the CRIS 3-ton reference point. That's an
+    expected consequence of the documented methodology (see
+    docs/methods.yaml: appliances.electric_heating), not a red flag. The
+    upper bound below is therefore anchored to DOE's ceiling with explicit,
+    documented headroom (2x) rather than either a naive DOE-range check
+    (would false-fail on legitimate data) or an unanchored round number.
     """
 
-    HP_SPACE_LOWER = 3_000    # $ — below minimum realistic installed cost
-    HP_SPACE_UPPER = 25_000   # $ — above documented high end for residential
+    DOE_LOWER = 4_000
+    DOE_UPPER = 20_000
+    CRIS_3_TON_REFERENCE = 11_261
+    LOWER = 3_000              # $ — below DOE's own floor, clearly implausible
+    UPPER = DOE_UPPER * 2      # $ — 2x DOE's ceiling: generous for ducted+turnkey, still catches real corruption
 
-    @pytest.mark.parametrize("appliance_id", ["heat_pump_space", "heat_pump_space_cris"])
-    def test_heat_pump_space_cost_in_range(self, appliance_id: str) -> None:
-        """heat pump space heating installed cost is $3,000–$25,000 (DOE/NEEP 2022 range)."""
-        df = _load_capital_costs()
-        if df is None:
-            pytest.skip("Capital costs CSV not found.")
-        cost = _get_cost(df, appliance_id)
-        if cost is None:
-            pytest.skip(f"'{appliance_id}' not in capital costs.")
-        assert self.HP_SPACE_LOWER <= cost <= self.HP_SPACE_UPPER, (
-            f"{appliance_id} installed cost: ${cost:,.0f}. "
-            f"Expected ${self.HP_SPACE_LOWER:,}–${self.HP_SPACE_UPPER:,}. "
-            f"DOE/NEEP 2022: whole-home ASHP $4,000–$20,000 installed; "
-            f"CEC TECH CA CRIS 2025: $11,261 (3-ton system)."
-        )
+    def test_all_pipeline_counties_in_plausible_range(self) -> None:
+        for county_slug in PIPELINE_COUNTY_SLUGS:
+            hp = ElectricHeatingAppliance.for_county(county_slug)
+            assert self.LOWER <= hp.base_cost <= self.UPPER, (
+                f"{county_slug}: heat pump space heating cost ${hp.base_cost:,.0f} "
+                f"outside plausible range ${self.LOWER:,}-${self.UPPER:,} "
+                f"(DOE/NEEP 2022 range: ${self.DOE_LOWER:,}-${self.DOE_UPPER:,}; "
+                f"CRIS 2025 3-ton reference: ${self.CRIS_3_TON_REFERENCE:,}). "
+                f"Source: data/County_Median_HPSH_Stats.csv (TECH Clean California, ducted only, turnkey cost)."
+            )
 
+    def test_missing_county_falls_back_to_computed_median_not_a_guess(self) -> None:
+        """Regression: for_county() used to fall back to a hardcoded $19,000 (or
+        an arbitrary first row) for counties absent from the source data. It
+        must compute the actual median of counties present instead."""
+        df = ElectricHeatingAppliance._load_config()
+        expected_median = df[ElectricHeatingAppliance.CAPITAL_COST_COLUMN_NAME].median()
+        missing_county = "not-a-real-county-xyz"
+        assert missing_county not in df.index
+        hp = ElectricHeatingAppliance.for_county(missing_county)
+        assert hp.base_cost == pytest.approx(expected_median)
 
-# ---------------------------------------------------------------------------
-# Heat pump water heater
-# ---------------------------------------------------------------------------
 
 class TestHeatPumpWaterHeaterCost:
-    """Heat pump water heater installed cost is within DOE range.
+    """Heat pump water heater cost per county (TECH Clean California).
 
     Source: DOE Office of Energy Efficiency & Renewable Energy (2023):
-      Heat pump water heater (55-gallon equivalent) installed cost: $1,000–$5,000.
-      Federal tax credit (25C) covers 30% up to $2,000 after 2022.
-      CEC TECH California CRIS 2025: $2,467.
+      Heat pump water heater (55-gallon equivalent) installed cost: $1,000-$5,000.
       https://www.energy.gov/eere/buildings/water-heating
+    CEC TECH California CRIS 2025 data point: $2,467
+      (data/loadprofiles/CAPITAL_COST_DEFINITIONS/*.csv, water_heater_electric_cris row).
 
-    Both NEW and CRIS_2025 methodology rows are checked.
+    Same reasoning as TestHeatPumpSpaceCost: this pipeline's data is
+    contractor/turnkey cost, which runs above DOE's range for a large share
+    of counties (87% exceed $5,000 — verified 2026-07-06). Upper bound is
+    anchored to DOE's ceiling with documented headroom, not unanchored.
     """
 
-    HPWH_LOWER = 1_000   # $
-    HPWH_UPPER = 5_000   # $
+    DOE_LOWER = 1_000
+    DOE_UPPER = 5_000
+    CRIS_REFERENCE = 2_467
+    LOWER = 800                # $ — below plausible even for a bare unit
+    UPPER = DOE_UPPER * 3      # $ — 3x DOE's ceiling: HPWH turnkey costs run further above DOE than HPSH does (worst observed: Lake County ~$14.1k, ~2.8x)
 
-    @pytest.mark.parametrize("appliance_id", ["water_heater_electric", "water_heater_electric_cris"])
-    def test_heat_pump_water_heater_cost_in_range(self, appliance_id: str) -> None:
-        """heat pump water heater installed cost is $1,000–$5,000 (DOE 2023 range)."""
-        df = _load_capital_costs()
-        if df is None:
-            pytest.skip("Capital costs CSV not found.")
-        cost = _get_cost(df, appliance_id)
-        if cost is None:
-            pytest.skip(f"'{appliance_id}' not in capital costs.")
-        assert self.HPWH_LOWER <= cost <= self.HPWH_UPPER, (
-            f"{appliance_id} installed cost: ${cost:,.0f}. "
-            f"Expected ${self.HPWH_LOWER:,}–${self.HPWH_UPPER:,}. "
-            f"DOE EERE 2023: HPWH installed cost $1,000–$5,000. "
-            f"CEC TECH CA CRIS 2025: $2,467."
-        )
+    def test_all_pipeline_counties_in_plausible_range(self) -> None:
+        for county_slug in PIPELINE_COUNTY_SLUGS:
+            wh = ElectricWaterHeatingAppliance.for_county(county_slug)
+            assert self.LOWER <= wh.base_cost <= self.UPPER, (
+                f"{county_slug}: HPWH cost ${wh.base_cost:,.0f} outside plausible "
+                f"range ${self.LOWER:,}-${self.UPPER:,} "
+                f"(DOE 2023 range: ${self.DOE_LOWER:,}-${self.DOE_UPPER:,}; "
+                f"CRIS 2025 reference: ${self.CRIS_REFERENCE:,}). "
+                f"Source: data/County_Median_HPWH_Stats.csv (TECH Clean California, turnkey cost)."
+            )
+
+    def test_missing_county_falls_back_to_computed_median_not_a_guess(self) -> None:
+        df = ElectricWaterHeatingAppliance._load_config()
+        expected_median = df[ElectricWaterHeatingAppliance.CAPITAL_COST_COLUMN_NAME].median()
+        missing_county = "not-a-real-county-xyz"
+        assert missing_county not in df.index
+        wh = ElectricWaterHeatingAppliance.for_county(missing_county)
+        assert wh.base_cost == pytest.approx(expected_median)
 
 
-# ---------------------------------------------------------------------------
-# Induction stove
-# ---------------------------------------------------------------------------
+class TestCARBAppliancesCost:
+    """Induction stove / gas appliance costs: CARB data + 3.4% CPI-U to 2023.
 
-class TestInductionStoveCost:
-    """Induction stove/range installed cost is within Rewiring America range.
+    Each value is capital + installation + other (2022) * 1.034. See
+    docs/methods.yaml: appliances.carb_appliance_costs for the breakdown.
 
-    Source: Rewiring America Electrification Handbook (2022):
-      Induction range (freestanding) installed cost: $800–$3,500.
-      Mid-range residential models: $1,200–$2,000 (hardware); installation adds $200–$500.
-      https://www.rewiringamerica.org/electrification-handbook
-
-    The model has $2,000 (NEW) and $2,400 (CRIS_2025). Both are in the
-    plausible range for a mid-to-high-quality induction range with installation.
+    Rewiring America Electrification Handbook (2022) cites induction range
+    installed cost as $800-$3,500 (hardware + basic install). CARB's
+    $4,260.08 exceeds that ceiling by ~22% — expected, since it separately
+    itemizes an "other" cost component ($340, e.g. permits/misc) on top of
+    capital + installation, and applies 2023 inflation, both of which
+    Rewiring America's figure may not include.
     """
 
-    INDUCTION_LOWER = 500    # $
-    INDUCTION_UPPER = 4_000  # $
+    REWIRING_AMERICA_LOWER = 800
+    REWIRING_AMERICA_UPPER = 3_500
 
-    @pytest.mark.parametrize("appliance_id", ["induction_stove", "induction_stove_cris"])
-    def test_induction_stove_cost_in_range(self, appliance_id: str) -> None:
-        """induction stove installed cost is $500–$4,000 (Rewiring America 2022 range)."""
-        df = _load_capital_costs()
-        if df is None:
-            pytest.skip("Capital costs CSV not found.")
-        cost = _get_cost(df, appliance_id)
-        if cost is None:
-            pytest.skip(f"'{appliance_id}' not in capital costs.")
-        assert self.INDUCTION_LOWER <= cost <= self.INDUCTION_UPPER, (
-            f"{appliance_id} installed cost: ${cost:,.0f}. "
-            f"Expected ${self.INDUCTION_LOWER:,}–${self.INDUCTION_UPPER:,}. "
-            f"Rewiring America 2022: induction range $800–$3,500 installed."
+    def test_induction_stove_cost(self) -> None:
+        cost = ElectricCookingAppliance().base_cost
+        assert cost == pytest.approx(4260.08), (
+            f"Induction stove: ${cost:,.2f}, expected $4,260.08. "
+            f"(Rewiring America 2022 range: ${self.REWIRING_AMERICA_LOWER:,}-"
+            f"${self.REWIRING_AMERICA_UPPER:,} — CARB's figure exceeds this by "
+            f"~22%, expected due to its added 'other' cost line + 2023 inflation.)"
         )
 
+    def test_gas_stove_cost(self) -> None:
+        cost = GasStoveAppliance().base_cost
+        assert cost == pytest.approx(2802.14), f"Gas stove: ${cost:,.2f}, expected $2,802.14"
 
-# ---------------------------------------------------------------------------
-# Gas appliances are cheaper than their electric equivalents
-# ---------------------------------------------------------------------------
+    def test_gas_water_heater_cost(self) -> None:
+        cost = GasWaterHeatingAppliance().base_cost
+        assert cost == pytest.approx(2264.46), f"Gas water heater: ${cost:,.2f}, expected $2,264.46"
+
+    def test_gas_heating_cost(self) -> None:
+        cost = GasHeatingAppliance().base_cost
+        assert cost == pytest.approx(9771.30), f"Gas heating: ${cost:,.2f}, expected $9,771.30"
+
 
 class TestGasVsElectricCostOrdering:
     """Gas appliances have lower installed cost than their electric replacements.
 
     This is a key economic assumption in the paper: electrification requires
-    upfront capital for more expensive equipment, and the paper analyzes whether
-    lower operating costs justify the premium.
-
-    If electric appliances are modeled as cheaper than gas, the economic
-    conclusions (payback periods, NPV) will be systematically biased.
-
-    Source: All comparative cost data from DOE EERE, Rewiring America (2022),
-    and CEC TECH California CRIS 2025.
+    upfront capital for more expensive equipment, and the paper analyzes
+    whether lower operating costs justify the premium. If electric appliances
+    were modeled as cheaper than gas, the economic conclusions would be
+    systematically biased.
     """
 
-    def test_heat_pump_space_costs_more_than_gas_furnace(self) -> None:
-        """heat pump space heating costs more to install than a gas furnace.
+    def test_heat_pump_space_costs_more_than_gas_furnace_everywhere(self) -> None:
+        gas_cost = GasHeatingAppliance().base_cost
+        for county_slug in PIPELINE_COUNTY_SLUGS:
+            hp_cost = ElectricHeatingAppliance.for_county(county_slug).base_cost
+            assert hp_cost > gas_cost, (
+                f"{county_slug}: heat pump (${hp_cost:,.0f}) is not more expensive "
+                f"than gas furnace (${gas_cost:,.0f})."
+            )
 
-        DOE: gas furnace $2,000–$8,000; ASHP $4,000–$20,000. The electric
-        alternative should be more expensive upfront, creating a payback story.
-        """
-        df = _load_capital_costs()
-        if df is None:
-            pytest.skip("Capital costs CSV not found.")
-        hp_cost = _get_cost(df, "heat_pump_space") or _get_cost(df, "heat_pump_space_cris")
-        gas_cost = _get_cost(df, "gas_space_heater")
-        if hp_cost is None or gas_cost is None:
-            pytest.skip("heat pump or gas furnace cost not found in capital costs.")
-        assert hp_cost > gas_cost, (
-            f"Heat pump space (${hp_cost:,.0f}) is not more expensive than "
-            f"gas furnace (${gas_cost:,.0f}). "
-            f"The paper's economic analysis assumes electrification has higher upfront cost. "
-            f"DOE: gas furnace $2,000–$8,000; ASHP $4,000–$20,000."
-        )
+    def test_heat_pump_water_heater_costs_more_than_gas_water_heater_everywhere(self) -> None:
+        gas_cost = GasWaterHeatingAppliance().base_cost
+        for county_slug in PIPELINE_COUNTY_SLUGS:
+            hpwh_cost = ElectricWaterHeatingAppliance.for_county(county_slug).base_cost
+            assert hpwh_cost > gas_cost, (
+                f"{county_slug}: HPWH (${hpwh_cost:,.0f}) is not more expensive "
+                f"than gas water heater (${gas_cost:,.0f})."
+            )
 
-    def test_heat_pump_water_heater_costs_more_than_gas_water_heater(self) -> None:
-        """heat pump water heater costs more to install than a gas water heater.
-
-        DOE: gas water heater $500–$2,500; HPWH $1,000–$5,000. Electric
-        should be more expensive, consistent with the electrification premium story.
-        """
-        df = _load_capital_costs()
-        if df is None:
-            pytest.skip("Capital costs CSV not found.")
-        hpwh_cost = _get_cost(df, "water_heater_electric") or _get_cost(df, "water_heater_electric_cris")
-        gas_wh_cost = _get_cost(df, "gas_water_heater")
-        if hpwh_cost is None or gas_wh_cost is None:
-            pytest.skip("HPWH or gas water heater cost not found in capital costs.")
-        assert hpwh_cost > gas_wh_cost, (
-            f"HPWH (${hpwh_cost:,.0f}) is not more expensive than "
-            f"gas water heater (${gas_wh_cost:,.0f}). "
-            f"DOE: gas water heater $500–$2,500; HPWH $1,000–$5,000."
+    def test_induction_stove_costs_more_than_gas_stove(self) -> None:
+        induction_cost = ElectricCookingAppliance().base_cost
+        gas_cost = GasStoveAppliance().base_cost
+        assert induction_cost > gas_cost, (
+            f"Induction (${induction_cost:,.0f}) is not more expensive than gas (${gas_cost:,.0f})."
         )

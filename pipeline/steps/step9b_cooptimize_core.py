@@ -8,6 +8,24 @@ import pandas as pd
 
 from evaluations.eac import crf as _crf, alpha_batt_npv as _alpha_batt_npv
 from evaluations.constants import DEFAULT_DISCOUNT_RATE
+from appliances.solar_system import SolarSystemAppliance
+from appliances.battery_storage import BatteryStorageAppliance
+from appliances.electric_base import IncentiveScenario
+
+# See step9b_cooptimize_pv_battery.py for the full note on why these must
+# match the appliance classes step14 uses for reporting, not a standalone
+# guess — a caller that sizes here without reconciling would repeat the bug
+# found 2026-07-06.
+#
+# Net (not gross) of full_incentives: 2026-07-07 — the LP's sizing decision
+# should reflect what the modeled decision-maker actually pays. Config's
+# default incentive scenario is full_incentives, so a caller that sizes here
+# without an explicit override should assume the same. Real production runs
+# (mod_solar_storage.run) pass the net cost under whichever incentive
+# scenario Config actually specifies, not this static default — see that
+# module for why.
+_DEFAULT_PV_CAPEX_PER_KW = SolarSystemAppliance.per_kw_cost_net(IncentiveScenario.FULL_INCENTIVES)
+_DEFAULT_BATT_CAPEX_PER_KWH = BatteryStorageAppliance.per_kwh_cost_net(IncentiveScenario.FULL_INCENTIVES)
 
 try:
     import pulp
@@ -227,8 +245,8 @@ def _solve_lp(
     cycle_monthly: bool = False,
     allow_grid_charging: bool = False,
     allow_batt_export: bool = True,
-    c_pv_kw: float = 2830.0,           # $/kW
-    c_batt_kwh: float = 800.0,         # $/kWh (approx, configurable)
+    c_pv_kw: float = _DEFAULT_PV_CAPEX_PER_KW,   # $/kW — see appliances.solar_system, configurable
+    c_batt_kwh: float = _DEFAULT_BATT_CAPEX_PER_KWH,  # $/kWh — see appliances.battery_storage, configurable
     c_batt_kw: float = 0.0,            # $/kW PCS/inverter (optional)
     pv_life_yrs: int = 25,
     batt_life_yrs: int = 15,

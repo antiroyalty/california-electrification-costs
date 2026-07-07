@@ -2,17 +2,21 @@ from typing import Dict
 from appliances.gas_base import GasAppliance
 
 class GasStoveAppliance(GasAppliance):
-    def __init__(self, 
+    def __init__(self,
                  stove_type: str = "gas",
                  base_cost: float = 2802.14,
                  lifetime_years: int = 15,
                  efficiency: float = 0.45):
         """
         Initialize gas stove appliance.
-        
+
         Args:
             stove_type: Type of gas cooking system (default: "gas")
-            base_cost: Base equipment and installation cost in dollars
+            base_cost: Base equipment and installation cost in dollars.
+                CARB appliance comparison data ("Cristina's approach" — see Simon
+                La Vieille, "EV Integration to Ana's Project," Aug 2025): capital
+                $1,600 + installation $890 + other $220 = $2,710 (2022), inflated
+                3.4% CPI-U to 2023 = $2,802.14.
             lifetime_years: Expected equipment lifetime in years
             efficiency: Gas stove efficiency (typically ~45% for cooking)
         """
