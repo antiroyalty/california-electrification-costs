@@ -10,6 +10,7 @@
 
 from datetime import datetime, timedelta
 import argparse
+import dataclasses
 import os
 import pandas as pd
 from collections import defaultdict
@@ -272,7 +273,7 @@ def process_county_scenario_from_series(file_path, county, utility, selected_rat
     return calculate_annual_costs_electricity(load_profile, utility, selected_rate_plan, timestamps=timestamps)
 
 
-def process_county_scenario_nem3(file_path, county, utility, selected_rate_plan):
+def process_county_scenario_nem3(file_path, county, utility, selected_rate_plan, *, nbc_dollars_per_kwh_override=None):
     """Compute NEM3 bill using Aggregator columns: nem3.imports.kwh and nem3.exports.kwh."""
     file = os.path.join(file_path, county, f"{INPUT_FILE_NAME}_{county}.csv")
     if not os.path.exists(file):
@@ -285,6 +286,8 @@ def process_county_scenario_nem3(file_path, county, utility, selected_rate_plan)
     exports_col = "nem3.exports.kwh"
 
     opts = default_options_for_utility(utility)
+    if nbc_dollars_per_kwh_override is not None:
+        opts = dataclasses.replace(opts, nbc_dollars_per_kwh=nbc_dollars_per_kwh_override)
     base_dir = os.path.join("data", "NEM3")
     export_table = get_export_rate_table_for_county(base_dir=base_dir, utility=utility, county_name_or_slug=county)
 
@@ -380,7 +383,7 @@ def utility_to_rate_plans(utility: str):
         case _:
             raise ValueError(f"Unknown utility: {utility}")
     
-def process(base_input_dir, base_output_dir, scenario, housing_type, counties, use_nem3: bool = False):
+def process(base_input_dir, base_output_dir, scenario, housing_type, counties, use_nem3: bool = False, *, nbc_dollars_per_kwh_override=None):
     timestamp = get_timestamp()
 
     scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
@@ -403,7 +406,10 @@ def process(base_input_dir, base_output_dir, scenario, housing_type, counties, u
             )
 
             # NEM3 overlay for solarstorage (exports credited at ACC, NBCs applied)
-            solar_nem3 = process_county_scenario_nem3(scenario_path, county, utility, rate_plan)
+            solar_nem3 = process_county_scenario_nem3(
+                scenario_path, county, utility, rate_plan,
+                nbc_dollars_per_kwh_override=nbc_dollars_per_kwh_override,
+            )
 
             annual_costs_results = build_results_df_with_variants(
                 scenario,

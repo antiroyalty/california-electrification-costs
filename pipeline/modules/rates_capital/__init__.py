@@ -27,7 +27,10 @@ def run(cfg: Config) -> None:
 
     # 12) Electricity rates
     log_step(12)
-    EvaluateElectricityRates.process(base_dir, base_dir, cfg.scenario, cfg.housing_type, c_list)
+    EvaluateElectricityRates.process(
+        base_dir, base_dir, cfg.scenario, cfg.housing_type, c_list,
+        nbc_dollars_per_kwh_override=cfg.nbc_dollars_per_kwh_override,
+    )
 
     # 13) Combine totals
     log_step(13)
