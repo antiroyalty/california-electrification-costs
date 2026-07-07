@@ -1,5 +1,5 @@
 import os
-from typing import Optional
+from typing import Dict, Optional
 
 import pandas as pd
 
@@ -797,3 +797,34 @@ def compute_assets_info(
         return out
     except Exception:
         return None
+
+
+def compute_statewide_savings_distribution(
+    base_input_dir: str,
+    scenario: str,
+    housing_type: str,
+) -> Dict[str, float]:
+    """Scan all county directories and return {county_slug: annual_savings} for the scenario.
+
+    annual_savings = baseline_total_annual_cost - scenario_total_annual_cost_with_solar.
+
+    Counties missing either value are omitted. Intended to be called once before a
+    per-county loop so the distribution can be used to contextualise each county's result.
+    """
+    scenario_dir = os.path.join(base_input_dir, scenario, housing_type)
+    if not os.path.isdir(scenario_dir):
+        return {}
+
+    county_slugs = [
+        d for d in os.listdir(scenario_dir)
+        if os.path.isdir(os.path.join(scenario_dir, d))
+        and not d.startswith("CAPITAL")
+    ]
+
+    result: Dict[str, float] = {}
+    for slug in county_slugs:
+        baseline = read_total_annual_cost(base_input_dir, "baseline", housing_type, slug, with_solar=False)
+        scenario_solar = read_total_annual_cost(base_input_dir, scenario, housing_type, slug, with_solar=True)
+        if baseline is not None and scenario_solar is not None:
+            result[slug] = baseline - scenario_solar
+    return result
