@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+from evaluations.constants import DEFAULT_DISCOUNT_RATE
+
 
 @dataclass
 class Config:
@@ -24,6 +26,10 @@ class Config:
     rate_plans: Optional[Dict[str, Dict[str, str]]] = None
     electricity_variant: str = "nem3"
     incentive: str = "full_incentives"
-    discount_rate: float = 0.07
+    discount_rate: float = DEFAULT_DISCOUNT_RATE
     agg: str = "mean"
+
+    # Sensitivity override: non-bypassable charge ($/kWh). None = use each
+    # utility's default (currently 0.0 for all three — see helpers/nem3_export_rates.py).
+    nbc_dollars_per_kwh_override: Optional[float] = None
 

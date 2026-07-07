@@ -6,7 +6,8 @@ from typing import List, Optional, Tuple
 
 import pandas as pd
 
-from evaluations.eac import crf as _crf
+from evaluations.eac import crf as _crf, alpha_batt_npv as _alpha_batt_npv
+from evaluations.constants import DEFAULT_DISCOUNT_RATE
 
 try:
     import pulp
@@ -231,7 +232,7 @@ def _solve_lp(
     c_batt_kw: float = 0.0,            # $/kW PCS/inverter (optional)
     pv_life_yrs: int = 25,
     batt_life_yrs: int = 15,
-    discount_rate: float = 0.07,
+    discount_rate: float = DEFAULT_DISCOUNT_RATE,
     c_deg_per_kwh: float = 0.0,        # degradation cost per kWh throughput
 ) -> CooptResult:
     """Build and solve LP. Returns CooptResult with sizing, costs, and flows.
@@ -351,11 +352,13 @@ def _solve_lp(
     #   alpha_batt = K_batt / PVA(r, N)
     # alpha_batt > CRF(r, n_batt) because CRF would amortize only one purchase over n_batt years
     # and ignore the replacement cost. The difference is the discounted cost of the second battery.
-    r = float(discount_rate)
+    #
+    # These coefficients are the same ones evaluations.eac uses for EAC reporting
+    # (crf, alpha_batt_npv) — computed here via the shared primitives so the LP
+    # and the reporting layer cannot silently drift apart.
     N = int(pv_life_yrs)
-    pva_n = ((1 - (1 + r) ** (-N)) / r) if r > 0 else float(N)
-    alpha_pv = 1.0 / pva_n
-    alpha_batt = (1.0 + (1.0 + r) ** (-batt_life_yrs)) / pva_n
+    alpha_pv = _crf(discount_rate, N)
+    alpha_batt = _alpha_batt_npv(discount_rate, batt_life_yrs, N)
     capex_annual = PV_kw * c_pv_kw * alpha_pv + B_E * c_batt_kwh * alpha_batt + B_P * c_batt_kw * alpha_batt
 
     # Operating bill (imports - exports) + degradation

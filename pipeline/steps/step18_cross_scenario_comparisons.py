@@ -28,7 +28,7 @@ from typing import List, Set
 
 import pandas as pd
 
-from helpers.main_helpers import git_short_sha
+from helpers.main_helpers import git_short_sha, merge_and_write_csv
 from helpers.plot_scenario_comparison_helper import (
     collect_payback_with_solar,
     plot_payback_dotline,
@@ -43,6 +43,7 @@ from helpers.plot_scenario_comparison_helper import (
     collect_pv_lcoe,
     collect_pv_lcoe_by_county,
 )
+from evaluations.constants import DEFAULT_DISCOUNT_RATE
 
 from helpers.main_helpers import get_scenario_path
 from scenarios import SCENARIOS
@@ -201,6 +202,7 @@ def process(
     electricity_variant: str = "nem3",
     agg: str = "mean",
     run_timestamp: str | None = None,
+    discount_rate: float = DEFAULT_DISCOUNT_RATE,
 ):
     os.makedirs(output_dir, exist_ok=True)
     sha = git_short_sha()
@@ -212,6 +214,7 @@ def process(
         scenarios,
         counties,
         incentive='full_incentives',
+        discount_rate=discount_rate,
         agg=agg,
         timestamp=run_timestamp,
         electricity_plan_preference=plan_preference,
@@ -225,7 +228,7 @@ def process(
             bill_col = eac_df.get('annual_bill_with_solar', pd.Series([0] * len(eac_df)))
         comp = ['capex_pv', 'capex_storage', 'capex_electric', 'capex_gas', 'vehicle_om']
         eac_df['total_eac'] = eac_df[comp].sum(axis=1) + bill_col
-        eac_df.to_csv(os.path.join(output_dir, f"step18_eac_summary_g{sha}.csv"), index=False)
+        merge_and_write_csv(eac_df, os.path.join(output_dir, f"step18_eac_summary_g{sha}.csv"), key_col="scenario")
         fig = plot_eac_stacked_bar(eac_df, scenario_order=scenarios)
         fig.savefig(os.path.join(output_dir, f"step18_eac_stacked_bar_g{sha}.png"), dpi=150, bbox_inches='tight')
 
@@ -237,6 +240,7 @@ def process(
         scenarios,
         counties,
         incentive='full_incentives',
+        discount_rate=discount_rate,
         electricity_plan_preference=plan_preference,
         electricity_variant='nem3',
     )
@@ -246,10 +250,12 @@ def process(
         scenarios,
         counties,
         incentive='full_incentives',
+        discount_rate=discount_rate,
         electricity_plan_preference=plan_preference,
         electricity_variant='retail',
     )
-    by_cty_nem3.to_csv(os.path.join(output_dir, f"step18_eac_by_county_nem3_g{sha}.csv"), index=False)
-    by_cty_retail.to_csv(os.path.join(output_dir, f"step18_eac_by_county_retail_g{sha}.csv"), index=False)
+    by_county_key = ["scenario", "county_slug"]
+    merge_and_write_csv(by_cty_nem3, os.path.join(output_dir, f"step18_eac_by_county_nem3_g{sha}.csv"), key_col=by_county_key)
+    merge_and_write_csv(by_cty_retail, os.path.join(output_dir, f"step18_eac_by_county_retail_g{sha}.csv"), key_col=by_county_key)
 
     return eac_df
