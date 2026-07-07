@@ -49,9 +49,9 @@ Flags / configuration
   Enable Grid→Battery charging (off by default)
 - --allow-batt-export / --disallow-batt-export
   Enable or disable Battery→Grid exports (default: enabled)
-- --discount-rate (default: 0.07)
-- --pv-capex-kw (default: 2830.0 $/kW)
-- --batt-capex-kwh (default: 800.0 $/kWh)
+- --discount-rate (default: DEFAULT_DISCOUNT_RATE, evaluations/constants.py)
+- --pv-capex-kw (default: SolarSystemAppliance.per_kw_cost_net(FULL_INCENTIVES), $2,310/kW)
+- --batt-capex-kwh (default: BatteryStorageAppliance.per_kwh_cost_net(FULL_INCENTIVES), ~$1,022/kWh)
 - --batt-capex-kw (default: 0.0 $/kW)
 - --pv-life-yrs (default: 25)
 - --batt-life-yrs (default: 15)
@@ -93,6 +93,29 @@ from .step9b_cooptimize_core import (
     _timestamp_index_8760,
 )
 from evaluations.constants import DEFAULT_DISCOUNT_RATE
+from appliances.solar_system import SolarSystemAppliance
+from appliances.battery_storage import BatteryStorageAppliance
+from appliances.electric_base import IncentiveScenario
+
+# Net (after-incentive, full_incentives scenario) $/kW and $/kWh, derived from
+# the same appliance classes step14 uses to report capex. The LP's sizing
+# objective must use a price consistent with what's actually reported for the
+# scenario being modeled:
+#   - Bug found 2026-07-06: the LP sized against stale hardcoded defaults
+#     ($2,830/kW, $800/kWh) while step14 reported capex at the appliance
+#     classes' real gross values (~$3,300/kW, ~$1,461/kWh) — fixed by
+#     reconciling to the same appliance classes.
+#   - Refinement 2026-07-07: reconciling to *gross* cost left a second,
+#     smaller inconsistency — the paper's default/headline scenario reports
+#     capex net of the 30% ITC (full_incentives), so a decision-maker sizing
+#     against gross cost is using a price ~45% higher than what they'd
+#     actually pay. The LP's sizing signal should match whichever incentive
+#     scenario is actually being reported. These defaults (used when a caller
+#     doesn't specify otherwise) assume full_incentives, matching Config's
+#     own default; real production runs (mod_solar_storage.run) pass the net
+#     cost for whichever incentive scenario Config actually specifies.
+DEFAULT_PV_CAPEX_PER_KW = SolarSystemAppliance.per_kw_cost_net(IncentiveScenario.FULL_INCENTIVES)
+DEFAULT_BATT_CAPEX_PER_KWH = BatteryStorageAppliance.per_kwh_cost_net(IncentiveScenario.FULL_INCENTIVES)
 
 
 RATE_PLANS = {
@@ -950,8 +973,8 @@ def process(
     pv_capex_sweep: Optional[List[float]] = None,
     coarse_sweeps: bool = False,
     discount_rate: float = DEFAULT_DISCOUNT_RATE,
-    pv_capex_per_kw: float = 2830.0,
-    batt_capex_per_kwh: float = 800.0,
+    pv_capex_per_kw: float = DEFAULT_PV_CAPEX_PER_KW,
+    batt_capex_per_kwh: float = DEFAULT_BATT_CAPEX_PER_KWH,
     batt_capex_per_kw: float = 0.0,
     pv_life_yrs: int = 25,
     batt_life_yrs: int = 15,
@@ -1286,9 +1309,9 @@ def main():
                         "DEFAULT_BATT_SIZE_SWEEP, DEFAULT_PV_SIZE_SWEEP)")
     p.add_argument("--coarse-sweeps", action="store_true",
                    help="Use 12×24 monthly-hourly averages for sweep plots (faster)")
-    p.add_argument("--discount-rate", type=float, default=0.07)
-    p.add_argument("--pv-capex-kw", type=float, default=2830.0)
-    p.add_argument("--batt-capex-kwh", type=float, default=800.0)
+    p.add_argument("--discount-rate", type=float, default=DEFAULT_DISCOUNT_RATE)
+    p.add_argument("--pv-capex-kw", type=float, default=DEFAULT_PV_CAPEX_PER_KW)
+    p.add_argument("--batt-capex-kwh", type=float, default=DEFAULT_BATT_CAPEX_PER_KWH)
     args = p.parse_args()
 
     sweep_vals = list(DEFAULT_BATT_CAPEX_SWEEP) if args.use_defaults else None
