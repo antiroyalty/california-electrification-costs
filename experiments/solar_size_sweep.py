@@ -31,11 +31,13 @@ import step9_my_own_solar_storage as diy
 from helpers.capital_cost_map_builder import LIFETIMES
 from step15_payback_periods import vehicle_annual_adders_from_ledger
 from evaluations.eac import crf as _crf
+from evaluations.constants import DEFAULT_DISCOUNT_RATE
 
 
 @dataclass
 class SweepOptions:
     compute_bills: bool = False
+    discount_rate: float = DEFAULT_DISCOUNT_RATE
 
 
 def _paths_for_county(base_input_dir: str, scenario: str, housing_type: str, county: str) -> Dict[str, str]:
@@ -130,7 +132,7 @@ def _eac_baseline_components(
     ledger: Optional[pd.DataFrame],
     scenario: str,
     county_slug: str,
-    discount_rate: float = 0.07,
+    discount_rate: float = DEFAULT_DISCOUNT_RATE,
 ) -> Dict[str, float]:
     """Compute annualized capex for 'electric' (ex PV/storage) and 'gas', and vehicle O&M from the ledger.
     Independent of PV size.
@@ -448,7 +450,7 @@ def run_for_county(
     rows: List[Dict] = []
     # Read ledger once per county to compute baseline components
     ledger = _read_capital_ledger(base_input_dir, scenario, housing_type)
-    base_eac = _eac_baseline_components(ledger, scenario, county_slug)
+    base_eac = _eac_baseline_components(ledger, scenario, county_slug, discount_rate=options.discount_rate)
     exp_county_dir = os.path.join(experiments_root, scenario, housing_type, county_slug)
     _ensure_dir(exp_county_dir)
 
@@ -508,8 +510,8 @@ def run_for_county(
         pvst_capex = pv_capex + st_capex
         pvst_net   = pv_net + st_net
         # Annualized PV & storage capex per fraction
-        crf_pv = _crf(0.07, LIFETIMES.get('solar', 25))
-        crf_st = _crf(0.07, LIFETIMES.get('storage', 15))
+        crf_pv = _crf(options.discount_rate, LIFETIMES.get('solar', 25))
+        crf_st = _crf(options.discount_rate, LIFETIMES.get('storage', 15))
         capex_pv_annual = pv_net * crf_pv
         capex_storage_annual = st_net * crf_st
 
