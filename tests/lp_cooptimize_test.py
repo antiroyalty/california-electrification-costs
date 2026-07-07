@@ -455,3 +455,70 @@ class TestCapexMatchesEvaluationsPrimitives:
             "the LP must compute its NPV-framing capex coefficients via the shared "
             "primitives, not a local re-derivation."
         )
+
+
+# ---------------------------------------------------------------------------
+# H7 — LP sizing price must match step14's reporting price
+#
+# Bug found 2026-07-06: the LP sized PV/battery against stale hardcoded
+# defaults ($2,830/kW, $800/kWh) while step14 (via SolarSystemAppliance,
+# BatteryStorageAppliance) reported capex for that same system at the real,
+# cited values (~$3,300/kW, ~$1,461/kWh gross). Demonstrated live: a
+# discount-rate sweep at r=0.03 sized a 2.13 kWh battery as "worth it" at
+# $800/kWh, but the reported capex_storage only reconciled at ~$1,023/kWh net
+# of ITC — a price the LP never evaluated the decision against.
+#
+# Refinement 2026-07-07: reconciling to *gross* cost left a second, smaller
+# inconsistency — the paper's default/headline scenario reports capex net of
+# the 30% ITC (full_incentives), not gross. The LP's sizing signal should
+# match whichever incentive scenario is actually reported, so these defaults
+# (assumed when a caller doesn't specify otherwise) are now net of
+# full_incentives, matching Config's own default incentive scenario.
+# ---------------------------------------------------------------------------
+class TestLPSizingPriceMatchesReportingPrice:
+    def test_core_lp_defaults_match_appliance_classes(self):
+        from appliances.electric_base import IncentiveScenario
+        from pipeline.steps.step9b_cooptimize_core import (
+            _DEFAULT_PV_CAPEX_PER_KW,
+            _DEFAULT_BATT_CAPEX_PER_KWH,
+        )
+        from appliances.solar_system import SolarSystemAppliance
+        from appliances.battery_storage import BatteryStorageAppliance
+
+        assert _DEFAULT_PV_CAPEX_PER_KW == pytest.approx(
+            SolarSystemAppliance.per_kw_cost_net(IncentiveScenario.FULL_INCENTIVES)
+        )
+        assert _DEFAULT_BATT_CAPEX_PER_KWH == pytest.approx(
+            BatteryStorageAppliance.per_kwh_cost_net(IncentiveScenario.FULL_INCENTIVES)
+        )
+
+    def test_process_defaults_match_appliance_classes(self):
+        from appliances.electric_base import IncentiveScenario
+        from pipeline.steps.step9b_cooptimize_pv_battery import (
+            DEFAULT_PV_CAPEX_PER_KW,
+            DEFAULT_BATT_CAPEX_PER_KWH,
+        )
+        from appliances.solar_system import SolarSystemAppliance
+        from appliances.battery_storage import BatteryStorageAppliance
+
+        assert DEFAULT_PV_CAPEX_PER_KW == pytest.approx(
+            SolarSystemAppliance.per_kw_cost_net(IncentiveScenario.FULL_INCENTIVES)
+        )
+        assert DEFAULT_BATT_CAPEX_PER_KWH == pytest.approx(
+            BatteryStorageAppliance.per_kwh_cost_net(IncentiveScenario.FULL_INCENTIVES)
+        )
+
+    def test_lp_default_battery_price_is_not_the_old_stale_value(self):
+        """The old bug's hardcoded $800/kWh was well below the real net
+        reporting price (~$1,022/kWh). Assert the default has actually moved,
+        not just that it's internally self-consistent (which a re-introduced
+        bug could also be, if someone hardcoded the same wrong number in both
+        places)."""
+        from pipeline.steps.step9b_cooptimize_core import _DEFAULT_BATT_CAPEX_PER_KWH
+
+        assert _DEFAULT_BATT_CAPEX_PER_KWH > 950, (
+            f"Default battery $/kWh is {_DEFAULT_BATT_CAPEX_PER_KWH}, suspiciously close to "
+            f"the old stale $800/kWh default. Confirm "
+            f"BatteryStorageAppliance.per_kwh_cost_net(FULL_INCENTIVES) still reflects real "
+            f"market pricing."
+        )
