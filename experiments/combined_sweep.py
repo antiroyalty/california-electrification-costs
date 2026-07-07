@@ -31,11 +31,13 @@ from appliances.battery_storage import BatteryStorageAppliance
 from appliances.electric_base import IncentiveScenario
 from step15_payback_periods import vehicle_annual_adders_from_ledger
 from evaluations.eac import crf as _crf
+from evaluations.constants import DEFAULT_DISCOUNT_RATE
 
 
 @dataclass
 class CombinedSweepOptions:
     compute_bills: bool = False
+    discount_rate: float = DEFAULT_DISCOUNT_RATE
 
 
 def _paths_for_county(base_input_dir: str, scenario: str, housing_type: str, county: str) -> Dict[str, str]:
@@ -102,7 +104,7 @@ def _eac_baseline_components(
     ledger: Optional[pd.DataFrame],
     scenario: str,
     county_slug: str,
-    discount_rate: float = 0.07,
+    discount_rate: float = DEFAULT_DISCOUNT_RATE,
 ) -> Dict[str, float]:
     capex_electric = 0.0
     capex_gas = 0.0
@@ -217,7 +219,7 @@ def run_for_county(
     base_kw = diy._compute_system_capacity_kW(weather_df, load_profile)  # type: ignore
 
     ledger = _read_capital_ledger(base_input_dir, scenario, housing_type)
-    base_eac = _eac_baseline_components(ledger, scenario, county_slug)
+    base_eac = _eac_baseline_components(ledger, scenario, county_slug, discount_rate=options.discount_rate)
     exp_county_dir = os.path.join(experiments_root, scenario, housing_type, county_slug)
     _ensure_dir(exp_county_dir)
 
@@ -230,8 +232,8 @@ def run_for_county(
             pv_row = sub.iloc[0]
     if pv_row is None:
         pv_row = pd.Series({'solar_kw': 0.0, 'pv_capex': 0.0, 'pv_incentives_full': 0.0})
-    crf_pv = _crf(0.07, LIFETIMES.get('solar', 25))
-    crf_st = _crf(0.07, LIFETIMES.get('storage', 15))
+    crf_pv = _crf(options.discount_rate, LIFETIMES.get('solar', 25))
+    crf_st = _crf(options.discount_rate, LIFETIMES.get('storage', 15))
 
     rows: List[Dict] = []
     for f in fractions:

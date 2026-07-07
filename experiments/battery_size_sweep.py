@@ -34,11 +34,13 @@ from appliances.battery_storage import BatteryStorageAppliance
 from appliances.electric_base import IncentiveScenario
 from step15_payback_periods import vehicle_annual_adders_from_ledger
 from evaluations.eac import crf as _crf
+from evaluations.constants import DEFAULT_DISCOUNT_RATE
 
 
 @dataclass
 class BatterySweepOptions:
     compute_bills: bool = False
+    discount_rate: float = DEFAULT_DISCOUNT_RATE
 
 
 def _paths_for_county(base_input_dir: str, scenario: str, housing_type: str, county: str) -> Dict[str, str]:
@@ -105,7 +107,7 @@ def _eac_baseline_components(
     ledger: Optional[pd.DataFrame],
     scenario: str,
     county_slug: str,
-    discount_rate: float = 0.07,
+    discount_rate: float = DEFAULT_DISCOUNT_RATE,
 ) -> Dict[str, float]:
     capex_electric = 0.0
     capex_gas = 0.0
@@ -332,7 +334,7 @@ def run_for_county(
         system_kw = float(base_kw) * float(getattr(diy, 'PV_SIZE_FRACTION', 1.0))
 
     ledger = _read_capital_ledger(base_input_dir, scenario, housing_type)
-    base_eac = _eac_baseline_components(ledger, scenario, county_slug)
+    base_eac = _eac_baseline_components(ledger, scenario, county_slug, discount_rate=options.discount_rate)
     exp_county_dir = os.path.join(experiments_root, scenario, housing_type, county_slug)
     _ensure_dir(exp_county_dir)
 
@@ -345,7 +347,7 @@ def run_for_county(
             pv_capex_base = float(sub.iloc[0].get('pv_capex', 0.0) or 0.0)
             pv_inc_full = float(sub.iloc[0].get('pv_incentives_full', 0.0) or 0.0)
             pv_net = pv_capex_base - pv_inc_full
-    crf_pv = _crf(0.07, LIFETIMES.get('solar', 25))
+    crf_pv = _crf(options.discount_rate, LIFETIMES.get('solar', 25))
 
     rows: List[Dict] = []
     for cap_kwh in capacities_kwh:
@@ -362,7 +364,7 @@ def run_for_county(
 
         # Storage capex/net scaled linearly from BatteryStorageAppliance unit economics
         st = _battery_costs_for_kwh(cap_kwh)
-        crf_st = _crf(0.07, LIFETIMES.get('storage', 15))
+        crf_st = _crf(options.discount_rate, LIFETIMES.get('storage', 15))
         capex_storage_annual = st['storage_net'] * crf_st
         capex_pv_annual = pv_net * crf_pv
 

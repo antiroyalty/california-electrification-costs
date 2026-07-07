@@ -36,6 +36,7 @@ from pipeline.steps.step9b_cooptimize_core import (
 )
 from helpers.nem3_export_rates import get_export_rate_table_for_county
 from helpers.electricity_rate_helpers import PGE_RATE_PLANS
+from evaluations.eac import crf, alpha_batt_npv
 
 NEM3_BASE_DIR = os.path.join(REPO_ROOT, "data", "NEM3")
 
@@ -401,4 +402,56 @@ class TestACCExportRatesBelowRetailImport:
             f"Average gap between retail and ACC should exceed $0.10/kWh "
             f"(avg_imp={avg_imp:.4f}, avg_exp={avg_exp:.4f}, gap={gap:.4f}). "
             f"A small gap would undermine the NEM3 economic penalty argument."
+        )
+
+
+# ---------------------------------------------------------------------------
+# H6 — LP capex coefficients must match the shared evaluations.eac primitives
+#
+# _solve_lp used to re-derive its NPV-framing capex coefficients (alpha_pv,
+# alpha_batt) inline instead of calling evaluations.eac.crf / alpha_batt_npv.
+# The two were mathematically identical by construction but nothing enforced
+# that they stay identical — a change to one formula could silently diverge
+# from the other. This test pins fixed PV/battery sizes (removing solver
+# choice as a variable) and asserts the LP's reported capex_annual equals the
+# primitive-computed value directly, for non-default rate/lifetimes so the
+# test can't pass by coincidentally matching a hardcoded default elsewhere.
+# ---------------------------------------------------------------------------
+class TestCapexMatchesEvaluationsPrimitives:
+    def test_lp_capex_annual_matches_crf_and_alpha_batt_npv(self):
+        inputs = CooptInputs(
+            load_kwh=H24_LOAD,
+            pv_gen_per_kw=H24_PV_PER_KW,
+            import_rates=P_IMP,
+            export_rates=P_EXP_ACC,
+        )
+        fixed_pv_kw = 3.0
+        fixed_batt_kwh = 5.0
+        c_pv_kw = 3000.0
+        c_batt_kwh = 900.0
+        discount_rate = 0.05
+        pv_life_yrs = 20
+        batt_life_yrs = 8
+
+        result = _solve_lp(
+            inputs,
+            fixed_pv_kw=fixed_pv_kw,
+            fixed_batt_kwh=fixed_batt_kwh,
+            c_pv_kw=c_pv_kw,
+            c_batt_kwh=c_batt_kwh,
+            c_batt_kw=0.0,
+            pv_life_yrs=pv_life_yrs,
+            batt_life_yrs=batt_life_yrs,
+            discount_rate=discount_rate,
+        )
+
+        expected_capex = (
+            fixed_pv_kw * c_pv_kw * crf(discount_rate, pv_life_yrs)
+            + fixed_batt_kwh * c_batt_kwh * alpha_batt_npv(discount_rate, batt_life_yrs, pv_life_yrs)
+        )
+
+        assert result.capex_annual == pytest.approx(expected_capex, rel=1e-9), (
+            "LP capex_annual has drifted from evaluations.eac.crf/alpha_batt_npv — "
+            "the LP must compute its NPV-framing capex coefficients via the shared "
+            "primitives, not a local re-derivation."
         )

@@ -108,6 +108,7 @@ def run(cfg: Config) -> None:
             c_list,
             plan_preference=plan_preference,
             electricity_variant=cfg.electricity_variant,
+            discount_rate=cfg.discount_rate,
         )
     except Exception as e:
         print(f"[Step18] Skipped (missing sibling scenario data): {e}")

@@ -92,6 +92,7 @@ from .step9b_cooptimize_core import (
     _solve_lp,
     _timestamp_index_8760,
 )
+from evaluations.constants import DEFAULT_DISCOUNT_RATE
 
 
 RATE_PLANS = {
@@ -948,7 +949,7 @@ def process(
     pv_size_sweep: Optional[List[float]] = None,
     pv_capex_sweep: Optional[List[float]] = None,
     coarse_sweeps: bool = False,
-    discount_rate: float = 0.07,
+    discount_rate: float = DEFAULT_DISCOUNT_RATE,
     pv_capex_per_kw: float = 2830.0,
     batt_capex_per_kwh: float = 800.0,
     batt_capex_per_kw: float = 0.0,

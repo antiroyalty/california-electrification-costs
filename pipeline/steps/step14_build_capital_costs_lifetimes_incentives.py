@@ -8,7 +8,7 @@ a lifetime, and associated incentives at the state, federal, and utility level.
 
 import os
 import pandas as pd
-from helpers.main_helpers import log, slugify_county_name, get_scenario_path, norcal_counties, socal_counties, central_counties
+from helpers.main_helpers import log, slugify_county_name, get_scenario_path, norcal_counties, socal_counties, central_counties, merge_and_write_csv
 from helpers.capital_costs_helper import load_electrified_assets
 from scenarios import SCENARIOS
 from typing import Dict, Tuple
@@ -658,16 +658,19 @@ def process(
     os.makedirs(out_dir, exist_ok=True)
 
     detailed_name = f"capital_costs_{scenario}_{housing_type.replace('-', '_')}.csv"
-    ledger_df.to_csv(os.path.join(out_dir, detailed_name), index=False)
-    print(os.path.join(out_dir, detailed_name))
+    detailed_path = os.path.join(out_dir, detailed_name)
+    merge_and_write_csv(ledger_df, detailed_path)
+    print(detailed_path)
 
     summary_name = f"capital_costs_summary_{scenario}_{housing_type.replace('-', '_')}.csv"
-    summary.to_csv(os.path.join(out_dir, summary_name), index=False)
-    print(os.path.join(out_dir, summary_name))
+    summary_path = os.path.join(out_dir, summary_name)
+    merge_and_write_csv(summary, summary_path)
+    print(summary_path)
 
     summary_pv_name = f"capital_costs_summary_with_pv_{scenario}_{housing_type.replace('-', '_')}.csv"
-    summary_with_pv.to_csv(os.path.join(out_dir, summary_pv_name), index=False)
-    print(os.path.join(out_dir, summary_pv_name))
+    summary_pv_path = os.path.join(out_dir, summary_pv_name)
+    merge_and_write_csv(summary_with_pv, summary_pv_path)
+    print(summary_pv_path)
 
     log(
         at="process", 

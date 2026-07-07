@@ -60,6 +60,7 @@ from evaluations.vehicles import vehicle_annual_adders_from_ledger
 from evaluations.eac import crf as _crf, compute_eac_from_inputs
 from evaluations.tariffs import select_row_value_for_plan as _select_plan_value
 from evaluations.lcoe import lcoe_crf_simple
+from evaluations.constants import DEFAULT_DISCOUNT_RATE
 
 
 # ---------- Internal data access helpers ----------
@@ -860,7 +861,7 @@ def collect_pv_lcoe(
     housing_type: str,
     scenarios: Iterable[str],
     counties: Iterable[str],
-    discount_rate: float = 0.07,
+    discount_rate: float = DEFAULT_DISCOUNT_RATE,
     lifetime_years: float = 25.0,
     agg: str = "mean",
 ) -> pd.DataFrame:
@@ -909,7 +910,7 @@ def collect_pv_lcoe_by_county(
     housing_type: str,
     scenarios: Iterable[str],
     counties: Iterable[str],
-    discount_rate: float = 0.07,
+    discount_rate: float = DEFAULT_DISCOUNT_RATE,
     lifetime_years: float = 25.0,
 ) -> pd.DataFrame:
     """Collect PV LCOE ($/kWh) per county for each scenario.
@@ -994,7 +995,7 @@ def collect_eac_components(
     scenarios: Iterable[str],
     counties: Iterable[str],
     incentive: str = "full_incentives",
-    discount_rate: float = 0.07,
+    discount_rate: float = DEFAULT_DISCOUNT_RATE,
     agg: str = "mean",
     timestamp: Optional[str] = None,
     electricity_plan_preference: Optional[Iterable[str]] = None,
@@ -1131,7 +1132,7 @@ def collect_eac_components_by_county(
     scenarios: Iterable[str],
     counties: Iterable[str],
     incentive: str = "full_incentives",
-    discount_rate: float = 0.07,
+    discount_rate: float = DEFAULT_DISCOUNT_RATE,
     timestamp: Optional[str] = None,
     electricity_plan_preference: Optional[Iterable[str]] = None,
     electricity_variant: Optional[str] = "nem3",

@@ -5,6 +5,8 @@ from typing import Mapping, Optional
 
 import pandas as pd
 
+from .constants import DEFAULT_DISCOUNT_RATE
+
 
 def crf(rate: float, years: float) -> float:
     """Capital Recovery Factor.
@@ -79,7 +81,7 @@ def compute_eac_from_inputs(
     pv_summary_row: Optional[pd.Series | Mapping[str, float]],
     *,
     incentive: str = "full_incentives",
-    discount_rate: float = 0.07,
+    discount_rate: float = DEFAULT_DISCOUNT_RATE,
     lifetimes: Optional[Mapping[str, float]] = None,
     annual_bill_electric: float = 0.0,
     annual_bill_gas: float = 0.0,

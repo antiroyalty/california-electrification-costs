@@ -50,6 +50,7 @@ def run(cfg: Config) -> None:
             counties=c_list,
             allow_grid_charging=False,
             allow_batt_export=True,
+            discount_rate=cfg.discount_rate,
         )
     else:
         Step9MyOwnSolarStorage.process(

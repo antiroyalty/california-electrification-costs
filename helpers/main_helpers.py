@@ -156,6 +156,44 @@ def format_load_profile(load_profile):
     return [round(x, 3) for x in load_profile[5:20]]
 
 
+def merge_and_write_csv(df: pd.DataFrame, path: str, key_col="county_slug") -> None:
+    """Write df to path, preserving existing rows whose key isn't in this run.
+
+    Several pipeline outputs (capital_costs ledgers in step14, cross-scenario
+    exports in step18) are single shared files covering every county (and, in
+    step18's case, every scenario) for a given output, but a single call site
+    often only computes a subset (e.g. a targeted re-run for 3 counties, or a
+    cross-scenario comparison over one scenario family). A plain `to_csv`
+    silently discards every row not in the current run — this happened for
+    real once (an Alameda row was lost extending a 1-county analysis to 3
+    more). Instead: drop any existing rows matching this run's keys (so
+    re-runs correctly refresh them), then union with rows this run didn't
+    touch.
+
+    key_col: a single column name, or a list of column names for a composite
+    key. Use a composite key (e.g. ["scenario", "county_slug"]) whenever a
+    single call can supply a partial slice along more than one dimension —
+    e.g. step18's by-county exports have one row per (scenario, county), so
+    keying on county_slug alone would wrongly drop other scenarios' rows for
+    a county that reappears in a later, differently-scoped run.
+
+    Note: this is safe for sequential runs only. Concurrent writers to the
+    same path can still race (read-modify-write, no locking).
+    """
+    key_cols = [key_col] if isinstance(key_col, str) else list(key_col)
+
+    if os.path.exists(path):
+        existing = pd.read_csv(path)
+        if all(k in existing.columns for k in key_cols) and all(k in df.columns for k in key_cols):
+            incoming_keys = set(map(tuple, df[key_cols].values.tolist()))
+            existing_keys = existing[key_cols].apply(tuple, axis=1)
+            existing = existing[~existing_keys.isin(incoming_keys)]
+            df = pd.concat([existing, df], ignore_index=True)
+    if all(k in df.columns for k in key_cols):
+        df = df.sort_values(key_cols)
+    df.to_csv(path, index=False)
+
+
 def log_step(step: int | str, label: str | None = None) -> None:
     """Print a simple step banner for progress visibility.
 

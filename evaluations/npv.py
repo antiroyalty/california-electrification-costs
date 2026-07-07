@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Iterable
 
+from .constants import DEFAULT_DISCOUNT_RATE
+
 
 def annuity_factor(rate: float, n_years: float) -> float:
     """Return annuity factor A such that EAC = NPV * A.
@@ -40,7 +42,7 @@ def compute_npv_details_from_inputs(
     pv_storage_net_capex: float,
     electrification_net_capex: float | None,
     horizon_years: int = 25,
-    discount_rate: float = 0.07,
+    discount_rate: float = DEFAULT_DISCOUNT_RATE,
 ) -> dict:
     """Compute NPV details from numeric inputs (no I/O).
 
