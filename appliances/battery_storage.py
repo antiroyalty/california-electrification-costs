@@ -42,6 +42,17 @@ class BatteryStorageAppliance(ElectricAppliance):
         unit = cls(num_units=1)
         return unit.base_cost / unit.capacity_kwh
 
+    @classmethod
+    def per_kwh_cost_net(cls, scenario: IncentiveScenario) -> float:
+        """Net (after-incentive) $/kWh under the given incentive scenario.
+
+        Use this — not per_kwh_cost() — for a sizing decision meant to reflect
+        what the modeled decision-maker actually pays, e.g. the LP's default
+        sizing signal, which should match whichever incentive scenario is the
+        one actually being reported (2026-07-07)."""
+        unit = cls(num_units=1)
+        return unit.get_net_cost(scenario) / unit.capacity_kwh
+
     def get_cost_breakdown(self, scenario: IncentiveScenario = IncentiveScenario.FULL_INCENTIVES) -> Dict:
         """Return detailed cost breakdown for battery storage."""
         total_incentives = self.calculate_total_incentives(scenario)
