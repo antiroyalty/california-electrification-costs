@@ -26,6 +26,7 @@ from .lcoe import (
     lcoe_npv_from_params,
     lcoe_from_schedules,
 )
+from .sensitivity import SensitivityParameter, SENSITIVITY_PARAMETERS
 
 __all__ = [
     "npv",
@@ -39,4 +40,6 @@ __all__ = [
     "lcoe_crf_simple",
     "lcoe_npv_from_params",
     "lcoe_from_schedules",
+    "SensitivityParameter",
+    "SENSITIVITY_PARAMETERS",
 ]
