@@ -1029,21 +1029,18 @@ def _pdf_rate_tou_dr1(ts: pd.Timestamp) -> float:
     Summer: Peak 58.7c, Off-Peak 36.7c, Super-Off-Peak 27.9c
     Winter: Peak 51.3c, Off-Peak 43.1c, Super-Off-Peak 34.0c
     Peak hours: 4-9 pm (16-20), both weekdays and weekends.
-    Super-off-peak (as coded): weekdays hours 1-5 and 10-13; weekends hours
-    1-13. All other hours are off-peak.
+    Super-off-peak: weekdays hours 0-5 and 10-13; weekends hours 0-13.
+    All other hours are off-peak.
 
-    Note: the tariff's stated super-off-peak window starts at midnight, but
-    SDGE_RATE_PLANS encodes that boundary hour as 24 instead of 0, which
-    never matches a real datetime.hour (always 0-23). This reference
-    function deliberately encodes the *coded* (buggy) hour list, not the
-    tariff's stated one, for the rate-value parity tests below, whose job is
-    to check the dollar values, not the hour classification. The hour
-    classification bug itself is proven separately in
-    TestSDGEMidnightHourBug.
+    Before 2026-07-07, SDGE_RATE_PLANS encoded the midnight boundary as hour
+    24 instead of 0, which never matches a real datetime.hour (always
+    0-23), so midnight was silently billed at the off-peak rate. Fixed the
+    same day this test file was added. See TestSDGEMidnightHourBug for the
+    regression guard.
     """
     h = ts.hour
     is_weekend = ts.weekday() >= 5
-    super_off_peak_hours = set(range(1, 14)) if is_weekend else {1, 2, 3, 4, 5, 10, 11, 12, 13}
+    super_off_peak_hours = set(range(0, 14)) if is_weekend else {0, 1, 2, 3, 4, 5, 10, 11, 12, 13}
     if _sdge_summer(ts):
         if 16 <= h <= 20:
             return 0.587
@@ -1084,14 +1081,14 @@ class TestSDGETOUDR1Structure:
 
 
 class TestSDGEMidnightHourBug:
-    """Proves a real, pre-existing bug: midnight (hour 0) falls through to
-    the off-peak rate instead of super-off-peak, because
-    SDGE_RATE_PLANS['TOU-DR1']['*']['*']['superOffPeakHours'] lists 24
-    instead of 0. datetime.hour is always 0-23, so 24 never matches.
+    """Regression guard for a real, pre-existing bug found while adding this
+    test file: midnight (hour 0) fell through to the off-peak rate instead
+    of super-off-peak, because
+    SDGE_RATE_PLANS['TOU-DR1']['*']['*']['superOffPeakHours'] listed 24
+    instead of 0. datetime.hour is always 0-23, so 24 never matched.
 
-    This is not part of the 2026-07-07 rate-value fix. Found while adding
-    this test file. Left failing, on purpose, as a proven, precise record of
-    the bug rather than a passing test written around it.
+    Fixed the same day this test file was added, alongside the
+    2026-07-07 rate-value correction. Not part of that correction itself.
     """
 
     def test_midnight_should_be_super_off_peak_summer(self):
@@ -1100,7 +1097,7 @@ class TestSDGEMidnightHourBug:
         actual = _hourly_import_rate(plan, ts)
         assert actual == pytest.approx(0.279), (
             f"Midnight should bill at the super-off-peak rate (27.9c), got {actual:.3f}. "
-            f"This fails today because superOffPeakHours lists 24 instead of 0."
+            f"If this fails, superOffPeakHours has regressed back to listing 24 instead of 0."
         )
 
     def test_midnight_should_be_super_off_peak_winter(self):
@@ -1109,7 +1106,7 @@ class TestSDGEMidnightHourBug:
         actual = _hourly_import_rate(plan, ts)
         assert actual == pytest.approx(0.340), (
             f"Midnight should bill at the super-off-peak rate (34.0c), got {actual:.3f}. "
-            f"This fails today because superOffPeakHours lists 24 instead of 0."
+            f"If this fails, superOffPeakHours has regressed back to listing 24 instead of 0."
         )
 
 
