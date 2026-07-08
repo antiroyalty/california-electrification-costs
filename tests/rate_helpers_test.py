@@ -1159,22 +1159,23 @@ class TestSDGERateParity:
 class TestSDGEFixedCharges:
     """Mirrors TestSCEFixedCharges. SDG&E's tariff has a Base Services
     Charge of $0.79343/day for TOU-DR1, the same figure PG&E charges under
-    E-ELEC. SDGE_RATE_PLANS currently has no 'fixedCharge' key at all for
-    TOU-DR1, so this defaults to $0.00/day: a real, material undercount of
-    roughly $290/year per household, found while adding this test file, not
-    part of the 2026-07-07 rate-value fix. Left failing, on purpose.
+    E-ELEC. SDGE_RATE_PLANS had no 'fixedCharge' key at all for TOU-DR1
+    before this test file was added, so it silently defaulted to $0.00/day:
+    a real, material undercount of roughly $290/year per household. Fixed
+    the same day this test file was added, not part of the 2026-07-07
+    rate-value correction itself.
     """
 
     def test_monthly_fixed_tou_dr1(self):
         plan = SDGE_RATE_PLANS["TOU-DR1"]
         assert _estimate_monthly_fixed_from_plan(plan, 2018, 7) == pytest.approx(0.79343 * 31), (
-            "TOU-DR1 is missing a 'fixedCharge' key (SDG&E's $0.79343/day Base "
-            "Services Charge), so monthly fixed charges are silently $0."
+            "TOU-DR1's 'fixedCharge' key is missing or wrong (SDG&E's $0.79343/day "
+            "Base Services Charge), so monthly fixed charges are silently off."
         )
 
     def test_annual_fixed_tou_dr1_zero_load(self):
         result = calculate_annual_costs_electricity(ZERO_LOAD_8760, "SDG&E", "TOU-DR1")
         assert result["TOU-DR1"] == pytest.approx(0.79343 * 365, abs=0.01), (
-            "TOU-DR1 is missing a 'fixedCharge' key, so a zero-load annual bill "
-            "should still be $0.79343 x 365 but is currently $0."
+            "TOU-DR1's 'fixedCharge' key is missing or wrong: a zero-load annual "
+            "bill should be $0.79343 x 365."
         )
