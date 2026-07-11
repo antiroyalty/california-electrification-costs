@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Claim 3: Co-optimization value</title>
+<style>
+:root{
+  --bg:#FFFFFF; --surface:#FFFFFF; --surface-2:#F4F5F1;
+  --ink:#1E2A26; --ink-soft:#5C6B66; --ink-faint:#8A968F;
+  --rule:#D9DDD5;
+  --accent:#2B6E63; --accent-ink:#1D4B44; --accent-soft:#DCEAE6;
+  --positive:#2E7D46; --positive-soft:#E4F2E6;
+  --negative:#A23B2E; --negative-soft:#F6E4E1;
+  --caution:#8A5A12; --caution-soft:#F1E7D2;
+  --shadow: 0 1px 2px rgba(20,30,26,0.06), 0 6px 20px rgba(20,30,26,0.05);
+  --serif: Iowan Old Style, Georgia, "Times New Roman", serif;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Public Sans", Helvetica, Arial, sans-serif;
+  --mono: "SF Mono", "IBM Plex Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#131A18; --surface:#1A2320; --surface-2:#1F2925;
+    --ink:#E7ECE9; --ink-soft:#9FB0A9; --ink-faint:#6E7D77;
+    --rule:#2B3733;
+    --accent:#5FC3AE; --accent-ink:#8FDCCB; --accent-soft:#213330;
+    --positive:#5FBE7A; --positive-soft:#1E2E22;
+    --negative:#E08776; --negative-soft:#332320;
+    --caution:#D7A94E; --caution-soft:#332A1A;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 6px 24px rgba(0,0,0,0.35);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#131A18; --surface:#1A2320; --surface-2:#1F2925;
+  --ink:#E7ECE9; --ink-soft:#9FB0A9; --ink-faint:#6E7D77;
+  --rule:#2B3733;
+  --accent:#5FC3AE; --accent-ink:#8FDCCB; --accent-soft:#213330;
+  --positive:#5FBE7A; --positive-soft:#1E2E22;
+  --negative:#E08776; --negative-soft:#332320;
+  --caution:#D7A94E; --caution-soft:#332A1A;
+  --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 6px 24px rgba(0,0,0,0.35);
+}
+:root[data-theme="light"]{
+  --bg:#FFFFFF; --surface:#FFFFFF; --surface-2:#F4F5F1;
+  --ink:#1E2A26; --ink-soft:#5C6B66; --ink-faint:#8A968F;
+  --rule:#D9DDD5;
+  --accent:#2B6E63; --accent-ink:#1D4B44; --accent-soft:#DCEAE6;
+  --positive:#2E7D46; --positive-soft:#E4F2E6;
+  --negative:#A23B2E; --negative-soft:#F6E4E1;
+  --caution:#8A5A12; --caution-soft:#F1E7D2;
+  --shadow: 0 1px 2px rgba(20,30,26,0.06), 0 6px 20px rgba(20,30,26,0.05);
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{
+  background:var(--bg); color:var(--ink); font-family:var(--sans);
+  font-size:16px; line-height:1.6; -webkit-font-smoothing:antialiased;
+}
+::selection{ background:var(--accent-soft); color:var(--accent-ink); }
+a{ color:var(--accent-ink); }
+a:focus-visible, button:focus-visible, summary:focus-visible{
+  outline:2px solid var(--accent); outline-offset:2px;
+}
+.wrap{ max-width:790px; margin:0 auto; padding:56px 24px 96px; }
+.wide{ max-width:980px; }
+
+header.masthead{
+  border-bottom:1px solid var(--rule); padding-bottom:28px; margin-bottom:40px;
+}
+.eyebrow{
+  font-family:var(--mono); font-size:12px; letter-spacing:0.08em; text-transform:uppercase;
+  color:var(--accent-ink); margin:0 0 10px;
+}
+h1.title{
+  font-family:var(--serif); font-weight:600; font-size:clamp(28px,4vw,38px);
+  line-height:1.15; margin:0 0 14px; text-wrap:balance; color:var(--ink);
+}
+p.thesis{
+  font-family:var(--serif); font-size:19px; line-height:1.55; color:var(--ink);
+  margin:0 0 20px; max-width:680px;
+}
+.buildinfo{
+  display:flex; flex-wrap:wrap; gap:8px 18px; font-family:var(--mono); font-size:12.5px;
+  color:var(--ink-soft);
+}
+.buildinfo b{ color:var(--ink); font-weight:600; }
+
+nav.toc{
+  display:flex; flex-wrap:wrap; gap:10px; margin:28px 0 8px;
+}
+nav.toc a{
+  font-family:var(--mono); font-size:12.5px; text-decoration:none; color:var(--ink-soft);
+  background:var(--surface-2); border:1px solid var(--rule); padding:6px 11px; border-radius:6px;
+}
+nav.toc a:hover{ color:var(--accent-ink); border-color:var(--accent); }
+
+section.claim{ margin:64px 0; scroll-margin-top:24px; }
+.claim-head{
+  display:flex; gap:16px; align-items:baseline; margin-bottom:6px;
+}
+.claim-num{
+  font-family:var(--mono); font-size:13px; color:var(--accent-ink);
+  background:var(--accent-soft); border-radius:5px; padding:3px 9px; white-space:nowrap;
+}
+h2.claim-title{
+  font-family:var(--serif); font-weight:600; font-size:clamp(22px,3vw,27px);
+  line-height:1.28; margin:0; text-wrap:balance;
+}
+p.claim-sub{
+  color:var(--ink-soft); font-size:16px; margin:10px 0 20px; max-width:680px;
+}
+
+.stat-row{
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:1px;
+  background:var(--rule); border:1px solid var(--rule); border-radius:10px; overflow:hidden;
+  margin:0 0 28px;
+}
+.stat{ background:var(--surface); padding:16px 18px; }
+.stat .num{
+  font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:24px; font-weight:600;
+  color:var(--ink); display:block; line-height:1.15;
+}
+.stat .lbl{ font-size:12.5px; color:var(--ink-soft); margin-top:4px; display:block; }
+
+figure.fig{ margin:0 0 24px; }
+figure.fig img{
+  width:100%; height:auto; display:block; border-radius:8px; border:1px solid var(--rule);
+  background:var(--surface);
+}
+figure.fig figcaption{
+  font-size:13px; color:var(--ink-soft); margin-top:8px; line-height:1.5;
+}
+.fig-grid{
+  display:grid; grid-template-columns:1fr 1fr; gap:20px; margin:0 0 28px;
+}
+@media (max-width:640px){ .fig-grid{ grid-template-columns:1fr; } }
+
+.fig-pending{
+  border:1.5px dashed var(--rule); border-radius:10px; padding:22px 24px; margin:0 0 28px;
+  background:var(--surface-2);
+}
+.fig-pending .tag{
+  font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.06em;
+  color:var(--caution); background:var(--caution-soft); border-radius:4px; padding:3px 8px;
+  display:inline-block; margin-bottom:10px;
+}
+.fig-pending p{ margin:0 0 8px; font-size:14.5px; color:var(--ink-soft); line-height:1.6; }
+.fig-pending p:last-child{ margin-bottom:0; }
+.fig-pending strong{ color:var(--ink); }
+
+.sources{ margin:0 0 20px; }
+.sources h3, .subhead{
+  font-family:var(--mono); font-size:12px; text-transform:uppercase; letter-spacing:.06em;
+  color:var(--ink-faint); margin:0 0 12px; font-weight:600;
+}
+.sources ul{ margin:0; padding:0; list-style:none; }
+.sources li{
+  font-size:14.5px; color:var(--ink-soft); padding:8px 0; border-top:1px solid var(--rule);
+  line-height:1.55;
+}
+.sources li:first-child{ border-top:none; }
+.sources li strong{ color:var(--ink); font-weight:600; }
+
+.callout{
+  border-left:3px solid var(--accent); background:var(--surface-2); border-radius:0 8px 8px 0;
+  padding:16px 20px; margin:0 0 24px; font-size:14.5px; color:var(--ink-soft); line-height:1.6;
+}
+.callout strong{ color:var(--ink); }
+
+details.opens{
+  border:1px solid var(--rule); border-radius:8px; padding:14px 18px; margin:0 0 12px;
+  background:var(--surface);
+}
+details.opens summary{
+  cursor:pointer; font-size:14.5px; font-weight:600; color:var(--ink);
+  list-style:none;
+}
+details.opens summary::-webkit-details-marker{ display:none; }
+details.opens summary::before{ content:"+ "; color:var(--accent-ink); font-family:var(--mono); }
+details.opens[open] summary::before{ content:"- "; }
+details.opens p{ font-size:14px; color:var(--ink-soft); margin:10px 0 0; line-height:1.6; }
+
+.strip{
+  border:1px solid var(--rule); border-radius:10px; padding:18px 20px 8px; background:var(--surface);
+  margin:0 0 12px;
+}
+.strip-row{ display:grid; grid-template-columns:112px 1fr 62px; align-items:center; gap:10px; padding:4px 0; }
+.strip-county{ font-size:12.5px; color:var(--ink-soft); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.strip-track{ position:relative; height:10px; background:var(--surface-2); border-radius:3px; }
+.strip-zero{ position:absolute; top:-2px; bottom:-2px; width:1px; background:var(--ink-faint); }
+.strip-bar{ position:absolute; top:0; bottom:0; border-radius:3px; }
+.strip-bar.bar-pos{ background:var(--positive); }
+.strip-bar.bar-neg{ background:var(--negative); }
+.strip-val{ font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:12.5px; text-align:right; color:var(--ink-soft); }
+.strip-val.neg{ color:var(--negative); font-weight:600; }
+
+.table-wrap{ overflow-x:auto; border:1px solid var(--rule); border-radius:10px; margin:0 0 20px; }
+table.data{ width:100%; border-collapse:collapse; font-size:13.5px; min-width:620px; }
+table.data th{
+  font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.04em;
+  text-align:right; color:var(--ink-faint); padding:10px 14px; background:var(--surface-2);
+  border-bottom:1px solid var(--rule); white-space:nowrap;
+}
+table.data th:first-child{ text-align:left; }
+table.data td{ padding:8px 14px; border-bottom:1px solid var(--rule); color:var(--ink-soft); }
+table.data td.num{ text-align:right; font-family:var(--mono); font-variant-numeric:tabular-nums; }
+table.data td.num.neg{ color:var(--negative); font-weight:600; }
+table.data tr:last-child td{ border-bottom:none; }
+table.data tr:hover td{ background:var(--surface-2); }
+table.data td:first-child{ color:var(--ink); }
+
+footer.end{
+  border-top:1px solid var(--rule); margin-top:56px; padding-top:20px;
+  font-size:13px; color:var(--ink-faint); font-family:var(--mono);
+}
+ol.limitations{ margin:0 0 8px; padding-left:22px; }
+ol.limitations > li{ font-size:15.5px; color:var(--ink); font-weight:600; padding:12px 0; border-top:1px solid var(--rule); }
+ol.limitations > li:first-child{ border-top:none; padding-top:0; }
+ol.limitations > li > p{ font-size:14.5px; color:var(--ink-soft); font-weight:400; margin:8px 0 0; line-height:1.6; }
+ul.sub-limitations{ margin:8px 0 0; padding-left:20px; }
+ul.sub-limitations li{ font-size:14.5px; color:var(--ink-soft); font-weight:400; padding:4px 0; line-height:1.55; }
+
+/* MECH-CSS-START */
+.obj-box{ border:1px solid var(--rule); border-radius:10px; background:var(--surface); padding:20px 22px; margin:0 0 24px; box-shadow:var(--shadow); }
+.obj-label{ font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-faint); margin-bottom:12px; }
+.obj-eq{ font-family:var(--mono); font-size:15px; line-height:2.0; color:var(--ink); text-align:center; padding:6px 4px 12px; overflow-x:auto; white-space:nowrap; }
+.obj-eq .op{ color:var(--ink-faint); margin:0 4px; }
+.obj-eq .ot-cap{ color:var(--ink-soft); }
+.obj-eq .ot-imp{ color:var(--accent-ink); background:var(--accent-soft); border-radius:4px; padding:2px 6px; font-weight:600; }
+.obj-eq .ot-exp{ color:var(--caution); background:var(--caution-soft); border-radius:4px; padding:2px 6px; font-weight:600; }
+.obj-eq .ot-plain{ color:var(--ink-faint); }
+.obj-gloss{ list-style:none; margin:4px 0 12px; padding:0; }
+.obj-gloss li{ font-size:14px; color:var(--ink-soft); padding:5px 0; line-height:1.5; }
+.obj-gloss .chip{ font-family:var(--mono); font-size:12px; border-radius:4px; padding:2px 7px; margin-right:8px; white-space:nowrap; }
+.obj-gloss .chip-cap{ color:var(--ink-soft); background:var(--surface-2); border:1px solid var(--rule); }
+.obj-gloss .chip-imp{ color:var(--accent-ink); background:var(--accent-soft); }
+.obj-gloss .chip-exp{ color:var(--caution); background:var(--caution-soft); }
+.obj-punch{ font-size:14.5px; color:var(--ink); line-height:1.6; margin:6px 0 0; border-top:1px solid var(--rule); padding-top:12px; }
+/* MECH-CSS-END */
+</style>
+</head>
+<body>
+<div class="wrap wide">
+
+<header class="masthead">
+  <p class="eyebrow">Working paper review &middot; draft for discussion with Duncan</p>
+  <h1 class="title">The Economics of Going Electric in California, Gas to Grid</h1>
+  <p class="thesis">NEM 3.0 hasn&rsquo;t broken the economic case for home electrification. But it hasn&rsquo;t delivered the battery-storage incentive it may have been designed to create.</p>
+  <div class="buildinfo">
+    <span>commit <b>c459506</b></span>
+    <span>branch <b>main</b></span>
+    <span><b>260</b> tests passing</span>
+    <span>47 of 58 CA counties modeled</span>
+  </div>
+  <nav class="toc">
+    <a href="claim1.html">Claim 1 &middot; Storage</a>
+    <a href="claim2.html">Claim 2 &middot; Electrification vs. gas</a>
+    <a href="claim3.html" style="color:var(--accent-ink);border-color:var(--accent);">Claim 3 &middot; Co-optimization value</a>
+    <a href="claims-c459506.html#limitations">Full doc &middot; Limitations</a>
+  </nav>
+</header>
+
+<section class="claim" id="claim-3">
+  <div class="claim-head"><span class="claim-num">CLAIM 3</span></div>
+  <h2 class="claim-title">Co-optimized solar sizing saves money over a fixed-sizing heuristic, in every county tested</h2>
+  <p class="claim-sub">Co-optimizing PV size for the fully-electrified home, rather than using a fixed sizing heuristic, saves money in <strong>every one of 47 counties tested, with no exceptions</strong>.</p>
+
+  <div class="stat-row">
+    <div class="stat"><span class="num">$646</span><span class="lbl">mean annual savings from co-optimized vs. fixed PV sizing</span></div>
+    <div class="stat"><span class="num">$271&ndash;$826</span><span class="lbl">full range across all 47 counties</span></div>
+    <div class="stat"><span class="num">47 / 47</span><span class="lbl">counties where co-optimization wins. No exceptions</span></div>
+  </div>
+
+  <div class="fig-pending">
+    <span class="tag">Figure TBD</span>
+    <p><strong>Distribution of co-optimization savings.</strong> A histogram or box plot of the $271&ndash;$826/yr savings across all 47 counties, showing that every county lands on the same side of zero.</p>
+    <p>In the meantime, see Claim 2&rsquo;s four county figures above: in each, the gap between the second bar (fixed-PV electrification) and third bar (co-optimized electrification) <em>is</em> this claim.</p>
+  </div>
+
+  <div class="sources">
+    <h3>Tests backing this claim</h3>
+    <ul>
+      <li><code>co_optimization_test.py</code> (3 tests). The co-optimizer&rsquo;s reported capacities and cost components reconcile with each other, so a mis-wired reporting layer can&rsquo;t quietly show one number while computing another.</li>
+      <li><code>solar_storage_dispatch_test.py</code> (6 tests). The hour-by-hour dispatch physics (load balance, battery state-of-charge bounds, no double-counted energy) hold at every timestep, for every county.</li>
+      <li><code>step23_compare_coopt_vs_fixed_dispatch_test.py</code>. The specific fixed-vs-co-optimized comparison this claim rests on reads the right cost fields.</li>
+      <li><code>TestLPAnalyticalBaseline</code> (<code>lp_cooptimize_test.py</code>). The LP&rsquo;s no-solar baseline case matches a closed-form calculation by hand, the simplest possible check that the optimizer isn&rsquo;t just fitting noise.</li>
+    </ul>
+  </div>
+
+  <div class="sources">
+    <h3>Sources</h3>
+    <ul>
+      <li>Same capex sources as Claims 1 &amp; 2. The methodological contribution here is the co-optimization LP itself (<code>pipeline/steps/step9b_cooptimize_core.py</code>). It jointly sizes PV, battery, and hourly dispatch under NEM&nbsp;3.0&rsquo;s actual rate structure, rather than a rule-of-thumb annual-match sizing heuristic.</li>
+    </ul>
+  </div>
+</section>
+
+<footer class="end">
+  Generated from commit c459506 &middot; california-electrification-costs &middot; draft for internal review, not for distribution
+</footer>
+
+</div>
+</body>
+</html>
