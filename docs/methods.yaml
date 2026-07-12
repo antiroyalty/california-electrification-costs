@@ -3,6 +3,7 @@
     "title": "Evaluation Constants",
     "constants": {
       "LIFETIMES_DEFAULT": "solar=25, storage=15, heat_pump=15, induction_stove=15, water_heater=15 (years)",
+      "LIFETIMES_SOURCE": "Storage 15-yr service life: NREL ATB 2024 Residential Battery Storage (https://atb.nrel.gov/electricity/2024/residential_battery_storage), the same source as the battery $/kWh cost. CAVEAT: NREL's 15-yr life is paired with a Fixed O&M (~2.5%/yr of capex) for battery augmentation to offset degradation and hold rated capacity. This model currently omits that O&M and sets degradation cost to 0, so it is MORE generous to storage than NREL. TODO: add augmentation O&M or run a degradation sensitivity (either would make storage pencil slightly worse, strengthening Claim 1). Solar 25-yr and appliance 15-yr are conventional planning assumptions.",
       "THERM_TO_KWH": "29.3001 kWh/therm"
     },
     "code": [
