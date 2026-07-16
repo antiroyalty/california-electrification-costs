@@ -1,0 +1,149 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage[hidelinks]{hyperref}
+
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+
+\title{Co-optimization of Rooftop Solar and Storage under NEM~3.0\\[2pt]
+       \large Model Specification (Step~9b)}
+\author{Ana Santasheva}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section{Overview}
+
+Step~9b is a linear program that jointly chooses the rooftop solar array size, the
+battery energy and power capacity, and the hour-by-hour dispatch of solar, battery, and
+grid, so as to minimize a household's total annual cost. Total annual cost is the sum of
+annualized capital cost and the net annual energy bill (imports priced at the retail
+time-of-use rate, exports credited at the NEM~3.0 Avoided Cost Calculator rate). The
+program is solved at full 8760-hour resolution, or on a reduced set of 288 representative
+time slices (12~months $\times$ 24~hours) weighted by days per month. All variables are
+continuous; there are no integer variables.
+
+\section{Nomenclature}
+
+\subsection*{Sets and indices}
+\begin{tabular}{@{}l L{0.72\textwidth}@{}}
+\toprule
+Symbol & Meaning \\
+\midrule
+$h$ & index of an hour (or representative time slice) \\
+$\mathcal{H}$ & set of hours in the analysis year: 8760, or 288 representative slices \\
+\bottomrule
+\end{tabular}
+
+\subsection*{Decision variables (all $\ge 0$, continuous)}
+\begin{tabular}{@{}l L{0.62\textwidth} l@{}}
+\toprule
+Symbol & Meaning & Units \\
+\midrule
+$PV$ & installed solar (photovoltaic) capacity & kW \\
+$B_E$ & battery usable energy capacity & kWh \\
+$B_P$ & battery power (inverter) capacity & kW \\
+$x_h^{pv\to l}$ & solar energy sent to serve load in hour $h$ & kWh \\
+$x_h^{pv\to b}$ & solar energy sent to charge the battery & kWh \\
+$x_h^{pv\to g}$ & solar energy exported to the grid & kWh \\
+$x_h^{b\to l}$ & battery energy discharged to serve load & kWh \\
+$x_h^{b\to g}$ & battery energy exported to the grid & kWh \\
+$x_h^{g\to l}$ & grid energy imported to serve load & kWh \\
+$x_h^{g\to b}$ & grid energy imported to charge the battery & kWh \\
+$soc_h$ & battery state of charge at the start of hour $h$ & kWh \\
+\bottomrule
+\end{tabular}
+
+\subsection*{Parameters}
+\begin{tabular}{@{}l L{0.56\textwidth} l@{}}
+\toprule
+Symbol & Meaning & Units \\
+\midrule
+$L_h$ & household electricity load in hour $h$ & kWh \\
+$G_h$ & solar generation per kW installed in hour $h$ (AC yield) & kWh/kW \\
+$p_h^{imp}$ & retail import price in hour $h$ (time-of-use) & \$/kWh \\
+$p_h^{exp}$ & export credit in hour $h$ (NEM~3.0 ACC) & \$/kWh \\
+$w_h$ & weight of hour/slice $h$ (days in month for 288 mode; 1 for 8760) & --- \\
+$c_{pv}$ & solar installed capital cost & \$/kW \\
+$c_{b}$ & battery energy installed capital cost & \$/kWh \\
+$c_{bp}$ & battery power installed capital cost (default 0) & \$/kW \\
+$c_{deg}$ & battery degradation cost per kWh discharged (default 0) & \$/kWh \\
+$r$ & real discount rate (default 0.07) & --- \\
+$N$ & analysis horizon and solar service life (25) & yr \\
+$n_{batt}$ & battery service life (15) & yr \\
+$\eta_{ch},\ \eta_{dis}$ & battery charge / discharge efficiency, each $\sqrt{0.96}$ & --- \\
+$\underline{s},\ \overline{s}$ & minimum / maximum state-of-charge fraction (0.20, 0.90) & --- \\
+$\alpha_{pv},\ \alpha_{b}$ & solar / battery capital-annualization factors (see \S\ref{sec:coef}) & 1/yr \\
+\bottomrule
+\end{tabular}
+
+\section{Optimization problem}
+
+\paragraph{Objective.} Minimize total annual cost: annualized capital cost, plus the net
+annual energy bill (imports minus export credits), plus battery degradation cost.
+\begin{equation}
+\begin{aligned}
+\min\ \ & PV\,c_{pv}\,\alpha_{pv} \;+\; B_E\,c_{b}\,\alpha_{b} \;+\; B_P\,c_{bp}\,\alpha_{b} \\[2pt]
+& {}+ \sum_{h\in\mathcal{H}} w_h\Big[\big(x_h^{g\to l}+x_h^{g\to b}\big)\,p_h^{imp}
+        \;-\; \big(x_h^{pv\to g}+x_h^{b\to g}\big)\,p_h^{exp}\Big] \\[2pt]
+& {}+ \sum_{h\in\mathcal{H}} w_h\,c_{deg}\big(x_h^{b\to l}+x_h^{b\to g}\big)
+\end{aligned}
+\end{equation}
+
+\paragraph{Constraints.} For every hour $h\in\mathcal{H}$:
+\begin{align}
+x_h^{pv\to l}+x_h^{pv\to b}+x_h^{pv\to g} &\;\le\; PV\cdot G_h && \text{(solar availability)} \\
+x_h^{pv\to l}+x_h^{b\to l}+x_h^{g\to l} &\;=\; L_h && \text{(load balance)} \\
+x_h^{pv\to b}+x_h^{g\to b} &\;\le\; B_P && \text{(charge power)} \\
+x_h^{b\to l}+x_h^{b\to g} &\;\le\; B_P && \text{(discharge power)} \\
+soc_{h+1} &\;=\; soc_h + \eta_{ch}\big(x_h^{pv\to b}+x_h^{g\to b}\big)
+        - \tfrac{1}{\eta_{dis}}\big(x_h^{b\to l}+x_h^{b\to g}\big) && \text{(SOC dynamics)} \\
+\underline{s}\,B_E \;\le\; soc_h &\;\le\; \overline{s}\,B_E && \text{(SOC bounds)}
+\end{align}
+The state of charge is cyclic: $soc$ returns to its starting value over the full year in
+8760 mode, or over each representative day in 288 mode. By default grid charging is
+disabled ($x_h^{g\to b}=0$) and battery-to-grid export is permitted.
+
+\section{Coefficients and conventions}
+\label{sec:coef}
+
+The capital-annualization factors convert an up-front capital cost into an equivalent
+annual cost over the analysis horizon $N$:
+\begin{equation}
+\alpha_{pv} = \mathrm{CRF}(r,N),
+\qquad
+\alpha_{b} = \frac{K_{batt}}{\mathrm{PVA}(r,N)},
+\end{equation}
+where
+\begin{equation}
+\mathrm{CRF}(r,n) = \frac{r(1+r)^{n}}{(1+r)^{n}-1},
+\qquad
+\mathrm{PVA}(r,N) = \frac{1-(1+r)^{-N}}{r},
+\qquad
+K_{batt} = 1 + (1+r)^{-n_{batt}}.
+\end{equation}
+Solar is amortized once over its $N$-year life. The battery term $K_{batt}$ is the present
+value of \emph{two} purchases: one at installation and a replacement at year $n_{batt}$
+within the $N$-year horizon. Because of that replacement, $\alpha_{b} > \mathrm{CRF}(r,n_{batt})$.
+
+\paragraph{Prices and rates.} $p_h^{exp}$ is the NEM~3.0 Avoided Cost Calculator export
+credit, supplied as a month~$\times$~hour table per utility. $p_h^{imp}$ is the retail
+time-of-use import price for the county's utility and rate plan.
+
+\paragraph{Defaults.} $r = 7\%$, $N = 25$~yr, $n_{batt} = 15$~yr, round-trip efficiency
+$\eta_{ch}\eta_{dis} = 0.96$, state of charge confined to 20\%--90\% of $B_E$, and
+$c_{bp} = c_{deg} = 0$. The 15-year battery life and battery cost follow NREL ATB~2024
+Residential Battery Storage; solar cost follows the CPUC-adopted installed price.
+
+\paragraph{Scope of the objective bill.} The bill inside the objective is a simplified
+hourly accounting (imports at $p_h^{imp}$, exports at $p_h^{exp}$) used to drive the
+sizing and dispatch decision. The full NEM~3.0 monthly accounting (non-bypassable
+charges, fixed charges, minimum bill, carry-forward credits, and annual true-up) is
+applied downstream (Step~12) when computing the reported bill.
+
+\end{document}
