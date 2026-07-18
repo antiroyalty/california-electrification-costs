@@ -52,10 +52,24 @@ class DatedIncentive:
     per_kwh: Optional[float]   # dollars per kWh of storage, for fixed-rate rebates
     valid_from: str            # ISO date
     valid_through: Optional[str]  # ISO date, or None if open-ended
-    applies_to: str            # "pv", "storage", or "pv+storage"
+    applies_to: str            # see APPLIES_TO_* below
     statute_or_program: str
     citation: str
     note: str = ""
+    flat_amount: Optional[float] = None  # flat dollar credit, e.g. 30D's $7,500
+    max_value: Optional[float] = None    # cap on a percentage credit, e.g. 25C's $2,000
+    verification_status: str = "verified"  # "verified" | "needs_verification"
+
+
+# Values for DatedIncentive.applies_to. These name the modeled appliance class,
+# not the tax-code category, so the registry below can be read against the code.
+APPLIES_TO_PV = "pv"
+APPLIES_TO_STORAGE = "storage"
+APPLIES_TO_PV_STORAGE = "pv+storage"
+APPLIES_TO_SPACE_HEATING = "space_heating"
+APPLIES_TO_WATER_HEATING = "water_heating"
+APPLIES_TO_COOKING = "cooking"
+APPLIES_TO_VEHICLE = "vehicle"
 
 
 # ---------------------------------------------------------------------------
