@@ -50,8 +50,10 @@ Flags / configuration
 - --allow-batt-export / --disallow-batt-export
   Enable or disable Battery→Grid exports (default: enabled)
 - --discount-rate (default: DEFAULT_DISCOUNT_RATE, evaluations/constants.py)
-- --pv-capex-kw (default: SolarSystemAppliance.per_kw_cost_net(FULL_INCENTIVES), $2,310/kW)
-- --batt-capex-kwh (default: BatteryStorageAppliance.per_kwh_cost_net(FULL_INCENTIVES), ~$1,022/kWh)
+- --pv-capex-kw (default: SolarSystemAppliance.per_kw_cost_net(FULL_INCENTIVES), $3,300/kW
+  under the default POST_ITC_2026 regime; $2,310/kW under the expired ITC_2025 regime)
+- --batt-capex-kwh (default: BatteryStorageAppliance.per_kwh_cost_net(FULL_INCENTIVES),
+  ~$1,461/kWh under the default POST_ITC_2026 regime; ~$1,022/kWh under the expired ITC)
 - --batt-capex-kw (default: 0.0 $/kW)
 - --pv-life-yrs (default: 25)
 - --batt-life-yrs (default: 15)
@@ -114,6 +116,12 @@ from appliances.electric_base import IncentiveScenario
 #     doesn't specify otherwise) assume full_incentives, matching Config's
 #     own default; real production runs (mod_solar_storage.run) pass the net
 #     cost for whichever incentive scenario Config actually specifies.
+#   - Update 2026-07-17: the ITC net vs gross distinction above is now moot
+#     under the default regime. incentive_policy.py's DEFAULT_POLICY_REGIME is
+#     POST_ITC_2026 (IRC 25D repealed by OBBBA), so per_*_cost_net(FULL) now
+#     returns gross for PV and storage. The invariant these defaults encode
+#     (LP sizes against the same price step14 reports) is unchanged; only the
+#     value moved, from ~$1,022 to ~$1,461/kWh and $2,310 to $3,300/kW.
 DEFAULT_PV_CAPEX_PER_KW = SolarSystemAppliance.per_kw_cost_net(IncentiveScenario.FULL_INCENTIVES)
 DEFAULT_BATT_CAPEX_PER_KWH = BatteryStorageAppliance.per_kwh_cost_net(IncentiveScenario.FULL_INCENTIVES)
 
