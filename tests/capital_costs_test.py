@@ -103,6 +103,56 @@ class TestBatteryStorageCost:
         assert _DEFAULT_BATT_CAPEX_PER_KWH == pytest.approx(expected)
 
 
+class TestPolicyRegimePricing:
+    """The policy regime (incentive_policy.py) decides whether the federal ITC
+    legally exists, and therefore the net capex the LP sizes against. Locks the
+    2026-07-17 wiring: default is current law (no ITC); ITC_2025 is the expired
+    comparison regime. These pin the actual dollar values, not a relative
+    invariant, so a regression that silently re-enabled the ITC would fail here."""
+
+    def test_default_regime_is_post_itc(self) -> None:
+        from appliances.incentive_policy import DEFAULT_POLICY_REGIME, PolicyRegime
+        assert DEFAULT_POLICY_REGIME == PolicyRegime.POST_ITC_2026, (
+            "The headline regime for a 2026 analysis is current law (no federal ITC). "
+            "If this changed, the paper's default prices changed with it."
+        )
+
+    def test_post_itc_net_equals_gross(self) -> None:
+        """Under current law the ITC is repealed, so full_incentives net == gross
+        for PV and storage. This is the number the paper reports by default."""
+        from appliances.electric_base import IncentiveScenario
+        from appliances.incentive_policy import PolicyRegime
+        pv_net = SolarSystemAppliance.per_kw_cost_net(
+            IncentiveScenario.FULL_INCENTIVES, regime=PolicyRegime.POST_ITC_2026)
+        batt_net = BatteryStorageAppliance.per_kwh_cost_net(
+            IncentiveScenario.FULL_INCENTIVES, regime=PolicyRegime.POST_ITC_2026)
+        assert pv_net == pytest.approx(3300.0)
+        assert batt_net == pytest.approx(1460.64, rel=1e-3)
+
+    def test_itc_2025_net_is_70_percent_of_gross(self) -> None:
+        """The expired comparison regime: 30% federal ITC gives the pre-OBBBA
+        net prices, $2,310/kW and ~$1,022/kWh."""
+        from appliances.electric_base import IncentiveScenario
+        from appliances.incentive_policy import PolicyRegime
+        pv_net = SolarSystemAppliance.per_kw_cost_net(
+            IncentiveScenario.FULL_INCENTIVES, regime=PolicyRegime.ITC_2025)
+        batt_net = BatteryStorageAppliance.per_kwh_cost_net(
+            IncentiveScenario.FULL_INCENTIVES, regime=PolicyRegime.ITC_2025)
+        assert pv_net == pytest.approx(2310.0)
+        assert batt_net == pytest.approx(1022.448, rel=1e-4)
+
+    def test_default_call_uses_post_itc_regime(self) -> None:
+        """Callers that pass only a scenario (the existing call sites) get the
+        default regime, i.e. current-law gross prices."""
+        from appliances.electric_base import IncentiveScenario
+        assert SolarSystemAppliance.per_kw_cost_net(
+            IncentiveScenario.FULL_INCENTIVES) == pytest.approx(
+            SolarSystemAppliance.per_kw_cost())
+        assert BatteryStorageAppliance.per_kwh_cost_net(
+            IncentiveScenario.FULL_INCENTIVES) == pytest.approx(
+            BatteryStorageAppliance.per_kwh_cost())
+
+
 class TestHeatPumpSpaceCost:
     """Heat pump space heating cost per county (TECH Clean California, ducted-only).
 
