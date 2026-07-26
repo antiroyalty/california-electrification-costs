@@ -146,4 +146,73 @@ sizing and dispatch decision. The full NEM~3.0 monthly accounting (non-bypassabl
 charges, fixed charges, minimum bill, carry-forward credits, and annual true-up) is
 applied downstream (Step~12) when computing the reported bill.
 
+\section{Incentive policy regime}
+\label{sec:incentives}
+
+The capital costs $c_{pv}$ and $c_{b}$ entering the objective are \emph{net} of whichever
+incentives legally exist in the modeled installation year. Which incentives exist is a
+policy question separate from how much of an available incentive a given household
+actually captures, and the model treats the two as orthogonal axes: a \emph{policy
+regime} determines the set of live incentives, and an \emph{incentive scenario}
+(full / half / none) scales what is captured.
+
+\sloppypar
+Two regimes are defined. Under \textsc{itc\_2025}, the federal residential clean energy
+credit (IRC~25D) supplies 30\% of installed cost, giving $c_{pv} = \$2{,}310$/kW and
+$c_{b} = \$1{,}022$/kWh. Under \textsc{post\_itc\_2026}, IRC~25D is repealed and the
+gross costs apply directly: $c_{pv} = \$3{,}300$/kW and $c_{b} = \$1{,}461$/kWh. The
+One Big Beautiful Bill Act (Pub.~L.~119-21, 2025-07-04) repealed IRC~25D for
+expenditures made after 2025-12-31, so \textsc{post\_itc\_2026} is current law and is
+the default regime for this analysis. The ITC era is retained as an explicit comparison
+regime rather than as the headline case.
+
+\subsection*{Federal and state incentives in the appliance layer}
+
+\sloppypar
+Table~\ref{tab:incentives} lists every incentive the cost model applies, the call site
+that applies it, and its status under OBBBA. The table is maintained in code as
+\texttt{INCENTIVE\_REGISTRY} in \texttt{appliances/incentive\_policy.py}; paths in the
+first column are relative to \texttt{appliances/} and line numbers are as of 2026-07-17.
+
+\begin{table}[h]
+\centering
+\footnotesize
+\begin{tabular}{@{}l l l l@{}}
+\toprule
+Call site & Credit & Statute / program & Status \\
+\midrule
+\texttt{solar\_system:27}        & 30\%              & IRC 25D  & Repealed, 2025-12-31 \\
+\texttt{battery\_storage:27}     & 30\%              & IRC 25D  & Repealed, 2025-12-31 \\
+\texttt{electric\_heating:45}    & 30\%, cap \$2,000 & IRC 25C  & Repealed, 2025-12-31 \\
+\texttt{electric\_water\_heating:46} & 30\%, cap \$2,000 & IRC 25C & Repealed, 2025-12-31 \\
+\texttt{electric\_vehicle:37}    & \$7,500           & IRC 30D  & Terminated, 2025-09-30 \\
+\texttt{electric\_cooking:29}    & \$840             & IRA \S50122 (HEEHRA) & Not repealed$^{\dagger}$ \\
+\texttt{electric\_vehicle:56}    & \$3,000           & CA utility rebate & Not repealed$^{\dagger}$ \\
+\midrule
+(not applied)                    & \$200/kWh         & CA SGIP general mkt. & Closed to applicants \\
+\bottomrule
+\end{tabular}
+\caption{Incentives applied by the capital-cost model, with status under the One Big
+Beautiful Bill Act (Pub.~L.~119-21). $^{\dagger}$HEEHRA and the California utility
+vehicle rebate are not federal tax credits and were not repealed by OBBBA; their
+availability is a program-funding question rather than a statutory one, and remains to
+be confirmed.}
+\label{tab:incentives}
+\end{table}
+
+\paragraph{Direction of effect.} The repeals do not all push the same way. Removing
+IRC~25D raises the cost of solar and storage, which makes storage \emph{less} likely to
+enter the optimal solution and therefore reinforces the finding that storage does not
+pencil out under NEM~3.0. Removing IRC~25C and IRC~30D raises the cost of the heat pump,
+the heat pump water heater, and the vehicle, which makes full electrification more
+expensive relative to a gas baseline and therefore cuts \emph{against} the finding that
+electrification is cost-competitive. The two effects are separated in the results by
+applying the repeals in sequence rather than jointly, so that each change in outcome is
+attributable to a specific policy change.
+
+\paragraph{Regime boundary.} The two-regime formulation is an approximation at the
+boundary. IRC~30D terminated on 2025-09-30, roughly three months before IRC~25C and
+IRC~25D, so no single date cleanly separates the regimes. For a 2026-vintage analysis,
+in which all three credits have lapsed, the approximation has no effect on results.
+
 \end{document}

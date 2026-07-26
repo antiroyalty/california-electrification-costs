@@ -15,6 +15,12 @@ POST_ITC_2026 regime there is no federal ITC, so for PV and storage full / half 
 gross cost. This module owns the regime-to-incentive mapping. Gross costs still live in the appliance
 classes; this module does not duplicate them.
 
+Scope correction (2026-07-17): the ITC was not an isolated problem. An audit of the appliance
+layer found that EVERY federal credit it applies predates OBBBA and is labeled "through 2032":
+IRC 25C on heat pumps and heat pump water heaters, and IRC 30D on vehicles, alongside the 25D
+credit on solar and storage. See INCENTIVE_REGISTRY below for the full provenance table mapping
+each credit to the call site that applies it, and WIRING_SEQUENCE for the agreed order of work.
+
 Nothing is wired to this module yet. It is the single place the LP sizing price and every plot
 reference label should read from once integration begins.
 """
@@ -52,10 +58,24 @@ class DatedIncentive:
     per_kwh: Optional[float]   # dollars per kWh of storage, for fixed-rate rebates
     valid_from: str            # ISO date
     valid_through: Optional[str]  # ISO date, or None if open-ended
-    applies_to: str            # "pv", "storage", or "pv+storage"
+    applies_to: str            # see APPLIES_TO_* below
     statute_or_program: str
     citation: str
     note: str = ""
+    flat_amount: Optional[float] = None  # flat dollar credit, e.g. 30D's $7,500
+    max_value: Optional[float] = None    # cap on a percentage credit, e.g. 25C's $2,000
+    verification_status: str = "verified"  # "verified" | "needs_verification"
+
+
+# Values for DatedIncentive.applies_to. These name the modeled appliance class,
+# not the tax-code category, so the registry below can be read against the code.
+APPLIES_TO_PV = "pv"
+APPLIES_TO_STORAGE = "storage"
+APPLIES_TO_PV_STORAGE = "pv+storage"
+APPLIES_TO_SPACE_HEATING = "space_heating"
+APPLIES_TO_WATER_HEATING = "water_heating"
+APPLIES_TO_COOKING = "cooking"
+APPLIES_TO_VEHICLE = "vehicle"
 
 
 # ---------------------------------------------------------------------------
@@ -111,6 +131,144 @@ SGIP_GENERAL_MARKET = DatedIncentive(
 )
 
 
+# Federal energy efficient home improvement credit, IRC 25C. 30 percent of installed
+# cost, capped at $2,000/yr for qualifying heat pumps and heat pump water heaters.
+# Repealed by OBBBA for property placed in service after 2025-12-31.
+FEDERAL_25C = DatedIncentive(
+    name="federal_energy_efficient_home_improvement_credit",
+    fraction=0.30,
+    per_kwh=None,
+    max_value=2000.0,
+    valid_from="2023-01-01",
+    valid_through="2025-12-31",
+    applies_to="space_heating+water_heating",
+    statute_or_program="IRC 25C",
+    citation=(
+        "Repealed for property placed in service after 2025-12-31 by the One Big "
+        "Beautiful Bill Act, Pub. L. 119-21 (2025-07-04). "
+        "TODO: pin the specific OBBBA section number and a CRS or JCT cite before "
+        "this appears in the paper."
+    ),
+    verification_status="needs_verification",
+    note=(
+        "Modeled in electric_heating.py and electric_water_heating.py as a flat 30 percent "
+        "capped at $2,000, applied to each appliance independently. Confirm the statutory "
+        "cap is per-appliance and not a combined annual cap across 25C property, which "
+        "would reduce the modeled ITC-era benefit."
+    ),
+)
+
+# Federal clean vehicle credit, IRC 30D. Flat $7,500 for a qualifying new EV.
+# Terminated by OBBBA for vehicles acquired after 2025-09-30, earlier than the
+# 25C / 25D repeal date.
+FEDERAL_30D = DatedIncentive(
+    name="federal_clean_vehicle_credit",
+    fraction=None,
+    per_kwh=None,
+    flat_amount=7500.0,
+    valid_from="2023-01-01",
+    valid_through="2025-09-30",
+    applies_to=APPLIES_TO_VEHICLE,
+    statute_or_program="IRC 30D",
+    citation=(
+        "Terminated for vehicles acquired after 2025-09-30 by the One Big Beautiful "
+        "Bill Act, Pub. L. 119-21 (2025-07-04). "
+        "TODO: pin the specific OBBBA section number and a CRS or JCT cite before "
+        "this appears in the paper."
+    ),
+    verification_status="needs_verification",
+    note=(
+        "Note the date: 30D dies 2025-09-30, three months BEFORE 25C and 25D. The "
+        "regime enum is a two-value approximation and does not represent that gap. "
+        "Harmless for a 2026-vintage analysis, where all three are gone."
+    ),
+)
+
+# IRA Section 50122 High-Efficiency Electric Home Rebate (HEEHRA), $840 for a
+# qualifying electric cooking appliance. NOT a tax credit and NOT repealed by OBBBA.
+# State-administered, so availability is a program-status question, not a statutory one.
+HEEHRA_COOKING = DatedIncentive(
+    name="heehra_electric_cooking_rebate",
+    fraction=None,
+    per_kwh=None,
+    flat_amount=840.0,
+    valid_from="2022-08-16",
+    valid_through=None,
+    applies_to=APPLIES_TO_COOKING,
+    statute_or_program="IRA Section 50122 (HEEHRA), administered by CEC in California",
+    citation="TODO: confirm current California HEEHRA program status and remaining funding.",
+    verification_status="needs_verification",
+    note=(
+        "The one federal incentive in the model that OBBBA did NOT repeal. Do not sweep "
+        "it away with the tax credits. Its risk is program exhaustion, not statute: "
+        "confirm whether CA's allocation is still open to new applicants, the same "
+        "question that closed SGIP general-market."
+    ),
+)
+
+# California utility EV rebate, modeled as a $3,000 average across PG&E, SCE, SDG&E.
+CA_UTILITY_EV_REBATE = DatedIncentive(
+    name="ca_utility_ev_rebate",
+    fraction=None,
+    per_kwh=None,
+    flat_amount=3000.0,
+    valid_from="2020-01-01",
+    valid_through=None,
+    applies_to=APPLIES_TO_VEHICLE,
+    statute_or_program="California IOU electric vehicle rebates (PG&E / SCE / SDG&E average)",
+    citation="TODO: confirm each IOU program is still open and re-derive the average.",
+    verification_status="needs_verification",
+    note=(
+        "State/utility program, unaffected by OBBBA. Modeled as a single blended $3,000 "
+        "rather than per-utility, which is a simplification worth stating if EV scenarios "
+        "carry any weight in the paper."
+    ),
+)
+
+
+# ---------------------------------------------------------------------------
+# PROVENANCE REGISTRY
+#
+# Every federal or state incentive the appliance layer currently applies, mapped to
+# the exact call site that applies it. Built 2026-07-17 during the post-ITC audit,
+# which found that the ITC was not an isolated problem: the entire federal incentive
+# stack in appliances/ predates OBBBA and is labeled "through 2032".
+#
+# Read this as the checklist for the wiring work. Order matters, see WIRING_SEQUENCE.
+#
+# WHY THIS MATTERS FOR THE PAPER'S CLAIMS:
+#   Removing 25D makes solar and storage more expensive, which makes storage pencil
+#   out even less well. That STRENGTHENS Claim 1 (storage does not pencil under NEM 3.0).
+#   Removing 25C and 30D makes electrification more expensive relative to gas, which
+#   pushes AGAINST Claim 2 (electrification beats gas in 46/47 counties). Claim 2 is
+#   the claim at risk here. Claim 3 (co-optimized sizing beats naive sizing) is a
+#   relative comparison at a common price and should be insensitive to all of this.
+# ---------------------------------------------------------------------------
+INCENTIVE_REGISTRY = (
+    # (call site, encoded credit, DatedIncentive, live under DEFAULT_POLICY_REGIME?)
+    ("appliances/solar_system.py:27",         "30%",             FEDERAL_ITC_25D,      False),
+    ("appliances/battery_storage.py:27",      "30%",             FEDERAL_ITC_25D,      False),
+    ("appliances/electric_heating.py:45",     "30%, cap $2,000", FEDERAL_25C,          False),
+    ("appliances/electric_water_heating.py:46", "30%, cap $2,000", FEDERAL_25C,        False),
+    ("appliances/electric_vehicle.py:37",     "$7,500",          FEDERAL_30D,          False),
+    ("appliances/electric_cooking.py:29",     "$840",            HEEHRA_COOKING,       True),
+    ("appliances/electric_vehicle.py:56",     "$3,000",          CA_UTILITY_EV_REBATE, True),
+    # Documented for provenance, not applied at any call site.
+    (None,                                    "$200/kWh",        SGIP_GENERAL_MARKET,  False),
+)
+
+# Agreed 2026-07-17. Wire in this order, one commit per step, so each result delta is
+# separately attributable. Fixing all of them in one commit would move Claim 1 and
+# Claim 2 simultaneously and lose the attribution.
+WIRING_SEQUENCE = (
+    "1. IRC 25D (solar + storage). Expected: storage pencils out even less. Strengthens Claim 1.",
+    "2. IRC 25C and 30D (heat pump, water heater, EV). Expected: electrification gets more "
+    "expensive vs gas. Tests Claim 2. Re-run the 47-county comparison and report the new count.",
+    "3. Verify HEEHRA and the CA utility EV rebate as program-status questions. Neither was "
+    "repealed by OBBBA, so neither belongs in steps 1 or 2.",
+)
+
+
 def federal_itc_fraction(regime: PolicyRegime = DEFAULT_POLICY_REGIME) -> float:
     """Federal ITC fraction of gross cost that legally applies under the given regime.
 
@@ -148,3 +306,16 @@ if __name__ == "__main__":
         batt_net = batt_gross * (1 - f)
         marker = "  <-- default" if r == DEFAULT_POLICY_REGIME else ""
         print(f"{r.value:16} {pv_net:>14,.2f} {batt_net:>16,.2f}   {regime_summary(r)}{marker}")
+
+    print(f"\n\nProvenance registry: federal and state incentives applied by appliances/")
+    print(f"Default regime: {DEFAULT_POLICY_REGIME.value}\n")
+    print(f"{'call site':44} {'encoded':16} {'statute/program':22} {'live?':6} check")
+    print("-" * 110)
+    for site, encoded, inc, live in INCENTIVE_REGISTRY:
+        flag = "yes" if live else "NO"
+        check = "" if inc.verification_status == "verified" else "VERIFY"
+        print(f"{(site or '(not applied)'):44} {encoded:16} {inc.statute_or_program[:22]:22} {flag:6} {check}")
+
+    print("\nWiring sequence (agreed 2026-07-17):")
+    for step in WIRING_SEQUENCE:
+        print(f"  {step}")

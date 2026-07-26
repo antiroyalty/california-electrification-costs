@@ -4,31 +4,43 @@ Battery Storage Appliance Class for Capital Cost Analysis
 
 from typing import Dict
 from appliances.electric_base import ElectricAppliance, Incentive, IncentiveScenario
+from appliances.incentive_policy import (
+    PolicyRegime,
+    DEFAULT_POLICY_REGIME,
+    federal_itc_fraction,
+    regime_summary,
+)
 
 class BatteryStorageAppliance(ElectricAppliance):
     """Battery storage system (Tesla Powerwall 3)."""
-    
-    def __init__(self, num_units: int = 1, lifetime_years: int = 15):
+
+    def __init__(self, num_units: int = 1, lifetime_years: int = 15,
+                 policy_regime: PolicyRegime = DEFAULT_POLICY_REGIME):
         # https://atb.nrel.gov/electricity/2024/data ATB data used by CEC report https://www.energy.ca.gov/sites/default/files/2024-07/CEC-200-2024-011.pdf
         base_unit_cost = 18258  # $18,258 per unit (2023 value)
         capacity_per_unit = 12.5  # 12.5 kWh per unit
-        
+
         total_cost = base_unit_cost * num_units
         total_capacity = capacity_per_unit * num_units
-        
+
         super().__init__(f"battery_storage_{num_units}units", total_cost, lifetime_years)
-        
+
         self.num_units = num_units
         self.unit_cost = base_unit_cost
         self.capacity_kwh = total_capacity
-        
-        # Add federal storage tax credit (30% through 2032, for systems >= 3 kWh)
-        if total_capacity >= 3.0:
+        self.policy_regime = policy_regime
+
+        # Federal storage ITC (IRC 25D, systems >= 3 kWh). Whether it legally exists
+        # is decided by the policy regime, not hardcoded: incentive_policy.py is the
+        # single source of truth. Under the default POST_ITC_2026 regime the credit is
+        # repealed (OBBBA, Pub. L. 119-21) and no incentive is created, so net == gross.
+        itc_fraction = federal_itc_fraction(policy_regime)
+        if total_capacity >= 3.0 and itc_fraction > 0:
             federal_tax_credit = Incentive(
                 name="federal_storage_tax_credit",
-                value=30.0,  # 30%
+                value=itc_fraction * 100.0,  # percent
                 unit="%",
-                description="Federal energy storage investment tax credit (ITC) 30% for systems >= 3 kWh",
+                description=f"Federal energy storage ITC (IRC 25D), systems >= 3 kWh, {regime_summary(policy_regime)}",
                 source_url="https://www.energy.gov/eere/solar/homeowners-guide-federal-tax-credit-solar-photovoltaics"
             )
             self.add_incentive(federal_tax_credit)
@@ -43,14 +55,18 @@ class BatteryStorageAppliance(ElectricAppliance):
         return unit.base_cost / unit.capacity_kwh
 
     @classmethod
-    def per_kwh_cost_net(cls, scenario: IncentiveScenario) -> float:
-        """Net (after-incentive) $/kWh under the given incentive scenario.
+    def per_kwh_cost_net(cls, scenario: IncentiveScenario,
+                         regime: PolicyRegime = DEFAULT_POLICY_REGIME) -> float:
+        """Net (after-incentive) $/kWh under the given incentive scenario and
+        policy regime.
 
         Use this — not per_kwh_cost() — for a sizing decision meant to reflect
         what the modeled decision-maker actually pays, e.g. the LP's default
         sizing signal, which should match whichever incentive scenario is the
-        one actually being reported (2026-07-07)."""
-        unit = cls(num_units=1)
+        one actually being reported (2026-07-07). The regime decides which
+        incentives legally exist (2026-07-17); pass ITC_2025 to price the same
+        system under the expired federal ITC for a before/after comparison."""
+        unit = cls(num_units=1, policy_regime=regime)
         return unit.get_net_cost(scenario) / unit.capacity_kwh
 
     def get_cost_breakdown(self, scenario: IncentiveScenario = IncentiveScenario.FULL_INCENTIVES) -> Dict:
