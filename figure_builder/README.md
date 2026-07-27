@@ -37,9 +37,20 @@ python3 -m figure_builder bridge                    # assumption-bridge waterfal
 python3 -m figure_builder split                     # combined doc -> claim1/2/3.html
 ```
 
-Sweeps are cached in `figure_builder/sweeps/` and reused; pass `--force` to
-recompute. The mechanism/counties recipes patch `claims-c459506.html` in place
-between HTML-comment markers, so re-running is idempotent (no duplicated blocks).
+Sweeps are cached in `figure_builder/sweeps/` as
+`sweep_8760_<county>_<regime>.csv` (keyed by regime, since solar's fixed price
+differs between regimes) and reused; pass `--force` to recompute. The
+mechanism/counties recipes patch `claims-c459506.html` in place between
+HTML-comment markers, so re-running is idempotent (no duplicated blocks).
+
+The headline Claim-1 figure is a **before/after** comparison
+(`plot_pv_batt_vs_capex_compare`): a 2025 panel (with the 30% federal ITC,
+battery `$1,022/kWh` net) beside a current-law panel (ITC expired,
+`$1,460.64/kWh` net), on shared axes. `build_mechanism_block` computes both
+regime sweeps for the county automatically; the mechanism and ceiling panels are
+drawn at current law. The four-county grid (`build_county_grid`) is also
+before/after: each county is a 2025-vs-current-law comparison, stacked
+full-width.
 
 ## Prices track the policy regime automatically
 
