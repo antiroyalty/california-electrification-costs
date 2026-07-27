@@ -17,7 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from figure_builder import COMBINED_DOC, FIG_DIR, REPO
+from figure_builder import COMBINED_DOC, FIG_DIR, sweep_csv_path
 from figure_builder.datasets import collect_battery_capex_sweep
 from figure_builder.dispatch import CLAIM1_COUNTIES
 from figure_builder.pricing import live_prices
@@ -31,8 +31,8 @@ def _cmd_sweeps(args) -> list:
     out = []
     for slug in slugs:
         print(f"\n{slug}:")
-        df = collect_battery_capex_sweep(slug, force=args.force)
-        out.append(str((REPO / "figure_builder" / "sweeps" / f"sweep_8760_{slug}.csv")))
+        collect_battery_capex_sweep(slug, force=args.force)
+        out.append(str(sweep_csv_path(slug, prices.regime)))
     return out
 
 

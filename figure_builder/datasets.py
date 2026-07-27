@@ -23,6 +23,7 @@ SWEEP_COLUMNS = ["battery_capex_kwh", "pv_kw", "batt_kwh", "total_cost", "covera
 def collect_battery_capex_sweep(
     slug: str,
     *,
+    regime=None,
     scenario: str = "full_electric_ev_coopt",
     points: List[int] = SWEEP_POINTS,
     pv_capex_per_kw: Optional[float] = None,
@@ -35,11 +36,12 @@ def collect_battery_capex_sweep(
     Columns: battery_capex_kwh, pv_kw, batt_kwh, total_cost, coverage
     (coverage = PV annual generation / annual load).
 
-    Solar capex is fixed at `pv_capex_per_kw`, defaulting to the live net price
-    for the current regime. Results cache to figure_builder/sweeps/; pass
-    `force=True` to recompute.
+    Solar capex is fixed at the live net price for `regime` (default: current
+    law), or `pv_capex_per_kw` if given. Results cache per (county, regime) to
+    figure_builder/sweeps/; pass `force=True` to recompute.
     """
-    path = sweep_csv_path(slug)
+    prices = live_prices(regime)
+    path = sweep_csv_path(slug, prices.regime)
     if cache and not force and path.exists():
         df = pd.read_csv(path)
         if list(df.columns) == SWEEP_COLUMNS:
@@ -47,7 +49,7 @@ def collect_battery_capex_sweep(
 
     from pipeline.steps.step9b_cooptimize_core import CooptInputs, _solve_lp
 
-    c_pv = pv_capex_per_kw if pv_capex_per_kw is not None else live_prices().pv_net_per_kw
+    c_pv = pv_capex_per_kw if pv_capex_per_kw is not None else prices.pv_net_per_kw
     di = county_dispatch_inputs(slug, scenario)
     inp = CooptInputs(load_kwh=di.load, pv_gen_per_kw=di.pv_gen_per_kw,
                       import_rates=di.p_imp, export_rates=di.p_exp)

@@ -66,17 +66,34 @@ def plot_pv_batt_vs_capex(
 
     df = sweep.sort_values("battery_capex_kwh")
     df = df[df.battery_capex_kwh >= min_capex]
+    figsize = (6.2, 4.2) if compact else (7.4, 4.5)
+    fig, axL = plt.subplots(figsize=figsize)
+    axR = axL.twinx()
+    meta, (lP, lB) = _draw_pv_batt(axL, axR, df, batt_price_net,
+                                   compact=compact, rich=not compact)
+    axL.set_title(title, fontsize=11 if compact else 11.5, color=INK, pad=8, loc="left")
+    axL.legend(handles=[lP, lB], loc="upper center", fontsize=8.5 if compact else 9.5,
+               frameon=False, ncol=2, bbox_to_anchor=(0.5, -0.17 if compact else -0.16))
+    return fig, meta
+
+
+def _draw_pv_batt(axL, axR, df, batt_price_net, *, compact, rich,
+                  pv_ymax=None, bt_ymax=None, x_right=None,
+                  price_marker_label="today's price"):
+    """Draw the dual-axis PV/battery-vs-capex chart onto a given axis pair.
+
+    Shared by the single-panel and the before/after comparison figures. Pass
+    `pv_ymax`/`bt_ymax`/`x_right` to force identical scales across panels so a
+    two-panel comparison is visually honest. `df` must be pre-filtered/sorted.
+    """
     x = df.battery_capex_kwh.values
     pv = df.pv_kw.values
     bt = df.batt_kwh.values
     flat = pv[bt < 0.2]
     pv_flat = float(flat.mean()) if len(flat) else float(pv.min())
-    x_right = max(float(x.max()), batt_price_net) * 1.03
-
-    figsize = (6.2, 4.2) if compact else (7.4, 4.5)
+    if x_right is None:
+        x_right = max(float(x.max()), batt_price_net) * 1.03
     lwP, lwB, ms = (2.4, 2.0, 3.2) if compact else (2.6, 2.2, 4.0)
-    fig, axL = plt.subplots(figsize=figsize)
-    axR = axL.twinx()
 
     axR.fill_between(x, 0, bt, color=CAUT, alpha=0.10, zorder=1)
     lB, = axR.plot(x, bt, color=CAUT, lw=lwB, marker="o", ms=ms, zorder=3,
@@ -91,11 +108,11 @@ def plot_pv_batt_vs_capex(
 
     axL.axvline(batt_price_net, color=INK_FAINT, ls=(0, (2, 2)), lw=1.1, zorder=2)
     axL.text(batt_price_net - x_right * 0.014, pv.max() * 0.97,
-             f"today's price\n${batt_price_net:,.0f}/kWh\n" + r"$\rightarrow$ battery = 0",
+             f"{price_marker_label}\n${batt_price_net:,.0f}/kWh\n" + r"$\rightarrow$ battery = 0",
              ha="right", va="top", color=INK_SOFT, fontsize=8 if compact else 9,
              linespacing=1.25)
 
-    if not compact and len(x) > 3:
+    if rich and len(x) > 3:
         axL.annotate("cheaper storage\n" + r"$\rightarrow$ more solar",
                      xy=(x[2], pv[2]), xytext=(0.19 * x_right, pv.max() * 0.9),
                      color=ACCENT_INK, fontsize=9.5, ha="left", va="center",
@@ -107,17 +124,54 @@ def plot_pv_batt_vs_capex(
                    fontsize=9.5 if compact else 10.5)
     axL.set_ylabel("Optimal solar (kW)", color=ACCENT_INK, fontsize=9.5 if compact else 10.5)
     axR.set_ylabel("Optimal battery (kWh)", color=CAUT, fontsize=9.5 if compact else 10.5)
-    axL.set_ylim(0, pv.max() * 1.14)
-    axR.set_ylim(0, max(bt.max(), 1) * 1.14)
+    axL.set_ylim(0, pv_ymax if pv_ymax else pv.max() * 1.14)
+    axR.set_ylim(0, bt_ymax if bt_ymax else max(bt.max(), 1) * 1.14)
     axL.set_xlim(0, x_right)
     axL.tick_params(labelsize=8.5 if compact else 9.5)
     axR.tick_params(labelsize=8.5 if compact else 9.5, colors=CAUT)
     axL.spines["top"].set_visible(False)
     axR.spines["top"].set_visible(False)
-    axL.set_title(title, fontsize=11 if compact else 11.5, color=INK, pad=8, loc="left")
-    axL.legend(handles=[lP, lB], loc="upper center", fontsize=8.5 if compact else 9.5,
-               frameon=False, ncol=2, bbox_to_anchor=(0.5, -0.17 if compact else -0.16))
-    return fig, {"pv_flat": pv_flat, "pv_max": float(pv.max())}
+    return {"pv_flat": pv_flat, "pv_max": float(pv.max())}, (lP, lB)
+
+
+def plot_pv_batt_vs_capex_compare(
+    before: pd.DataFrame, after: pd.DataFrame, *,
+    batt_before: float, batt_after: float, title: str,
+    panel_labels: Tuple[str, str], min_capex: float = 25.0,
+) -> Tuple["object", Dict[str, Meta]]:
+    """Two side-by-side dual-axis panels on shared scales: a before/after
+    comparison of the same county under two price regimes. Returns
+    `(fig, {"before": meta, "after": meta})`."""
+    apply_style()
+    import matplotlib.pyplot as plt
+
+    b = before.sort_values("battery_capex_kwh")
+    b = b[b.battery_capex_kwh >= min_capex]
+    a = after.sort_values("battery_capex_kwh")
+    a = a[a.battery_capex_kwh >= min_capex]
+    pv_ymax = max(b.pv_kw.max(), a.pv_kw.max()) * 1.14
+    bt_ymax = max(b.batt_kwh.max(), a.batt_kwh.max(), 1) * 1.14
+    x_right = max(b.battery_capex_kwh.max(), a.battery_capex_kwh.max(),
+                  batt_before, batt_after) * 1.03
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12.6, 4.9))
+    ax1R, ax2R = ax1.twinx(), ax2.twinx()
+    mB, (lP, lB) = _draw_pv_batt(ax1, ax1R, b, batt_before, compact=True, rich=False,
+                                 pv_ymax=pv_ymax, bt_ymax=bt_ymax, x_right=x_right,
+                                 price_marker_label="2025 price")
+    mA, _ = _draw_pv_batt(ax2, ax2R, a, batt_after, compact=True, rich=False,
+                          pv_ymax=pv_ymax, bt_ymax=bt_ymax, x_right=x_right,
+                          price_marker_label="today's price")
+    # De-clutter shared inner labels: PV axis on the left panel, battery axis on the right.
+    ax1R.set_ylabel("")
+    ax2.set_ylabel("")
+    ax1.set_title(panel_labels[0], fontsize=11, color=ACCENT_INK, pad=8, loc="left")
+    ax2.set_title(panel_labels[1], fontsize=11, color=NEG, pad=8, loc="left")
+    fig.suptitle(title, fontsize=12.5, color=INK, x=0.02, ha="left", y=1.03)
+    fig.legend(handles=[lP, lB], loc="upper center", fontsize=9.5, frameon=False,
+               ncol=2, bbox_to_anchor=(0.5, -0.01))
+    fig.tight_layout()
+    return fig, {"before": mB, "after": mA}
 
 
 def plot_marginal_solar_value_ladder(

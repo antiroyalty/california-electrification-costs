@@ -36,5 +36,7 @@ FIG_DIR = REPO / "figure_builder" / "figures"
 COMBINED_DOC = REPO / "claims-c459506.html"
 
 
-def sweep_csv_path(slug: str) -> Path:
-    return SWEEP_DIR / f"sweep_8760_{slug}.csv"
+def sweep_csv_path(slug: str, regime: str = "post_itc_2026") -> Path:
+    """Cache path for a county sweep. Keyed by regime, since the sweep depends on
+    solar's price, which differs between policy regimes."""
+    return SWEEP_DIR / f"sweep_8760_{slug}_{regime}.csv"
