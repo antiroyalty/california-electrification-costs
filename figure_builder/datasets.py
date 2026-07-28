@@ -20,6 +20,22 @@ from figure_builder.pricing import live_prices
 SWEEP_COLUMNS = ["battery_capex_kwh", "pv_kw", "batt_kwh", "total_cost", "coverage"]
 
 
+def resolve_pv_capex(pv_capex_per_kw=None, regime=None) -> float:
+    """The fixed PV $/kW a claim-figure sweep uses: an explicit override if given,
+    otherwise the live net price for the regime (the model's sourced, tested
+    price).
+
+    This binds the figure data path to the model price by default. It is the
+    regression guard for the 2026-07-27 finding that an old figure was drawn at
+    an unlabeled $4,000/kW sensitivity-sweep endpoint instead of the real price.
+    Sensitivity sweeps may still pass an explicit price; the default cannot
+    silently drift to an arbitrary constant.
+    """
+    if pv_capex_per_kw is not None:
+        return float(pv_capex_per_kw)
+    return live_prices(regime).pv_net_per_kw
+
+
 def collect_battery_capex_sweep(
     slug: str,
     *,
@@ -49,7 +65,7 @@ def collect_battery_capex_sweep(
 
     from pipeline.steps.step9b_cooptimize_core import CooptInputs, _solve_lp
 
-    c_pv = pv_capex_per_kw if pv_capex_per_kw is not None else prices.pv_net_per_kw
+    c_pv = resolve_pv_capex(pv_capex_per_kw, regime)
     di = county_dispatch_inputs(slug, scenario)
     inp = CooptInputs(load_kwh=di.load, pv_gen_per_kw=di.pv_gen_per_kw,
                       import_rates=di.p_imp, export_rates=di.p_exp)
