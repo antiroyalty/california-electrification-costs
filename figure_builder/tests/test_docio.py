@@ -84,6 +84,17 @@ def test_slice_between():
     assert docio.slice_between(html, "section", "rest") == "sectionBB"
 
 
+def test_set_commit_label_rewrites_masthead_and_footer():
+    html = ('<div class="buildinfo"><span>commit <b>c459506</b></span></div>'
+            '<footer>Generated from commit c459506 &middot; x</footer>')
+    out = docio.set_commit_label(html, "74e2f33")
+    assert "c459506" not in out
+    assert "commit <b>74e2f33</b>" in out
+    assert "Generated from commit 74e2f33" in out
+    # idempotent when the sha already matches
+    assert docio.set_commit_label(out, "74e2f33") == out
+
+
 def test_figure_html_shape():
     out = docio.figure_html("BASE64", "a caption", "alt text")
     assert 'src="data:image/png;base64,BASE64"' in out

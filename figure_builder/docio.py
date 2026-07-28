@@ -130,6 +130,16 @@ def slice_between(html: str, start: str, end: str) -> str:
     return html[i:j]
 
 
+def set_commit_label(html: str, sha: str) -> str:
+    """Rewrite the doc's visible commit references (the masthead build-info block
+    and the footer "Generated from commit ...") to `sha`. Used when a snapshot is
+    copied forward to a new commit, so it self-identifies correctly instead of
+    inheriting the source snapshot's sha."""
+    html = re.sub(r"(commit <b>)[0-9a-f]{6,40}(</b>)", rf"\g<1>{sha}\g<2>", html)
+    html = re.sub(r"(Generated from commit )[0-9a-f]{6,40}", rf"\g<1>{sha}", html)
+    return html
+
+
 def strip_trailing_comment(s: str) -> str:
     """Trim a single trailing single-line HTML comment (e.g. a section banner)."""
     s = s.rstrip()
