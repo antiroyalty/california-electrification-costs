@@ -1,0 +1,19 @@
+{
+  "artifacts": [
+    "/Users/ana/Documents/Berkeley/CCAI/cost-of-solar-storage/figure_builder/sweeps/sweep_8760_alameda_post_itc_2026.csv",
+    "/Users/ana/Documents/Berkeley/CCAI/cost-of-solar-storage/figure_builder/sweeps/sweep_8760_fresno_post_itc_2026.csv",
+    "/Users/ana/Documents/Berkeley/CCAI/cost-of-solar-storage/figure_builder/sweeps/sweep_8760_los-angeles_post_itc_2026.csv",
+    "/Users/ana/Documents/Berkeley/CCAI/cost-of-solar-storage/figure_builder/sweeps/sweep_8760_san-diego_post_itc_2026.csv",
+    "/Users/ana/Documents/Berkeley/CCAI/cost-of-solar-storage/claims-c459506.html",
+    "/Users/ana/Documents/Berkeley/CCAI/cost-of-solar-storage/claims-c459506.html",
+    "/Users/ana/Documents/Berkeley/CCAI/cost-of-solar-storage/figure_builder/figures/bridge_waterfall.png",
+    "/Users/ana/Documents/Berkeley/CCAI/cost-of-solar-storage/claim1.html",
+    "/Users/ana/Documents/Berkeley/CCAI/cost-of-solar-storage/claim2.html",
+    "/Users/ana/Documents/Berkeley/CCAI/cost-of-solar-storage/claim3.html"
+  ],
+  "batt_net_per_kwh": 1460.64,
+  "combined_doc": "/Users/ana/Documents/Berkeley/CCAI/cost-of-solar-storage/claims-c459506.html",
+  "git_sha": "a3e7549",
+  "pv_net_per_kw": 3300.0,
+  "regime": "post_itc_2026"
+}

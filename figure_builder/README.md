@@ -24,7 +24,16 @@ redefined here.
 
 ## Usage
 
+The combined doc follows a **one-page-per-commit** convention: recipes target
+`claims-<current-sha>.html` (resolved from `git rev-parse --short HEAD`), never a
+hardcoded filename, so a prior commit's archived snapshot is never overwritten.
+`snapshot` creates the current commit's file (seeded from the most recent
+snapshot) if it does not exist yet; `all`/`mechanism`/`counties` seed it
+automatically.
+
 ```bash
+python3 -m figure_builder snapshot                  # ensure claims-<sha>.html exists
+
 # Regenerate everything (sweeps -> figures -> patch combined doc -> split)
 python3 -m figure_builder all
 

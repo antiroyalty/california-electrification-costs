@@ -31,12 +31,47 @@ if str(REPO) not in sys.path:
 SWEEP_DIR = REPO / "figure_builder" / "sweeps"
 FIG_DIR = REPO / "figure_builder" / "figures"
 
-# The combined review doc the claim recipes patch. Per-claim files are derived
-# from it by recipes.split_claims.
-COMBINED_DOC = REPO / "claims-c459506.html"
-
-
 def sweep_csv_path(slug: str, regime: str = "post_itc_2026") -> Path:
     """Cache path for a county sweep. Keyed by regime, since the sweep depends on
     solar's price, which differs between policy regimes."""
     return SWEEP_DIR / f"sweep_8760_{slug}_{regime}.csv"
+
+
+# --- one claims snapshot per commit -----------------------------------------
+# The review doc follows a one-page-per-commit convention: claims-<sha>.html.
+# Recipes always target the CURRENT commit's file so an archived snapshot from a
+# prior commit is never overwritten.
+import re as _re
+
+
+def git_short_sha() -> str:
+    """Short sha of HEAD. Uses rev-parse directly so it never carries a
+    `-dirty` suffix (which would corrupt the filename)."""
+    import subprocess
+    return subprocess.check_output(
+        ["git", "rev-parse", "--short", "HEAD"], cwd=REPO, text=True).strip()
+
+
+def latest_claims_snapshot(exclude: Path = None):
+    """Most recently modified claims-<sha>.html snapshot on disk, or None. The
+    Apple-Notes style variant and other non-sha files are ignored."""
+    cands = [p for p in REPO.glob("claims-*.html")
+             if _re.fullmatch(r"claims-[0-9a-f]{7,40}\.html", p.name) and p != exclude]
+    return max(cands, key=lambda p: p.stat().st_mtime) if cands else None
+
+
+def current_claims_doc(seed: bool = True) -> Path:
+    """Path to the combined claims doc for the CURRENT commit
+    (claims-<sha>.html). If it does not exist yet and `seed` is True, copy it
+    forward from the most recent existing snapshot, so a new commit gets its own
+    file to patch instead of overwriting an archived one."""
+    import shutil
+    target = REPO / f"claims-{git_short_sha()}.html"
+    if seed and not target.exists():
+        prior = latest_claims_snapshot(exclude=target)
+        if prior is None:
+            raise FileNotFoundError(
+                "no existing claims-<sha>.html to seed a new snapshot from")
+        shutil.copy(prior, target)
+        print(f"[figure_builder] seeded {target.name} from {prior.name}")
+    return target

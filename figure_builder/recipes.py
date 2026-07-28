@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from figure_builder import COMBINED_DOC, FIG_DIR
+from figure_builder import FIG_DIR, current_claims_doc
 from figure_builder import docio
 from figure_builder.charts import (
     plot_battery_value_waterfall, plot_marginal_solar_value_ladder,
@@ -83,12 +83,14 @@ def _mechanism_fragment(prices_now, prices_2025, mA, mB, mC, b64A, b64B, b64C) -
   <div class="callout"><strong>One sentence for the skeptic:</strong> the battery is not a substitute for solar. It is what lets the marginal kWh of solar reach the peak price instead of the export price, which is exactly why optimal solar goes <em>up</em>, not down, as storage gets cheaper.</div>'''
 
 
-def build_mechanism_block(doc=COMBINED_DOC, *, county="alameda") -> Path:
-    """Rebuild the Claim-1 mechanism block and patch it into the combined doc.
-    The headline figure is a 2025-vs-current-law before/after; the mechanism and
-    ceiling panels are drawn at current law. Idempotent."""
+def build_mechanism_block(doc=None, *, county="alameda") -> Path:
+    """Rebuild the Claim-1 mechanism block and patch it into the combined doc
+    (the current commit's claims-<sha>.html by default). The headline figure is a
+    2025-vs-current-law before/after; the mechanism and ceiling panels are drawn
+    at current law. Idempotent."""
     from appliances.incentive_policy import PolicyRegime
 
+    doc = Path(doc) if doc is not None else current_claims_doc()
     prices_now = live_prices()
     prices_2025 = live_prices(PolicyRegime.ITC_2025)
     sweep_now = collect_battery_capex_sweep(county)
@@ -113,12 +115,13 @@ def build_mechanism_block(doc=COMBINED_DOC, *, county="alameda") -> Path:
     return Path(doc)
 
 
-def build_county_grid(doc=COMBINED_DOC) -> Path:
+def build_county_grid(doc=None) -> Path:
     """Rebuild the four-county Claim-1 grid as 2025-vs-current-law before/after
     comparisons, stacked full-width, and patch it into the combined doc.
     Idempotent."""
     from appliances.incentive_policy import PolicyRegime
 
+    doc = Path(doc) if doc is not None else current_claims_doc()
     prices_now = live_prices()
     prices_2025 = live_prices(PolicyRegime.ITC_2025)
     cells = []
@@ -181,12 +184,12 @@ def _nav(active: str, src_name: str) -> str:
     return "\n".join(out)
 
 
-def split_claims(doc=COMBINED_DOC) -> list:
+def split_claims(doc=None) -> list:
     """Split the combined review doc into standalone claim1/2/3.html files with
     per-file nav and title. Non-destructive: the combined doc is left intact."""
     import re
 
-    src = Path(doc)
+    src = Path(doc) if doc is not None else current_claims_doc()
     src_name = src.name
     h = src.read_text()
 

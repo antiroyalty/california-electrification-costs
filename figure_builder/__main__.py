@@ -17,7 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from figure_builder import COMBINED_DOC, FIG_DIR, sweep_csv_path
+from figure_builder import FIG_DIR, current_claims_doc, sweep_csv_path
 from figure_builder.datasets import collect_battery_capex_sweep
 from figure_builder.dispatch import CLAIM1_COUNTIES
 from figure_builder.pricing import live_prices
@@ -56,6 +56,14 @@ def _cmd_split(_args):
     return [str(p) for p in split_claims()]
 
 
+def _cmd_snapshot(_args):
+    """Ensure the current commit has its own claims-<sha>.html, seeding it from
+    the most recent snapshot if needed. Never overwrites an archived snapshot."""
+    doc = current_claims_doc()
+    print(f"Current-commit claims doc: {doc.name}")
+    return [str(doc)]
+
+
 def _cmd_all(args):
     artifacts = []
     artifacts += _cmd_sweeps(args)
@@ -67,22 +75,15 @@ def _cmd_all(args):
     return artifacts
 
 
-def _git_sha() -> str:
-    try:
-        from helpers.main_helpers import git_short_sha
-        return git_short_sha()
-    except Exception:
-        return "unknown"
-
-
 def _write_metadata(artifacts) -> None:
+    from figure_builder import git_short_sha
     prices = live_prices()
     meta = {
         "regime": prices.regime,
-        "git_sha": _git_sha(),
+        "git_sha": git_short_sha(),
         "pv_net_per_kw": prices.pv_net_per_kw,
         "batt_net_per_kwh": prices.batt_net_per_kwh,
-        "combined_doc": str(COMBINED_DOC),
+        "combined_doc": str(current_claims_doc(seed=False)),
         "artifacts": artifacts,
     }
     path = FIG_DIR / "run_metadata.json"
@@ -92,8 +93,9 @@ def _write_metadata(artifacts) -> None:
 
 
 _COMMANDS = {
-    "sweeps": _cmd_sweeps, "mechanism": _cmd_mechanism, "counties": _cmd_counties,
-    "bridge": _cmd_bridge, "split": _cmd_split, "all": _cmd_all,
+    "snapshot": _cmd_snapshot, "sweeps": _cmd_sweeps, "mechanism": _cmd_mechanism,
+    "counties": _cmd_counties, "bridge": _cmd_bridge, "split": _cmd_split,
+    "all": _cmd_all,
 }
 
 
