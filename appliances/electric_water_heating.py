@@ -2,6 +2,9 @@ from typing import Dict, Optional
 import os
 import pandas as pd
 from appliances.electric_base import ElectricAppliance, IncentiveScenario
+from appliances.incentive_policy import (
+    PolicyRegime, DEFAULT_POLICY_REGIME, federal_25c_credit, regime_summary,
+)
 from helpers.main_helpers import slugify_county_name
 
 class ElectricWaterHeatingAppliance(ElectricAppliance):
@@ -32,24 +35,39 @@ class ElectricWaterHeatingAppliance(ElectricAppliance):
         base_cost: float = 2637.0,
         lifetime_years: int = 15,
         capacity_gallons: int = 55,
+        policy_regime: PolicyRegime = DEFAULT_POLICY_REGIME,
     ):
         super().__init__(f"electric_{heater_type}_water_heater", base_cost, lifetime_years)
         self.heater_type = heater_type
         self.capacity_gallons = capacity_gallons
         self.county_slug: Optional[str] = None
-        
-        # Add federal heat pump water heater tax credit
+        self.policy_regime = policy_regime
+
+        # Federal heat pump water heater tax credit (IRC 25C), gated on the regime.
         self._add_federal_heat_pump_water_heater_incentive()
 
     def _add_federal_heat_pump_water_heater_incentive(self) -> None:
-        """Add federal 30% tax credit for heat pump water heaters."""
+        """Add the federal IRC 25C credit for heat pump water heaters, only if it
+        legally applies under this appliance's policy regime. incentive_policy.py
+        is the single source of truth for whether the credit exists (repealed by
+        OBBBA section 70505 for property placed in service after 2025-12-31) and
+        for its value. Under the default POST_ITC_2026 regime no incentive is
+        created, so net cost == gross."""
+        credit = federal_25c_credit(self.policy_regime)
+        if credit is None:
+            return
+        fraction, cap = credit
         self._add_federal_incentive(
-            name="Federal Heat Pump Water Heater Tax Credit",
-            value=30.0,
+            name="Federal Heat Pump Water Heater Tax Credit (IRC 25C)",
+            value=fraction * 100.0,
             unit="%",
-            max_value=2000.0,
-            description="Federal 30% tax credit for residential heat pump water heaters (through 2032)",
-            source_url="https://www.irs.gov/credits-deductions/residential-clean-energy-credit"
+            max_value=cap,
+            description=(
+                f"Federal energy efficient home improvement credit (IRC 25C), "
+                f"{fraction * 100:.0f}% of installed cost capped at ${cap:,.0f}/yr for "
+                f"heat pump water heaters; {regime_summary(self.policy_regime)}"
+            ),
+            source_url="https://www.irs.gov/newsroom/faqs-for-modification-of-sections-25c-25d-25e-30c-30d-45l-45w-and-179d-under-public-law-119-21-139-stat-72-july-4-2025-commonly-known-as-the-one-big-beautiful-bill-obbb",
         )
 
     @classmethod
@@ -77,7 +95,8 @@ class ElectricWaterHeatingAppliance(ElectricAppliance):
         })
 
     @classmethod
-    def for_county(cls, county_slug: str, heater_type: str = "heat_pump") -> "ElectricWaterHeatingAppliance":
+    def for_county(cls, county_slug: str, heater_type: str = "heat_pump",
+                   policy_regime: PolicyRegime = DEFAULT_POLICY_REGIME) -> "ElectricWaterHeatingAppliance":
         df = cls._load_config()
 
         if county_slug in df.index:
@@ -86,7 +105,8 @@ class ElectricWaterHeatingAppliance(ElectricAppliance):
             row = cls._state_median_row(df)
 
         base_cost = float(row[cls.CAPITAL_COST_COLUMN_NAME])
-        inst = cls(heater_type=heater_type, base_cost=base_cost, lifetime_years=15)
+        inst = cls(heater_type=heater_type, base_cost=base_cost, lifetime_years=15,
+                   policy_regime=policy_regime)
         inst.county_slug = county_slug
         return inst
 

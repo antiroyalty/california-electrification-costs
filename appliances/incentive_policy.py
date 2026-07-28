@@ -21,8 +21,11 @@ IRC 25C on heat pumps and heat pump water heaters, and IRC 30D on vehicles, alon
 credit on solar and storage. See INCENTIVE_REGISTRY below for the full provenance table mapping
 each credit to the call site that applies it, and WIRING_SEQUENCE for the agreed order of work.
 
-Nothing is wired to this module yet. It is the single place the LP sizing price and every plot
-reference label should read from once integration begins.
+Wiring status (2026-07): IRC 25D (solar, storage) reads its regime gating from this module
+(federal_itc_fraction), and IRC 25C (heat pump, heat pump water heater) and IRC 30D (EV) do
+too (federal_25c_credit, federal_30d_amount). This module is the single source of truth for
+which federal incentives legally exist by regime; the appliance classes read the gating from
+here and own only the gross costs.
 """
 
 from __future__ import annotations
@@ -144,17 +147,24 @@ FEDERAL_25C = DatedIncentive(
     applies_to="space_heating+water_heating",
     statute_or_program="IRC 25C",
     citation=(
-        "Repealed for property placed in service after 2025-12-31 by the One Big "
-        "Beautiful Bill Act, Pub. L. 119-21 (2025-07-04). "
-        "TODO: pin the specific OBBBA section number and a CRS or JCT cite before "
-        "this appears in the paper."
+        "Terminated by the One Big Beautiful Bill Act section 70505 for property placed "
+        "in service after 2025-12-31. Pub. L. 119-21, 139 Stat. 72 (2025-07-04). "
+        "IRS guidance on the OBBBA modification of sections 25C/25D/30D: "
+        "https://www.irs.gov/newsroom/faqs-for-modification-of-sections-25c-25d-25e-30c-30d-45l-45w-and-179d-under-public-law-119-21-139-stat-72-july-4-2025-commonly-known-as-the-one-big-beautiful-bill-obbb"
     ),
-    verification_status="needs_verification",
+    verification_status="verified",
     note=(
-        "Modeled in electric_heating.py and electric_water_heating.py as a flat 30 percent "
-        "capped at $2,000, applied to each appliance independently. Confirm the statutory "
-        "cap is per-appliance and not a combined annual cap across 25C property, which "
-        "would reduce the modeled ITC-era benefit."
+        "CAP IS COMBINED, NOT PER-APPLIANCE. The $2,000 is a single annual aggregate "
+        "limit across heat pumps, heat pump water heaters, and biomass stoves/boilers "
+        "(IRC 25C(b)(5)(A); IRS Energy Efficient Home Improvement Credit, "
+        "https://www.irs.gov/credits-deductions/energy-efficient-home-improvement-credit). "
+        "This model applies $2,000 to EACH appliance independently (electric_heating.py, "
+        "electric_water_heating.py), which over-counts the credit for any scenario that "
+        "installs both a heat pump AND a heat pump water heater in the same year. This "
+        "does NOT affect current-law results (25C = 0 under POST_ITC_2026); it only "
+        "inflates the ITC_2025 comparison. A correct fix is a bundle-level cap applied "
+        "where appliances are summed (step14), left as a separate decision so it is not "
+        "conflated with the OBBBA repeal delta."
     ),
 )
 
@@ -171,12 +181,13 @@ FEDERAL_30D = DatedIncentive(
     applies_to=APPLIES_TO_VEHICLE,
     statute_or_program="IRC 30D",
     citation=(
-        "Terminated for vehicles acquired after 2025-09-30 by the One Big Beautiful "
-        "Bill Act, Pub. L. 119-21 (2025-07-04). "
-        "TODO: pin the specific OBBBA section number and a CRS or JCT cite before "
-        "this appears in the paper."
+        "Terminated by the One Big Beautiful Bill Act section 70502(a) for vehicles "
+        "acquired after 2025-09-30 (amended IRC 30D(h), striking the prior 2032 date). "
+        "Pub. L. 119-21, 139 Stat. 72 (2025-07-04). "
+        "IRS guidance on the OBBBA modification of sections 25C/25D/30D: "
+        "https://www.irs.gov/newsroom/faqs-for-modification-of-sections-25c-25d-25e-30c-30d-45l-45w-and-179d-under-public-law-119-21-139-stat-72-july-4-2025-commonly-known-as-the-one-big-beautiful-bill-obbb"
     ),
-    verification_status="needs_verification",
+    verification_status="verified",
     note=(
         "Note the date: 30D dies 2025-09-30, three months BEFORE 25C and 25D. The "
         "regime enum is a two-value approximation and does not represent that gap. "
@@ -278,6 +289,32 @@ def federal_itc_fraction(regime: PolicyRegime = DEFAULT_POLICY_REGIME) -> float:
     if regime == PolicyRegime.ITC_2025:
         return FEDERAL_ITC_25D.fraction or 0.0
     return 0.0
+
+
+def federal_25c_credit(regime: PolicyRegime = DEFAULT_POLICY_REGIME):
+    """(fraction, per-appliance cap $) of the IRC 25C energy-efficient-home-
+    improvement credit that legally applies under `regime`, or None if it does not.
+
+    Terminated by OBBBA section 70505 after 2025-12-31, so None under current law.
+    Mirrors federal_itc_fraction: this reports the credit that EXISTS, not the
+    amount captured (the full/half/no IncentiveScenario multiplier is applied by
+    the appliance). NOTE the cap is modeled here per appliance; the statute's
+    $2,000 is a COMBINED annual cap across heat pumps + HPWH + biomass. See
+    FEDERAL_25C.note. This only affects the ITC_2025 comparison (25C = 0 today)."""
+    if regime == PolicyRegime.ITC_2025:
+        return (FEDERAL_25C.fraction, FEDERAL_25C.max_value)
+    return None
+
+
+def federal_30d_amount(regime: PolicyRegime = DEFAULT_POLICY_REGIME):
+    """Flat dollar IRC 30D clean-vehicle credit that legally applies under
+    `regime`, or None if it does not.
+
+    Terminated by OBBBA section 70502(a) for vehicles acquired after 2025-09-30,
+    so None under current law."""
+    if regime == PolicyRegime.ITC_2025:
+        return FEDERAL_30D.flat_amount
+    return None
 
 
 def regime_summary(regime: PolicyRegime = DEFAULT_POLICY_REGIME) -> str:
