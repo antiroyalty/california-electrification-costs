@@ -66,12 +66,18 @@ def current_claims_doc(seed: bool = True) -> Path:
     forward from the most recent existing snapshot, so a new commit gets its own
     file to patch instead of overwriting an archived one."""
     import shutil
-    target = REPO / f"claims-{git_short_sha()}.html"
+    sha = git_short_sha()
+    target = REPO / f"claims-{sha}.html"
     if seed and not target.exists():
         prior = latest_claims_snapshot(exclude=target)
         if prior is None:
             raise FileNotFoundError(
                 "no existing claims-<sha>.html to seed a new snapshot from")
         shutil.copy(prior, target)
-        print(f"[figure_builder] seeded {target.name} from {prior.name}")
+        # The commit sha is baked into the doc's visible masthead/footer; rewrite
+        # it so the new snapshot self-identifies instead of inheriting prior's.
+        from figure_builder import docio
+        target.write_text(docio.set_commit_label(target.read_text(), sha))
+        print(f"[figure_builder] seeded {target.name} from {prior.name} "
+              f"(commit label set to {sha})")
     return target
