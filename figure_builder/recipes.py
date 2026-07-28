@@ -58,6 +58,8 @@ def _write(doc, html: str) -> None:
 def _mechanism_fragment(prices_now, prices_2025, mA, mB, mC, b64A, b64B, b64C) -> str:
     b_2025 = f"${prices_2025.batt_net_per_kwh:,.0f}/kWh net"
     b_now = f"${prices_now.batt_net_per_kwh:,.0f}/kWh net"
+    s_2025 = f"${prices_2025.pv_net_per_kw:,.0f}/kW"
+    s_now = f"${prices_now.pv_net_per_kw:,.0f}/kW"
     return f'''  <div class="callout" style="border-left-color:var(--accent-ink);">
     <strong>Why this happens: the LP&rsquo;s own logic.</strong> The result looks paradoxical only if solar and storage are substitutes. In the objective function they are <strong>complements</strong>, and the reason is two terms:
   </div>
@@ -73,7 +75,7 @@ def _mechanism_fragment(prices_now, prices_2025, mA, mB, mC, b64A, b64B, b64C) -
     <p class="obj-punch">A battery earns only the <strong>difference</strong> between those two prices, net of ~10% round-trip loss and a mid-life replacement. So the battery only enters when it is cheap. The moment it does, it lets surplus midday solar reach the evening peak, lifting the value of the marginal kWh of solar from p<sub>exp</sub> to p<sub>imp</sub>. Cheaper storage <strong>raises</strong> the optimal amount of solar. It never replaces it.</p>
   </div>
 
-  <figure class="fig"><img src="data:image/png;base64,{b64A}" alt="Optimal solar and battery vs battery cost, 2025 with ITC versus current law, Alameda" /><figcaption><strong>2025 vs. now: removing the federal ITC.</strong> Left, 2025, with the 30% ITC (battery {b_2025}): the solar-only optimum sat at {mA['before']['pv_flat']:.2f}&nbsp;kW, rising toward {mA['before']['pv_max']:.2f}&nbsp;kW as cheaper storage enters. Right, current law, the ITC expired (battery {b_now}): pricier storage pushes the battery firmly to zero at market prices and the solar-only optimum settles at {mA['after']['pv_flat']:.2f}&nbsp;kW. Removing the credit makes storage pencil out <em>less</em>, so Claim&nbsp;1 strengthens. Both panels share axes. Only battery capex is swept; solar&rsquo;s price is fixed within each panel. Real Step&nbsp;9b co-optimization, Alameda / PG&amp;E, full-electrification load.</figcaption></figure>
+  <figure class="fig"><img src="data:image/png;base64,{b64A}" alt="Optimal solar and battery vs battery cost, 2025 with ITC versus current law, Alameda" /><figcaption><strong>2025 vs. now: removing the federal ITC.</strong> Left, 2025, with the 30% ITC (battery {b_2025}): the solar-only optimum sat at {mA['before']['pv_flat']:.2f}&nbsp;kW, rising toward {mA['before']['pv_max']:.2f}&nbsp;kW as cheaper storage enters. Right, current law, the ITC expired (battery {b_now}): pricier storage pushes the battery firmly to zero at market prices and the solar-only optimum settles at {mA['after']['pv_flat']:.2f}&nbsp;kW. Removing the credit makes storage pencil out <em>less</em>, so Claim&nbsp;1 strengthens. Both panels share axes. Only battery capex is swept; <strong>solar&rsquo;s price is fixed at its net installed cost within each panel: {s_2025} in 2025 (gross $3,300/kW less the 30% ITC), {s_now} under current law (ITC repealed, net = gross)</strong>. Real Step&nbsp;9b co-optimization, Alameda / PG&amp;E, full-electrification load.</figcaption></figure>
 
   <div class="fig-grid">
     <figure class="fig"><img src="data:image/png;base64,{b64B}" alt="A battery raises the value of the marginal kWh of solar" /><figcaption><strong>The mechanism.</strong> The last kWh of solar is worth only <strong>${mB['v_export']:.3f}</strong> if exported at the ACC rate, below solar&rsquo;s own ${mB['pv_lcoe']:.3f}/kWh break-even, so the LP stops building. A battery shifts that same kWh into the evening peak, where it offsets a <strong>${mB['v_peak']:.3f}</strong> import (after round-trip loss). That is well above break-even, so the LP builds more. Alameda / PG&amp;E, current law.</figcaption></figure>
@@ -101,7 +103,8 @@ def build_mechanism_block(doc=None, *, county="alameda") -> Path:
         sweep_2025, sweep_now,
         batt_before=prices_2025.batt_net_per_kwh, batt_after=prices_now.batt_net_per_kwh,
         title="Alameda (PG&E): storage economics before and after the federal ITC expired",
-        panel_labels=("2025 — with the 30% federal ITC", "Now — ITC expired (current law)"))
+        panel_labels=(f"2025 — 30% ITC · solar ${prices_2025.pv_net_per_kw:,.0f}/kW",
+                      f"Now — ITC expired · solar ${prices_now.pv_net_per_kw:,.0f}/kW"))
     figB, mB = plot_marginal_solar_value_ladder(di, prices_now)
     figC, mC = plot_pv_ceiling(sweep_now, di, batt_price_net=prices_now.batt_net_per_kwh)
 
@@ -132,7 +135,8 @@ def build_county_grid(doc=None) -> Path:
             sweep_2025, sweep_now,
             batt_before=prices_2025.batt_net_per_kwh, batt_after=prices_now.batt_net_per_kwh,
             title=f"{label} ({util})",
-            panel_labels=("2025 · with ITC", "now · no ITC"))
+            panel_labels=(f"2025 · ITC · PV ${prices_2025.pv_net_per_kw:,.0f}/kW",
+                          f"now · no ITC · PV ${prices_now.pv_net_per_kw:,.0f}/kW"))
         caption = f"<strong>{label} ({util}).</strong> {_COUNTY_CAPTIONS[slug]}"
         cells.append(docio.figure_html(
             docio.embed_png(fig), caption,
