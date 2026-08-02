@@ -165,6 +165,118 @@ def build_bridge(out=None) -> Path:
     return out
 
 
+# --- Claim-1 robustness: the installer-heuristic question (Duncan, 2026-07) -----
+# Kept as one self-contained recipe rather than a full collector/chart/grid build,
+# since it is a single robustness figure. It caches its own sweep so it is
+# reproducible and not a lost one-off.
+def _entry_threshold(cap, batt) -> float:
+    """Highest battery cost at which the optimal battery is still non-trivial."""
+    import numpy as np
+    m = np.asarray(batt) > 0.1
+    return float(np.asarray(cap)[m].max()) if m.any() else float("nan")
+
+
+def _installer_rule_fixed_pv_sweep(county, pv_offset, prices):
+    """Optimal battery vs battery cost with PV FIXED at the annual-offset size.
+    Cached to figure_builder/sweeps/sweep_8760_<county>_fixedpv_<regime>.csv."""
+    import pandas as pd
+    from figure_builder import SWEEP_DIR
+    from figure_builder.dispatch import SWEEP_POINTS
+    from pipeline.steps.step9b_cooptimize_core import CooptInputs, _solve_lp
+
+    path = SWEEP_DIR / f"sweep_8760_{county}_fixedpv_{prices.regime}.csv"
+    if path.exists():
+        return pd.read_csv(path)
+    di = county_dispatch_inputs(county)
+    inp = CooptInputs(load_kwh=di.load, pv_gen_per_kw=di.pv_gen_per_kw,
+                      import_rates=di.p_imp, export_rates=di.p_exp)
+    rows = []
+    for cb in SWEEP_POINTS:
+        r = _solve_lp(inp, allow_grid_charging=False, allow_batt_export=True,
+                      c_pv_kw=prices.pv_net_per_kw, c_batt_kwh=float(cb), c_batt_kw=0.0,
+                      pv_life_yrs=25, batt_life_yrs=15, discount_rate=0.07,
+                      c_deg_per_kwh=0.0, weights=None, cycle_monthly=False,
+                      fixed_pv_kw=pv_offset)
+        rows.append({"battery_capex_kwh": cb, "batt_kwh": max(r.batt_kwh, 0.0)})
+    df = pd.DataFrame(rows)
+    SWEEP_DIR.mkdir(parents=True, exist_ok=True)
+    df.to_csv(path, index=False)
+    return df
+
+
+def _plot_installer_rule(free, fixed, prices, pv_offset, title):
+    from figure_builder import charts as ch
+    ch.apply_style()
+    import matplotlib.pyplot as plt
+
+    fr = free[free.battery_capex_kwh >= 25].sort_values("battery_capex_kwh")
+    fx = fixed[fixed.battery_capex_kwh >= 25].sort_values("battery_capex_kwh")
+    thr_free = _entry_threshold(fr.battery_capex_kwh, fr.batt_kwh)
+    thr_fix = _entry_threshold(fx.battery_capex_kwh, fx.batt_kwh)
+    today = prices.batt_net_per_kwh
+    ymax = max(fx.batt_kwh.max(), fr.batt_kwh.max()) * 1.15
+
+    fig, ax = plt.subplots(figsize=(7.8, 4.9))
+    ax.plot(fr.battery_capex_kwh, fr.batt_kwh, color=ch.ACCENT, lw=2.6, marker="o",
+            ms=4, label="PV economically optimized (co-optimized)")
+    ax.plot(fx.battery_capex_kwh, fx.batt_kwh, color=ch.CAUT, lw=2.6, marker="s",
+            ms=4, label=f"PV fixed to 100% annual offset ({pv_offset:.1f} kW, installer rule)")
+    ax.axvline(today, color=ch.INK_FAINT, ls=(0, (2, 2)), lw=1.3)
+    ax.text(today - 16, ymax * 0.60,
+            f"today's battery price\n${today:,.0f}/kWh\n" + r"$\rightarrow$ zero under either rule",
+            ha="right", va="top", color=ch.INK_SOFT, fontsize=9, linespacing=1.3)
+    # entry thresholds as light ticks just above the axis
+    for thr, col in [(thr_free, ch.ACCENT_INK), (thr_fix, ch.CAUT)]:
+        ax.plot([thr, thr], [0, ymax * 0.05], color=col, lw=2.0)
+        ax.text(thr, ymax * 0.075, f"${thr:,.0f}", ha="center", va="bottom",
+                color=col, fontsize=8.5, fontweight="bold")
+    ax.text(thr_fix + (today - thr_fix) / 2, ymax * 0.16,
+            "battery only pencils\nbelow these prices", ha="center", va="bottom",
+            color=ch.INK_SOFT, fontsize=8.5, style="italic", linespacing=1.2)
+    ax.set_xlabel(r"Battery cost  (\$/kWh)   $\leftarrow$ cheaper", fontsize=10.5)
+    ax.set_ylabel("Optimal battery size (kWh)", fontsize=10.5)
+    ax.set_xlim(0, max(fx.battery_capex_kwh.max(), today) * 1.03)
+    ax.set_ylim(0, ymax)
+    for s in ["top", "right"]:
+        ax.spines[s].set_visible(False)
+    ax.set_title(title, fontsize=11, color=ch.INK, pad=10, loc="left")
+    ax.legend(loc="upper right", fontsize=9.5, frameon=False)
+    return fig, {"thr_free": thr_free, "thr_fix": thr_fix}
+
+
+def _installer_rule_fragment(prices, pv_offset, m, b64) -> str:
+    return f'''  <!-- INSTALLER-RULE body -->
+  <div class="callout" style="border-left-color:var(--accent-ink);">
+    <strong>Robustness: what if installers oversize solar?</strong> In practice a system is often sized to offset 100% of annual consumption, not to the economic optimum. That larger array (here {pv_offset:.1f}&nbsp;kW, versus the ~2&nbsp;kW optimum) spills far more midday surplus, which under NEM&nbsp;3.0 exports at only ~$0.05/kWh, so a battery has more to store. Does storage then pencil?
+  </div>
+
+  <figure class="fig"><img src="data:image/png;base64,{b64}" alt="Optimal battery vs battery cost, PV economically optimized versus PV fixed at annual offset, Alameda" /><figcaption><strong>Oversizing raises the battery threshold, but not to today&rsquo;s price.</strong> With PV fixed to the installer rule, a battery pencils out at a higher price (~${m['thr_fix']:,.0f}/kWh) than under the economic optimum (~${m['thr_free']:,.0f}/kWh), exactly as intuition suggests. But today&rsquo;s net battery price (${prices.batt_net_per_kwh:,.0f}/kWh) is still well above both thresholds, so the optimal battery is zero under either sizing rule. Alameda / PG&amp;E, current law, PV fixed at its ${prices.pv_net_per_kw:,.0f}/kW net cost. <em>Caveat:</em> the thresholds depend on the NEM&nbsp;3.0 export values, which are flat in the model (max ~$0.10/kWh); if the real ACC has higher-value evening hours, a battery could pencil at somewhat higher prices than shown.</figcaption></figure>
+  <!-- /INSTALLER-RULE body -->'''
+
+
+def build_installer_rule_figure(doc=None, county="alameda", label="Alameda (PG&E)") -> Path:
+    """Add the installer-heuristic robustness figure to the Claim-1 block: optimal
+    battery vs battery cost, PV economically optimized vs PV fixed at 100% annual
+    offset. Answers Duncan's 2026-07 question. Idempotent; inserted after the
+    mechanism block."""
+    doc = Path(doc) if doc is not None else current_claims_doc()
+    prices = live_prices()
+    di = county_dispatch_inputs(county)
+    pv_offset = di.annual_load / di.yield_per_kw
+    free = collect_battery_capex_sweep(county)
+    fixed = _installer_rule_fixed_pv_sweep(county, pv_offset, prices)
+    fig, m = _plot_installer_rule(
+        free, fixed, prices, pv_offset,
+        f"{label}: oversizing solar to the installer rule raises the battery threshold, "
+        f"not to today's price")
+    frag = _installer_rule_fragment(prices, pv_offset, m, docio.embed_png(fig))
+    html = _read(doc)
+    html = docio.upsert_marked_block(html, "INSTALLER-RULE", frag,
+                                     anchor=docio.end_marker("MECH-BLOCK"))
+    _write(doc, html)
+    return doc
+
+
 # --- document split ---------------------------------------------------------
 _NAV_ITEMS = [
     ("claim1.html", "Claim 1 &middot; Storage"),
