@@ -52,10 +52,12 @@ REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
+from appliances.electric_base import IncentiveScenario
 from appliances.solar_system import SolarSystemAppliance
 from appliances.battery_storage import BatteryStorageAppliance
 from appliances.electric_heating import ElectricHeatingAppliance
 from appliances.electric_water_heating import ElectricWaterHeatingAppliance
+from appliances.electric_vehicle import ElectricVehicleAppliance
 from appliances.electric_cooking import ElectricCookingAppliance
 from appliances.gas_stove import GasStoveAppliance
 from appliances.gas_water_heating import GasWaterHeatingAppliance
@@ -317,3 +319,66 @@ class TestGasVsElectricCostOrdering:
         assert induction_cost > gas_cost, (
             f"Induction (${induction_cost:,.0f}) is not more expensive than gas (${gas_cost:,.0f})."
         )
+
+
+class TestElectrificationIncentiveRegime:
+    """Step 2 of the incentive wiring (2026-07): IRC 25C (heat pump, heat pump
+    water heater) and IRC 30D (EV) are now gated on the policy regime, like 25D.
+    Default is current law (credits repealed by OBBBA, so absent); ITC_2025 is the
+    expired comparison regime where they apply. These pin the actual dollar deltas.
+    The California utility EV rebate is a state program, not repealed, so it
+    survives in every regime."""
+
+    def _pv_regime(self):
+        from appliances.incentive_policy import PolicyRegime
+        return PolicyRegime
+
+    def test_heat_pump_25c_absent_by_default_present_under_itc(self) -> None:
+        PolicyRegime = self._pv_regime()
+        hp_now = ElectricHeatingAppliance.for_county("alameda")
+        hp_itc = ElectricHeatingAppliance.for_county(
+            "alameda", policy_regime=PolicyRegime.ITC_2025)
+        assert not any("25C" in i.name for i in hp_now.incentives), (
+            "Under current law the federal 25C heat pump credit is repealed and "
+            "must not be applied."
+        )
+        assert any("25C" in i.name for i in hp_itc.incentives)
+        # The federal credit is exactly min(30% of gross, $2,000), per appliance.
+        delta = (hp_itc.calculate_total_incentives(IncentiveScenario.FULL_INCENTIVES)
+                 - hp_now.calculate_total_incentives(IncentiveScenario.FULL_INCENTIVES))
+        assert delta == pytest.approx(min(0.30 * hp_now.base_cost, 2000.0))
+
+    def test_water_heater_25c_absent_by_default_present_under_itc(self) -> None:
+        PolicyRegime = self._pv_regime()
+        wh_now = ElectricWaterHeatingAppliance.for_county("alameda")
+        wh_itc = ElectricWaterHeatingAppliance.for_county(
+            "alameda", policy_regime=PolicyRegime.ITC_2025)
+        assert not any("25C" in i.name for i in wh_now.incentives)
+        assert any("25C" in i.name for i in wh_itc.incentives)
+        delta = (wh_itc.calculate_total_incentives(IncentiveScenario.FULL_INCENTIVES)
+                 - wh_now.calculate_total_incentives(IncentiveScenario.FULL_INCENTIVES))
+        assert delta == pytest.approx(min(0.30 * wh_now.base_cost, 2000.0))
+
+    def test_ev_30d_gated_but_ca_rebate_survives(self) -> None:
+        PolicyRegime = self._pv_regime()
+        ev_now = ElectricVehicleAppliance()
+        ev_itc = ElectricVehicleAppliance(policy_regime=PolicyRegime.ITC_2025)
+        # Current law: no 30D, only the $3,000 CA utility rebate.
+        assert ev_now.calculate_total_incentives(
+            IncentiveScenario.FULL_INCENTIVES) == pytest.approx(3000.0)
+        # ITC era: 30D $7,500 stacks on the $3,000 CA rebate.
+        assert ev_itc.calculate_total_incentives(
+            IncentiveScenario.FULL_INCENTIVES) == pytest.approx(10500.0)
+        assert not any("30D" in i.name for i in ev_now.incentives)
+        assert any("30D" in i.name for i in ev_itc.incentives)
+
+    def test_regime_helpers(self) -> None:
+        from appliances.incentive_policy import (
+            federal_25c_credit, federal_30d_amount, PolicyRegime,
+        )
+        # Default current law: both credits repealed.
+        assert federal_25c_credit() is None
+        assert federal_30d_amount() is None
+        # ITC era: 30% capped $2,000, and flat $7,500.
+        assert federal_25c_credit(PolicyRegime.ITC_2025) == (0.30, 2000.0)
+        assert federal_30d_amount(PolicyRegime.ITC_2025) == 7500.0

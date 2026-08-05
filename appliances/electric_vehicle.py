@@ -1,5 +1,8 @@
 from typing import Dict
 from appliances.electric_base import ElectricAppliance, Incentive, IncentiveScenario
+from appliances.incentive_policy import (
+    PolicyRegime, DEFAULT_POLICY_REGIME, federal_30d_amount, regime_summary,
+)
 
 class ElectricVehicleAppliance(ElectricAppliance):
     def __init__(self, 
@@ -13,35 +16,48 @@ class ElectricVehicleAppliance(ElectricAppliance):
                     # https://theicct.org/wp-content/uploads/2021/06/EV-equity-feb2021.pdf - $/mile
                     # https://www.fhwa.dot.gov/policyinformation/statistics/2022/mv1.cfm - # of vehicles in CA
                     # https://www.fhwa.dot.gov/policyinformation/statistics/2022/vm2.cfm - # of miles driven in CA for all cars
-                 annual_insurance_cost: float = 2040.0): # https://theicct.org/wp-content/uploads/2021/06/EV-equity-feb2021.pdf - monthly insurance cost for EVs in CA
+                 annual_insurance_cost: float = 2040.0, # https://theicct.org/wp-content/uploads/2021/06/EV-equity-feb2021.pdf - monthly insurance cost for EVs in CA
+                 policy_regime: PolicyRegime = DEFAULT_POLICY_REGIME):
         """
         Initialize electric vehicle appliance.
-        
+
         Args:
             vehicle_type: Type of electric vehicle (default: "BEV" - Battery Electric Vehicle)
             base_cost: Base vehicle purchase cost in dollars
             lifetime_years: Expected vehicle ownership period in years
             annual_maintenance_cost: Annual maintenance cost in dollars
             annual_insurance_cost: Annual insurance cost in dollars
+            policy_regime: Decides whether the federal 30D credit legally applies.
         """
         super().__init__(f"electric_{vehicle_type.lower()}", base_cost, lifetime_years)
         self.vehicle_type = vehicle_type
         self.annual_maintenance_cost = annual_maintenance_cost
         self.annual_insurance_cost = annual_insurance_cost
-        
-        # Add federal EV tax credit
+        self.policy_regime = policy_regime
+
+        # Federal EV tax credit (IRC 30D), gated on the regime; CA utility rebate always.
         self._add_federal_ev_credit()
 
     def _add_federal_ev_credit(self) -> None:
-        """Add federal Clean Vehicle Credit for electric vehicles."""
-        self._add_federal_incentive(
-            name="Federal Clean Vehicle Credit",
-            value=7500.0,
-            unit="$",
-            description="Federal tax credit for new electric vehicles",
-            source_url="https://www.irs.gov/credits-deductions/clean-vehicle-credits"
-        )
-        
+        """Add the federal IRC 30D clean-vehicle credit ($7,500) only if it
+        legally applies under this appliance's policy regime (terminated by OBBBA
+        section 70502 for vehicles acquired after 2025-09-30). incentive_policy.py
+        owns whether it exists and its value. The California utility rebate below
+        is a STATE program, not repealed by OBBBA, so it is applied in every
+        regime."""
+        amount = federal_30d_amount(self.policy_regime)
+        if amount is not None:
+            self._add_federal_incentive(
+                name="Federal Clean Vehicle Credit (IRC 30D)",
+                value=amount,
+                unit="$",
+                description=(
+                    f"Federal clean vehicle credit (IRC 30D), ${amount:,.0f} for a new "
+                    f"EV; {regime_summary(self.policy_regime)}"
+                ),
+                source_url="https://www.irs.gov/newsroom/faqs-for-modification-of-sections-25c-25d-25e-30c-30d-45l-45w-and-179d-under-public-law-119-21-139-stat-72-july-4-2025-commonly-known-as-the-one-big-beautiful-bill-obbb",
+            )
+
         # # Federal Alternative Fuel Infrastructure Tax Credit for charging equipment.
         # alt_fuel_infra_credit = Incentive(
         #     name="Alternative Fuel Infrastructure Tax Credit",
