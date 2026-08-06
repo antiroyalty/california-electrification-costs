@@ -11,7 +11,9 @@ from scripts.build_nbt_export_schedules import (
     MONTHS,
     _parse_retrieved_on,
     _validate_component,
+    _validate_midas_units,
     _validate_pge_source_identity,
+    _validate_total_schedule_magnitude,
     parse_midas,
 )
 
@@ -33,6 +35,7 @@ def _minimal_sce_identity_rows(vintage: int) -> pd.DataFrame:
             "TimeStart": ["8:00:00", "8:00:00"],
             "ValueName": ["Jan Weekend HS0", "Jan Weekend HS0"],
             "Value": [0.05, 0.01],
+            "Unit": ["export $/kWh", "Export $/kWh"],
         }
     )
 
@@ -55,7 +58,10 @@ def _complete_sce_rows_with_one_masked_nan() -> pd.DataFrame:
             )
         ]
         rows["Value"] = value
-        return rows[["RIN", "RateName", "DateStart", "TimeStart", "ValueName", "Value"]]
+        rows["Unit"] = "export $/kWh"
+        return rows[
+            ["RIN", "RateName", "DateStart", "TimeStart", "ValueName", "Value", "Unit"]
+        ]
 
     generation = component("USCA-XXSC-NB26-0000", 0.05)
     # Reproduce the dangerous case: one schedule key has a missing observation
@@ -102,7 +108,9 @@ def test_pge_pdf_identity_accepts_exact_billing_year_and_application_vintage():
     text = (
         "PG&E Solar Billing Plan "
         "2026 Energy Export Credit (EEC) Values: "
-        "2024 Interconnection Application Year"
+        "2024 Interconnection Application Year "
+        "2026 Weekday Values ($) Per Kilowatt Hour "
+        "2026 Weekend/Holiday Values ($) Per Kilowatt Hour"
     )
     _validate_pge_source_identity(text, Path("pge.pdf"), billing_year=2026, vintage=2024)
 
@@ -115,7 +123,9 @@ def test_pge_pdf_identity_rejects_cli_year_or_vintage_mismatch(billing_year, vin
     text = (
         "PG&E Solar Billing Plan "
         "2026 Energy Export Credit (EEC) Values: "
-        "2024 Interconnection Application Year"
+        "2024 Interconnection Application Year "
+        "2026 Weekday Values ($) Per Kilowatt Hour "
+        "2026 Weekend/Holiday Values ($) Per Kilowatt Hour"
     )
     with pytest.raises(ValueError, match="PG&E source identity mismatch"):
         _validate_pge_source_identity(text, Path("pge.pdf"), billing_year, vintage)
@@ -126,3 +136,36 @@ def test_retrieval_date_is_explicit_strict_iso_provenance():
     for invalid in ("2026-8-6", "08/06/2026", "not-a-date"):
         with pytest.raises(argparse.ArgumentTypeError, match="retrieval date must be"):
             _parse_retrieved_on(invalid)
+
+
+def test_midas_unit_validation_accepts_utility_capitalization_difference():
+    _validate_midas_units(
+        pd.DataFrame({"Unit": ["export $/kWh", "Export $/kWh"]}),
+        Path("source.zip"),
+    )
+
+
+@pytest.mark.parametrize("unit", ["export ¢/kWh", "Export $/MWh", None])
+def test_midas_unit_validation_rejects_wrong_or_missing_units(unit):
+    with pytest.raises(ValueError, match="MIDAS (unit mismatch|Unit contains missing)"):
+        _validate_midas_units(pd.DataFrame({"Unit": [unit]}), Path("source.zip"))
+
+
+@pytest.mark.parametrize("rate", [0.0001, 8.0])
+def test_builder_magnitude_guardrail_rejects_likely_unit_scaling(rate):
+    rows = EXPECTED_KEYS.to_frame(index=False)
+    rows["rate_usd_per_kwh"] = rate
+    with pytest.raises(ValueError, match="magnitude guardrail"):
+        _validate_total_schedule_magnitude(rows, "test total schedule")
+
+
+def test_pge_pdf_identity_rejects_missing_usd_per_kwh_header():
+    text = (
+        "PG&E Solar Billing Plan "
+        "2026 Energy Export Credit (EEC) Values: "
+        "2024 Interconnection Application Year "
+        "2026 Weekday Values (cents) Per Kilowatt Hour "
+        "2026 Weekend/Holiday Values (cents) Per Kilowatt Hour"
+    )
+    with pytest.raises(ValueError, match="USD-per-kWh unit header"):
+        _validate_pge_source_identity(text, Path("pge.pdf"), 2026, 2024)
