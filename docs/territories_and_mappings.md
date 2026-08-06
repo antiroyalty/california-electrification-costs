@@ -1,4 +1,9 @@
-# County → Territory/Zone Mappings: Where They Matter and How To Wire Them
+# Superseded NBT mapping notes: County → Territory/Zone Mappings
+
+> The NBT export-rate mapping described below is obsolete. Official schedules
+> are utility × billing year × interconnection vintage, not county × building
+> climate zone. See `NBT_TARIFF_MODEL.md`. Non-NBT baseline territories may
+> still be relevant to retail baseline allowances.
 
 This note summarizes where county-to-territory/zone logic shows up in the pipeline, and how to thread CSV-backed mappings through gas/electric retail rates and NEM 3.0 export credits. It also calls out solar irradiance inputs, which are per-county weather rather than climate-zone based.
 
@@ -141,4 +146,3 @@ Notes:
   - Every `(utility, county_slug)` in `county_to_electric_territory.csv` resolves to a valid territory present in electric `BASELINE_ALLOWANCES`.
 
 - Consider CI checks to fail fast if any mapping is incomplete.
-

@@ -1,4 +1,8 @@
-# County + Climate-Zone Granularity — Design Doc
+# Superseded: County + Climate-Zone Granularity
+
+> This proposal was based on an incorrect interpretation of building climate
+> zone data as an NBT export-price dimension. It is retained only as research
+> history and must not be used for implementation. See `NBT_TARIFF_MODEL.md`.
 
 This document proposes how to incorporate climate-zone granularity, alongside county granularity, throughout the analysis pipeline — especially for NEM 3.0 export compensation that varies by utility/climate zone.
 

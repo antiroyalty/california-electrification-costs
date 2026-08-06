@@ -1,4 +1,9 @@
-# Step 9b — Co‑Optimization of Solar Size, Storage Size, and Hourly Dispatch
+# Superseded Step 9b co-optimization design notes
+
+> This design note predates the shared `tariffs/` package and still describes
+> the removed county/climate-zone export-rate path. It is retained as research
+> history only. See `NBT_TARIFF_MODEL.md` and the current Step 9b code for the
+> authoritative implementation.
 
 This document outlines a new pipeline step that co‑optimizes:
 - PV system size (kW)
@@ -165,4 +170,3 @@ Produce a summary showing:
 
 ---
 Questions welcome. I can scaffold the step with a minimal LP (pulp or cvxpy), wire inputs/outputs, and iterate on plan/rate detail and constraints as we validate.
-
