@@ -59,13 +59,6 @@ class DispatchInputs:
         return cover, cover / round_trip_eff
 
 
-def _rate_plans() -> Dict[str, dict]:
-    from helpers.electricity_rate_helpers import (
-        PGE_RATE_PLANS, SCE_RATE_PLANS, SDGE_RATE_PLANS,
-    )
-    return {"PG&E": PGE_RATE_PLANS, "SCE": SCE_RATE_PLANS, "SDG&E": SDGE_RATE_PLANS}
-
-
 def county_dispatch_inputs(
     slug: str,
     scenario: str = DEFAULT_SCENARIO,
@@ -74,13 +67,10 @@ def county_dispatch_inputs(
     """Assemble the 8760-hour arrays for one county, mirroring the setup Step 9b
     performs before solving the LP."""
     from helpers.main_helpers import get_scenario_path
-    from helpers.utility_helpers import get_utility_for_county
-    from helpers.nem3_export_rates import get_export_rate_table_for_county
+    from tariffs import NBTScenario, TariffCatalog, resolve_county_service_assignment
+    from tariffs.calendar import full_year_hourly_index
     from pipeline.steps.step9_solar_storage_dispatch_core import (
         prepare_weather_and_load, pv_timeseries_ac_kwh,
-    )
-    from pipeline.steps.step9b_cooptimize_core import (
-        _hourly_import_rate, _timestamp_index_8760,
     )
 
     cdir = os.path.join(get_scenario_path(base, scenario, HOUSING_TYPE), slug)
@@ -90,14 +80,9 @@ def county_dispatch_inputs(
         LOAD_COL,
     )
     pvgen = pv_timeseries_ac_kwh(wdf, 1.0)
-    util = get_utility_for_county(slug)
-    plans = _rate_plans()[util]
-    plan = plans[next(iter(plans))]
-    ts = _timestamp_index_8760(2018)
-    p_imp = np.array([_hourly_import_rate(plan, t) for t in ts])
-    xt = get_export_rate_table_for_county(
-        base_dir=os.path.join("data", "NEM3"),
-        utility=util, county_name_or_slug=slug,
-    )
-    p_exp = np.array([float(xt[t.month][t.hour]) for t in ts])
-    return DispatchInputs(slug, util, load, pvgen, p_imp, p_exp)
+    assignment = resolve_county_service_assignment(slug)
+    tariff = TariffCatalog().bundle(assignment.utility, NBTScenario())
+    ts = full_year_hourly_index(2026)
+    p_imp = np.array(tariff.import_schedule.rates_for(ts))
+    p_exp = np.array(tariff.export_schedule.rates_for(ts)) + tariff.acc_plus_rate
+    return DispatchInputs(slug, assignment.utility.value, load, pvgen, p_imp, p_exp)
