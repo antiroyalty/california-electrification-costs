@@ -1,5 +1,7 @@
 data/*
 !data/NEM3/
+sanity-check-raw-data/
+skills/
 # Source data for heat pump capex (TECH Clean California, per county) — drives
 # the largest capex line item in every electrified scenario; must be tracked
 # and reproducible, not silently missing on a fresh clone.
