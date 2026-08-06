@@ -30,6 +30,7 @@ def run(cfg: Config) -> None:
     EvaluateElectricityRates.process(
         base_dir, base_dir, cfg.scenario, cfg.housing_type, c_list,
         nbc_dollars_per_kwh_override=cfg.nbc_dollars_per_kwh_override,
+        nbt_scenario=cfg.nbt_scenario(),
     )
 
     # 13) Combine totals

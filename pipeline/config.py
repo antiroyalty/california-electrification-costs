@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from evaluations.constants import DEFAULT_DISCOUNT_RATE
+from tariffs.models import CustomerSegment, NBTScenario, ServiceType
 
 
 @dataclass
@@ -33,3 +34,19 @@ class Config:
     # utility's default (currently 0.0 for all three — see helpers/nem3_export_rates.py).
     nbc_dollars_per_kwh_override: Optional[float] = None
 
+    # Net Billing Tariff policy scenario. The default represents a system that
+    # applies for interconnection and is billed in 2026. Vintage is explicit
+    # because it materially changes both EEC shapes and the ACC Plus adder.
+    nbt_billing_year: int = 2026
+    nbt_vintage: int = 2026
+    nbt_customer_segment: str = CustomerSegment.STANDARD.value
+    nbt_include_acc_plus: bool = True
+
+    def nbt_scenario(self) -> NBTScenario:
+        return NBTScenario(
+            billing_year=self.nbt_billing_year,
+            nbt_vintage=self.nbt_vintage,
+            service_type=ServiceType.BUNDLED,
+            customer_segment=CustomerSegment(self.nbt_customer_segment),
+            include_acc_plus=self.nbt_include_acc_plus,
+        )
