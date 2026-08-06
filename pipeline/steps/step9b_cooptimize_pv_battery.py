@@ -5,8 +5,8 @@ This module builds a linear program (LP) to minimize annual total cost:
   annualized capex (PV + battery) + retail imports − NEM3 export credits (+ optional degradation cost)
 
 Notes
-- CSV‑only NEM3 export tables are loaded via helpers.nem3_export_rates
-- Retail import price is built from helpers.electricity_rate_helpers plans
+- Official NBT schedules are resolved through the tariffs package by utility,
+  billing year, and interconnection vintage.
 - Weather→PV per‑kW yield is computed using Step 9 core helpers (GHI‑based PVWatts‑style)
 
 Outputs (per county)
@@ -24,12 +24,13 @@ Usage examples
       --housing-type single-family-detached \
       --counties alameda los-angeles
 
-- Override retail plan and allow grid charging and battery exports (if desired):
+- Run Alameda under its required NBT import plan and allow grid charging and
+  battery exports (if desired):
     python3 step9b_cooptimize_pv_battery.py \
       --scenario baseline_coopt \
       --housing-type single-family-detached \
       --counties alameda \
-      --plan E-TOU-D \
+      --plan E-ELEC \
       --allow-grid-charging \
       --allow-batt-export
 
@@ -44,7 +45,8 @@ Flags / configuration
 - --counties <list>
   County slugs or names; if omitted, auto-discovers folders under the scenario path
 - --plan <name>
-  Retail plan for the resolved utility (e.g., PG&E: E-TOU-D; SCE: TOU-D-4-9PM; SDG&E: TOU-ELEC). Defaults to the first plan found for the utility.
+  Must match the resolved utility's required NBT import plan: PG&E E-ELEC,
+  SCE TOU-D-PRIME, or SDG&E EV-TOU-5. If omitted, that required plan is selected.
 - --allow-grid-charging
   Enable Grid→Battery charging (off by default)
 - --allow-batt-export / --disallow-batt-export
@@ -78,9 +80,8 @@ from helpers.main_helpers import (
     get_scenario_path,
     slugify_county_name,
 )
-from helpers.utility_helpers import get_utility_for_county
-from helpers.nem3_export_rates import get_export_rate_table_for_county
-from helpers.electricity_rate_helpers import PGE_RATE_PLANS, SCE_RATE_PLANS, SDGE_RATE_PLANS
+from tariffs import NBTScenario, TariffCatalog, resolve_county_service_assignment
+from tariffs.calendar import full_year_hourly_index
 
 from .step9_solar_storage_dispatch_core import (
     prepare_weather_and_load,
@@ -90,9 +91,7 @@ from .step9b_cooptimize_core import (
     CooptInputs,
     FlowSeries,
     build_monthly_hourly_inputs,
-    _hourly_import_rate,
     _solve_lp,
-    _timestamp_index_8760,
 )
 from evaluations.constants import DEFAULT_DISCOUNT_RATE
 from appliances.solar_system import SolarSystemAppliance
@@ -125,12 +124,6 @@ from appliances.electric_base import IncentiveScenario
 DEFAULT_PV_CAPEX_PER_KW = SolarSystemAppliance.per_kw_cost_net(IncentiveScenario.FULL_INCENTIVES)
 DEFAULT_BATT_CAPEX_PER_KWH = BatteryStorageAppliance.per_kwh_cost_net(IncentiveScenario.FULL_INCENTIVES)
 
-
-RATE_PLANS = {
-    "PG&E": PGE_RATE_PLANS,
-    "SCE": SCE_RATE_PLANS,
-    "SDG&E": SDGE_RATE_PLANS,
-}
 
 # ---------------------------------------------------------------------------
 # Default sweep values — used when --use-defaults is passed.
@@ -957,13 +950,6 @@ def _rescale_pv_batt_cost_heatmaps_by_pv(
         )
 
 
-def _default_plan_for_utility(util: str) -> str:
-    plans = list(RATE_PLANS.get(util, {}).keys())
-    if not plans:
-        return ""
-    return plans[0]
-
-
 def process(
     base_input_dir: str,
     base_output_dir: str,
@@ -987,7 +973,11 @@ def process(
     pv_life_yrs: int = 25,
     batt_life_yrs: int = 15,
     batt_degrade_cost_per_kwh: float = 0.0,
+    nbt_scenario: NBTScenario | None = None,
+    nbc_dollars_per_kwh_override: float | None = None,
 ) -> None:
+    resolved_scenario = nbt_scenario or NBTScenario()
+    tariff_catalog = TariffCatalog()
     scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
     counties_to_run = get_counties(scenario_path, counties)
     capacity_records = []
@@ -1015,23 +1005,20 @@ def process(
             continue
 
         # Utility + rates
-        util = get_utility_for_county(county_slug)
-        if not util:
-            print(f"[step9b] No utility for county {county_slug}; skipping.")
-            continue
-        plan_name = plan_override or _default_plan_for_utility(util)
-        plan_details = RATE_PLANS.get(util, {}).get(plan_name)
-        if not plan_details:
-            print(f"[step9b] No plan details found for utility={util}, plan={plan_name}; skipping.")
-            continue
+        assignment = resolve_county_service_assignment(county_slug)
+        tariff = tariff_catalog.bundle(
+            assignment.utility,
+            resolved_scenario,
+            import_plan=plan_override,
+            non_bypassable_rate=nbc_dollars_per_kwh_override,
+        )
 
-        # NEM3 export table month×hour
-        export_table = get_export_rate_table_for_county(base_dir=os.path.join("data", "NEM3"), utility=util, county_name_or_slug=county_slug)
-
-        # Prices per hour
-        ts_index = _timestamp_index_8760(2018)
-        p_imp = [_hourly_import_rate(plan_details, ts) for ts in ts_index]
-        p_exp = [float(export_table[ts.month][ts.hour]) for ts in ts_index]
+        # The load and weather values are TMY/profile data, while day-of-week
+        # and holiday classification must come from the explicit tariff year.
+        ts_index = list(full_year_hourly_index(resolved_scenario.billing_year))
+        p_imp = tariff.import_schedule.rates_for(ts_index)
+        base_export = tariff.export_schedule.rates_for(ts_index, component="total")
+        p_exp = [rate + tariff.acc_plus_rate for rate in base_export]
 
         if debug_prices:
             _write_price_diagnostics(out_dir, county_slug, ts_index, p_imp, p_exp)

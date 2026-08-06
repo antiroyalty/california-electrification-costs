@@ -48,12 +48,15 @@ from helpers.main_helpers import (
     log,
 )
 from helpers.utility_helpers import get_utility_for_county
-from helpers.electricity_rate_helpers import PGE_RATE_PLANS, SCE_RATE_PLANS, SDGE_RATE_PLANS
-from helpers.nem3_export_rates import (
-    get_export_rate_table_for_county,
-    default_options_for_utility,
-    NEM3Options,
+from tariffs import (
+    EnergyFlows,
+    NBTScenario,
+    TariffBundle,
+    TariffCatalog,
+    calculate_nbt_bill,
+    required_nbt_import_plan,
 )
+from tariffs.calendar import full_year_hourly_index
 from .step9_solar_storage_dispatch_core import (
     prepare_weather_and_load,
     pv_timeseries_ac_kwh,
@@ -61,7 +64,6 @@ from .step9_solar_storage_dispatch_core import (
     temp_battery_capacity_kwh,
     compute_system_capacity_kW,
 )
-from .step12_evaluate_electricity_rates import calculate_nem3_annual_costs
 from evaluations.eac import crf as _crf
 
 
@@ -70,13 +72,7 @@ TOTAL_LOAD_COLUMN_NAME = "electricity.real_and_simulated.for_typical_county_home
 
 
 def _rate_plans_for_utility(utility: str) -> List[str]:
-    if utility == "PG&E":
-        return list(PGE_RATE_PLANS.keys())
-    if utility == "SCE":
-        return list(SCE_RATE_PLANS.keys())
-    if utility == "SDG&E":
-        return list(SDGE_RATE_PLANS.keys())
-    raise ValueError(f"Unknown utility: {utility}")
+    return [required_nbt_import_plan(utility)]
 
 
 @dataclass
@@ -119,8 +115,7 @@ class CountyContext:
     weather_df: pd.DataFrame
     load_kwh: List[float]
     timestamps: pd.DatetimeIndex
-    acc_table: Dict
-    nem3_options: NEM3Options
+    tariff: TariffBundle
     capex: CapexParams
     oam: OandMParams
     incentives: Incentives
@@ -148,16 +143,13 @@ def annualized_capex(solar_kw: float, battery_kwh: float, ctx: CountyContext) ->
 
 
 def nem3_bill(imports: List[float], exports: List[float], plan: str, ctx: CountyContext) -> float:
-    res = calculate_nem3_annual_costs(
-        ctx.timestamps,
-        imports,
-        exports,
-        ctx.utility,
-        plan,
-        options=ctx.nem3_options,
-        export_table=ctx.acc_table,
+    if plan != ctx.tariff.import_schedule.plan_name:
+        raise ValueError(f"Plan {plan} does not match resolved NBT tariff {ctx.tariff.import_schedule.plan_name}")
+    ledger = calculate_nbt_bill(
+        EnergyFlows(ctx.timestamps, imports, exports),
+        ctx.tariff,
     )
-    return float(res.get(plan, 0.0))
+    return ledger.annual_amount_due
 
 
 def eac_for_plan(x: Tuple[float, float], plan: str, ctx: CountyContext) -> float:
@@ -284,7 +276,8 @@ def process(
                 print(f"Missing inputs for {county_slug}; skipping")
                 continue
             weather_df, load_kwh = prepare_weather_and_load(weather_file, load_file, TOTAL_LOAD_COLUMN_NAME)
-            ts = pd.date_range(start="2018-01-01", periods=8760, freq="H")
+            nbt_scenario = NBTScenario()
+            ts = full_year_hourly_index(nbt_scenario.billing_year)
 
             # Bounds: PV max defaults to 2 × PV-match size
             pv_match_kw = compute_system_capacity_kW(weather_df, load_kwh)
@@ -293,9 +286,7 @@ def process(
                 battery_kwh=(0.0, float(batt_kwh_max)),
             )
 
-            # ACC table, NEM3 options
-            acc_table = get_export_rate_table_for_county(base_dir=os.path.join("data", "NEM3"), utility=utility, county_name_or_slug=county_slug)
-            nem3_opts = default_options_for_utility(utility)
+            tariff = TariffCatalog().bundle(utility, nbt_scenario)
 
             ctx = CountyContext(
                 base_input_dir=base_input_dir,
@@ -306,8 +297,7 @@ def process(
                 weather_df=weather_df,
                 load_kwh=load_kwh,
                 timestamps=ts,
-                acc_table=acc_table,
-                nem3_options=nem3_opts,
+                tariff=tariff,
                 capex=CapexParams(pv_per_kw=pv_capex_per_kw, batt_per_kwh=batt_capex_per_kwh),
                 oam=OandMParams(pv_per_kw=pv_oam_per_kw, batt_per_kwh=batt_oam_per_kwh),
                 incentives=Incentives(pv=pv_incentive, batt=batt_incentive),

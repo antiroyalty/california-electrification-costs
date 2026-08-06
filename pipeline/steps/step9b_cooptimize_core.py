@@ -143,7 +143,15 @@ def _verify_invariants(
                 f"SOC above maximum at hour {h}: soc={f.soc[h]:.4f}, max={soc_max:.4f}"
             )
 
-    # 5. Financial reconciliation: total cost must equal the sum of its components.
+        # 5. A meter interval has one direction: import or export, never both.
+        grid_import = f.grid_to_load[h] + f.grid_to_batt[h]
+        grid_export = f.pv_to_grid[h] + f.batt_to_grid[h]
+        assert not (grid_import > tol and grid_export > tol), (
+            f"Simultaneous grid import/export at hour {h}: "
+            f"import={grid_import:.4f}, export={grid_export:.4f}"
+        )
+
+    # 6. Financial reconciliation: total cost must equal the sum of its components.
     expected_total = (
         result.capex_annual
         + result.import_cost
@@ -252,6 +260,8 @@ def _solve_lp(
     batt_life_yrs: int = 15,
     discount_rate: float = DEFAULT_DISCOUNT_RATE,
     c_deg_per_kwh: float = 0.0,        # degradation cost per kWh throughput
+    max_interval_flow_kwh: float = 1000.0,
+    max_pv_to_annual_load_ratio: float = 1.5,
 ) -> CooptResult:
     """Build and solve LP. Returns CooptResult with sizing, costs, and flows.
 
@@ -265,6 +275,24 @@ def _solve_lp(
     p_imp = inputs.import_rates
     p_exp = inputs.export_rates
     H = len(L)
+    lengths = {
+        "load_kwh": len(L),
+        "pv_gen_per_kw": len(G),
+        "import_rates": len(p_imp),
+        "export_rates": len(p_exp),
+    }
+    if len(set(lengths.values())) != 1 or H == 0:
+        raise ValueError(f"All CooptInputs series must have the same nonzero length: {lengths}")
+    if any(float(value) < 0 for series in (L, G, p_imp, p_exp) for value in series):
+        raise ValueError("Loads, PV availability, and tariff rates must be non-negative")
+    if max_interval_flow_kwh <= 0:
+        raise ValueError("max_interval_flow_kwh must be positive")
+    if max(float(value) for value in L) > max_interval_flow_kwh:
+        raise ValueError(
+            "Load exceeds max_interval_flow_kwh; pass an explicit larger physical bound"
+        )
+    if max_pv_to_annual_load_ratio <= 0:
+        raise ValueError("max_pv_to_annual_load_ratio must be positive")
     if weights is None:
         weights = [1.0] * H
     if len(weights) != H:
@@ -273,11 +301,25 @@ def _solve_lp(
     # Problem
     prob = pulp.LpProblem("CoOptimize_PV_Battery_Dispatch", pulp.LpMinimize)
 
-    # Sizing
+    # Sizing. California NBT permits systems sized up to 150% of recent or
+    # projected annual usage; deriving the cap from this profile prevents the
+    # model from turning a representative household into a merchant generator.
+    weighted_load = sum(float(weights[h]) * float(L[h]) for h in range(H))
+    weighted_pv_yield = sum(float(weights[h]) * float(G[h]) for h in range(H))
+    pv_kw_cap = (
+        max_pv_to_annual_load_ratio * weighted_load / weighted_pv_yield
+        if weighted_pv_yield > 0
+        else 0.0
+    )
     if fixed_pv_kw is None:
-        PV_kw = pulp.LpVariable("PV_kw", lowBound=0, cat=pulp.LpContinuous)
+        PV_kw = pulp.LpVariable("PV_kw", lowBound=0, upBound=pv_kw_cap, cat=pulp.LpContinuous)
     else:
         fixed_pv = float(fixed_pv_kw)
+        if fixed_pv > pv_kw_cap + 1e-9:
+            raise ValueError(
+                f"fixed_pv_kw={fixed_pv:.3f} exceeds the NBT 150% sizing cap "
+                f"of {pv_kw_cap:.3f} kW for this profile"
+            )
         PV_kw = pulp.LpVariable("PV_kw", lowBound=fixed_pv, upBound=fixed_pv, cat=pulp.LpContinuous)
     if fixed_batt_kwh is None:
         B_E = pulp.LpVariable("B_E_kWh", lowBound=0, cat=pulp.LpContinuous)
@@ -285,6 +327,7 @@ def _solve_lp(
         fixed = float(fixed_batt_kwh)
         B_E = pulp.LpVariable("B_E_kWh", lowBound=fixed, upBound=fixed, cat=pulp.LpContinuous)
     B_P = pulp.LpVariable("B_P_kW", lowBound=0, cat=pulp.LpContinuous)
+    prob += B_P <= B_E  # at most 1C power, consistent with residential batteries
 
     # Flows per hour
     pv2load = [pulp.LpVariable(f"pv2load_{h}", lowBound=0) for h in range(H)]
@@ -295,6 +338,7 @@ def _solve_lp(
     grid2load = [pulp.LpVariable(f"grid2load_{h}", lowBound=0) for h in range(H)]
     grid2batt = [pulp.LpVariable(f"grid2batt_{h}", lowBound=0) for h in range(H)]
     soc = [pulp.LpVariable(f"soc_{h}", lowBound=0) for h in range(H)]
+    grid_import_mode = [pulp.LpVariable(f"grid_import_mode_{h}", cat=pulp.LpBinary) for h in range(H)]
 
     # When grid charging is enabled, split SOC to prevent exporting grid-charged energy.
     batt2load_pv = batt2load_grid = soc_pv = soc_grid = None
@@ -322,6 +366,10 @@ def _solve_lp(
             prob += batt2load[h] == batt2load_pv[h] + batt2load_grid[h]
         else:
             prob += batt2load[h] + batt2grid[h] <= B_P
+        # Directional meter and battery constraints. These are essential when
+        # official late-summer NBT export prices exceed retail import prices.
+        prob += grid2load[h] + grid2batt[h] <= max_interval_flow_kwh * grid_import_mode[h]
+        prob += pv2grid[h] + batt2grid[h] <= max_interval_flow_kwh * (1 - grid_import_mode[h])
 
     # Disallow/allow grid charging and batt exports per flags
     if not allow_grid_charging:
