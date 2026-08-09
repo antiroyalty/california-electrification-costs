@@ -1,5 +1,5 @@
-"""Live capital costs, sourced from the same appliance-class primitives the
-co-optimization LP prices against.
+git ad"""Live capital costs, sourced from the same appliance-class primitives the
+co-optimization model prices against.
 
 This exists so figure annotations can never drift from the model. The whole
 Claim-1 rework began because a figure said "$1,022/kWh" while the model priced

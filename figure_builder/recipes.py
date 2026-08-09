@@ -55,13 +55,23 @@ def _write(doc, html: str) -> None:
     Path(doc).write_text(html)
 
 
-def _mechanism_fragment(prices_now, prices_2025, mA, mB, mC, b64A, b64B, b64C) -> str:
+def _mechanism_fragment(
+    prices_now,
+    prices_2025,
+    mA,
+    mB,
+    mC,
+    b64A,
+    b64B,
+    b64C,
+    resolution_label,
+) -> str:
     b_2025 = f"${prices_2025.batt_net_per_kwh:,.0f}/kWh net"
     b_now = f"${prices_now.batt_net_per_kwh:,.0f}/kWh net"
     s_2025 = f"${prices_2025.pv_net_per_kw:,.0f}/kW"
     s_now = f"${prices_now.pv_net_per_kw:,.0f}/kW"
     return f'''  <div class="callout" style="border-left-color:var(--accent-ink);">
-    <strong>Why this happens: the LP&rsquo;s own logic.</strong> The result looks paradoxical only if solar and storage are substitutes. In the objective function they are <strong>complements</strong>, and the reason is two terms:
+    <strong>Why this happens: the optimization model&rsquo;s own logic.</strong> The result looks paradoxical only if solar and storage are substitutes. In the objective function they are <strong>complements</strong>, and the reason is two terms:
   </div>
 
   <div class="obj-box">
@@ -75,17 +85,17 @@ def _mechanism_fragment(prices_now, prices_2025, mA, mB, mC, b64A, b64B, b64C) -
     <p class="obj-punch">A battery earns only the <strong>difference</strong> between those two prices, net of ~10% round-trip loss and a mid-life replacement. So the battery only enters when it is cheap. The moment it does, it lets surplus midday solar reach the evening peak, lifting the value of the marginal kWh of solar from p<sub>exp</sub> to p<sub>imp</sub>. Cheaper storage <strong>raises</strong> the optimal amount of solar. It never replaces it.</p>
   </div>
 
-  <figure class="fig"><img src="data:image/png;base64,{b64A}" alt="Optimal solar and battery vs battery cost, 2025 with ITC versus current law, Alameda" /><figcaption><strong>2025 vs. now: removing the federal ITC.</strong> Left, 2025, with the 30% ITC (battery {b_2025}): the solar-only optimum sat at {mA['before']['pv_flat']:.2f}&nbsp;kW, rising toward {mA['before']['pv_max']:.2f}&nbsp;kW as cheaper storage enters. Right, current law, the ITC expired (battery {b_now}): pricier storage pushes the battery firmly to zero at market prices and the solar-only optimum settles at {mA['after']['pv_flat']:.2f}&nbsp;kW. Removing the credit makes storage pencil out <em>less</em>, so Claim&nbsp;1 strengthens. Both panels share axes. Only battery capex is swept; <strong>solar&rsquo;s price is fixed at its net installed cost within each panel: {s_2025} in 2025 (gross $3,300/kW less the 30% ITC), {s_now} under current law (ITC repealed, net = gross)</strong>. Real Step&nbsp;9b co-optimization, Alameda / PG&amp;E, full-electrification load.</figcaption></figure>
+  <figure class="fig"><img src="data:image/png;base64,{b64A}" alt="Optimal solar and battery vs battery cost, 2025 with ITC versus current law, Alameda" /><figcaption><strong>2025 vs. now: removing the federal ITC.</strong> Left, 2025, with the 30% ITC (battery {b_2025}): the solar-only optimum sat at {mA['before']['pv_flat']:.2f}&nbsp;kW, rising toward {mA['before']['pv_max']:.2f}&nbsp;kW as cheaper storage enters. Right, current law, the ITC expired (battery {b_now}): pricier storage pushes the battery firmly to zero at market prices and the solar-only optimum settles at {mA['after']['pv_flat']:.2f}&nbsp;kW. Removing the credit makes storage pencil out <em>less</em>, so Claim&nbsp;1 strengthens. Both panels share axes. Only battery capex is swept; <strong>solar&rsquo;s price is fixed at its net installed cost within each panel: {s_2025} in 2025 (gross $3,300/kW less the 30% ITC), {s_now} under current law (ITC repealed, net = gross)</strong>. Step&nbsp;9b {resolution_label}, Alameda / PG&amp;E, full-electrification load.</figcaption></figure>
 
   <div class="fig-grid">
-    <figure class="fig"><img src="data:image/png;base64,{b64B}" alt="A battery raises the value of the marginal kWh of solar" /><figcaption><strong>The mechanism.</strong> The last kWh of solar is worth only <strong>${mB['v_export']:.3f}</strong> if exported at the ACC rate, below solar&rsquo;s own ${mB['pv_lcoe']:.3f}/kWh break-even, so the LP stops building. A battery shifts that same kWh into the evening peak, where it offsets a <strong>${mB['v_peak']:.3f}</strong> import (after round-trip loss). That is well above break-even, so the LP builds more. Alameda / PG&amp;E, current law.</figcaption></figure>
-    <figure class="fig"><img src="data:image/png;base64,{b64C}" alt="Even a free unlimited battery caps optimal solar at annual load coverage" /><figcaption><strong>The ceiling.</strong> Drive the battery toward free and let it grow without limit: optimal solar rises, then flattens against total annual consumption ({mC['pv_100']:.1f}&ndash;{mC['pv_100_rte']:.1f}&nbsp;kW) and stops. At $1/kWh the model builds a {mC['batt_min']:,.0f}&nbsp;kWh seasonal battery, yet solar is still only {mC['pv_min']:.1f}&nbsp;kW ({mC['cover_min'] * 100:.0f}% of load), because past full load coverage the next panel only earns the $0.05 export rate. A free battery raises the ceiling to your annual load; it never removes it.</figcaption></figure>
+    <figure class="fig"><img src="data:image/png;base64,{b64B}" alt="A battery raises the value of the marginal kWh of solar" /><figcaption><strong>The mechanism.</strong> The last kWh of solar is worth only <strong>${mB['v_export']:.3f}</strong> if exported at the ACC rate, below solar&rsquo;s own ${mB['pv_lcoe']:.3f}/kWh break-even, so the model stops building. A battery shifts that same kWh into the evening peak, where it offsets a <strong>${mB['v_peak']:.3f}</strong> import (after round-trip loss). That is well above break-even, so the model builds more. Alameda / PG&amp;E, current law.</figcaption></figure>
+    <figure class="fig"><img src="data:image/png;base64,{b64C}" alt="Even a near-free household battery caps optimal solar near annual load coverage" /><figcaption><strong>The ceiling.</strong> Drive battery cost toward zero within the model&rsquo;s explicit 40&nbsp;kWh representative-household sizing domain: optimal solar rises, then flattens near total annual consumption ({mC['pv_100']:.1f}&ndash;{mC['pv_100_rte']:.1f}&nbsp;kW). At $1/kWh the solution reaches a {mC['batt_min']:,.0f}&nbsp;kWh battery, while solar is {mC['pv_min']:.1f}&nbsp;kW ({mC['cover_min'] * 100:.0f}% of load), because additional generation primarily earns the much lower export rate. Near-free household storage raises the solar ceiling; it does not remove it.</figcaption></figure>
   </div>
 
   <div class="callout"><strong>One sentence for the skeptic:</strong> the battery is not a substitute for solar. It is what lets the marginal kWh of solar reach the peak price instead of the export price, which is exactly why optimal solar goes <em>up</em>, not down, as storage gets cheaper.</div>'''
 
 
-def build_mechanism_block(doc=None, *, county="alameda") -> Path:
+def build_mechanism_block(doc=None, *, county="alameda", fine: bool = False) -> Path:
     """Rebuild the Claim-1 mechanism block and patch it into the combined doc
     (the current commit's claims-<sha>.html by default). The headline figure is a
     2025-vs-current-law before/after; the mechanism and ceiling panels are drawn
@@ -95,8 +105,10 @@ def build_mechanism_block(doc=None, *, county="alameda") -> Path:
     doc = Path(doc) if doc is not None else current_claims_doc()
     prices_now = live_prices()
     prices_2025 = live_prices(PolicyRegime.ITC_2025)
-    sweep_now = collect_battery_capex_sweep(county)
-    sweep_2025 = collect_battery_capex_sweep(county, regime=PolicyRegime.ITC_2025)
+    sweep_now = collect_battery_capex_sweep(county, fine=fine)
+    sweep_2025 = collect_battery_capex_sweep(
+        county, regime=PolicyRegime.ITC_2025, fine=fine
+    )
     di = county_dispatch_inputs(county)
 
     figA, mA = plot_pv_batt_vs_capex_compare(
@@ -108,9 +120,22 @@ def build_mechanism_block(doc=None, *, county="alameda") -> Path:
     figB, mB = plot_marginal_solar_value_ladder(di, prices_now)
     figC, mC = plot_pv_ceiling(sweep_now, di, batt_price_net=prices_now.batt_net_per_kwh)
 
-    frag = _mechanism_fragment(prices_now, prices_2025, mA, mB, mC,
-                               docio.embed_png(figA), docio.embed_png(figB),
-                               docio.embed_png(figC))
+    resolution_label = (
+        "full 8,760-hour chronological sensitivity model"
+        if fine
+        else "weighted 12&times;24 monthly-hour sensitivity model"
+    )
+    frag = _mechanism_fragment(
+        prices_now,
+        prices_2025,
+        mA,
+        mB,
+        mC,
+        docio.embed_png(figA),
+        docio.embed_png(figB),
+        docio.embed_png(figC),
+        resolution_label,
+    )
     html = _read(doc)
     html = docio.upsert_marked_block(html, "MECH-BLOCK", frag, anchor=MECH_ANCHOR)
     html = docio.inject_css(html, "MECH-CSS", _MECH_CSS)
@@ -118,7 +143,7 @@ def build_mechanism_block(doc=None, *, county="alameda") -> Path:
     return Path(doc)
 
 
-def build_county_grid(doc=None) -> Path:
+def build_county_grid(doc=None, *, fine: bool = False) -> Path:
     """Rebuild the four-county Claim-1 grid as 2025-vs-current-law before/after
     comparisons, stacked full-width, and patch it into the combined doc.
     Idempotent."""
@@ -129,15 +154,21 @@ def build_county_grid(doc=None) -> Path:
     prices_2025 = live_prices(PolicyRegime.ITC_2025)
     cells = []
     for slug, label, util in CLAIM1_COUNTIES:
-        sweep_now = collect_battery_capex_sweep(slug)
-        sweep_2025 = collect_battery_capex_sweep(slug, regime=PolicyRegime.ITC_2025)
+        sweep_now = collect_battery_capex_sweep(slug, fine=fine)
+        sweep_2025 = collect_battery_capex_sweep(
+            slug, regime=PolicyRegime.ITC_2025, fine=fine
+        )
         fig, _ = plot_pv_batt_vs_capex_compare(
             sweep_2025, sweep_now,
             batt_before=prices_2025.batt_net_per_kwh, batt_after=prices_now.batt_net_per_kwh,
             title=f"{label} ({util})",
             panel_labels=(f"2025 · ITC · PV ${prices_2025.pv_net_per_kw:,.0f}/kW",
                           f"now · no ITC · PV ${prices_now.pv_net_per_kw:,.0f}/kW"))
-        caption = f"<strong>{label} ({util}).</strong> {_COUNTY_CAPTIONS[slug]}"
+        resolution = "8,760-hour" if fine else "weighted 12×24 monthly-hour"
+        caption = (
+            f"<strong>{label} ({util}).</strong> {_COUNTY_CAPTIONS[slug]} "
+            f"Sensitivity resolution: {resolution}."
+        )
         cells.append(docio.figure_html(
             docio.embed_png(fig), caption,
             f"Before/after battery-capex sweep, {label}"))
@@ -178,26 +209,52 @@ def _entry_threshold(cap, batt) -> float:
 
 def _installer_rule_fixed_pv_sweep(county, pv_offset, prices):
     """Optimal battery vs battery cost with PV FIXED at the annual-offset size.
-    Cached to figure_builder/sweeps/sweep_8760_<county>_fixedpv_<regime>.csv."""
+    Cached as a weighted 12x24 sensitivity sweep."""
     import pandas as pd
     from figure_builder import SWEEP_DIR
     from figure_builder.dispatch import SWEEP_POINTS
-    from pipeline.steps.step9b_cooptimize_core import CooptInputs, _solve_lp
+    from figure_builder.datasets import sweep_cache_is_compatible
+    from pipeline.steps.step9b_cooptimize_core import (
+        CooptInputs,
+        _solve_lp,
+        build_monthly_hourly_inputs,
+    )
 
-    path = SWEEP_DIR / f"sweep_8760_{county}_fixedpv_{prices.regime}.csv"
+    max_battery_kwh = 40.0
+    path = SWEEP_DIR / f"sweep_288_{county}_fixedpv_{prices.regime}.csv"
     if path.exists():
-        return pd.read_csv(path)
+        cached = pd.read_csv(path)
+        required_columns = [
+            "battery_capex_kwh",
+            "batt_kwh",
+            "max_battery_kwh",
+            "meter_binary_count",
+            "solver_rounds",
+        ]
+        if sweep_cache_is_compatible(
+            cached,
+            max_battery_kwh,
+            expected_columns=required_columns,
+        ):
+            return cached
     di = county_dispatch_inputs(county)
     inp = CooptInputs(load_kwh=di.load, pv_gen_per_kw=di.pv_gen_per_kw,
                       import_rates=di.p_imp, export_rates=di.p_exp)
+    inp, weights = build_monthly_hourly_inputs(inp, year=2026)
     rows = []
     for cb in SWEEP_POINTS:
         r = _solve_lp(inp, allow_grid_charging=False, allow_batt_export=True,
                       c_pv_kw=prices.pv_net_per_kw, c_batt_kwh=float(cb), c_batt_kw=0.0,
                       pv_life_yrs=25, batt_life_yrs=15, discount_rate=0.07,
-                      c_deg_per_kwh=0.0, weights=None, cycle_monthly=False,
-                      fixed_pv_kw=pv_offset)
-        rows.append({"battery_capex_kwh": cb, "batt_kwh": max(r.batt_kwh, 0.0)})
+                      c_deg_per_kwh=0.0, weights=weights, cycle_monthly=True,
+                      fixed_pv_kw=pv_offset, max_battery_kwh=max_battery_kwh)
+        rows.append({
+            "battery_capex_kwh": cb,
+            "batt_kwh": max(r.batt_kwh, 0.0),
+            "max_battery_kwh": max_battery_kwh,
+            "meter_binary_count": int(r.meter_binary_count),
+            "solver_rounds": int(r.solver_rounds),
+        })
     df = pd.DataFrame(rows)
     SWEEP_DIR.mkdir(parents=True, exist_ok=True)
     df.to_csv(path, index=False)
@@ -250,7 +307,7 @@ def _installer_rule_fragment(prices, pv_offset, m, b64) -> str:
     <strong>Robustness: what if installers oversize solar?</strong> In practice a system is often sized to offset 100% of annual consumption, not to the economic optimum. That larger array (here {pv_offset:.1f}&nbsp;kW, versus the ~2&nbsp;kW optimum) spills far more midday surplus, which under NEM&nbsp;3.0 exports at only ~$0.05/kWh, so a battery has more to store. Does storage then pencil?
   </div>
 
-  <figure class="fig"><img src="data:image/png;base64,{b64}" alt="Optimal battery vs battery cost, PV economically optimized versus PV fixed at annual offset, Alameda" /><figcaption><strong>Oversizing raises the battery threshold, but not to today&rsquo;s price.</strong> With PV fixed to the installer rule, a battery pencils out at a higher price (~${m['thr_fix']:,.0f}/kWh) than under the economic optimum (~${m['thr_free']:,.0f}/kWh), exactly as intuition suggests. But today&rsquo;s net battery price (${prices.batt_net_per_kwh:,.0f}/kWh) is still well above both thresholds, so the optimal battery is zero under either sizing rule. Alameda / PG&amp;E, current law, PV fixed at its ${prices.pv_net_per_kw:,.0f}/kW net cost. <em>Caveat:</em> the thresholds depend on the NEM&nbsp;3.0 export values, which are flat in the model (max ~$0.10/kWh); if the real ACC has higher-value evening hours, a battery could pencil at somewhat higher prices than shown.</figcaption></figure>
+  <figure class="fig"><img src="data:image/png;base64,{b64}" alt="Optimal battery vs battery cost, PV economically optimized versus PV fixed at annual offset, Alameda" /><figcaption><strong>Oversizing raises the battery threshold, but not to today&rsquo;s price.</strong> With PV fixed to the installer rule, a battery pencils out at a higher price (~${m['thr_fix']:,.0f}/kWh) than under the economic optimum (~${m['thr_free']:,.0f}/kWh), exactly as intuition suggests. But today&rsquo;s net battery price (${prices.batt_net_per_kwh:,.0f}/kWh) is still well above both thresholds, so the optimal battery is zero under either sizing rule. Alameda / PG&amp;E, current law, PV fixed at its ${prices.pv_net_per_kw:,.0f}/kW net cost. Weighted 12&times;24 monthly-hour sensitivity using the modeled 2026 hourly EEC and ACC&nbsp;Plus schedule.</figcaption></figure>
   <!-- /INSTALLER-RULE body -->'''
 
 

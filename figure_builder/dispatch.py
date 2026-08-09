@@ -1,5 +1,5 @@
 """Per-county dispatch inputs: turn a county slug into the 8760-hour load, PV
-yield, and import/export price arrays the co-optimization LP consumes.
+yield, and import/export price arrays the co-optimization model consumes.
 
 This block was copy-pasted three times across the old scratchpad scripts
 (`regen_sweep_8760`, `regen_counties_8760`, `build_mechanism_figs`). It lives
@@ -65,7 +65,7 @@ def county_dispatch_inputs(
     base: str = BASE_INPUT_DIR,
 ) -> DispatchInputs:
     """Assemble the 8760-hour arrays for one county, mirroring the setup Step 9b
-    performs before solving the LP."""
+    performs before solving the model."""
     from helpers.main_helpers import get_scenario_path
     from tariffs import NBTScenario, TariffCatalog, resolve_county_service_assignment
     from tariffs.calendar import full_year_hourly_index

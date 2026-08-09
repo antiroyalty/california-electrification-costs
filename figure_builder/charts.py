@@ -221,7 +221,7 @@ def plot_marginal_solar_value_ladder(
 def plot_pv_ceiling(sweep: pd.DataFrame, dispatch, *, batt_price_net: float
                     ) -> Tuple["object", Meta]:
     """Log-x line: optimal solar rises then flattens against total annual load,
-    even as a near-free battery grows into a seasonal reservoir."""
+    with near-free storage in the representative-household sizing domain."""
     apply_style()
     import matplotlib.pyplot as plt
 
@@ -246,7 +246,7 @@ def plot_pv_ceiling(sweep: pd.DataFrame, dispatch, *, batt_price_net: float
              color=INK_SOFT, fontsize=8.5, linespacing=1.2)
     imin = int(np.argmin(xc))
     axc.annotate(
-        f"battery here = {btc[imin]:,.0f} kWh\n(a seasonal reservoir),\n"
+        f"battery here = {btc[imin]:,.0f} kWh\n(the household-size limit),\n"
         f"yet solar is still only {pvc[imin]:.1f} kW",
         xy=(xc[imin], pvc[imin]), xytext=(2.4, pv_100_rte * 0.42),
         color=ACCENT_INK, fontsize=9, ha="left", va="center", fontweight="bold",
@@ -261,7 +261,7 @@ def plot_pv_ceiling(sweep: pd.DataFrame, dispatch, *, batt_price_net: float
     axc.tick_params(labelsize=9.5)
     for s in ["top", "right"]:
         axc.spines[s].set_visible(False)
-    axc.set_title("Even a free, unlimited battery can't push solar past your annual load",
+    axc.set_title("Near-free household storage still leaves a solar ceiling",
                   fontsize=11.5, color=INK, pad=10, loc="left")
     return fig, {"pv_100": pv_100, "pv_100_rte": pv_100_rte,
                  "batt_min": float(btc[imin]), "pv_min": float(pvc[imin]),
