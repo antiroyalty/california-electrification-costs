@@ -1,7 +1,7 @@
-"""
+git """
 Step 9b — Co‑Optimize PV size, Battery size (kWh,kW), and hourly dispatch.
 
-This module builds a linear program (LP) to minimize annual total cost:
+This module builds a sparse mixed-integer linear program to minimize annual total cost:
   annualized capex (PV + battery) + retail imports − NEM3 export credits (+ optional degradation cost)
 
 Notes
@@ -60,11 +60,18 @@ Flags / configuration
 - --pv-life-yrs (default: 25)
 - --batt-life-yrs (default: 15)
 - --batt-degrade-cost-kwh (default: 0.0 $/kWh throughput)
+- --max-battery-kwh (default: 40 kWh)
+  Explicit representative-household battery sizing ceiling. Fixed-size
+  sensitivity runs may deliberately exceed it.
 
 Assumptions
 - Full‑year (8760) optimization for fidelity (SOC chronology). A 12×24 time‑slice variant can be added later.
 - Annualized capex via CRF with discount rate and lifetimes above.
-- Solver: PuLP (CBC). If PuLP is missing, a clear error is raised with installation instructions.
+- Model construction: PuLP. Production solve backend: SciPy HiGHS MILP.
+- Meter-direction binaries are generated only for intervals where the relaxed
+  optimum actually imports and exports simultaneously. Large low-cost
+  sensitivity grids should use coarse monthly-hourly mode unless full hourly
+  chronology is specifically required.
 """
 
 from __future__ import annotations
@@ -99,10 +106,10 @@ from appliances.battery_storage import BatteryStorageAppliance
 from appliances.electric_base import IncentiveScenario
 
 # Net (after-incentive, full_incentives scenario) $/kW and $/kWh, derived from
-# the same appliance classes step14 uses to report capex. The LP's sizing
+# the same appliance classes step14 uses to report capex. The optimizer's sizing
 # objective must use a price consistent with what's actually reported for the
 # scenario being modeled:
-#   - Bug found 2026-07-06: the LP sized against stale hardcoded defaults
+#   - Bug found 2026-07-06: the optimizer sized against stale hardcoded defaults
 #     ($2,830/kW, $800/kWh) while step14 reported capex at the appliance
 #     classes' real gross values (~$3,300/kW, ~$1,461/kWh) — fixed by
 #     reconciling to the same appliance classes.
@@ -110,7 +117,7 @@ from appliances.electric_base import IncentiveScenario
 #     smaller inconsistency — the paper's default/headline scenario reports
 #     capex net of the 30% ITC (full_incentives), so a decision-maker sizing
 #     against gross cost is using a price ~45% higher than what they'd
-#     actually pay. The LP's sizing signal should match whichever incentive
+#     actually pay. The optimizer's sizing signal should match whichever incentive
 #     scenario is actually being reported. These defaults (used when a caller
 #     doesn't specify otherwise) assume full_incentives, matching Config's
 #     own default; real production runs (mod_solar_storage.run) pass the net
@@ -119,7 +126,7 @@ from appliances.electric_base import IncentiveScenario
 #     under the default regime. incentive_policy.py's DEFAULT_POLICY_REGIME is
 #     POST_ITC_2026 (IRC 25D repealed by OBBBA), so per_*_cost_net(FULL) now
 #     returns gross for PV and storage. The invariant these defaults encode
-#     (LP sizes against the same price step14 reports) is unchanged; only the
+#     (the optimizer sizes against the same price step14 reports) is unchanged; only the
 #     value moved, from ~$1,022 to ~$1,461/kWh and $2,310 to $3,300/kW.
 DEFAULT_PV_CAPEX_PER_KW = SolarSystemAppliance.per_kw_cost_net(IncentiveScenario.FULL_INCENTIVES)
 DEFAULT_BATT_CAPEX_PER_KWH = BatteryStorageAppliance.per_kwh_cost_net(IncentiveScenario.FULL_INCENTIVES)
@@ -289,6 +296,7 @@ def _write_batt_capex_sweep(
     batt_life_yrs: int,
     discount_rate: float,
     batt_degrade_cost_per_kwh: float,
+    max_battery_kwh: float,
     weights: Optional[List[float]] = None,
     cycle_monthly: bool = False,
     file_tag: Optional[str] = None,
@@ -306,6 +314,7 @@ def _write_batt_capex_sweep(
             batt_life_yrs=batt_life_yrs,
             discount_rate=discount_rate,
             c_deg_per_kwh=batt_degrade_cost_per_kwh,
+            max_battery_kwh=max_battery_kwh,
             weights=weights,
             cycle_monthly=cycle_monthly,
         )
@@ -320,6 +329,9 @@ def _write_batt_capex_sweep(
                 "import_cost": result.import_cost,
                 "export_credit": result.export_credit,
                 "degradation_cost": result.degradation_cost,
+                "max_battery_kwh": float(max_battery_kwh),
+                "meter_binary_count": int(result.meter_binary_count),
+                "solver_rounds": int(result.solver_rounds),
             }
         )
 
@@ -421,12 +433,12 @@ def _write_batt_size_vs_capex_by_pv(
                 )
 
         ax.set_xlabel("Battery Capex ($/kWh)")
-        ax.set_ylabel("Optimal Battery Size (kWh) from LP")
+        ax.set_ylabel("Optimal Battery Size (kWh) from Model")
         ax.set_title("Battery Size vs Battery Capex (PV Capex Sensitivity)")
         ax.text(
             0.5,
             -0.18,
-            "Each line is the LP‑optimal battery size for a fixed PV capex.",
+            "Each line is the model-optimal battery size for a fixed PV capex.",
             transform=ax.transAxes,
             ha="center",
             va="top",
@@ -507,7 +519,7 @@ def _write_pv_size_vs_capex_by_pv(
                 )
 
         ax.set_xlabel("Battery Capex ($/kWh)")
-        ax.set_ylabel("Optimal PV Size (kW) from LP")
+        ax.set_ylabel("Optimal PV Size (kW) from Model")
         ax.set_title("PV Size vs Battery Capex (PV Capex Sensitivity)")
         ax.legend(loc="best", fontsize=9)
 
@@ -669,6 +681,7 @@ def _write_batt_cost_heatmap(
     batt_life_yrs: int,
     discount_rate: float,
     batt_degrade_cost_per_kwh: float,
+    max_battery_kwh: float,
     marker_batt_kwh: Optional[float] = None,
     marker_capex_kwh: Optional[float] = None,
     weights: Optional[List[float]] = None,
@@ -690,6 +703,7 @@ def _write_batt_cost_heatmap(
                 batt_life_yrs=batt_life_yrs,
                 discount_rate=discount_rate,
                 c_deg_per_kwh=batt_degrade_cost_per_kwh,
+                max_battery_kwh=max_battery_kwh,
                 weights=weights,
                 cycle_monthly=cycle_monthly,
             )
@@ -817,6 +831,7 @@ def _write_pv_batt_cost_heatmap(
     batt_life_yrs: int,
     discount_rate: float,
     batt_degrade_cost_per_kwh: float,
+    max_battery_kwh: float,
     marker_pv_kw: Optional[float] = None,
     marker_batt_kwh: Optional[float] = None,
     weights: Optional[List[float]] = None,
@@ -839,6 +854,7 @@ def _write_pv_batt_cost_heatmap(
                 batt_life_yrs=batt_life_yrs,
                 discount_rate=discount_rate,
                 c_deg_per_kwh=batt_degrade_cost_per_kwh,
+                max_battery_kwh=max_battery_kwh,
                 weights=weights,
                 cycle_monthly=cycle_monthly,
             )
@@ -973,6 +989,7 @@ def process(
     pv_life_yrs: int = 25,
     batt_life_yrs: int = 15,
     batt_degrade_cost_per_kwh: float = 0.0,
+    max_battery_kwh: float = 40.0,
     nbt_scenario: NBTScenario | None = None,
     nbc_dollars_per_kwh_override: float | None = None,
 ) -> None:
@@ -1023,7 +1040,7 @@ def process(
         if debug_prices:
             _write_price_diagnostics(out_dir, county_slug, ts_index, p_imp, p_exp)
 
-        # Solve LP
+        # Solve the co-optimization model.
         inputs = CooptInputs(
             load_kwh=load_kwh,
             pv_gen_per_kw=G,
@@ -1041,6 +1058,7 @@ def process(
             batt_life_yrs=batt_life_yrs,
             discount_rate=discount_rate,
             c_deg_per_kwh=batt_degrade_cost_per_kwh,
+            max_battery_kwh=max_battery_kwh,
         )
 
         sweep_inputs = inputs
@@ -1072,6 +1090,7 @@ def process(
                 batt_life_yrs=batt_life_yrs,
                 discount_rate=discount_rate,
                 batt_degrade_cost_per_kwh=batt_degrade_cost_per_kwh,
+                max_battery_kwh=max_battery_kwh,
                 weights=sweep_weights,
                 cycle_monthly=sweep_cycle,
             )
@@ -1102,6 +1121,7 @@ def process(
                 batt_life_yrs=batt_life_yrs,
                 discount_rate=discount_rate,
                 batt_degrade_cost_per_kwh=batt_degrade_cost_per_kwh,
+                max_battery_kwh=max_battery_kwh,
                 marker_batt_kwh=result.batt_kwh,
                 marker_capex_kwh=batt_capex_per_kwh,
                 weights=sweep_weights,
@@ -1124,6 +1144,7 @@ def process(
                 batt_life_yrs=batt_life_yrs,
                 discount_rate=discount_rate,
                 batt_degrade_cost_per_kwh=batt_degrade_cost_per_kwh,
+                max_battery_kwh=max_battery_kwh,
                 marker_pv_kw=result.pv_kw,
                 marker_batt_kwh=result.batt_kwh,
                 weights=sweep_weights,
@@ -1144,6 +1165,7 @@ def process(
                     batt_life_yrs=batt_life_yrs,
                     discount_rate=discount_rate,
                     c_deg_per_kwh=batt_degrade_cost_per_kwh,
+                    max_battery_kwh=max_battery_kwh,
                     weights=sweep_weights,
                     cycle_monthly=sweep_cycle,
                 )
@@ -1162,6 +1184,7 @@ def process(
                         batt_life_yrs=batt_life_yrs,
                         discount_rate=discount_rate,
                         batt_degrade_cost_per_kwh=batt_degrade_cost_per_kwh,
+                        max_battery_kwh=max_battery_kwh,
                         file_tag=tag,
                         weights=sweep_weights,
                         cycle_monthly=sweep_cycle,
@@ -1181,6 +1204,7 @@ def process(
                         batt_life_yrs=batt_life_yrs,
                         discount_rate=discount_rate,
                         batt_degrade_cost_per_kwh=batt_degrade_cost_per_kwh,
+                        max_battery_kwh=max_battery_kwh,
                         marker_batt_kwh=sweep_result.batt_kwh,
                         marker_capex_kwh=batt_capex_per_kwh,
                         file_tag=tag,
@@ -1203,6 +1227,7 @@ def process(
                         batt_life_yrs=batt_life_yrs,
                         discount_rate=discount_rate,
                         batt_degrade_cost_per_kwh=batt_degrade_cost_per_kwh,
+                        max_battery_kwh=max_battery_kwh,
                         marker_pv_kw=sweep_result.pv_kw,
                         marker_batt_kwh=sweep_result.batt_kwh,
                         file_tag=tag,
@@ -1251,6 +1276,9 @@ def process(
             "Solar Capacity (kW)": round(result.pv_kw, 2),
             "Battery Capacity (kWh)": round(result.batt_kwh, 2),
             "Battery Power Capacity (kW)": round(result.batt_kw, 2),
+            "Battery Capacity Upper Bound (kWh)": float(max_battery_kwh),
+            "Meter Direction Binaries": int(result.meter_binary_count),
+            "Solver Rounds": int(result.solver_rounds),
             "Coopt Total Cost": round(result.total_cost, 4),
             "Coopt Capex Annual": round(result.capex_annual, 4),
             "Coopt Import Cost": round(result.import_cost, 4),
@@ -1307,6 +1335,7 @@ def main():
     p.add_argument("--discount-rate", type=float, default=DEFAULT_DISCOUNT_RATE)
     p.add_argument("--pv-capex-kw", type=float, default=DEFAULT_PV_CAPEX_PER_KW)
     p.add_argument("--batt-capex-kwh", type=float, default=DEFAULT_BATT_CAPEX_PER_KWH)
+    p.add_argument("--max-battery-kwh", type=float, default=40.0)
     args = p.parse_args()
 
     sweep_vals = list(DEFAULT_BATT_CAPEX_SWEEP) if args.use_defaults else None
@@ -1331,6 +1360,7 @@ def main():
         discount_rate=args.discount_rate,
         pv_capex_per_kw=args.pv_capex_kw,
         batt_capex_per_kwh=args.batt_capex_kwh,
+        max_battery_kwh=args.max_battery_kwh,
         batt_capex_per_kw=0.0,
         pv_life_yrs=25,
         batt_life_yrs=15,

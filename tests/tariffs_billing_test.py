@@ -84,6 +84,32 @@ def test_representative_annual_bill_and_credit_intermediates_stay_in_ballpark():
     assert 1_000 < ledger.annual_amount_due < 4_000
 
 
+@pytest.mark.parametrize("utility", ["PG&E", "SCE", "SDG&E"])
+def test_zero_exports_exactly_matches_import_only_tariff_bill(utility):
+    """Paper-critical: NBT adds no billing asymmetry when exports are zero."""
+
+    timestamps = pd.date_range("2026-01-01", "2026-12-31 23:00", freq="h")
+    imports = [0.35 + 0.45 * (timestamp.hour < 8 or timestamp.hour >= 17) for timestamp in timestamps]
+    tariff = TariffCatalog().bundle(utility, NBTScenario())
+
+    ledger = calculate_nbt_bill(
+        EnergyFlows(timestamps, imports, [0.0] * len(timestamps)),
+        tariff,
+    )
+    hourly_charge = sum(
+        load * rate
+        for load, rate in zip(imports, tariff.import_schedule.rates_for(timestamps))
+    )
+    daily_charge = sum(
+        tariff.import_schedule.daily_fixed_charge(day)
+        for day in timestamps.normalize().unique()
+    )
+
+    assert ledger.annual_base_export_credit == 0.0
+    assert ledger.annual_acc_plus_credit == 0.0
+    assert ledger.annual_amount_due == pytest.approx(hourly_charge + daily_charge, abs=1e-6)
+
+
 def test_step12_file_integration_calendarizes_tmy_to_explicit_tariff_year(tmp_path):
     county = "alameda"
     county_dir = tmp_path / county

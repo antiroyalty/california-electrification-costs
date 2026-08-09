@@ -42,6 +42,11 @@ class Config:
     nbt_customer_segment: str = CustomerSegment.STANDARD.value
     nbt_include_acc_plus: bool = True
 
+    # Representative-household storage sizing domain. This explicit upper
+    # bound is also what makes the full-year meter-direction formulation
+    # numerically tight; sensitivity runs should override and report it.
+    max_battery_kwh: float = 40.0
+
     def nbt_scenario(self) -> NBTScenario:
         return NBTScenario(
             billing_year=self.nbt_billing_year,

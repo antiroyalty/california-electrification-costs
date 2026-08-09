@@ -28,7 +28,11 @@ REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from pipeline.steps.step9b_cooptimize_core import CooptInputs, _solve_lp
+from pipeline.steps.step9b_cooptimize_core import (
+    CooptInputs,
+    _meter_direction_hours,
+    _solve_lp,
+)
 from tariffs import NBTScenario, TariffCatalog
 from tariffs.calendar import full_year_hourly_index
 from evaluations.eac import crf, alpha_batt_npv
@@ -335,6 +339,19 @@ class TestACCExportRatesBelowRetailImport:
             if p_exp[h] > p_imp[h] + 1e-6
         ]
         assert violations
+        assert len(violations) == 216
+
+    def test_only_nonconvex_price_hours_are_binary_candidates(self, alameda_price_series):
+        p_imp, p_exp = alameda_price_series
+        inputs = CooptInputs(
+            load_kwh=[1.0] * 8760,
+            pv_gen_per_kw=[1.0] * 8760,
+            import_rates=p_imp,
+            export_rates=p_exp,
+        )
+        candidates = _meter_direction_hours(inputs)
+        assert len(candidates) == 216
+        assert all(p_exp[hour] > p_imp[hour] for hour in candidates)
 
     def test_acc_rates_substantially_below_retail(self, alameda_price_series):
         """Annual average export compensation remains below retail imports."""
@@ -366,6 +383,26 @@ class TestACCExportRatesBelowRetailImport:
             imported = result.flows.grid_to_load[hour] + result.flows.grid_to_batt[hour]
             exported = result.flows.pv_to_grid[hour] + result.flows.batt_to_grid[hour]
             assert not (imported > 1e-6 and exported > 1e-6)
+        assert result.meter_binary_count == 1
+        assert result.solver_rounds == 2
+
+
+def test_explicit_battery_capacity_bound_is_enforced():
+    inputs = CooptInputs(
+        load_kwh=[0.0, 1.0],
+        pv_gen_per_kw=[1.0, 0.0],
+        import_rates=[0.40, 0.40],
+        export_rates=[0.0, 0.0],
+    )
+    result = _solve_lp(
+        inputs,
+        fixed_pv_kw=1.0,
+        c_pv_kw=0.0,
+        c_batt_kwh=0.0,
+        c_batt_kw=0.0,
+        max_battery_kwh=0.5,
+    )
+    assert 0.0 <= result.batt_kwh <= 0.5 + 1e-8
 
 
 # ---------------------------------------------------------------------------

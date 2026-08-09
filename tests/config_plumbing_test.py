@@ -67,6 +67,23 @@ def test_solar_storage_module_passes_discount_rate_to_lp():
     )
 
 
+def test_solar_storage_module_passes_explicit_battery_sizing_bound():
+    import pipeline.modules.solar_storage as mod
+
+    cfg = Config(
+        scenario="baseline_coopt",
+        housing_type="single-family-detached",
+        counties=["Alameda County"],
+        max_battery_kwh=55.0,
+    )
+
+    with patch.object(mod, "WeatherFiles"), patch.object(mod, "Step9bCoopt") as mock_step9b:
+        mod.run(cfg)
+
+    _, kwargs = mock_step9b.process.call_args
+    assert kwargs["max_battery_kwh"] == 55.0
+
+
 def test_solar_storage_module_sizes_against_net_cost_for_the_configured_incentive_scenario():
     """2026-07-07 refinement: the LP's sizing price must reflect the actual
     incentive scenario Config specifies, not always full_incentives. Uses a

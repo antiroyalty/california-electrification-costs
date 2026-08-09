@@ -116,11 +116,32 @@ def test_cross_year_observed_holiday_is_classified_as_weekend_holiday():
     assert day_types([pd.Timestamp("2021-12-31 12:00")]) == ["weekend_holiday"]
 
 
-def test_normalized_data_file_itself_is_stable():
-    digest = hashlib.sha256(DATA_PATH.read_bytes()).hexdigest()
-    # This catches accidental source-data edits. Update only by rerunning the
-    # audited builder and reviewing source hashes plus exact sentinel tests.
-    assert digest == "a2aee866c47a93db151c3555f9b65487816aa6feea0f574f5e576d34e4096127"
+def test_normalized_schedule_values_are_semantically_stable():
+    """Pin values and keys without depending on CSV line endings or column order."""
+
+    data = _data().sort_values(
+        [
+            "utility", "billing_year", "nbt_vintage", "service_type",
+            "customer_segment", "component", "month", "day_type", "hour_start",
+        ]
+    )
+    digest = hashlib.sha256()
+    for row in data.itertuples(index=False):
+        fields = (
+            row.utility,
+            str(int(row.billing_year)),
+            str(int(row.nbt_vintage)),
+            row.service_type,
+            row.customer_segment,
+            str(int(row.month)),
+            row.day_type,
+            str(int(row.hour_start)),
+            row.component,
+            f"{float(row.rate_usd_per_kwh):.6f}",
+            row.source_id,
+        )
+        digest.update(("\x1f".join(fields) + "\n").encode("utf-8"))
+    assert digest.hexdigest() == "1cba4a7cc5e9429841b4cbe058228fb9256b69ff4c94d7858c90abb6f15b78b6"
 
 
 @pytest.mark.parametrize(

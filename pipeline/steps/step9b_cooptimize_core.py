@@ -26,6 +26,19 @@ from appliances.electric_base import IncentiveScenario
 # module for why.
 _DEFAULT_PV_CAPEX_PER_KW = SolarSystemAppliance.per_kw_cost_net(IncentiveScenario.FULL_INCENTIVES)
 _DEFAULT_BATT_CAPEX_PER_KWH = BatteryStorageAppliance.per_kwh_cost_net(IncentiveScenario.FULL_INCENTIVES)
+# Representative-household sizing domain. This is an explicit modeling bound,
+# not a tariff value. It implements the 30–40 kWh range documented in the
+# optimization design notes and can be overridden for sensitivity analyses.
+DEFAULT_MAX_BATTERY_KWH = 40.0
+# On a several-thousand-dollar annual objective this proves the solution to
+# substantially less than one cent while avoiding work that cannot affect any
+# reported research value.
+HIGHS_MIP_RELATIVE_GAP = 1e-6
+# If the first continuous relaxation exploits many intervals, adding only the
+# currently violated rows can make a later constraint-generation round harder
+# than the compact eager model. This affects performance only, never the
+# feasible region or optimum.
+METER_BINARY_EAGER_THRESHOLD = 96
 
 try:
     import pulp
@@ -76,6 +89,8 @@ class CooptResult:
     export_credit: float
     degradation_cost: float
     flows: FlowSeries
+    meter_binary_count: int
+    solver_rounds: int
 
 
 # Battery operating parameters — shared between LP constraints and post-solve verification.
@@ -244,6 +259,113 @@ def _ensure_pulp() -> None:
         )
 
 
+def _meter_direction_hours(inputs: CooptInputs, *, tolerance: float = 1e-9) -> list[int]:
+    """Hours whose non-convex price ordering requires an import/export binary.
+
+    When the import price is strictly greater than the export price,
+    simultaneous import and export is dominated and an LP needs no mode
+    variable. Equal-price hours retain a binary because otherwise a solver may
+    return a physically invalid but objective-equivalent degenerate solution.
+    """
+
+    return [
+        hour
+        for hour, (import_rate, export_rate) in enumerate(
+            zip(inputs.import_rates, inputs.export_rates)
+        )
+        if float(export_rate) >= float(import_rate) - tolerance
+    ]
+
+
+def _solve_with_highs(problem) -> None:
+    """Solve a PuLP linear model with SciPy's HiGHS MILP backend.
+
+    PuLP remains the readable model-construction layer. Converting its sparse
+    linear expressions here avoids CBC's severe branch-and-bound slowdown on
+    the 8,760-hour formulation while preserving one authoritative model.
+    """
+
+    try:
+        import numpy as np
+        from scipy.optimize import Bounds, LinearConstraint, milp
+        from scipy.sparse import coo_matrix
+    except ImportError as exc:
+        raise RuntimeError(
+            "Full-resolution co-optimization requires scipy.optimize.milp (HiGHS)"
+        ) from exc
+
+    variables = list(problem.variables())
+    variable_index = {variable: index for index, variable in enumerate(variables)}
+    objective = np.array(
+        [float(problem.objective.get(variable, 0.0)) for variable in variables],
+        dtype=float,
+    )
+    lower_bounds = np.array(
+        [
+            -np.inf if variable.lowBound is None else float(variable.lowBound)
+            for variable in variables
+        ],
+        dtype=float,
+    )
+    upper_bounds = np.array(
+        [
+            np.inf if variable.upBound is None else float(variable.upBound)
+            for variable in variables
+        ],
+        dtype=float,
+    )
+    integrality = np.array(
+        [1 if variable.cat == pulp.LpInteger else 0 for variable in variables],
+        dtype=np.uint8,
+    )
+
+    row_indices: list[int] = []
+    column_indices: list[int] = []
+    coefficients: list[float] = []
+    constraint_lower: list[float] = []
+    constraint_upper: list[float] = []
+    for row, constraint in enumerate(problem.constraints.values()):
+        for variable, coefficient in constraint.items():
+            row_indices.append(row)
+            column_indices.append(variable_index[variable])
+            coefficients.append(float(coefficient))
+        rhs = float(-constraint.constant)
+        if constraint.sense == pulp.LpConstraintLE:
+            constraint_lower.append(-np.inf)
+            constraint_upper.append(rhs)
+        elif constraint.sense == pulp.LpConstraintGE:
+            constraint_lower.append(rhs)
+            constraint_upper.append(np.inf)
+        elif constraint.sense == pulp.LpConstraintEQ:
+            constraint_lower.append(rhs)
+            constraint_upper.append(rhs)
+        else:
+            raise ValueError(f"Unknown PuLP constraint sense {constraint.sense}")
+
+    matrix = coo_matrix(
+        (coefficients, (row_indices, column_indices)),
+        shape=(len(constraint_lower), len(variables)),
+    ).tocsr()
+    result = milp(
+        c=objective,
+        integrality=integrality,
+        bounds=Bounds(lower_bounds, upper_bounds),
+        constraints=LinearConstraint(
+            matrix,
+            np.asarray(constraint_lower, dtype=float),
+            np.asarray(constraint_upper, dtype=float),
+        ),
+        options={"presolve": True, "mip_rel_gap": HIGHS_MIP_RELATIVE_GAP},
+    )
+    if not result.success or result.x is None:
+        raise RuntimeError(
+            f"HiGHS MILP did not solve to optimality: status={result.status}, "
+            f"message={result.message}"
+        )
+    for variable, value in zip(variables, result.x):
+        variable.varValue = float(value)
+
+
 def _solve_lp(
     inputs: CooptInputs,
     *,
@@ -260,14 +382,23 @@ def _solve_lp(
     batt_life_yrs: int = 15,
     discount_rate: float = DEFAULT_DISCOUNT_RATE,
     c_deg_per_kwh: float = 0.0,        # degradation cost per kWh throughput
-    max_interval_flow_kwh: float = 1000.0,
+    max_battery_kwh: float = DEFAULT_MAX_BATTERY_KWH,
     max_pv_to_annual_load_ratio: float = 1.5,
+    solver_backend: str = "highs",
 ) -> CooptResult:
-    """Build and solve LP. Returns CooptResult with sizing, costs, and flows.
+    """Build and solve the sparse MILP. Return sizing, costs, and flows.
 
     FlowSeries order mirrors Step 9 conventions:
       pv_to_load, pv_to_batt, pv_to_grid, batt_to_load, batt_to_grid,
       grid_to_load, grid_to_batt, soc
+
+    PV, battery, and flow decisions remain continuous. The model first solves
+    their LP relaxation, then creates binary meter-direction variables only at
+    intervals whose relaxed solution actually imports and exports at once.
+    ``max_battery_kwh`` is the explicit household sizing ceiling and, with the
+    1C constraint, supplies a tight battery-power bound for those disjunctions.
+    A fixed-size sensitivity is itself an explicit override and therefore uses
+    its fixed capacity as the bound.
     """
     _ensure_pulp()
     L = inputs.load_kwh
@@ -285,14 +416,12 @@ def _solve_lp(
         raise ValueError(f"All CooptInputs series must have the same nonzero length: {lengths}")
     if any(float(value) < 0 for series in (L, G, p_imp, p_exp) for value in series):
         raise ValueError("Loads, PV availability, and tariff rates must be non-negative")
-    if max_interval_flow_kwh <= 0:
-        raise ValueError("max_interval_flow_kwh must be positive")
-    if max(float(value) for value in L) > max_interval_flow_kwh:
-        raise ValueError(
-            "Load exceeds max_interval_flow_kwh; pass an explicit larger physical bound"
-        )
+    if max_battery_kwh < 0:
+        raise ValueError("max_battery_kwh cannot be negative")
     if max_pv_to_annual_load_ratio <= 0:
         raise ValueError("max_pv_to_annual_load_ratio must be positive")
+    if solver_backend not in {"highs", "cbc"}:
+        raise ValueError("solver_backend must be 'highs' or 'cbc'")
     if weights is None:
         weights = [1.0] * H
     if len(weights) != H:
@@ -315,6 +444,8 @@ def _solve_lp(
         PV_kw = pulp.LpVariable("PV_kw", lowBound=0, upBound=pv_kw_cap, cat=pulp.LpContinuous)
     else:
         fixed_pv = float(fixed_pv_kw)
+        if fixed_pv < 0:
+            raise ValueError("fixed_pv_kw cannot be negative")
         if fixed_pv > pv_kw_cap + 1e-9:
             raise ValueError(
                 f"fixed_pv_kw={fixed_pv:.3f} exceeds the NBT 150% sizing cap "
@@ -322,23 +453,79 @@ def _solve_lp(
             )
         PV_kw = pulp.LpVariable("PV_kw", lowBound=fixed_pv, upBound=fixed_pv, cat=pulp.LpContinuous)
     if fixed_batt_kwh is None:
-        B_E = pulp.LpVariable("B_E_kWh", lowBound=0, cat=pulp.LpContinuous)
+        battery_capacity_bound = float(max_battery_kwh)
+        B_E = pulp.LpVariable(
+            "B_E_kWh", lowBound=0, upBound=battery_capacity_bound, cat=pulp.LpContinuous
+        )
     else:
         fixed = float(fixed_batt_kwh)
+        if fixed < 0:
+            raise ValueError("fixed_batt_kwh cannot be negative")
+        # Fixed-size sweeps explicitly override the default household sizing
+        # domain; their own fixed capacity is still a finite, tight bound.
+        battery_capacity_bound = fixed
         B_E = pulp.LpVariable("B_E_kWh", lowBound=fixed, upBound=fixed, cat=pulp.LpContinuous)
-    B_P = pulp.LpVariable("B_P_kW", lowBound=0, cat=pulp.LpContinuous)
+    B_P = pulp.LpVariable(
+        "B_P_kW", lowBound=0, upBound=battery_capacity_bound, cat=pulp.LpContinuous
+    )
     prob += B_P <= B_E  # at most 1C power, consistent with residential batteries
 
     # Flows per hour
-    pv2load = [pulp.LpVariable(f"pv2load_{h}", lowBound=0) for h in range(H)]
-    pv2batt = [pulp.LpVariable(f"pv2batt_{h}", lowBound=0) for h in range(H)]
-    pv2grid = [pulp.LpVariable(f"pv2grid_{h}", lowBound=0) for h in range(H)]
-    batt2load = [pulp.LpVariable(f"batt2load_{h}", lowBound=0) for h in range(H)]
-    batt2grid = [pulp.LpVariable(f"batt2grid_{h}", lowBound=0) for h in range(H)]
-    grid2load = [pulp.LpVariable(f"grid2load_{h}", lowBound=0) for h in range(H)]
-    grid2batt = [pulp.LpVariable(f"grid2batt_{h}", lowBound=0) for h in range(H)]
-    soc = [pulp.LpVariable(f"soc_{h}", lowBound=0) for h in range(H)]
-    grid_import_mode = [pulp.LpVariable(f"grid_import_mode_{h}", cat=pulp.LpBinary) for h in range(H)]
+    pv_availability_bounds = [pv_kw_cap * float(G[h]) for h in range(H)]
+    pv2load = [
+        pulp.LpVariable(f"pv2load_{h}", lowBound=0, upBound=min(float(L[h]), pv_availability_bounds[h]))
+        for h in range(H)
+    ]
+    pv2batt = [
+        pulp.LpVariable(
+            f"pv2batt_{h}", lowBound=0,
+            upBound=min(battery_capacity_bound, pv_availability_bounds[h]),
+        )
+        for h in range(H)
+    ]
+    pv2grid = [
+        pulp.LpVariable(f"pv2grid_{h}", lowBound=0, upBound=pv_availability_bounds[h])
+        for h in range(H)
+    ]
+    batt2load = [
+        pulp.LpVariable(
+            f"batt2load_{h}", lowBound=0,
+            upBound=min(float(L[h]), battery_capacity_bound),
+        )
+        for h in range(H)
+    ]
+    batt2grid = [
+        pulp.LpVariable(
+            f"batt2grid_{h}", lowBound=0,
+            upBound=battery_capacity_bound if allow_batt_export else 0.0,
+        )
+        for h in range(H)
+    ]
+    grid2load = [
+        pulp.LpVariable(f"grid2load_{h}", lowBound=0, upBound=float(L[h]))
+        for h in range(H)
+    ]
+    grid2batt = [
+        pulp.LpVariable(
+            f"grid2batt_{h}", lowBound=0,
+            upBound=battery_capacity_bound if allow_grid_charging else 0.0,
+        )
+        for h in range(H)
+    ]
+    soc = [
+        pulp.LpVariable(f"soc_{h}", lowBound=0, upBound=battery_capacity_bound)
+        for h in range(H)
+    ]
+    grid_import_mode: dict[int, object] = {}
+    import_bounds = [
+        float(L[h]) + (battery_capacity_bound if allow_grid_charging else 0.0)
+        for h in range(H)
+    ]
+    export_bounds = [
+        pv_availability_bounds[h]
+        + (battery_capacity_bound if allow_batt_export else 0.0)
+        for h in range(H)
+    ]
 
     # When grid charging is enabled, split SOC to prevent exporting grid-charged energy.
     batt2load_pv = batt2load_grid = soc_pv = soc_grid = None
@@ -366,19 +553,6 @@ def _solve_lp(
             prob += batt2load[h] == batt2load_pv[h] + batt2load_grid[h]
         else:
             prob += batt2load[h] + batt2grid[h] <= B_P
-        # Directional meter and battery constraints. These are essential when
-        # official late-summer NBT export prices exceed retail import prices.
-        prob += grid2load[h] + grid2batt[h] <= max_interval_flow_kwh * grid_import_mode[h]
-        prob += pv2grid[h] + batt2grid[h] <= max_interval_flow_kwh * (1 - grid_import_mode[h])
-
-    # Disallow/allow grid charging and batt exports per flags
-    if not allow_grid_charging:
-        for h in range(H):
-            prob += grid2batt[h] == 0.0
-    if not allow_batt_export:
-        for h in range(H):
-            prob += batt2grid[h] == 0.0
-
     # SOC dynamics and bounds; enforce cyclic SOC
     for h in range(H):
         if cycle_monthly and H % 24 == 0:
@@ -443,11 +617,66 @@ def _solve_lp(
 
     prob += capex_annual + energy_cost + degrade_cost
 
-    # Solve
-    solver = pulp.PULP_CBC_CMD(msg=False)
-    prob.solve(solver)
-    if pulp.LpStatus[prob.status] != "Optimal":
-        raise RuntimeError(f"LP did not solve to optimality: status={pulp.LpStatus[prob.status]}")
+    # Solve with exact constraint generation. Each intermediate problem is a
+    # relaxation of the physical meter model. If its global optimum has no
+    # simultaneous import/export, it is feasible for the full model while also
+    # furnishing a lower bound, which proves it is the full model's optimum.
+    # Otherwise add tight binary disjunctions only at the violating intervals.
+    solver_rounds = 0
+    while True:
+        solver_rounds += 1
+        if solver_backend == "highs":
+            _solve_with_highs(prob)
+        else:
+            solver = pulp.PULP_CBC_CMD(msg=False)
+            prob.solve(solver)
+            if pulp.LpStatus[prob.status] != "Optimal":
+                raise RuntimeError(
+                    f"CBC MILP did not solve to optimality: status={pulp.LpStatus[prob.status]}"
+                )
+
+        violations = []
+        for h in range(H):
+            imported = float(grid2load[h].value()) + float(grid2batt[h].value())
+            exported = float(pv2grid[h].value()) + float(batt2grid[h].value())
+            if imported > 1e-7 and exported > 1e-7:
+                if h in grid_import_mode:
+                    raise RuntimeError(
+                        f"Meter-direction constraint violated solver tolerance at hour {h}: "
+                        f"import={imported}, export={exported}"
+                    )
+                violations.append(h)
+        if not violations:
+            break
+
+        hours_to_constrain = set(violations)
+        if solver_rounds == 1 and len(violations) > METER_BINARY_EAGER_THRESHOLD:
+            hours_to_constrain.update(_meter_direction_hours(inputs))
+
+        for h in sorted(hours_to_constrain):
+            if h in grid_import_mode:
+                continue
+            if import_bounds[h] <= 0 or export_bounds[h] <= 0:
+                if h in violations:
+                    raise RuntimeError(
+                        f"Simultaneous meter flow at hour {h} despite a zero physical bound"
+                    )
+                continue
+            mode = pulp.LpVariable(f"grid_import_mode_{h}", cat=pulp.LpBinary)
+            grid_import_mode[h] = mode
+            # Disaggregate the disjunction by physical flow. These bounds are
+            # equivalent to the summed meter-direction constraints at integer
+            # mode values, but their LP relaxation is materially tighter: a
+            # small PV bound cannot borrow the battery's capacity allowance,
+            # and vice versa.
+            prob += grid2load[h] <= float(L[h]) * mode
+            prob += grid2batt[h] <= (
+                battery_capacity_bound if allow_grid_charging else 0.0
+            ) * mode
+            prob += pv2grid[h] <= pv_availability_bounds[h] * (1 - mode)
+            prob += batt2grid[h] <= (
+                battery_capacity_bound if allow_batt_export else 0.0
+            ) * (1 - mode)
 
     # Extract values
     pv_kw_val = float(pulp.value(PV_kw))
@@ -490,6 +719,8 @@ def _solve_lp(
         export_credit=export_credit_val,
         degradation_cost=degradation_cost_val,
         flows=flows,
+        meter_binary_count=len(grid_import_mode),
+        solver_rounds=solver_rounds,
     )
     _verify_invariants(result, inputs)
     return result
