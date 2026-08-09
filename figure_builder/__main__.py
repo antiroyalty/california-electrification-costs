@@ -31,19 +31,20 @@ def _cmd_sweeps(args) -> list:
     out = []
     for slug in slugs:
         print(f"\n{slug}:")
-        collect_battery_capex_sweep(slug, force=args.force)
-        out.append(str(sweep_csv_path(slug, prices.regime)))
+        collect_battery_capex_sweep(slug, force=args.force, fine=args.fine)
+        resolution = "8760" if args.fine else "288"
+        out.append(str(sweep_csv_path(slug, prices.regime, resolution)))
     return out
 
 
-def _cmd_mechanism(_args):
+def _cmd_mechanism(args):
     from figure_builder.recipes import build_mechanism_block
-    return [str(build_mechanism_block())]
+    return [str(build_mechanism_block(fine=args.fine))]
 
 
-def _cmd_counties(_args):
+def _cmd_counties(args):
     from figure_builder.recipes import build_county_grid
-    return [str(build_county_grid())]
+    return [str(build_county_grid(fine=args.fine))]
 
 
 def _cmd_bridge(_args):
@@ -71,11 +72,11 @@ def _cmd_all(args):
     artifacts += _cmd_counties(args)
     artifacts += _cmd_bridge(args)
     artifacts += _cmd_split(args)
-    _write_metadata(artifacts)
+    _write_metadata(artifacts, fine=args.fine)
     return artifacts
 
 
-def _write_metadata(artifacts) -> None:
+def _write_metadata(artifacts, *, fine: bool) -> None:
     from figure_builder import git_short_sha
     prices = live_prices()
     meta = {
@@ -83,6 +84,7 @@ def _write_metadata(artifacts) -> None:
         "git_sha": git_short_sha(),
         "pv_net_per_kw": prices.pv_net_per_kw,
         "batt_net_per_kwh": prices.batt_net_per_kwh,
+        "sweep_resolution": "8760" if fine else "288_weighted_monthly_hour",
         "combined_doc": str(current_claims_doc(seed=False)),
         "artifacts": artifacts,
     }
@@ -107,6 +109,11 @@ def main() -> None:
                     help="County slugs (default: all four Claim-1 counties).")
     ap.add_argument("--force", action="store_true",
                     help="Recompute sweeps even if cached.")
+    ap.add_argument(
+        "--fine",
+        action="store_true",
+        help="Use full 8,760-hour chronology for sweeps (slow; default is weighted 12x24).",
+    )
     args = ap.parse_args()
     artifacts = _COMMANDS[args.command](args)
     print("\nArtifacts:")

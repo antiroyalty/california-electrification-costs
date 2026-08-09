@@ -38,8 +38,9 @@ python3 -m figure_builder snapshot                  # ensure claims-<sha>.html e
 python3 -m figure_builder all
 
 # Or step by step:
-python3 -m figure_builder sweeps                    # (re)compute the 4 county sweeps
+python3 -m figure_builder sweeps                    # weighted 12x24 sensitivity sweeps
 python3 -m figure_builder sweeps --counties alameda --force
+python3 -m figure_builder sweeps --counties alameda --fine  # deliberate 8760 run
 python3 -m figure_builder mechanism                 # Claim-1 Figures A/B/C + objective box
 python3 -m figure_builder counties                  # Claim-1 four-county grid
 python3 -m figure_builder bridge                    # assumption-bridge waterfall PNG
@@ -47,8 +48,16 @@ python3 -m figure_builder split                     # combined doc -> claim1/2/3
 ```
 
 Sweeps are cached in `figure_builder/sweeps/` as
-`sweep_8760_<county>_<regime>.csv` (keyed by regime, since solar's fixed price
-differs between regimes) and reused; pass `--force` to recompute. The
+`sweep_288_<county>_<regime>.csv` by default, or `sweep_8760_...` with
+`--fine` (keyed by regime, since solar's fixed price differs between regimes),
+and reused; pass `--force` to recompute. Weighted 12x24 is the declared
+sensitivity-grid resolution; use full chronology for headline cases and
+targeted checks, not large low-cost grids. The
+cache records the explicit battery-capacity bound and solver diagnostics; a
+cache generated under a different sizing domain or the former unbounded model
+is rejected automatically. The default domain is 0&ndash;40 kWh for a
+representative household and can be overridden for a reported sensitivity.
+The
 mechanism/counties recipes patch `claims-c459506.html` in place between
 HTML-comment markers, so re-running is idempotent (no duplicated blocks).
 

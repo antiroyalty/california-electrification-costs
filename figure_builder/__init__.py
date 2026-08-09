@@ -31,10 +31,16 @@ if str(REPO) not in sys.path:
 SWEEP_DIR = REPO / "figure_builder" / "sweeps"
 FIG_DIR = REPO / "figure_builder" / "figures"
 
-def sweep_csv_path(slug: str, regime: str = "post_itc_2026") -> Path:
-    """Cache path for a county sweep. Keyed by regime, since the sweep depends on
-    solar's price, which differs between policy regimes."""
-    return SWEEP_DIR / f"sweep_8760_{slug}_{regime}.csv"
+def sweep_csv_path(
+    slug: str,
+    regime: str = "post_itc_2026",
+    resolution: str = "288",
+) -> Path:
+    """Cache path keyed by temporal resolution and policy regime."""
+
+    if resolution not in {"288", "8760"}:
+        raise ValueError("resolution must be '288' or '8760'")
+    return SWEEP_DIR / f"sweep_{resolution}_{slug}_{regime}.csv"
 
 
 # --- one claims snapshot per commit -----------------------------------------

@@ -74,8 +74,20 @@ profile values onto the explicit billing calendar.
 
 Official export prices can exceed retail prices during a small number of
 late-summer evening hours. The optimization therefore enforces one meter
-direction per interval with a binary constraint. It also limits PV to 150% of
-modeled annual load and battery power to at most 1C.
+direction per interval. It first solves a continuous relaxation, adds tight
+binary disjunctions only at intervals that actually import and export
+simultaneously, and repeats until the relaxed global optimum is physically
+feasible. That stopping condition proves global optimality for the full meter
+model: the solution is both a relaxation lower bound and feasible for the full
+problem. PuLP constructs the model and SciPy HiGHS solves it.
+
+PV is limited to 150% of modeled annual load. Optimized representative-household
+storage is limited to an explicit, configurable 40 kWh, with battery power at
+most 1C. The limit supplies tight per-interval import/export bounds and is
+recorded in output diagnostics; fixed-size sensitivity runs explicitly override
+it with their requested capacity. Coarse 12×24 runs remain the recommended mode
+for large low-cost capex grids; full 8,760-hour chronology is used for headline
+county solutions and targeted sensitivities.
 
 Step 12 is authoritative for the realized annual bill because it implements
 monthly credit banks. Step 9b currently uses marginal hourly credits rather
