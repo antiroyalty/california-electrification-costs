@@ -30,15 +30,12 @@ if REPO_ROOT not in sys.path:
 
 from pipeline.steps.step9b_cooptimize_core import (
     CooptInputs,
+    _meter_direction_hours,
     _solve_lp,
-    _hourly_import_rate,
-    _timestamp_index_8760,
 )
-from helpers.nem3_export_rates import get_export_rate_table_for_county
-from helpers.electricity_rate_helpers import PGE_RATE_PLANS
+from tariffs import NBTScenario, TariffCatalog
+from tariffs.calendar import full_year_hourly_index
 from evaluations.eac import crf, alpha_batt_npv
-
-NEM3_BASE_DIR = os.path.join(REPO_ROOT, "data", "NEM3")
 
 # Profile for H1–H3: 24 hours, flat 1 kWh/hr load, solar only during hours 8–15.
 # pv_gen_per_kw = 1.0 during peak hours → 2 kW PV generates 2 kWh/hr during sun hours.
@@ -269,55 +266,34 @@ class TestLPBatteryRespondsToPriceSignal:
 
 
 # ---------------------------------------------------------------------------
-# H4 — ACC rate range for Alameda: data validation
+# H4 — Official NBT schedule shape and range
 # ---------------------------------------------------------------------------
 
 class TestACCRatesForAlameda:
-    """Verify that Alameda/PGE ACC rates loaded from CSV are in the ACC range.
-
-    The production code calls get_export_rate_table_for_county(utility='PG&E',
-    county='alameda') and uses the result as p_exp in the LP. If someone
-    accidentally put retail rates (~$0.35–0.60/kWh) in the CSV, or if the
-    function fell back to a retail default, the LP objective would be wrong.
-
-    ACC rates for PGE CZ3A peak at ~$0.0807/kWh. Retail TOU-D peak rates
-    are ~$0.48/kWh. A max threshold of $0.25 cleanly separates them.
-    """
+    """The production path uses a utility schedule, not a county climate zone."""
 
     @pytest.fixture(scope="class")
     def alameda_rates(self):
-        table = get_export_rate_table_for_county(
-            base_dir=NEM3_BASE_DIR,
-            utility="PG&E",
-            county_name_or_slug="alameda",
-        )
-        # Flatten the 12×24 table to a single list of 288 values
-        return [table[month][hour] for month in range(1, 13) for hour in range(24)]
+        schedule = TariffCatalog().export_schedule("PG&E", NBTScenario())
+        return schedule.rows[schedule.rows["component"] == "total"]["rate_usd_per_kwh"].tolist()
 
     def test_all_acc_rates_are_non_negative(self, alameda_rates):
-        """All 288 ACC rate entries for Alameda are non-negative."""
+        """All 576 weekday/weekend-holiday entries are non-negative."""
         negatives = [(i, v) for i, v in enumerate(alameda_rates) if v < 0.0]
         assert not negatives, (
             f"Found {len(negatives)} negative ACC rates (first: {negatives[0]}). "
             f"ACC rates should always be ≥ 0."
         )
 
-    def test_all_acc_rates_below_retail_threshold(self, alameda_rates):
-        """All rates should be clearly below retail levels (< $0.25/kWh).
+    def test_official_schedule_has_low_average_and_real_evening_spikes(self, alameda_rates):
+        """NBT averages are low even though some late-summer hours exceed retail."""
+        assert 0.07 < sum(alameda_rates) / len(alameda_rates) < 0.12
+        assert max(alameda_rates) == pytest.approx(1.19289)
 
-        PGE retail off-peak ≈ $0.31/kWh; ACC max ≈ $0.08/kWh. A threshold
-        of $0.25 catches any accidental retail-rate contamination.
-        """
-        too_high = [(i, v) for i, v in enumerate(alameda_rates) if v >= 0.25]
-        assert not too_high, (
-            f"Found {len(too_high)} ACC rates ≥ $0.25/kWh (first: {too_high[0]}). "
-            f"These look like retail rates, not ACC rates. Max ACC for PGE CZ3A is ~$0.08/kWh."
-        )
-
-    def test_acc_table_has_288_values(self, alameda_rates):
-        """The 12×24 table should produce exactly 288 rate entries."""
-        assert len(alameda_rates) == 288, (
-            f"Expected 288 ACC rate entries (12 months × 24 hours), "
+    def test_acc_table_has_576_values(self, alameda_rates):
+        """The schedule is 12 months × 2 day types × 24 hours."""
+        assert len(alameda_rates) == 576, (
+            f"Expected 576 ACC rate entries, "
             f"got {len(alameda_rates)}"
         )
 
@@ -337,62 +313,48 @@ class TestACCRatesForAlameda:
 
 
 # ---------------------------------------------------------------------------
-# H5 — ACC vs retail in production path: p_exp < p_imp for all 8760 hours
+# H5 — Official price spikes cannot create meter arbitrage
 # ---------------------------------------------------------------------------
 
 class TestACCExportRatesBelowRetailImport:
-    """In the production data path for Alameda/PGE, p_exp must be below p_imp
-    for every hour of the year.
-
-    This mirrors the exact construction in step9b_cooptimize_pv_battery.py:
-        export_table = get_export_rate_table_for_county(...)
-        p_exp = [float(export_table[ts.month][ts.hour]) for ts in ts_index]
-        p_imp = [_hourly_import_rate(plan_details, ts) for ts in ts_index]
-
-    If p_exp[h] > p_imp[h] for any hour, the optimizer would see exports as
-    more profitable than self-consumption — the opposite of NEM3 economics.
-    Catching that would require either wrong ACC data or wrong retail data.
-    """
+    """High export values are real; physical meter direction is the safeguard."""
 
     @pytest.fixture(scope="class")
     def alameda_price_series(self):
-        export_table = get_export_rate_table_for_county(
-            base_dir=NEM3_BASE_DIR,
-            utility="PG&E",
-            county_name_or_slug="alameda",
-        )
-        plan_details = PGE_RATE_PLANS["E-TOU-D"]
-        ts_index = _timestamp_index_8760(2018)
-        p_exp = [float(export_table[ts.month][ts.hour]) for ts in ts_index]
-        p_imp = [_hourly_import_rate(plan_details, ts) for ts in ts_index]
+        bundle = TariffCatalog().bundle("PG&E", NBTScenario())
+        ts_index = full_year_hourly_index(2026)
+        p_exp = [
+            rate + bundle.acc_plus_rate
+            for rate in bundle.export_schedule.rates_for(ts_index)
+        ]
+        p_imp = bundle.import_schedule.rates_for(ts_index)
         return p_imp, p_exp
 
-    def test_acc_never_exceeds_retail_import_rate(self, alameda_price_series):
-        """p_exp[h] <= p_imp[h] for all 8760 hours of 2018.
-
-        If this fails, the LP sees NEM3 exports as more valuable than retail
-        — inverting the core economics of the Net Billing Tariff.
-        """
+    def test_some_official_export_prices_exceed_retail(self, alameda_price_series):
+        """Pin the counterintuitive feature that exposed the old LP exploit."""
         p_imp, p_exp = alameda_price_series
         violations = [
             (h, p_exp[h], p_imp[h])
             for h in range(8760)
             if p_exp[h] > p_imp[h] + 1e-6
         ]
-        assert not violations, (
-            f"Found {len(violations)} hours where ACC p_exp > retail p_imp "
-            f"(first: hour={violations[0][0]}, p_exp={violations[0][1]:.4f}, "
-            f"p_imp={violations[0][2]:.4f}). "
-            f"Under NEM3, exports should always be worth less than avoided imports."
+        assert violations
+        assert len(violations) == 216
+
+    def test_only_nonconvex_price_hours_are_binary_candidates(self, alameda_price_series):
+        p_imp, p_exp = alameda_price_series
+        inputs = CooptInputs(
+            load_kwh=[1.0] * 8760,
+            pv_gen_per_kw=[1.0] * 8760,
+            import_rates=p_imp,
+            export_rates=p_exp,
         )
+        candidates = _meter_direction_hours(inputs)
+        assert len(candidates) == 216
+        assert all(p_exp[hour] > p_imp[hour] for hour in candidates)
 
     def test_acc_rates_substantially_below_retail(self, alameda_price_series):
-        """Average ACC rate should be well below average retail rate.
-
-        The paper's thesis is that NEM3 penalizes solar by paying ACC (~7-9¢)
-        instead of retail (~35-50¢). If the average gap is less than 10¢,
-        something is wrong with the data.
-        """
+        """Annual average export compensation remains below retail imports."""
         p_imp, p_exp = alameda_price_series
         avg_imp = sum(p_imp) / len(p_imp)
         avg_exp = sum(p_exp) / len(p_exp)
@@ -403,6 +365,44 @@ class TestACCExportRatesBelowRetailImport:
             f"(avg_imp={avg_imp:.4f}, avg_exp={avg_exp:.4f}, gap={gap:.4f}). "
             f"A small gap would undermine the NEM3 economic penalty argument."
         )
+
+    def test_lp_never_imports_and_exports_in_same_high_value_interval(self):
+        inputs = CooptInputs(
+            load_kwh=[1.0, 1.0],
+            pv_gen_per_kw=[1.0, 0.0],
+            import_rates=[0.20, 0.20],
+            export_rates=[2.00, 0.05],
+        )
+        result = _solve_lp(
+            inputs,
+            fixed_pv_kw=2.0,
+            fixed_batt_kwh=0.0,
+            **_zero_capex_kwargs(),
+        )
+        for hour in range(2):
+            imported = result.flows.grid_to_load[hour] + result.flows.grid_to_batt[hour]
+            exported = result.flows.pv_to_grid[hour] + result.flows.batt_to_grid[hour]
+            assert not (imported > 1e-6 and exported > 1e-6)
+        assert result.meter_binary_count == 1
+        assert result.solver_rounds == 2
+
+
+def test_explicit_battery_capacity_bound_is_enforced():
+    inputs = CooptInputs(
+        load_kwh=[0.0, 1.0],
+        pv_gen_per_kw=[1.0, 0.0],
+        import_rates=[0.40, 0.40],
+        export_rates=[0.0, 0.0],
+    )
+    result = _solve_lp(
+        inputs,
+        fixed_pv_kw=1.0,
+        c_pv_kw=0.0,
+        c_batt_kwh=0.0,
+        c_batt_kw=0.0,
+        max_battery_kwh=0.5,
+    )
+    assert 0.0 <= result.batt_kwh <= 0.5 + 1e-8
 
 
 # ---------------------------------------------------------------------------

@@ -1,4 +1,8 @@
-# NEM 3.0 (Net Billing Tariff) — Implementation Plan
+# Superseded NEM 3.0 implementation plan
+
+> This pre-implementation plan describes the removed `NEM3Options` and
+> 12×24 fallback path. The implemented architecture is documented in
+> `NBT_TARIFF_MODEL.md`.
 
 This document describes how to implement the California NEM 3.0 (aka Net Billing Tariff) across the three IOUs — PG&E, SCE, and SDG&E — within this repository’s pipeline.
 

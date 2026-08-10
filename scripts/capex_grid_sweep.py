@@ -1,7 +1,7 @@
 """
 Helper: PV capex × battery capex grid sweep for co-optimized sizes.
 
-Runs the Step 9b LP solver across a coarse grid of PV capex ($/kW)
+Runs the Step 9b optimization model across a coarse grid of PV capex ($/kW)
 and battery capex ($/kWh) for a single county, then writes:
 - CSV with optimal PV/battery sizes and annualized cost components
 - Single heatmap plot of total annual cost over the capex grid
@@ -14,16 +14,15 @@ from __future__ import annotations
 import argparse
 import os
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
 from helpers.main_helpers import get_scenario_path, slugify_county_name
-from helpers.utility_helpers import get_utility_for_county
-from helpers.electricity_rate_helpers import PGE_RATE_PLANS, SCE_RATE_PLANS, SDGE_RATE_PLANS
-from helpers.nem3_export_rates import get_export_rate_table_for_county
+from tariffs import NBTScenario, TariffCatalog, resolve_county_service_assignment
+from tariffs.calendar import full_year_hourly_index
 from pipeline.steps.step9_solar_storage_dispatch_core import (
     prepare_weather_and_load,
     pv_timeseries_ac_kwh,
@@ -31,17 +30,9 @@ from pipeline.steps.step9_solar_storage_dispatch_core import (
 from pipeline.steps.step9b_cooptimize_core import (
     CooptInputs,
     build_monthly_hourly_inputs,
-    _hourly_import_rate,
     _solve_lp,
-    _timestamp_index_8760,
 )
 
-
-RATE_PLANS: Dict[str, Dict] = {
-    "PG&E": PGE_RATE_PLANS,
-    "SCE": SCE_RATE_PLANS,
-    "SDG&E": SDGE_RATE_PLANS,
-}
 
 TOTAL_LOAD_COLUMN_NAME = "electricity.real_and_simulated.for_typical_county_home.kwh"
 
@@ -54,13 +45,6 @@ class GridSpec:
     batt_min: float
     batt_max: float
     batt_step: float
-
-
-def _default_plan_for_utility(util: str) -> str:
-    plans = list(RATE_PLANS.get(util, {}).keys())
-    if not plans:
-        raise ValueError(f"No rate plans found for utility '{util}'.")
-    return plans[0]
 
 
 def _frange(start: float, stop: float, step: float) -> List[float]:
@@ -132,6 +116,7 @@ def run(
     allow_batt_export: bool,
     fine: bool,
     year: int,
+    max_battery_kwh: float = 40.0,
 ) -> Tuple[str, str]:
     county_slug = slugify_county_name(county)
     scen_path = get_scenario_path(base_input_dir, scenario, housing_type)
@@ -151,23 +136,15 @@ def run(
     if len(pv_gen_per_kw) != 8760:
         raise ValueError(f"Expected 8760 PV hourly values, got {len(pv_gen_per_kw)}.")
 
-    util = get_utility_for_county(county_slug)
-    if not util:
-        raise ValueError(f"No utility found for county '{county_slug}'.")
-    plan_name = plan_override or _default_plan_for_utility(util)
-    plan_details = RATE_PLANS.get(util, {}).get(plan_name)
-    if not plan_details:
-        raise ValueError(f"No plan details for utility={util}, plan={plan_name}.")
-
-    export_table = get_export_rate_table_for_county(
-        base_dir=os.path.join("data", "NEM3"),
-        utility=util,
-        county_name_or_slug=county_slug,
-    )
-
-    ts_index = _timestamp_index_8760(year)
-    p_imp = [_hourly_import_rate(plan_details, ts) for ts in ts_index]
-    p_exp = [float(export_table[ts.month][ts.hour]) for ts in ts_index]
+    assignment = resolve_county_service_assignment(county_slug)
+    nbt_scenario = NBTScenario(billing_year=year, nbt_vintage=year)
+    tariff = TariffCatalog().bundle(assignment.utility, nbt_scenario, import_plan=plan_override)
+    ts_index = full_year_hourly_index(year)
+    p_imp = tariff.import_schedule.rates_for(ts_index)
+    p_exp = [
+        rate + tariff.acc_plus_rate
+        for rate in tariff.export_schedule.rates_for(ts_index)
+    ]
 
     inputs = CooptInputs(
         load_kwh=load_kwh,
@@ -201,6 +178,7 @@ def run(
                 c_deg_per_kwh=0.0,
                 weights=weights,
                 cycle_monthly=cycle_monthly,
+                max_battery_kwh=max_battery_kwh,
             )
             records.append(
                 {
@@ -214,6 +192,9 @@ def run(
                     "import_cost": float(result.import_cost),
                     "export_credit": float(result.export_credit),
                     "degradation_cost": float(result.degradation_cost),
+                    "max_battery_kwh": float(max_battery_kwh),
+                    "meter_binary_count": int(result.meter_binary_count),
+                    "solver_rounds": int(result.solver_rounds),
                 }
             )
 
@@ -228,7 +209,10 @@ def run(
     df.to_csv(csv_path, index=False)
 
     png_path = os.path.join(out_dir, f"capex_grid_{county_slug}.png")
-    title = f"Co-opt Total Cost: PV Capex × Battery Capex ({county_slug}, {plan_name})"
+    title = (
+        "Co-opt Total Cost: PV Capex × Battery Capex "
+        f"({county_slug}, {tariff.import_schedule.plan_name})"
+    )
     _plot_heatmap(
         df,
         x_key="pv_capex_per_kw",
@@ -282,7 +266,13 @@ def main() -> None:
         action="store_true",
         help="Use full 8760 resolution (slower). Default is coarse monthly-hourly aggregation.",
     )
-    p.add_argument("--year", type=int, default=2018)
+    p.add_argument("--year", type=int, default=2026)
+    p.add_argument(
+        "--max-battery-kwh",
+        type=float,
+        default=40.0,
+        help="Explicit representative-household battery sizing ceiling (kWh)",
+    )
     args = p.parse_args()
 
     grid = GridSpec(
@@ -310,6 +300,7 @@ def main() -> None:
         allow_batt_export=args.allow_batt_export,
         fine=args.fine,
         year=args.year,
+        max_battery_kwh=args.max_battery_kwh,
     )
 
     print(f"Wrote CSV: {csv_path}")

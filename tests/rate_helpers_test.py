@@ -22,9 +22,9 @@ from helpers.electricity_rate_helpers import PGE_RATE_PLANS, SCE_RATE_PLANS, SDG
 from pipeline.steps.step9b_cooptimize_core import _hourly_import_rate
 from pipeline.steps.step12_evaluate_electricity_rates import (
     _hourly_import_rate as _step12_rate,
-    _estimate_monthly_fixed_from_plan,
     calculate_annual_costs_electricity,
 )
+from tariffs.import_rates import monthly_fixed_charge as _estimate_monthly_fixed_from_plan
 
 
 def _ts(year: int, month: int, day: int, hour: int) -> pd.Timestamp:
@@ -257,27 +257,27 @@ def _png_rate_5_8pm(ts: pd.Timestamp) -> float:
 
 
 def _png_rate_prime(ts: pd.Timestamp) -> float:
-    """PNG source-of-truth rates from tou-d-prime-{summer,winter}.png.
+    """Official TOU-D Schedule rates effective June 25, 2026.
 
     Summer (Jun–Sep):
-      Weekdays:  On-Peak  59¢  hours 16–20 (4–9 pm)
-                 Off-Peak 26¢  all other hours
-      Weekends:  Mid-Peak 40¢  hours 16–20
-                 Off-Peak 26¢  all other hours
+      Weekdays:  On-Peak  $0.59910  hours 16–20 (4–9 pm)
+                 Off-Peak $0.27317  all other hours
+      Weekends:  Mid-Peak $0.40801  hours 16–20
+                 Off-Peak $0.27317  all other hours
     Winter (Oct–May, no weekday/weekend split):
-      Mid-Peak       56¢  hours 16–20 (4–9 pm)
-      Super-Off-Peak 24¢  hours 8–15  (same rate as Off-Peak)
-      Off-Peak       24¢  all other hours
+      Mid-Peak       $0.57265  hours 16–20 (4–9 pm)
+      Super-Off-Peak $0.25252  hours 8–15
+      Off-Peak       $0.25252  all other hours
     """
     h = ts.hour
     if _sce_summer(ts):
         if h in range(16, 21):
-            return 0.40 if ts.weekday() >= 5 else 0.59
-        return 0.26
+            return 0.40801 if ts.weekday() >= 5 else 0.59910
+        return 0.27317
     else:
         if h in range(16, 21):
-            return 0.56
-        return 0.24
+            return 0.57265
+        return 0.25252
 
 
 def _step9b(plan_name: str, ts: pd.Timestamp) -> float:
@@ -363,9 +363,9 @@ class TestSCEAnnualBillVsPNG:
 # ---------------------------------------------------------------------------
 # Fixed charge tests
 #
-# Two billing paths each use fixedCharge differently:
+# Comparison-plan and annual retail paths use fixedCharge differently:
 #
-#   _estimate_monthly_fixed_from_plan (NEM3 path in calculate_nem3_annual_costs):
+#   monthly_fixed_charge (tariff-domain comparison-plan primitive):
 #       returns fixedCharge_per_day × days_in_month
 #
 #   calculate_annual_costs_electricity (non-NEM3 path):
@@ -402,8 +402,8 @@ class TestSCEFixedCharges:
 
     def test_monthly_fixed_tou_d_prime(self):
         plan = SCE_RATE_PLANS["TOU-D-PRIME"]
-        assert _estimate_monthly_fixed_from_plan(plan, 2018, 6) == pytest.approx(0.79 * 30)
-        assert _estimate_monthly_fixed_from_plan(plan, 2018, 7) == pytest.approx(0.79 * 31)
+        assert _estimate_monthly_fixed_from_plan(plan, 2018, 6) == pytest.approx(0.794 * 30)
+        assert _estimate_monthly_fixed_from_plan(plan, 2018, 7) == pytest.approx(0.794 * 31)
 
     # --- Non-NEM3 path: calculate_annual_costs_electricity, zero load ---
 
@@ -417,7 +417,7 @@ class TestSCEFixedCharges:
 
     def test_annual_fixed_tou_d_prime_zero_load(self):
         result = calculate_annual_costs_electricity(ZERO_LOAD_8760, "SCE", "TOU-D-PRIME")
-        assert result["TOU-D-PRIME"] == pytest.approx(0.79 * 365, abs=0.01)
+        assert result["TOU-D-PRIME"] == pytest.approx(0.794 * 365, abs=0.01)
 
 
 # ---------------------------------------------------------------------------
@@ -467,12 +467,12 @@ class TestSCEFullAnnualBill:
 
     def test_tou_d_prime_full_bill(self):
         expected_energy = sum(_png_rate_prime(ts) for ts in YEAR_2018)
-        expected_total = expected_energy + 0.79 * 365
+        expected_total = expected_energy + 0.794 * 365
         result = calculate_annual_costs_electricity(FLAT_LOAD_8760, "SCE", "TOU-D-PRIME")
         actual = result["TOU-D-PRIME"]
         assert actual == pytest.approx(expected_total, abs=0.01), (
             f"TOU-D-PRIME full bill: code ${actual:.2f} vs expected ${expected_total:.2f} "
-            f"(energy ${expected_energy:.2f} + fixed ${0.79 * 365:.2f}, diff ${actual - expected_total:+.2f})"
+            f"(energy ${expected_energy:.2f} + fixed ${0.794 * 365:.2f}, diff ${actual - expected_total:+.2f})"
         )
 
 
@@ -571,10 +571,10 @@ def _pdf_rate_e_elec(ts: pd.Timestamp) -> float:
     """
     h = ts.hour
     if h in range(16, 21):          # peak 4–9pm
-        return 0.55 if _pge_summer(ts) else 0.32
+        return 0.55214 if _pge_summer(ts) else 0.32063
     if h in [15, 21, 22, 23]:       # partial-peak 3–4pm and 9pm–midnight
-        return 0.39 if _pge_summer(ts) else 0.30
-    return 0.33 if _pge_summer(ts) else 0.28  # off-peak
+        return 0.39026 if _pge_summer(ts) else 0.29854
+    return 0.33358 if _pge_summer(ts) else 0.28468  # off-peak
 
 
 def _pdf_rate_ev_b(ts: pd.Timestamp) -> float:

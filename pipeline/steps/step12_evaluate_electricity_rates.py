@@ -8,22 +8,16 @@
 # https://www.pge.com/en/account/rate-plans/how-rates-work/baseline-allowance.html#accordion-2fb51186db-item-2ea52b55e4
 # Baseline Allowances for E-TOU-C Rate Plan
 
-from datetime import datetime, timedelta
 import argparse
-import dataclasses
 import os
 import pandas as pd
 from collections import defaultdict
 from datetime import datetime, timedelta
 from helpers.main_helpers import get_counties, get_scenario_path, log, to_number, get_timestamp, norcal_counties, socal_counties, central_counties, slugify_county_name
 from helpers.electricity_rate_helpers import PGE_RATE_PLANS, SCE_RATE_PLANS, SDGE_RATE_PLANS
-from helpers.nem3_export_rates import (
-    get_export_rate_table,
-    get_export_rate_table_for_county,
-    default_options_for_utility,
-    NEM3Options,
-)
 from helpers.utility_helpers import get_utility_for_county
+from tariffs import EnergyFlows, NBTScenario, TariffCatalog, calculate_nbt_bill, required_nbt_import_plan
+from tariffs.calendar import calendarize_full_year
 
 
 RATE_PLANS = {
@@ -76,9 +70,22 @@ def get_hourly_rate(rate_section, hour):
 
 # TODO: Implement minimum daily charge, baseline credits
 def calculate_annual_costs_electricity(load_profile, utility, rate_plan_name, timestamps=None):
+    """Calculate a comparison-plan retail bill with strict hourly rate lookup.
+
+    A missing ``fixedCharge`` explicitly means that the comparison plan has no
+    daily fixed charge. Missing seasons, day types, or energy rates are errors.
+    """
     annual_costs = defaultdict(float)
-    # Now plan_details has a nested structure: season -> {weekdays, weekends}
-    plan_details = RATE_PLANS[utility][rate_plan_name]
+    try:
+        plan_details = RATE_PLANS[utility][rate_plan_name]
+    except KeyError as exc:
+        raise KeyError(f"Unknown retail plan {utility} {rate_plan_name}") from exc
+
+    if timestamps is not None and len(timestamps) != len(load_profile):
+        raise ValueError(
+            f"timestamps and load_profile must have the same length; got "
+            f"{len(timestamps)} and {len(load_profile)}"
+        )
 
     for hour_index, hourly_load in enumerate(load_profile):
         if timestamps is not None:
@@ -86,37 +93,25 @@ def calculate_annual_costs_electricity(load_profile, utility, rate_plan_name, ti
         else:
             current_datetime = datetime(year=2018, month=1, day=1) + timedelta(hours=hour_index)
         season = 'summer' if 6 <= current_datetime.month <= 9 else 'winter'
-        hour = current_datetime.hour
-
-        # Determine whether the current day is a weekday (Monday-Friday) or weekend (Saturday-Sunday)
-        dayotw_type = "weekends" if is_weekend(current_datetime) else "weekdays"
-
-        # Retrieve the seasonal rates and then the appropriate day type rates
+        day_type = "weekends" if is_weekend(current_datetime) else "weekdays"
         season_rates = plan_details.get(season)
-        if not season_rates:
-            continue
-
-        dayotw_rates = season_rates.get(dayotw_type)
-        if not dayotw_rates:
-            continue
-
-        if hour in dayotw_rates.get("peakHours", []):
-            rate = dayotw_rates.get("peak", 0.0)
-        elif "midPeakHours" in dayotw_rates and hour in dayotw_rates["midPeakHours"]:
-            rate = dayotw_rates["midPeak"]
-        elif "partPeakHours" in dayotw_rates and hour in dayotw_rates.get("partPeakHours", []):
-            rate = dayotw_rates["partPeak"]
-        elif "superOffPeakHours" in dayotw_rates and hour in dayotw_rates.get("superOffPeakHours", []):
-            rate = dayotw_rates["superOffPeak"]
+        if season_rates is None:
+            raise KeyError(f"Missing {season} rates for {utility} {rate_plan_name}")
+        if day_type in season_rates:
+            day_rates = season_rates[day_type]
+        elif "weekdays" in season_rates or "weekends" in season_rates:
+            raise KeyError(f"Missing {day_type} rates for {utility} {rate_plan_name} {season}")
         else:
-            rate = dayotw_rates.get("offPeak", 0.0)
+            day_rates = season_rates
+
+        rate = _hourly_import_rate(plan_details, current_datetime)
 
         # Calculate the cost for the hour
         energy_cost = hourly_load * rate
         annual_costs[rate_plan_name] += energy_cost
 
-        # Include fixed charges if available (daily charge spread across 24 hours)
-        fixed_charge = dayotw_rates.get("fixedCharge", 0.0)
+        # An absent fixedCharge is an explicit zero for comparison plans.
+        fixed_charge = float(day_rates["fixedCharge"]) if "fixedCharge" in day_rates else 0.0
         annual_costs[rate_plan_name] += fixed_charge / 24
 
     return annual_costs
@@ -170,95 +165,6 @@ def _hourly_import_rate(plan_details, dt: datetime) -> float:
     )
 
 
-def _estimate_monthly_fixed_from_plan(plan_details, year: int, month: int) -> float:
-    """Best-effort: infer a monthly fixed from plan details if present (daily basic charge)."""
-    # Try weekdays summer first, else any season
-    season = 'summer' if 6 <= month <= 9 else 'winter'
-    rates = plan_details.get(season, {})
-    day_rates = rates.get('weekdays', rates.get('weekends', rates))
-    per_day = float(day_rates.get('fixedCharge', 0.0))
-    # Days in month
-    days = 30
-    if month in (1,3,5,7,8,10,12):
-        days = 31
-    elif month == 2:
-        # ignore leap for simplicity
-        days = 28
-    return per_day * days
-
-
-def calculate_nem3_annual_costs(
-    timestamps,
-    import_kwh,
-    export_kwh,
-    utility: str,
-    rate_plan_name: str,
-    *,
-    options: NEM3Options | None = None,
-    export_table: dict | None = None,
-):
-    """Compute NEM 3.0 bill: monthly energy charges (retail), monthly export credits (ACC), NBCs, fixed/minimum, carry-forward.
-
-    Returns dict keyed by rate plan name with a single annual total in dollars.
-    """
-    annual_costs = {}
-    plan_details = RATE_PLANS[utility][rate_plan_name]
-    opts = options or default_options_for_utility(utility)
-    export_table = export_table or get_export_rate_table(utility)
-
-    # Ensure aligned series
-    ts = pd.to_datetime(timestamps)
-    imp = pd.Series(import_kwh).astype(float).reset_index(drop=True)
-    exp = pd.Series(export_kwh).astype(float).reset_index(drop=True)
-    if len(ts) != len(imp):
-        # Fall back to synthetic timestamps if needed
-        ts = pd.date_range(start=f"{datetime.now().year}-01-01", periods=len(imp), freq='H')
-    if len(exp) != len(imp):
-        exp = exp.reindex(range(len(imp))).fillna(0.0)
-
-    # Monthly accounting
-    annual_total = 0.0
-    carry_credit = 0.0  # dollars
-    grouped = pd.DataFrame({'ts': ts, 'imp': imp, 'exp': exp})
-    grouped['month'] = grouped['ts'].dt.month
-    grouped['hour'] = grouped['ts'].dt.hour
-
-    for month, g in grouped.groupby('month', sort=True):
-        # Hourly import energy rates and ACC export credits
-        energy_charge = 0.0
-        nbc_charge = 0.0
-        export_credit = 0.0
-        for _, row in g.iterrows():
-            dt = pd.Timestamp(row['ts']).to_pydatetime()
-            irate = _hourly_import_rate(plan_details, dt)
-            acc_rate = float(export_table.get(int(month), [0.0] * 24)[int(row['hour'])])
-            kwh_imp = float(row['imp'])
-            kwh_exp = float(row['exp'])
-            energy_charge += kwh_imp * max(0.0, irate - opts.nbc_dollars_per_kwh)
-            nbc_charge += kwh_imp * max(0.0, opts.nbc_dollars_per_kwh)
-            export_credit += kwh_exp * acc_rate
-
-        # Apply credits only to energy charge; carry forward remainder
-        energy_net = max(0.0, energy_charge - carry_credit - export_credit)
-        leftover_credit = max(0.0, (carry_credit + export_credit) - energy_charge)
-
-        # Fixed and minimum charges (prefer explicit options; otherwise infer per plan)
-        fixed = opts.fixed_charge_monthly or _estimate_monthly_fixed_from_plan(plan_details, ts[0].year, int(month))
-        minimum = opts.minimum_bill_monthly or 0.0
-        month_subtotal = energy_net + nbc_charge + fixed
-        month_total = max(month_subtotal, minimum)
-
-        annual_total += month_total
-        carry_credit = leftover_credit
-
-        # Optional year-end true-up
-        if int(month) == int(opts.true_up_month) and opts.nsc_dollars_per_kwh > 0.0:
-            # If modeling NSC in $/kWh, we would need a conversion; treat credit as $ and for simplicity assume no NSC payout here.
-            carry_credit = 0.0
-
-    annual_costs[rate_plan_name] = annual_total
-    return annual_costs
-    
 def process_county_scenario_from_series(file_path, county, utility, selected_rate_plan, column_name):
     """Read a specific aggregator column and compute retail annual cost for the given plan."""
     file = os.path.join(file_path, county, f"{INPUT_FILE_NAME}_{county}.csv")
@@ -273,35 +179,74 @@ def process_county_scenario_from_series(file_path, county, utility, selected_rat
     return calculate_annual_costs_electricity(load_profile, utility, selected_rate_plan, timestamps=timestamps)
 
 
-def process_county_scenario_nem3(file_path, county, utility, selected_rate_plan, *, nbc_dollars_per_kwh_override=None):
-    """Compute NEM3 bill using Aggregator columns: nem3.imports.kwh and nem3.exports.kwh."""
+def nbt_ledger_for_county(
+    file_path,
+    county,
+    utility,
+    selected_rate_plan,
+    *,
+    nbt_scenario: NBTScenario | None = None,
+    nbc_dollars_per_kwh_override=None,
+):
+    """Compute the full monthly NBT ledger for one county and import plan.
+
+    Returns the whole `BillLedger` rather than just the annual total so callers
+    can also report the credit-bank diagnostics (see `unused_credit`), which
+    are what expose Step 9b's marginal-credit optimization over-valuing exports
+    relative to this realized bill.
+    """
     file = os.path.join(file_path, county, f"{INPUT_FILE_NAME}_{county}.csv")
     if not os.path.exists(file):
         raise FileNotFoundError(f"File not found: {file}")
 
     df = pd.read_csv(file)
-    ts = pd.to_datetime(df['timestamp']) if 'timestamp' in df.columns else pd.date_range('2018-01-01', periods=len(df), freq='H')
-
+    required_columns = {"timestamp", "nem3.imports.kwh", "nem3.exports.kwh"}
+    missing = required_columns - set(df.columns)
+    if missing:
+        raise KeyError(f"{file} is missing required NBT columns: {sorted(missing)}")
+    resolved_scenario = nbt_scenario or NBTScenario()
+    source_timestamps = pd.DatetimeIndex(pd.to_datetime(df["timestamp"], errors="raise"))
+    if set(source_timestamps.year) == {resolved_scenario.billing_year}:
+        timestamps = source_timestamps
+    else:
+        timestamps = calendarize_full_year(source_timestamps, resolved_scenario.billing_year)
     imports_col = "nem3.imports.kwh"
     exports_col = "nem3.exports.kwh"
-
-    opts = default_options_for_utility(utility)
-    if nbc_dollars_per_kwh_override is not None:
-        opts = dataclasses.replace(opts, nbc_dollars_per_kwh=nbc_dollars_per_kwh_override)
-    base_dir = os.path.join("data", "NEM3")
-    export_table = get_export_rate_table_for_county(base_dir=base_dir, utility=utility, county_name_or_slug=county)
-
-    annual_solar_nem3 = calculate_nem3_annual_costs(
-        ts,
-        df[imports_col].astype(float).tolist(),
-        df[exports_col].astype(float).tolist(),
+    tariff = TariffCatalog().bundle(
         utility,
-        selected_rate_plan,
-        options=opts,
-        export_table=export_table,
+        resolved_scenario,
+        import_plan=selected_rate_plan,
+        non_bypassable_rate=nbc_dollars_per_kwh_override,
+    )
+    return calculate_nbt_bill(
+        EnergyFlows(
+            timestamps=timestamps,
+            import_kwh=df[imports_col].astype(float).tolist(),
+            export_kwh=df[exports_col].astype(float).tolist(),
+        ),
+        tariff,
     )
 
-    return annual_solar_nem3
+
+def process_county_scenario_nem3(
+    file_path,
+    county,
+    utility,
+    selected_rate_plan,
+    *,
+    nbt_scenario: NBTScenario | None = None,
+    nbc_dollars_per_kwh_override=None,
+):
+    """Compute an NBT bill from interval meter imports and exports."""
+    ledger = nbt_ledger_for_county(
+        file_path,
+        county,
+        utility,
+        selected_rate_plan,
+        nbt_scenario=nbt_scenario,
+        nbc_dollars_per_kwh_override=nbc_dollars_per_kwh_override,
+    )
+    return {selected_rate_plan: ledger.annual_amount_due}
 
 def build_results_df_with_variants(scenario: str, utility: str, *, retail_default: dict, retail_solar: dict, nem3_solar: dict | None = None) -> pd.DataFrame:
     """Return DataFrame with two rows (<scenario>, <scenario>.solarstorage) and columns per plan variant.
@@ -383,8 +328,19 @@ def utility_to_rate_plans(utility: str):
         case _:
             raise ValueError(f"Unknown utility: {utility}")
     
-def process(base_input_dir, base_output_dir, scenario, housing_type, counties, use_nem3: bool = False, *, nbc_dollars_per_kwh_override=None):
+def process(
+    base_input_dir,
+    base_output_dir,
+    scenario,
+    housing_type,
+    counties,
+    use_nem3: bool = True,
+    *,
+    nbc_dollars_per_kwh_override=None,
+    nbt_scenario: NBTScenario | None = None,
+):
     timestamp = get_timestamp()
+    resolved_nbt_scenario = nbt_scenario or NBTScenario()
 
     scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
     scenario_counties = get_counties(scenario_path, counties)
@@ -395,7 +351,11 @@ def process(base_input_dir, base_output_dir, scenario, housing_type, counties, u
         assert utility is not None, f"Utility not found for county: {county}"
         rate_plans = utility_to_rate_plans(utility)
         
-        log_kwargs = {}
+        log_kwargs = {
+            "nbt_billing_year": resolved_nbt_scenario.billing_year,
+            "nbt_interconnection_vintage": resolved_nbt_scenario.nbt_vintage,
+            "import_tariff_snapshot_as_of": resolved_nbt_scenario.tariff_snapshot_date,
+        }
         for rate_plan in rate_plans:
             # Retail import-only costs
             retail_default = process_county_scenario_from_series(
@@ -405,11 +365,20 @@ def process(base_input_dir, base_output_dir, scenario, housing_type, counties, u
                 scenario_path, county, utility, rate_plan, "retail.imports.kwh"
             )
 
-            # NEM3 overlay for solarstorage (exports credited at ACC, NBCs applied)
-            solar_nem3 = process_county_scenario_nem3(
-                scenario_path, county, utility, rate_plan,
-                nbc_dollars_per_kwh_override=nbc_dollars_per_kwh_override,
-            )
+            # NBT has one required highly differentiated import plan per IOU.
+            # Other retail plans remain useful as non-NBT comparison cases.
+            solar_nem3 = None
+            nbt_ledger = None
+            if use_nem3 and rate_plan == required_nbt_import_plan(utility):
+                nbt_ledger = nbt_ledger_for_county(
+                    scenario_path,
+                    county,
+                    utility,
+                    rate_plan,
+                    nbt_scenario=resolved_nbt_scenario,
+                    nbc_dollars_per_kwh_override=nbc_dollars_per_kwh_override,
+                )
+                solar_nem3 = {rate_plan: nbt_ledger.annual_amount_due}
 
             annual_costs_results = build_results_df_with_variants(
                 scenario,
@@ -422,10 +391,27 @@ def process(base_input_dir, base_output_dir, scenario, housing_type, counties, u
             results_df = update_df_with_results(results_df, annual_costs_results)
 
             log_kwargs.update({
-                f"annual_electricity_costs_{rate_plan}": to_number(retail_default.get(rate_plan, 0.0)),
-                f"annual_electricity_costs_solarstorage_{rate_plan}": to_number(retail_solar.get(rate_plan, 0.0)),
-                f"annual_electricity_costs_solarstorage_{rate_plan}_NEM3": to_number(solar_nem3.get(rate_plan, 0.0)),
+                f"annual_electricity_costs_{rate_plan}": to_number(retail_default[rate_plan]),
+                f"annual_electricity_costs_solarstorage_{rate_plan}": to_number(retail_solar[rate_plan]),
             })
+            if solar_nem3 is not None:
+                log_kwargs[f"annual_electricity_costs_solarstorage_{rate_plan}_NEM3"] = to_number(
+                    solar_nem3[rate_plan]
+                )
+            if nbt_ledger is not None:
+                # Realized-bill counterpart to Step 9b's marginal export signal.
+                # Unused credit is the wedge between the two; keep it visible.
+                log_kwargs.update({
+                    f"nbt_credit_earned_{rate_plan}": to_number(nbt_ledger.annual_credit_earned),
+                    f"nbt_credit_applied_{rate_plan}": to_number(nbt_ledger.annual_credit_applied),
+                    f"nbt_credit_unused_{rate_plan}": to_number(nbt_ledger.unused_credit),
+                    f"nbt_credit_saturation_{rate_plan}": to_number(
+                        nbt_ledger.credit_saturation_ratio
+                    ),
+                    f"nbt_expired_base_credit_{rate_plan}": to_number(
+                        nbt_ledger.expired_base_credit
+                    ),
+                })
 
         output_file_path = get_output_file_path(base_output_dir, scenario, housing_type, county, timestamp)
         combined_df = update_csv_with_results(output_file_path, results_df)

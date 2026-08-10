@@ -4,8 +4,8 @@ Found tonight: `Config.discount_rate` had a correct default and was correctly
 used *inside* step9b's LP and step18's EAC collection — but the module-level
 orchestration (`mod_solar_storage.run`, `mod_visualization.run`) never passed
 `cfg.discount_rate` to them at all, so the config value was silently ignored
-by the real pipeline. Same story for NBC: `calculate_nem3_annual_costs`
-accepted an `options` override, but nothing above it exposed a way to set it.
+by the real pipeline. Same story for NBC: the billing layer accepted an
+override, but nothing above it exposed a way to set it.
 
 These tests exercise the wiring at the module-call boundary, not the math
 inside the steps (that's covered by lp_cooptimize_test.py and friends). A
@@ -25,6 +25,25 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 from pipeline.config import Config
+from tariffs import CustomerSegment
+
+
+def test_config_builds_an_explicit_nbt_policy_scenario():
+    cfg = Config(
+        scenario="baseline",
+        housing_type="single-family-detached",
+        nbt_billing_year=2026,
+        nbt_vintage=2024,
+        nbt_customer_segment=CustomerSegment.EQUITY.value,
+        nbt_include_acc_plus=False,
+        nbt_tariff_snapshot_date="2026-08-09",
+    )
+    scenario = cfg.nbt_scenario()
+    assert scenario.billing_year == 2026
+    assert scenario.nbt_vintage == 2024
+    assert scenario.customer_segment is CustomerSegment.EQUITY
+    assert scenario.include_acc_plus is False
+    assert scenario.tariff_snapshot_date == "2026-08-09"
 
 
 def test_solar_storage_module_passes_discount_rate_to_lp():
@@ -48,6 +67,23 @@ def test_solar_storage_module_passes_discount_rate_to_lp():
         "otherwise the LP always sizes PV/battery at its own hardcoded default "
         "regardless of what Config specifies."
     )
+
+
+def test_solar_storage_module_passes_explicit_battery_sizing_bound():
+    import pipeline.modules.solar_storage as mod
+
+    cfg = Config(
+        scenario="baseline_coopt",
+        housing_type="single-family-detached",
+        counties=["Alameda County"],
+        max_battery_kwh=55.0,
+    )
+
+    with patch.object(mod, "WeatherFiles"), patch.object(mod, "Step9bCoopt") as mock_step9b:
+        mod.run(cfg)
+
+    _, kwargs = mock_step9b.process.call_args
+    assert kwargs["max_battery_kwh"] == 55.0
 
 
 def test_solar_storage_module_sizes_against_net_cost_for_the_configured_incentive_scenario():
@@ -129,10 +165,10 @@ def test_visualization_module_passes_discount_rate_to_step18():
 def test_step12_process_forwards_nbc_override_to_nem3_calculation():
     import pipeline.steps.step12_evaluate_electricity_rates as step12
 
-    with patch.object(step12, "process_county_scenario_nem3", wraps=step12.process_county_scenario_nem3) as spy, \
-         patch.object(step12, "process_county_scenario_from_series", return_value={}), \
+    with patch.object(step12, "nbt_ledger_for_county", wraps=step12.nbt_ledger_for_county) as spy, \
+         patch.object(step12, "process_county_scenario_from_series", return_value={"E-ELEC": 100.0}), \
          patch.object(step12, "get_utility_for_county", return_value="PG&E"), \
-         patch.object(step12, "utility_to_rate_plans", return_value=["E-TOU-D"]), \
+         patch.object(step12, "utility_to_rate_plans", return_value=["E-ELEC"]), \
          patch.object(step12, "build_results_df_with_variants", return_value={}), \
          patch.object(step12, "update_df_with_results", side_effect=lambda df, r: df), \
          patch.object(step12, "get_output_file_path", return_value="/dev/null"), \
@@ -145,7 +181,7 @@ def test_step12_process_forwards_nbc_override_to_nem3_calculation():
                 nbc_dollars_per_kwh_override=0.03,
             )
         except FileNotFoundError:
-            pass  # process_county_scenario_nem3 itself will hit real files; we only care it was called correctly
+            pass  # nbt_ledger_for_county itself will hit real files; we only care it was called correctly
 
     assert spy.called
     _, kwargs = spy.call_args

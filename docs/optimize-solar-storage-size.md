@@ -1,4 +1,8 @@
-# Solar + Storage Size Optimization (Explicit, NEM3-Aware)
+# Superseded solar + storage optimization notes
+
+> This document predates the shared `tariffs/` package and contains references
+> to the removed `NEM3Options` path. See `NBT_TARIFF_MODEL.md` and the current
+> Step 9b implementation for authoritative behavior.
 
 Goal: choose PV size (kW) and battery energy capacity (kWh) that minimize annual cost, with NEM 3.0 export crediting and the best retail import plan for the county’s utility. This replaces sweep‑based search with a direct optimization that calls the existing simulation + billing pipeline.
 

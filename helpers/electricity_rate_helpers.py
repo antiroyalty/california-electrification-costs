@@ -269,24 +269,24 @@ PGE_RATE_PLANS ={
         "E-ELEC": { # https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_E-ELEC.pdf
             # Rates updated to March 1, 2026 (AB 205 restructuring).
             # Source: data/utility-rates/pge/pge-residential-electric-rate-plan-pricing.pdf
-            # Winter peak (4-9pm) MEDIUM confidence — not clearly labeled in PDF; 32¢ is best read.
+            # Exact component rates from the tariff effective March 1, 2026.
             # fixedCharge = Base Services Charge, Tier 3 ($0.79343/day), per ELEC_SCHEDS_E-ELEC.pdf.
             # Same tier structure as EV2-A; Tier 3 used (standard non-CARE/FERA customer).
             # Tier 1: $0.19713/day, Tier 2: $0.39688/day, Tier 3: $0.79343/day (March 1, 2026).
             "summer": {
                 "weekdays": {
-                    "peak": 0.55,         # Peak rate (4:00–9:00 p.m.)
-                    "partPeak": 0.39,     # Partial-Peak rate (3:00–4:00 p.m. and 9:00–12:00 a.m.)
-                    "offPeak": 0.33,      # Off-Peak rate (all other hours)
+                    "peak": 0.55214,      # Exact bundled rate, tariff effective 2026-03-01
+                    "partPeak": 0.39026,
+                    "offPeak": 0.33358,
                     "peakHours": [16, 17, 18, 19, 20],
                     "partPeakHours": [15, 21, 22, 23],
                     "offPeakHours": [h for h in range(24) if h not in [15, 16, 17, 18, 19, 20, 21, 22, 23]],
                     "fixedCharge": 0.79343,  # Base Services Charge, Tier 3
                 },
                 "weekends": { # same as weekdays
-                    "peak": 0.55,         # Peak rate (4:00–9:00 p.m.)
-                    "partPeak": 0.39,     # Partial-Peak rate (3:00–4:00 p.m. and 9:00–12:00 a.m.)
-                    "offPeak": 0.33,      # Off-Peak rate (all other hours)
+                    "peak": 0.55214,
+                    "partPeak": 0.39026,
+                    "offPeak": 0.33358,
                     "peakHours": [16, 17, 18, 19, 20],
                     "partPeakHours": [15, 21, 22, 23],
                     "offPeakHours": [h for h in range(24) if h not in [15, 16, 17, 18, 19, 20, 21, 22, 23]],
@@ -295,24 +295,40 @@ PGE_RATE_PLANS ={
             },
             "winter": {
                 "weekdays": {
-                    "peak": 0.32,         # Peak rate (4:00–9:00 p.m.) [MEDIUM confidence]
-                    "partPeak": 0.30,     # Partial-Peak rate (3:00–4:00 p.m. and 9:00–12:00 a.m.)
-                    "offPeak": 0.28,      # Off-Peak rate (all other hours)
+                    "peak": 0.32063,
+                    "partPeak": 0.29854,
+                    "offPeak": 0.28468,
                     "peakHours": [16, 17, 18, 19, 20],
                     "partPeakHours": [15, 21, 22, 23],
                     "offPeakHours": [h for h in range(24) if h not in [15, 16, 17, 18, 19, 20, 21, 22, 23]],
                     "fixedCharge": 0.79343,
                 },
                 "weekends": { # same as weekdays
-                    "peak": 0.32,         # Peak rate (4:00–9:00 p.m.) [MEDIUM confidence]
-                    "partPeak": 0.30,     # Partial-Peak rate (3:00–4:00 p.m. and 9:00–12:00 a.m.)
-                    "offPeak": 0.28,      # Off-Peak rate (all other hours)
+                    "peak": 0.32063,
+                    "partPeak": 0.29854,
+                    "offPeak": 0.28468,
                     "peakHours": [16, 17, 18, 19, 20],
                     "partPeakHours": [15, 21, 22, 23],
                     "offPeakHours": [h for h in range(24) if h not in [15, 16, 17, 18, 19, 20, 21, 22, 23]],
                     "fixedCharge": 0.79343,
                 },
-            }
+            },
+            # PPP + Nuclear Decommissioning + CTC + Wildfire Fund Charge.
+            # Source: current E-ELEC unbundling table, effective 2026-03-01.
+            "nonBypassableRate": 0.01621,
+            "generationNonOffsettableRate": 0.0,
+            "deliveryNonOffsettableRate": 0.01621,
+            "componentRates": {
+                # Bundled PCIA is included with generation for presentation.
+                "generation": {
+                    "summer": {"peak": 0.25288, "partPeak": 0.15377, "offPeak": 0.10867},
+                    "winter": {"peak": 0.09075, "partPeak": 0.07078, "offPeak": 0.05743},
+                },
+                "delivery": {
+                    "summer": {"peak": 0.29926, "partPeak": 0.23649, "offPeak": 0.22491},
+                    "winter": {"peak": 0.22988, "partPeak": 0.22776, "offPeak": 0.22725},
+                },
+            },
         },
     }
 
@@ -466,46 +482,122 @@ SCE_RATE_PLANS = {
     "TOU-D-PRIME": {
         "summer": {
             "weekdays": {
-                "peak": 0.59,
-                "offPeak": 0.26,
+                "peak": 0.59910,
+                "offPeak": 0.27317,
                 "peakHours": list(range(16, 21)),  # 4:00 pm to 9:00 pm
                 "offPeakHours": [h for h in range(24) if h not in range(16, 21)],
-                "fixedCharge": 0.79, # Aka Daily Basic Charge
+                "fixedCharge": 0.794, # Aka Base Services Charge
             },
             "weekends": {
-                "peak": 0.40,
-                "offPeak": 0.26,
+                "peak": 0.40801,
+                "offPeak": 0.27317,
                 "peakHours": list(range(16, 21)),
                 "offPeakHours": [h for h in range(24) if h not in range(16, 21)],
-                "fixedCharge": 0.79, # Aka Daily Basic Charge
+                "fixedCharge": 0.794,
             }
         },
         "winter": {
             "weekdays": {
-                "peak": 0.56,
-                "offPeak": 0.24,
-                "superOffPeak": 0.24, # Same as offpeak
+                "peak": 0.57265,
+                "offPeak": 0.25252,
+                "superOffPeak": 0.25252,
                 "peakHours": [16, 17, 18, 19, 20], # Evening
                 "offPeakHours": [21, 22, 23, 24, 1, 2, 3, 4, 5, 6, 7], # Night time
                 "superOffPeakHours": [8, 9, 10, 11, 12, 13, 14, 15], # Sunshine hours
-                "fixedCharge": 0.79, # Aka Daily Basic Charge
+                "fixedCharge": 0.794,
             },
             "weekends": { # same as weekdays
-                "peak": 0.56,
-                "offPeak": 0.24,
-                "superOffPeak": 0.24, # Same as offpeak
+                "peak": 0.57265,
+                "offPeak": 0.25252,
+                "superOffPeak": 0.25252,
                 "peakHours": [16, 17, 18, 19, 20], # Evening
                 "offPeakHours": [21, 22, 23, 24, 1, 2, 3, 4, 5, 6, 7], # Night time
                 "superOffPeakHours": [8, 9, 10, 11, 12, 13, 14, 15], # Sunshine hours
-                "fixedCharge": 0.79, # Aka Daily Basic Charge
+                "fixedCharge": 0.794,
             }
         },
         "minimumDailyCharge": 0,
         "baseline_credit": 0,
+        # NDC + PPPC + CTC + WFC plus the volumetric Fixed Recovery Charge.
+        "nonBypassableRate": 0.01398,
+        "generationNonOffsettableRate": 0.00014,
+        "deliveryNonOffsettableRate": 0.01384,
+        "componentRates": {
+            "generation": {
+                "summer": {"peak": 0.29667, "weekendPeak": 0.10558, "offPeak": 0.07049},
+                "winter": {"peak": 0.26489, "offPeak": 0.05958, "superOffPeak": 0.05958},
+            },
+            "delivery": {
+                "summer": {"peak": 0.30243, "weekendPeak": 0.30243, "offPeak": 0.20268},
+                "winter": {"peak": 0.30776, "offPeak": 0.19294, "superOffPeak": 0.19294},
+            },
+        },
     }
 }
 
 SDGE_RATE_PLANS = {
+    "EV-TOU-5": {
+        # Official total-rate table effective 2026-06-01:
+        # https://www.sdge.com/sites/default/files/regulatory/6-1-26%20Schedule%20EV-TOU-5%20Total%20Rates%20Table.pdf
+        # NBT residential customers are required to take EV-TOU-5. Summer is
+        # June through October; ImportRateSchedule handles that plan-specific
+        # season boundary. The $0.00591/kWh WF-NBC + DWR-BC portion is stored
+        # separately by tariffs/import_rates.py for credit eligibility.
+        "summer": {
+            "weekdays": {
+                "peak": 0.79321,
+                "offPeak": 0.49613,
+                "superOffPeak": 0.12852,
+                "peakHours": [16, 17, 18, 19, 20],
+                "offPeakHours": [6, 7, 8, 9, 14, 15, 21, 22, 23],
+                "superOffPeakHours": [0, 1, 2, 3, 4, 5, 10, 11, 12, 13],
+                "fixedCharge": 0.79343,
+            },
+            "weekends": {
+                "peak": 0.79321,
+                "offPeak": 0.49613,
+                "superOffPeak": 0.12852,
+                "peakHours": [16, 17, 18, 19, 20],
+                "offPeakHours": [14, 15, 21, 22, 23],
+                "superOffPeakHours": list(range(0, 14)),
+                "fixedCharge": 0.79343,
+            },
+        },
+        "winter": {
+            "weekdays": {
+                "peak": 0.52292,
+                "offPeak": 0.46639,
+                "superOffPeak": 0.12115,
+                "peakHours": [16, 17, 18, 19, 20],
+                "offPeakHours": [6, 7, 8, 9, 14, 15, 21, 22, 23],
+                "superOffPeakHours": [0, 1, 2, 3, 4, 5, 10, 11, 12, 13],
+                "fixedCharge": 0.79343,
+            },
+            "weekends": {
+                "peak": 0.52292,
+                "offPeak": 0.46639,
+                "superOffPeak": 0.12115,
+                "peakHours": [16, 17, 18, 19, 20],
+                "offPeakHours": [14, 15, 21, 22, 23],
+                "superOffPeakHours": list(range(0, 14)),
+                "fixedCharge": 0.79343,
+            },
+        },
+        # PPPC + NDC + CTC + WF-NBC/DWR-BC are non-offsettable under NBT.
+        "nonBypassableRate": 0.02099,
+        "generationNonOffsettableRate": 0.0,
+        "deliveryNonOffsettableRate": 0.02099,
+        "componentRates": {
+            "generation": {
+                "summer": {"peak": 0.47019, "offPeak": 0.17311, "superOffPeak": 0.08147},
+                "winter": {"peak": 0.19990, "offPeak": 0.14337, "superOffPeak": 0.07410},
+            },
+            "delivery": {
+                "summer": {"peak": 0.32302, "offPeak": 0.32302, "superOffPeak": 0.04705},
+                "winter": {"peak": 0.32302, "offPeak": 0.32302, "superOffPeak": 0.04705},
+            },
+        },
+    },
     # Updated 2026-07-07 from SDG&E's official Schedule TOU-DR1 Total Rates
     # Table, effective 1/1/2026: https://www.sdge.com/sites/default/files/regulatory/1-1-26%20Schedule%20TOU-DR1%20Total%20Rates%20Table.pdf
     # Previous values were sourced from a consumer-facing marketing page, not

@@ -1,0 +1,189 @@
+{
+  "schema_version": 1,
+  "snapshot_as_of": "2026-08-09",
+  "method": "Annualized household economics using one tariff snapshot in effect on the snapshot date, applied to the standardized 8,760-hour billing-year profile.",
+  "schedules": [
+    {
+      "utility": "PG&E",
+      "plan_name": "E-ELEC",
+      "effective_date": "2026-06-01",
+      "source_id": "pge_e_elec_2026-06-01",
+      "rate_unit": "USD/kWh",
+      "fixed_charge_unit": "USD/meter/day",
+      "summer_end_month": 9,
+      "nonBypassableRate": 0.01621,
+      "generationNonOffsettableRate": 0.0,
+      "deliveryNonOffsettableRate": 0.01621,
+      "summer": {
+        "weekdays": {
+          "peak": 0.55214,
+          "partPeak": 0.39026,
+          "offPeak": 0.33358,
+          "peakHours": [16, 17, 18, 19, 20],
+          "partPeakHours": [15, 21, 22, 23],
+          "offPeakHours": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+          "fixedCharge": 0.79343
+        },
+        "weekends": {
+          "peak": 0.55214,
+          "partPeak": 0.39026,
+          "offPeak": 0.33358,
+          "peakHours": [16, 17, 18, 19, 20],
+          "partPeakHours": [15, 21, 22, 23],
+          "offPeakHours": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+          "fixedCharge": 0.79343
+        }
+      },
+      "winter": {
+        "weekdays": {
+          "peak": 0.32063,
+          "partPeak": 0.29854,
+          "offPeak": 0.28468,
+          "peakHours": [16, 17, 18, 19, 20],
+          "partPeakHours": [15, 21, 22, 23],
+          "offPeakHours": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+          "fixedCharge": 0.79343
+        },
+        "weekends": {
+          "peak": 0.32063,
+          "partPeak": 0.29854,
+          "offPeak": 0.28468,
+          "peakHours": [16, 17, 18, 19, 20],
+          "partPeakHours": [15, 21, 22, 23],
+          "offPeakHours": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+          "fixedCharge": 0.79343
+        }
+      },
+      "componentRates": {
+        "generation": {
+          "summer": {"peak": 0.25288, "partPeak": 0.15377, "offPeak": 0.10867},
+          "winter": {"peak": 0.09075, "partPeak": 0.07078, "offPeak": 0.05743}
+        },
+        "delivery": {
+          "summer": {"peak": 0.29926, "partPeak": 0.23649, "offPeak": 0.22491},
+          "winter": {"peak": 0.22988, "partPeak": 0.22776, "offPeak": 0.22725}
+        }
+      }
+    },
+    {
+      "utility": "SCE",
+      "plan_name": "TOU-D-PRIME",
+      "effective_date": "2026-06-01",
+      "source_id": "sce_tou_d_prime_2026-06-01",
+      "rate_unit": "USD/kWh",
+      "fixed_charge_unit": "USD/meter/day",
+      "summer_end_month": 9,
+      "nonBypassableRate": 0.01398,
+      "generationNonOffsettableRate": 0.00014,
+      "deliveryNonOffsettableRate": 0.01384,
+      "summer": {
+        "weekdays": {
+          "peak": 0.59291,
+          "offPeak": 0.26698,
+          "peakHours": [16, 17, 18, 19, 20],
+          "offPeakHours": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 21, 22, 23],
+          "fixedCharge": 0.794
+        },
+        "weekends": {
+          "peak": 0.40182,
+          "offPeak": 0.26698,
+          "peakHours": [16, 17, 18, 19, 20],
+          "offPeakHours": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 21, 22, 23],
+          "fixedCharge": 0.794
+        }
+      },
+      "winter": {
+        "weekdays": {
+          "peak": 0.56646,
+          "offPeak": 0.24633,
+          "superOffPeak": 0.24633,
+          "peakHours": [16, 17, 18, 19, 20],
+          "offPeakHours": [0, 1, 2, 3, 4, 5, 6, 7, 21, 22, 23],
+          "superOffPeakHours": [8, 9, 10, 11, 12, 13, 14, 15],
+          "fixedCharge": 0.794
+        },
+        "weekends": {
+          "peak": 0.56646,
+          "offPeak": 0.24633,
+          "superOffPeak": 0.24633,
+          "peakHours": [16, 17, 18, 19, 20],
+          "offPeakHours": [0, 1, 2, 3, 4, 5, 6, 7, 21, 22, 23],
+          "superOffPeakHours": [8, 9, 10, 11, 12, 13, 14, 15],
+          "fixedCharge": 0.794
+        }
+      },
+      "componentRates": {
+        "generation": {
+          "summer": {"peak": 0.29667, "weekendPeak": 0.10558, "offPeak": 0.07049},
+          "winter": {"peak": 0.26489, "offPeak": 0.05958, "superOffPeak": 0.05958}
+        },
+        "delivery": {
+          "summer": {"peak": 0.29624, "weekendPeak": 0.29624, "offPeak": 0.19649},
+          "winter": {"peak": 0.30157, "offPeak": 0.18675, "superOffPeak": 0.18675}
+        }
+      }
+    },
+    {
+      "utility": "SDG&E",
+      "plan_name": "EV-TOU-5",
+      "effective_date": "2026-08-01",
+      "source_id": "sdge_ev_tou_5_2026-08-01",
+      "rate_unit": "USD/kWh",
+      "fixed_charge_unit": "USD/meter/day",
+      "summer_end_month": 10,
+      "nonBypassableRate": 0.02099,
+      "generationNonOffsettableRate": 0.0,
+      "deliveryNonOffsettableRate": 0.02099,
+      "summer": {
+        "weekdays": {
+          "peak": 0.80205,
+          "offPeak": 0.49627,
+          "superOffPeak": 0.13090,
+          "peakHours": [16, 17, 18, 19, 20],
+          "offPeakHours": [6, 7, 8, 9, 14, 15, 21, 22, 23],
+          "superOffPeakHours": [0, 1, 2, 3, 4, 5, 10, 11, 12, 13],
+          "fixedCharge": 0.79343
+        },
+        "weekends": {
+          "peak": 0.80205,
+          "offPeak": 0.49627,
+          "superOffPeak": 0.13090,
+          "peakHours": [16, 17, 18, 19, 20],
+          "offPeakHours": [14, 15, 21, 22, 23],
+          "superOffPeakHours": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+          "fixedCharge": 0.79343
+        }
+      },
+      "winter": {
+        "weekdays": {
+          "peak": 0.52383,
+          "offPeak": 0.46566,
+          "superOffPeak": 0.12332,
+          "peakHours": [16, 17, 18, 19, 20],
+          "offPeakHours": [6, 7, 8, 9, 14, 15, 21, 22, 23],
+          "superOffPeakHours": [0, 1, 2, 3, 4, 5, 10, 11, 12, 13],
+          "fixedCharge": 0.79343
+        },
+        "weekends": {
+          "peak": 0.52383,
+          "offPeak": 0.46566,
+          "superOffPeak": 0.12332,
+          "peakHours": [16, 17, 18, 19, 20],
+          "offPeakHours": [14, 15, 21, 22, 23],
+          "superOffPeakHours": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+          "fixedCharge": 0.79343
+        }
+      },
+      "componentRates": {
+        "generation": {
+          "summer": {"peak": 0.48396, "offPeak": 0.17818, "superOffPeak": 0.08385},
+          "winter": {"peak": 0.20574, "offPeak": 0.14757, "superOffPeak": 0.07627}
+        },
+        "delivery": {
+          "summer": {"peak": 0.31809, "offPeak": 0.31809, "superOffPeak": 0.04705},
+          "winter": {"peak": 0.31809, "offPeak": 0.31809, "superOffPeak": 0.04705}
+        }
+      }
+    }
+  ]
+}

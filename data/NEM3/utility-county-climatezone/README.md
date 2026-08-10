@@ -1,3 +1,18 @@
+# Superseded: per-climate-zone NEM 3.0 export tables
+
+> **Retained as research history only — not read by any code.**
+>
+> NBT export schedules are keyed by utility × billing year × interconnection
+> vintage, not by county × building climate zone. The authoritative runtime
+> data is `data/tariffs/nbt_export_rates.csv`, built by
+> `scripts/build_nbt_export_schedules.py` and documented in
+> `docs/NBT_TARIFF_MODEL.md`.
+>
+> The generator scripts referenced below (`helpers/extract_nem3_sheet_to_csv.py`,
+> `helpers/nem3_export_rates.py`) have been deleted. The commands are kept
+> verbatim to document how these CSVs were originally produced; they will not
+> run against the current tree.
+
 This folder holds per-utility, per-climate-zone NEM 3.0 export tables in CSV form.
 
 File naming

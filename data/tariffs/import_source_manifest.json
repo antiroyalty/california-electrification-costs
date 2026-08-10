@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "snapshot_as_of": "2026-08-09",
+  "sources": [
+    {
+      "source_id": "pge_e_elec_2026-06-01",
+      "utility": "PG&E",
+      "plan_name": "E-ELEC",
+      "effective_date": "2026-06-01",
+      "checked_on": "2026-08-09",
+      "url": "https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_E-ELEC.pdf",
+      "archive_path": "sources/import/pge/2026-08-09/ELEC_SCHEDS_E-ELEC.pdf",
+      "archive_status": "archived",
+      "sha256": "a515ec2cd50db78e4728c8690435d60180b75348fbc12731875a63e678063b2f",
+      "notes": "Current official tariff PDF archived on 2026-08-09."
+    },
+    {
+      "source_id": "sce_tou_d_prime_2026-06-01",
+      "utility": "SCE",
+      "plan_name": "TOU-D-PRIME",
+      "effective_date": "2026-06-01",
+      "checked_on": "2026-08-09",
+      "url": "https://edisonintl.sharepoint.com/teams/Public/TM2/Shared%20Documents/Forms/AllItems.aspx?id=%2Fteams%2FPublic%2FTM2%2FShared%20Documents%2FPublic%2FRegulatory%2FTariff%2DSCE%20Tariff%20Books%2FElectric%2FSchedules%2FResidential%20Rates%2FELECTRIC%5FSCHEDULES%5FTOU%2DD%2Epdf",
+      "archive_path": "sources/import/sce/2026-08-09/ELECTRIC_SCHEDULES_TOU-D.pdf",
+      "archive_status": "archived",
+      "sha256": "dc2a83540d071a7dae9596cb2b36a4a7843a37a003fba9002329bbd8820a5dfb",
+      "notes": "Schedule TOU-D, Sheets 6-7, Option PRIME; Advice 5829-E; effective 2026-06-01."
+    },
+    {
+      "source_id": "sdge_ev_tou_5_2026-08-01",
+      "utility": "SDG&E",
+      "plan_name": "EV-TOU-5",
+      "effective_date": "2026-08-01",
+      "checked_on": "2026-08-09",
+      "url": "https://www.sdge.com/sites/default/files/regulatory/8-1-26%20Schedule%20EV-TOU-5%20Total%20Rates%20Table.pdf",
+      "archive_path": "sources/import/sdge/2026-08-09/8-1-26_Schedule_EV-TOU-5_Total_Rates_Table.pdf",
+      "archive_status": "archived",
+      "sha256": "19d38eef4ce84e184c93b8c913c4b6f8ffbb3c35b3c17dff10f3e01e710ecc95",
+      "notes": "Current official total-rates PDF archived on 2026-08-09."
+    }
+  ]
+}

@@ -16,6 +16,8 @@ This project requires Python 3 with the following external dependencies:
 - **geopandas** - Geographic data manipulation library
 - **folium** - Interactive web maps creation
 - **numpy** - Numerical computing library
+- **PuLP** - Linear optimization model construction
+- **SciPy 1.9+** - HiGHS mixed-integer solver used by solar-storage co-optimization
 - **requests** - HTTP library for API calls
 - **boto3** - AWS SDK for Python (for accessing building data)
 - **botocore** - Low-level interface to AWS services
@@ -35,7 +37,7 @@ This project requires Python 3 with the following external dependencies:
 #### Installation
 Install all dependencies using pip:
 ```bash
-pip install PySAM pandas geopandas folium numpy requests boto3 botocore geopy python-dotenv pytest matplotlib
+pip install PySAM pandas geopandas folium numpy pulp "scipy>=1.9" requests boto3 botocore geopy python-dotenv pytest matplotlib
 ```
 
 ### Getting Started
