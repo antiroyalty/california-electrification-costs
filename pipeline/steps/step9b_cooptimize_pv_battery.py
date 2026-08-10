@@ -1273,6 +1273,13 @@ def process(
         # Collect capacity summary for diagnostics cards
         capacity_records.append({
             "County": county_slug,
+            "Utility": tariff.utility.value,
+            "Import Tariff Plan": tariff.import_schedule.plan_name,
+            "Import Tariff Snapshot As Of": tariff.import_schedule.snapshot_as_of,
+            "Import Tariff Effective Date": tariff.import_schedule.effective_date,
+            "Import Tariff Source ID": tariff.import_schedule.source_id,
+            "NBT Billing Year": tariff.scenario.billing_year,
+            "NBT Interconnection Vintage": tariff.scenario.nbt_vintage,
             "Solar Capacity (kW)": round(result.pv_kw, 2),
             "Battery Capacity (kWh)": round(result.batt_kwh, 2),
             "Battery Power Capacity (kW)": round(result.batt_kw, 2),

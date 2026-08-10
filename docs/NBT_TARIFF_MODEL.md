@@ -16,6 +16,13 @@ An export schedule is keyed by utility, billing calendar year, interconnection
 application vintage, bundled service, month, weekday versus weekend/holiday,
 hour start (0 through 23), and generation/delivery component.
 
+Import prices use a separate current-snapshot convention. The headline method
+is **annualized household economics under tariffs in effect as of August 9,
+2026**. The PG&E E-ELEC, SCE TOU-D-PRIME, and SDG&E EV-TOU-5 tariffs in effect
+on that date are applied to the standardized 8,760-hour profile. This produces
+a comparable annualized result; it does not claim to reconstruct every tariff
+change that occurred during calendar 2026.
+
 The default is a standard, non-equity customer applying for interconnection
 and receiving service in 2026. Alternate vintages must be selected explicitly.
 The normalized runtime dataset includes NBT 2024 and NBT 2026 vintages at
@@ -29,7 +36,9 @@ observations for every component schedule (12 × 2 × 24), rejects duplicates
 and conflicting values, and verifies that total equals generation plus
 delivery. `data/tariffs/source_manifest.json` records official URLs and SHA-256
 hashes. `data/tariffs/acc_plus_rates.csv` stores the separate flat ACC Plus
-adder.
+adder. `data/tariffs/import_rate_snapshots.json` and
+`data/tariffs/import_source_manifest.json` provide the equivalent source and
+identity contract for retail import prices.
 
 Runtime lookups do not contain zero-rate, first-plan, missing-hour, or
 synthetic-timestamp fallbacks. Missing schedules and malformed profiles raise
@@ -46,7 +55,7 @@ Official references:
 - SDG&E export pricing: https://www.sdge.com/solar/solar-billing-plan/export-pricing
 - PG&E E-ELEC: https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_E-ELEC.pdf
 - SCE residential tariff book (TOU-D Option PRIME): https://www.sce.com/regulatory/regulatory-information/tariff-books/rates-pricing-choices
-- SDG&E EV-TOU-5: https://www.sdge.com/sites/default/files/regulatory/6-1-26%20Schedule%20EV-TOU-5%20Total%20Rates%20Table.pdf
+- SDG&E EV-TOU-5: https://www.sdge.com/sites/default/files/regulatory/8-1-26%20Schedule%20EV-TOU-5%20Total%20Rates%20Table.pdf
 
 ## Billing order
 
@@ -56,9 +65,12 @@ imports, earns base EEC and ACC Plus separately, applies base EEC only to
 eligible volumetric charges, and then applies ACC Plus to remaining energy,
 NBC, and fixed charges.
 
-PG&E base EEC carries while the customer remains on NBT. SCE base EEC expires
-at annual true-up. SDG&E profiles with annual net surplus currently fail
-loudly because an explicit net-surplus compensation price is required.
+Annual net-surplus settlement is not yet a complete domain primitive. SDG&E
+profiles with annual net surplus currently fail loudly because an explicit
+net-surplus compensation price is required. The utility-specific true-up work
+and the known asymmetry in the current implementation are recorded in
+`docs/research_logs/2026-08-09.md`; neither a zero credit nor a retail-credit
+carryover should be interpreted as implemented NSC policy.
 
 Generation and delivery components are preserved on both sides of the ledger.
 Generation EEC can offset only eligible generation import charges, and delivery

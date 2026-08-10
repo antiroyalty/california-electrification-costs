@@ -12,6 +12,8 @@ from tariffs.calendar import day_types
 ROOT = Path(__file__).resolve().parents[1]
 DATA_PATH = ROOT / "data" / "tariffs" / "nbt_export_rates.csv"
 MANIFEST_PATH = ROOT / "data" / "tariffs" / "source_manifest.json"
+IMPORT_DATA_PATH = ROOT / "data" / "tariffs" / "import_rate_snapshots.json"
+IMPORT_MANIFEST_PATH = ROOT / "data" / "tariffs" / "import_source_manifest.json"
 
 
 def _data() -> pd.DataFrame:
@@ -172,14 +174,14 @@ def test_exact_current_sce_prime_import_components_and_nbc_split():
     bundle = TariffCatalog().bundle("SCE", NBTScenario())
     weekday_peak = [pd.Timestamp("2026-07-06 18:00")]
     weekend_peak = [pd.Timestamp("2026-07-05 18:00")]
-    assert bundle.import_schedule.rates_for(weekday_peak) == [pytest.approx(0.59910)]
+    assert bundle.import_schedule.rates_for(weekday_peak) == [pytest.approx(0.59291)]
     assert bundle.import_schedule.rates_for(weekday_peak, component="generation") == [
         pytest.approx(0.29667)
     ]
     assert bundle.import_schedule.rates_for(weekday_peak, component="delivery") == [
-        pytest.approx(0.30243)
+        pytest.approx(0.29624)
     ]
-    assert bundle.import_schedule.rates_for(weekend_peak) == [pytest.approx(0.40801)]
+    assert bundle.import_schedule.rates_for(weekend_peak) == [pytest.approx(0.40182)]
     assert bundle.import_schedule.rates_for(weekend_peak, component="generation") == [
         pytest.approx(0.10558)
     ]
@@ -195,5 +197,111 @@ def test_exact_current_pge_and_sdge_non_offsettable_import_rates():
 
 def test_sdge_ev_tou_5_treats_october_as_summer_and_november_as_winter():
     schedule = TariffCatalog().bundle("SDG&E", NBTScenario()).import_schedule
-    assert schedule.rates_for([pd.Timestamp("2026-10-05 00:00")]) == [pytest.approx(0.12852)]
-    assert schedule.rates_for([pd.Timestamp("2026-11-02 00:00")]) == [pytest.approx(0.12115)]
+    assert schedule.rates_for([pd.Timestamp("2026-10-05 00:00")]) == [pytest.approx(0.13090)]
+    assert schedule.rates_for([pd.Timestamp("2026-11-02 00:00")]) == [pytest.approx(0.12332)]
+
+
+def test_import_tariffs_are_the_explicit_august_9_2026_snapshot():
+    expected = {
+        "PG&E": ("E-ELEC", "2026-06-01", "pge_e_elec_2026-06-01"),
+        "SCE": ("TOU-D-PRIME", "2026-06-01", "sce_tou_d_prime_2026-06-01"),
+        "SDG&E": ("EV-TOU-5", "2026-08-01", "sdge_ev_tou_5_2026-08-01"),
+    }
+    for utility, (plan_name, effective_date, source_id) in expected.items():
+        schedule = TariffCatalog().bundle(utility, NBTScenario()).import_schedule
+        assert schedule.snapshot_as_of == "2026-08-09"
+        assert schedule.plan_name == plan_name
+        assert schedule.effective_date == effective_date
+        assert schedule.source_id == source_id
+
+
+def test_catalog_never_silently_substitutes_a_different_import_snapshot_date():
+    with pytest.raises(KeyError, match="No import tariff snapshot for 2026-08-08"):
+        TariffCatalog().bundle(
+            "PG&E",
+            NBTScenario(tariff_snapshot_date="2026-08-08"),
+        )
+
+
+@pytest.mark.parametrize(
+    "utility,timestamp,total,generation,delivery",
+    [
+        ("PG&E", "2026-07-06 18:00", 0.55214, 0.25288, 0.29926),
+        ("SCE", "2026-07-06 18:00", 0.59291, 0.29667, 0.29624),
+        ("SDG&E", "2026-08-03 18:00", 0.80205, 0.48396, 0.31809),
+    ],
+)
+def test_exact_snapshot_peak_rates_reconcile(utility, timestamp, total, generation, delivery):
+    schedule = TariffCatalog().bundle(utility, NBTScenario()).import_schedule
+    timestamps = [pd.Timestamp(timestamp)]
+    assert schedule.rates_for(timestamps) == [pytest.approx(total)]
+    assert schedule.rates_for(timestamps, component="generation") == [
+        pytest.approx(generation)
+    ]
+    assert schedule.rates_for(timestamps, component="delivery") == [
+        pytest.approx(delivery)
+    ]
+    assert generation + delivery == pytest.approx(total)
+
+
+def test_import_snapshot_units_and_all_hourly_components_are_valid():
+    payload = json.loads(IMPORT_DATA_PATH.read_text(encoding="utf-8"))
+    assert payload["snapshot_as_of"] == "2026-08-09"
+    assert len(payload["schedules"]) == 3
+    timestamps = pd.date_range("2026-01-01", "2026-12-31 23:00", freq="h")
+    for utility in ("PG&E", "SCE", "SDG&E"):
+        schedule = TariffCatalog().bundle(utility, NBTScenario()).import_schedule
+        assert schedule.plan_details["rate_unit"] == "USD/kWh"
+        total = pd.Series(schedule.rates_for(timestamps))
+        generation = pd.Series(schedule.rates_for(timestamps, component="generation"))
+        delivery = pd.Series(schedule.rates_for(timestamps, component="delivery"))
+        assert len(total) == 8760
+        assert total.notna().all()
+        assert total.between(0.05, 1.0).all()
+        assert (total - generation - delivery).abs().max() <= 1e-9
+
+
+def test_archived_sce_import_tariff_matches_manifest_hash():
+    manifest = json.loads(IMPORT_MANIFEST_PATH.read_text(encoding="utf-8"))
+    sce = next(row for row in manifest["sources"] if row["utility"] == "SCE")
+    assert sce["archive_status"] == "archived"
+    source_path = IMPORT_MANIFEST_PATH.parent / sce["archive_path"]
+    assert source_path.exists()
+    assert hashlib.sha256(source_path.read_bytes()).hexdigest() == sce["sha256"]
+
+
+def test_every_import_schedule_has_an_honest_source_manifest_entry():
+    snapshot = json.loads(IMPORT_DATA_PATH.read_text(encoding="utf-8"))
+    manifest = json.loads(IMPORT_MANIFEST_PATH.read_text(encoding="utf-8"))
+    assert manifest["snapshot_as_of"] == snapshot["snapshot_as_of"] == "2026-08-09"
+
+    schedule_sources = {row["source_id"] for row in snapshot["schedules"]}
+    manifest_sources = {row["source_id"] for row in manifest["sources"]}
+    assert manifest_sources == schedule_sources
+    for source in manifest["sources"]:
+        assert source["checked_on"] == "2026-08-09"
+        assert source["archive_status"] in {"archived", "pending_manual_download"}
+        if source["archive_status"] == "archived":
+            assert source["sha256"]
+        else:
+            assert source["sha256"] is None
+
+
+def test_import_snapshot_rejects_wrong_currency_unit_before_billing(tmp_path):
+    payload = json.loads(IMPORT_DATA_PATH.read_text(encoding="utf-8"))
+    payload["schedules"][0]["rate_unit"] = "cents/kWh"
+    bad_path = tmp_path / "wrong-unit.json"
+    bad_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="rate_unit='USD/kWh'"):
+        TariffCatalog(import_snapshot_data_path=bad_path).bundle("PG&E", NBTScenario())
+
+
+def test_import_snapshot_rejects_a_hundredfold_rate_before_billing(tmp_path):
+    payload = json.loads(IMPORT_DATA_PATH.read_text(encoding="utf-8"))
+    payload["schedules"][0]["summer"]["weekdays"]["peak"] = 55.214
+    bad_path = tmp_path / "hundredfold-rate.json"
+    bad_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="implausible total rate"):
+        TariffCatalog(import_snapshot_data_path=bad_path).bundle("PG&E", NBTScenario())

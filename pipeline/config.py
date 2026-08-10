@@ -30,9 +30,9 @@ class Config:
     discount_rate: float = DEFAULT_DISCOUNT_RATE
     agg: str = "mean"
 
-    # Sensitivity override: non-bypassable charge ($/kWh). None = resolve each
-    # plan's `nonBypassableRate` from the rate-plan details
-    # (see tariffs/import_rates.py, ImportRateSchedule.resolve).
+    # Sensitivity override: non-offsettable volumetric charge ($/kWh). None =
+    # resolve the plan's `nonBypassableRate` from the source-locked import
+    # tariff snapshot (see ImportRateSchedule.resolve).
     nbc_dollars_per_kwh_override: Optional[float] = None
 
     # Net Billing Tariff policy scenario. The default represents a system that
@@ -42,6 +42,10 @@ class Config:
     nbt_vintage: int = 2026
     nbt_customer_segment: str = CustomerSegment.STANDARD.value
     nbt_include_acc_plus: bool = True
+    # Current-snapshot method: apply tariffs in effect on this date to the
+    # standardized 8,760-hour billing-year profile. A different date must have
+    # its own source-locked snapshot; the catalog never falls back silently.
+    nbt_tariff_snapshot_date: str = "2026-08-09"
 
     # Representative-household storage sizing domain. This explicit upper
     # bound is also what makes the full-year meter-direction formulation
@@ -55,4 +59,5 @@ class Config:
             service_type=ServiceType.BUNDLED,
             customer_segment=CustomerSegment(self.nbt_customer_segment),
             include_acc_plus=self.nbt_include_acc_plus,
+            tariff_snapshot_date=self.nbt_tariff_snapshot_date,
         )

@@ -340,6 +340,7 @@ def process(
     nbt_scenario: NBTScenario | None = None,
 ):
     timestamp = get_timestamp()
+    resolved_nbt_scenario = nbt_scenario or NBTScenario()
 
     scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
     scenario_counties = get_counties(scenario_path, counties)
@@ -350,7 +351,11 @@ def process(
         assert utility is not None, f"Utility not found for county: {county}"
         rate_plans = utility_to_rate_plans(utility)
         
-        log_kwargs = {}
+        log_kwargs = {
+            "nbt_billing_year": resolved_nbt_scenario.billing_year,
+            "nbt_interconnection_vintage": resolved_nbt_scenario.nbt_vintage,
+            "import_tariff_snapshot_as_of": resolved_nbt_scenario.tariff_snapshot_date,
+        }
         for rate_plan in rate_plans:
             # Retail import-only costs
             retail_default = process_county_scenario_from_series(
@@ -370,7 +375,7 @@ def process(
                     county,
                     utility,
                     rate_plan,
-                    nbt_scenario=nbt_scenario,
+                    nbt_scenario=resolved_nbt_scenario,
                     nbc_dollars_per_kwh_override=nbc_dollars_per_kwh_override,
                 )
                 solar_nem3 = {rate_plan: nbt_ledger.annual_amount_due}

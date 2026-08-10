@@ -36,12 +36,14 @@ def test_config_builds_an_explicit_nbt_policy_scenario():
         nbt_vintage=2024,
         nbt_customer_segment=CustomerSegment.EQUITY.value,
         nbt_include_acc_plus=False,
+        nbt_tariff_snapshot_date="2026-08-09",
     )
     scenario = cfg.nbt_scenario()
     assert scenario.billing_year == 2026
     assert scenario.nbt_vintage == 2024
     assert scenario.customer_segment is CustomerSegment.EQUITY
     assert scenario.include_acc_plus is False
+    assert scenario.tariff_snapshot_date == "2026-08-09"
 
 
 def test_solar_storage_module_passes_discount_rate_to_lp():
@@ -163,7 +165,7 @@ def test_visualization_module_passes_discount_rate_to_step18():
 def test_step12_process_forwards_nbc_override_to_nem3_calculation():
     import pipeline.steps.step12_evaluate_electricity_rates as step12
 
-    with patch.object(step12, "process_county_scenario_nem3", wraps=step12.process_county_scenario_nem3) as spy, \
+    with patch.object(step12, "nbt_ledger_for_county", wraps=step12.nbt_ledger_for_county) as spy, \
          patch.object(step12, "process_county_scenario_from_series", return_value={"E-ELEC": 100.0}), \
          patch.object(step12, "get_utility_for_county", return_value="PG&E"), \
          patch.object(step12, "utility_to_rate_plans", return_value=["E-ELEC"]), \
@@ -179,7 +181,7 @@ def test_step12_process_forwards_nbc_override_to_nem3_calculation():
                 nbc_dollars_per_kwh_override=0.03,
             )
         except FileNotFoundError:
-            pass  # process_county_scenario_nem3 itself will hit real files; we only care it was called correctly
+            pass  # nbt_ledger_for_county itself will hit real files; we only care it was called correctly
 
     assert spy.called
     _, kwargs = spy.call_args

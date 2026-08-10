@@ -1,4 +1,6 @@
 data/*
+!data/tariffs/
+!data/tariffs/**
 !data/NEM3/
 sanity-check-raw-data/
 skills/

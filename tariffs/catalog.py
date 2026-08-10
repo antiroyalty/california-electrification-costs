@@ -7,7 +7,7 @@ from typing import Iterable
 import pandas as pd
 
 from .calendar import day_types
-from .import_rates import ImportRateSchedule
+from .import_rates import DEFAULT_IMPORT_SNAPSHOT_DATA, ImportRateSchedule
 from .models import CustomerSegment, NBTScenario, TariffBundle, Utility
 
 
@@ -70,9 +70,11 @@ class TariffCatalog:
         self,
         export_data_path: str | Path = DEFAULT_EXPORT_DATA,
         acc_plus_data_path: str | Path = DEFAULT_ACC_PLUS_DATA,
+        import_snapshot_data_path: str | Path = DEFAULT_IMPORT_SNAPSHOT_DATA,
     ):
         self.export_data_path = Path(export_data_path)
         self.acc_plus_data_path = Path(acc_plus_data_path)
+        self.import_snapshot_data_path = Path(import_snapshot_data_path)
 
     def _read_export_data(self) -> pd.DataFrame:
         if not self.export_data_path.exists():
@@ -165,7 +167,11 @@ class TariffCatalog:
             utility=parsed,
             scenario=scenario,
             import_schedule=ImportRateSchedule.resolve(
-                parsed, import_plan, non_bypassable_rate=non_bypassable_rate
+                parsed,
+                import_plan,
+                non_bypassable_rate=non_bypassable_rate,
+                snapshot_as_of=scenario.tariff_snapshot_date,
+                snapshot_data_path=self.import_snapshot_data_path,
             ),
             export_schedule=self.export_schedule(parsed, scenario),
             acc_plus_rate=self.acc_plus_rate(parsed, scenario),

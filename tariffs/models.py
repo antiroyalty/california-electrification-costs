@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from enum import Enum
 from typing import TYPE_CHECKING, Sequence
 
@@ -56,6 +57,7 @@ class NBTScenario:
     service_type: ServiceType = ServiceType.BUNDLED
     customer_segment: CustomerSegment = CustomerSegment.STANDARD
     include_acc_plus: bool = True
+    tariff_snapshot_date: str = "2026-08-09"
 
     def __post_init__(self) -> None:
         if self.billing_year < 2023:
@@ -66,6 +68,10 @@ class NBTScenario:
             raise ValueError("NBT interconnection vintage cannot be after the billing year")
         if self.service_type is not ServiceType.BUNDLED:
             raise NotImplementedError("Only bundled-service NBT tariffs are modeled")
+        try:
+            date.fromisoformat(self.tariff_snapshot_date)
+        except ValueError as exc:
+            raise ValueError("tariff_snapshot_date must be an ISO date (YYYY-MM-DD)") from exc
 
 
 @dataclass(frozen=True)

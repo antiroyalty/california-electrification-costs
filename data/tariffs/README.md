@@ -33,6 +33,23 @@ interconnection vintage, and customer segment. Sources:
 
 Required import schedules and component splits are sourced from:
 
-- PG&E E-ELEC, effective March 1, 2026: https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_E-ELEC.pdf
-- SCE TOU-D Option PRIME, effective June 25, 2026: the official `ELECTRIC_SCHEDULES_TOU-D.pdf` in https://www.sce.com/regulatory/regulatory-information/tariff-books/rates-pricing-choices
-- SDG&E EV-TOU-5, effective June 1, 2026: https://www.sdge.com/sites/default/files/regulatory/6-1-26%20Schedule%20EV-TOU-5%20Total%20Rates%20Table.pdf
+`import_rate_snapshots.json` is the authoritative import-rate input for NBT.
+The current research convention is **annualized household economics under
+tariffs in effect as of 2026-08-09**: one source-locked snapshot is applied to
+the standardized 8,760-hour profile. It is not a reconstruction of tariff
+changes within calendar 2026. A requested snapshot date must match an actual
+stored snapshot; the catalog never substitutes the nearest available date.
+
+The snapshot contains the required NBT import schedules, their generation and
+delivery splits, non-offsettable rates, fixed charges, declared units,
+effective dates, and source IDs:
+
+- PG&E E-ELEC, effective 2026-06-01: https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_E-ELEC.pdf
+- SCE TOU-D Option PRIME, effective 2026-06-01: the official `ELECTRIC_SCHEDULES_TOU-D.pdf` in https://www.sce.com/regulatory/regulatory-information/tariff-books/rates-pricing-choices
+- SDG&E EV-TOU-5, effective 2026-08-01: https://www.sdge.com/sites/default/files/regulatory/8-1-26%20Schedule%20EV-TOU-5%20Total%20Rates%20Table.pdf
+
+`import_source_manifest.json` records the exact source URL, date checked,
+effective date, archive path, and SHA-256 hash when a local source copy has
+been archived. Runtime validation rejects missing hours, duplicate hour
+coverage, missing or non-finite values, generation/delivery mismatches,
+undeclared units, and likely cents-versus-dollars errors.
