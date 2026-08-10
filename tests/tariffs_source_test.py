@@ -261,13 +261,14 @@ def test_import_snapshot_units_and_all_hourly_components_are_valid():
         assert (total - generation - delivery).abs().max() <= 1e-9
 
 
-def test_archived_sce_import_tariff_matches_manifest_hash():
+@pytest.mark.parametrize("utility", ["PG&E", "SCE", "SDG&E"])
+def test_archived_import_tariff_matches_manifest_hash(utility):
     manifest = json.loads(IMPORT_MANIFEST_PATH.read_text(encoding="utf-8"))
-    sce = next(row for row in manifest["sources"] if row["utility"] == "SCE")
-    assert sce["archive_status"] == "archived"
-    source_path = IMPORT_MANIFEST_PATH.parent / sce["archive_path"]
+    source = next(row for row in manifest["sources"] if row["utility"] == utility)
+    assert source["archive_status"] == "archived"
+    source_path = IMPORT_MANIFEST_PATH.parent / source["archive_path"]
     assert source_path.exists()
-    assert hashlib.sha256(source_path.read_bytes()).hexdigest() == sce["sha256"]
+    assert hashlib.sha256(source_path.read_bytes()).hexdigest() == source["sha256"]
 
 
 def test_every_import_schedule_has_an_honest_source_manifest_entry():
@@ -280,11 +281,8 @@ def test_every_import_schedule_has_an_honest_source_manifest_entry():
     assert manifest_sources == schedule_sources
     for source in manifest["sources"]:
         assert source["checked_on"] == "2026-08-09"
-        assert source["archive_status"] in {"archived", "pending_manual_download"}
-        if source["archive_status"] == "archived":
-            assert source["sha256"]
-        else:
-            assert source["sha256"] is None
+        assert source["archive_status"] == "archived"
+        assert source["sha256"]
 
 
 def test_import_snapshot_rejects_wrong_currency_unit_before_billing(tmp_path):
