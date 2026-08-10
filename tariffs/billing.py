@@ -38,6 +38,11 @@ class BillLedger:
     months: tuple[MonthlyBill, ...]
     ending_base_credit_bank: float
     ending_acc_plus_credit_bank: float
+    # Base EEC that was earned but expired unused at annual true-up. For SCE
+    # and SDG&E this is non-zero precisely when `ending_base_credit_bank` has
+    # been forced to zero by expiry, so the credit the household never realized
+    # stays visible instead of vanishing from the ledger.
+    expired_base_credit: float = 0.0
 
     @property
     def annual_amount_due(self) -> float:
@@ -58,6 +63,42 @@ class BillLedger:
     @property
     def annual_acc_plus_credit(self) -> float:
         return sum(month.acc_plus_credit_earned for month in self.months)
+
+    @property
+    def annual_base_credit_applied(self) -> float:
+        return sum(month.base_credit_applied for month in self.months)
+
+    @property
+    def annual_acc_plus_credit_applied(self) -> float:
+        return sum(month.acc_plus_credit_applied for month in self.months)
+
+    @property
+    def annual_credit_earned(self) -> float:
+        return self.annual_base_export_credit + self.annual_acc_plus_credit
+
+    @property
+    def annual_credit_applied(self) -> float:
+        return self.annual_base_credit_applied + self.annual_acc_plus_credit_applied
+
+    @property
+    def unused_credit(self) -> float:
+        """Export credit earned over the year that never offset a charge.
+
+        This is the realized-bill counterpart to Step 9b's marginal export
+        signal. Step 9b values every exported kWh at its hourly credit rate,
+        but the monthly ledger can only apply credit against actual charges;
+        the difference shows up here. A large value means the optimizer
+        over-valued exports relative to the bill the household actually pays.
+        """
+        return self.annual_credit_earned - self.annual_credit_applied
+
+    @property
+    def credit_saturation_ratio(self) -> float:
+        """Fraction of earned export credit that went unused (0.0 when none earned)."""
+        earned = self.annual_credit_earned
+        if earned <= 0.0:
+            return 0.0
+        return self.unused_credit / earned
 
 
 def _validate_billing_year(frame: pd.DataFrame, billing_year: int) -> None:
@@ -189,7 +230,11 @@ def calculate_nbt_bill(flows: EnergyFlows, tariff: TariffBundle) -> BillLedger:
             "SDG&E annual net-surplus compensation requires an explicit NSC price; "
             "the profile exports more energy than it imports"
         )
+    expired_base_credit = 0.0
     if tariff.utility in {Utility.SCE, Utility.SDGE}:
+        # Base EEC expires at true-up for these utilities. Record what expired
+        # before clearing it so the unused-credit diagnostic stays accurate.
+        expired_base_credit = generation_bank + delivery_bank
         generation_bank = 0.0
         delivery_bank = 0.0
 
@@ -200,4 +245,5 @@ def calculate_nbt_bill(flows: EnergyFlows, tariff: TariffBundle) -> BillLedger:
         months=tuple(month_rows),
         ending_base_credit_bank=generation_bank + delivery_bank,
         ending_acc_plus_credit_bank=acc_plus_bank,
+        expired_base_credit=expired_base_credit,
     )

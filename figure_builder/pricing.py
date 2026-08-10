@@ -1,4 +1,4 @@
-git ad"""Live capital costs, sourced from the same appliance-class primitives the
+"""Live capital costs, sourced from the same appliance-class primitives the
 co-optimization model prices against.
 
 This exists so figure annotations can never drift from the model. The whole

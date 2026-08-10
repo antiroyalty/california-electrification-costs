@@ -57,9 +57,10 @@ cache records the explicit battery-capacity bound and solver diagnostics; a
 cache generated under a different sizing domain or the former unbounded model
 is rejected automatically. The default domain is 0&ndash;40 kWh for a
 representative household and can be overridden for a reported sensitivity.
-The
-mechanism/counties recipes patch `claims-c459506.html` in place between
-HTML-comment markers, so re-running is idempotent (no duplicated blocks).
+The mechanism/counties recipes patch the current commit's
+`claims-<sha>.html` (resolved by `current_claims_doc()`, never a hardcoded
+filename) in place between HTML-comment markers, so re-running is idempotent
+(no duplicated blocks).
 
 The headline Claim-1 figure is a **before/after** comparison
 (`plot_pv_batt_vs_capex_compare`): a 2025 panel (with the 30% federal ITC,

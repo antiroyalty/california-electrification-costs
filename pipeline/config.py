@@ -30,8 +30,9 @@ class Config:
     discount_rate: float = DEFAULT_DISCOUNT_RATE
     agg: str = "mean"
 
-    # Sensitivity override: non-bypassable charge ($/kWh). None = use each
-    # utility's default (currently 0.0 for all three — see helpers/nem3_export_rates.py).
+    # Sensitivity override: non-bypassable charge ($/kWh). None = resolve each
+    # plan's `nonBypassableRate` from the rate-plan details
+    # (see tariffs/import_rates.py, ImportRateSchedule.resolve).
     nbc_dollars_per_kwh_override: Optional[float] = None
 
     # Net Billing Tariff policy scenario. The default represents a system that

@@ -39,6 +39,13 @@ HIGHS_MIP_RELATIVE_GAP = 1e-6
 # than the compact eager model. This affects performance only, never the
 # feasible region or optimum.
 METER_BINARY_EAGER_THRESHOLD = 96
+# Constraint generation terminates on its own: every round pins at least one
+# previously unconstrained interval, so it cannot exceed the interval count.
+# This cap exists to fail loudly instead of grinding for hours if that argument
+# is ever broken by a change to the disjunction logic. It is deliberately far
+# above the round count any real county needs (SDG&E, the worst case, converges
+# in a handful of rounds).
+MAX_METER_DIRECTION_ROUNDS = 64
 
 try:
     import pulp
@@ -625,6 +632,13 @@ def _solve_lp(
     solver_rounds = 0
     while True:
         solver_rounds += 1
+        if solver_rounds > MAX_METER_DIRECTION_ROUNDS:
+            raise RuntimeError(
+                f"Meter-direction constraint generation did not converge within "
+                f"{MAX_METER_DIRECTION_ROUNDS} rounds ({len(grid_import_mode)} binaries "
+                f"pinned over {H} intervals). The relaxation is not tightening, which "
+                f"indicates a defect in the disjunction bounds rather than a hard instance."
+            )
         if solver_backend == "highs":
             _solve_with_highs(prob)
         else:

@@ -179,7 +179,7 @@ def process_county_scenario_from_series(file_path, county, utility, selected_rat
     return calculate_annual_costs_electricity(load_profile, utility, selected_rate_plan, timestamps=timestamps)
 
 
-def process_county_scenario_nem3(
+def nbt_ledger_for_county(
     file_path,
     county,
     utility,
@@ -188,7 +188,13 @@ def process_county_scenario_nem3(
     nbt_scenario: NBTScenario | None = None,
     nbc_dollars_per_kwh_override=None,
 ):
-    """Compute an NBT bill from interval meter imports and exports."""
+    """Compute the full monthly NBT ledger for one county and import plan.
+
+    Returns the whole `BillLedger` rather than just the annual total so callers
+    can also report the credit-bank diagnostics (see `unused_credit`), which
+    are what expose Step 9b's marginal-credit optimization over-valuing exports
+    relative to this realized bill.
+    """
     file = os.path.join(file_path, county, f"{INPUT_FILE_NAME}_{county}.csv")
     if not os.path.exists(file):
         raise FileNotFoundError(f"File not found: {file}")
@@ -212,13 +218,33 @@ def process_county_scenario_nem3(
         import_plan=selected_rate_plan,
         non_bypassable_rate=nbc_dollars_per_kwh_override,
     )
-    ledger = calculate_nbt_bill(
+    return calculate_nbt_bill(
         EnergyFlows(
             timestamps=timestamps,
             import_kwh=df[imports_col].astype(float).tolist(),
             export_kwh=df[exports_col].astype(float).tolist(),
         ),
         tariff,
+    )
+
+
+def process_county_scenario_nem3(
+    file_path,
+    county,
+    utility,
+    selected_rate_plan,
+    *,
+    nbt_scenario: NBTScenario | None = None,
+    nbc_dollars_per_kwh_override=None,
+):
+    """Compute an NBT bill from interval meter imports and exports."""
+    ledger = nbt_ledger_for_county(
+        file_path,
+        county,
+        utility,
+        selected_rate_plan,
+        nbt_scenario=nbt_scenario,
+        nbc_dollars_per_kwh_override=nbc_dollars_per_kwh_override,
     )
     return {selected_rate_plan: ledger.annual_amount_due}
 
@@ -337,8 +363,9 @@ def process(
             # NBT has one required highly differentiated import plan per IOU.
             # Other retail plans remain useful as non-NBT comparison cases.
             solar_nem3 = None
+            nbt_ledger = None
             if use_nem3 and rate_plan == required_nbt_import_plan(utility):
-                solar_nem3 = process_county_scenario_nem3(
+                nbt_ledger = nbt_ledger_for_county(
                     scenario_path,
                     county,
                     utility,
@@ -346,6 +373,7 @@ def process(
                     nbt_scenario=nbt_scenario,
                     nbc_dollars_per_kwh_override=nbc_dollars_per_kwh_override,
                 )
+                solar_nem3 = {rate_plan: nbt_ledger.annual_amount_due}
 
             annual_costs_results = build_results_df_with_variants(
                 scenario,
@@ -365,6 +393,20 @@ def process(
                 log_kwargs[f"annual_electricity_costs_solarstorage_{rate_plan}_NEM3"] = to_number(
                     solar_nem3[rate_plan]
                 )
+            if nbt_ledger is not None:
+                # Realized-bill counterpart to Step 9b's marginal export signal.
+                # Unused credit is the wedge between the two; keep it visible.
+                log_kwargs.update({
+                    f"nbt_credit_earned_{rate_plan}": to_number(nbt_ledger.annual_credit_earned),
+                    f"nbt_credit_applied_{rate_plan}": to_number(nbt_ledger.annual_credit_applied),
+                    f"nbt_credit_unused_{rate_plan}": to_number(nbt_ledger.unused_credit),
+                    f"nbt_credit_saturation_{rate_plan}": to_number(
+                        nbt_ledger.credit_saturation_ratio
+                    ),
+                    f"nbt_expired_base_credit_{rate_plan}": to_number(
+                        nbt_ledger.expired_base_credit
+                    ),
+                })
 
         output_file_path = get_output_file_path(base_output_dir, scenario, housing_type, county, timestamp)
         combined_df = update_csv_with_results(output_file_path, results_df)

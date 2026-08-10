@@ -1,4 +1,4 @@
-git """
+"""
 Step 9b — Co‑Optimize PV size, Battery size (kWh,kW), and hourly dispatch.
 
 This module builds a sparse mixed-integer linear program to minimize annual total cost:

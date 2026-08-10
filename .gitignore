@@ -7,7 +7,8 @@ skills/
 # and reproducible, not silently missing on a fresh clone.
 !data/County_Median_HPSH_Stats.csv
 !data/County_Median_HPWH_Stats.csv
-# Load profiles committed for CI testing (nem3_billing_test.py)
+# Load profiles committed for CI testing (tariffs_billing_test.py,
+# billing_plausibility_test.py, solar_storage_dispatch_test.py, and others)
 !data/loadprofiles/
 data/loadprofiles/*
 !data/loadprofiles/baseline_coopt/
