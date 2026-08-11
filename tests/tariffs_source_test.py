@@ -1,5 +1,6 @@
 import hashlib
 import json
+import zipfile
 from pathlib import Path
 
 import pandas as pd
@@ -88,6 +89,36 @@ def test_exact_source_archive_hashes_are_pinned_in_manifest():
         ("SDG&E", 2024): "23791bb46eda4ccf6cbd899c5e9c4fbd0c9383ad667e2f47fd6c16b9c217ddf9",
         ("SDG&E", 2026): "688e8d741a2e5326ebf368ae6b1e2f59742b82b831fa356744ce39b3b57d5356",
     }
+
+
+def test_nbt_export_source_archives_match_manifest_hashes_and_formats():
+    manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    sources = manifest["sources"]
+    assert {(row["utility"], row["nbt_vintage"]) for row in sources} == {
+        ("PG&E", 2024),
+        ("PG&E", 2026),
+        ("SCE", 2024),
+        ("SCE", 2026),
+        ("SDG&E", 2024),
+        ("SDG&E", 2026),
+    }
+    assert len({row["archive_path"] for row in sources}) == len(sources)
+
+    for source in sources:
+        assert source["archive_status"] == "archived"
+        source_path = MANIFEST_PATH.parent / source["archive_path"]
+        assert source_path.is_file(), (source["utility"], source["nbt_vintage"])
+        payload = source_path.read_bytes()
+        assert hashlib.sha256(payload).hexdigest() == source["sha256"]
+        if source_path.suffix == ".pdf":
+            assert source["utility"] == "PG&E"
+            assert payload.startswith(b"%PDF-")
+        elif source_path.suffix == ".zip":
+            with zipfile.ZipFile(source_path) as archive:
+                assert archive.namelist()
+                assert archive.testzip() is None
+        else:
+            pytest.fail(f"Unsupported NBT export source format: {source_path.suffix}")
 
 
 def test_export_rate_distribution_is_in_an_expected_research_ballpark():

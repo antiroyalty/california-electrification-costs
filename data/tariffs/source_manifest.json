@@ -7,6 +7,8 @@
       "billing_year": 2026,
       "nbt_vintage": 2024,
       "filename": "PGE_Solar Billing Plan_EEC Values Price Sheet 2024.pdf",
+      "archive_path": "sources/nbt_export/pge/2026-08-06/PGE_Solar Billing Plan_EEC Values Price Sheet 2024.pdf",
+      "archive_status": "archived",
       "sha256": "2f8487e887e44bce84a8a42aa38824e6ba27aac45534a9e53a6422bbc81aece6",
       "source_url": "https://www.pge.com/assets/pge/docs/vanities/PGE-EEC-Price-Sheets.zip",
       "retrieved_on": "2026-08-06"
@@ -16,6 +18,8 @@
       "billing_year": 2026,
       "nbt_vintage": 2026,
       "filename": "PGE_Solar Billing Plan_EEC Values Price Sheet 2026.pdf",
+      "archive_path": "sources/nbt_export/pge/2026-08-06/PGE_Solar Billing Plan_EEC Values Price Sheet 2026.pdf",
+      "archive_status": "archived",
       "sha256": "02287c528047d04f69843a9d66b9e527b04a6a570c7c8695ee00e1428c573822",
       "source_url": "https://www.pge.com/assets/pge/docs/vanities/PGE-EEC-Price-Sheets.zip",
       "retrieved_on": "2026-08-06"
@@ -25,6 +29,8 @@
       "billing_year": 2026,
       "nbt_vintage": 2024,
       "filename": "NBT24 MIDAS file.zip",
+      "archive_path": "sources/nbt_export/sce/2026-08-06/NBT24 MIDAS file.zip",
+      "archive_status": "archived",
       "sha256": "655b4de792d01f4350651e2f6eaf6f24c494f0f89dcaf4097139bfc5f33310ff",
       "source_url": "https://edisonintl.sharepoint.com/:f:/t/Public/Misc/Euu_nWW5ZppGmW_tLUuFhjEBDeg7oBCyB5hEG47Q67O2hQ?e=rwNerm",
       "retrieved_on": "2026-08-06"
@@ -34,6 +40,8 @@
       "billing_year": 2026,
       "nbt_vintage": 2026,
       "filename": "NBT26 MIDAS File.zip",
+      "archive_path": "sources/nbt_export/sce/2026-08-06/NBT26 MIDAS File.zip",
+      "archive_status": "archived",
       "sha256": "bede133b7ebe5afdb5e57152f55e17a116087b7cc82f337dbd9ea56306368957",
       "source_url": "https://edisonintl.sharepoint.com/:f:/t/Public/Misc/Euu_nWW5ZppGmW_tLUuFhjEBDeg7oBCyB5hEG47Q67O2hQ?e=rwNerm",
       "retrieved_on": "2026-08-06"
@@ -43,6 +51,8 @@
       "billing_year": 2026,
       "nbt_vintage": 2024,
       "filename": "sdge24.zip",
+      "archive_path": "sources/nbt_export/sdge/2026-08-06/sdge24.zip",
+      "archive_status": "archived",
       "sha256": "23791bb46eda4ccf6cbd899c5e9c4fbd0c9383ad667e2f47fd6c16b9c217ddf9",
       "source_url": "https://www.sdge.com/sites/default/files/LY2024%20NBT%20Pricing%20Upload%20MIDAS.zip",
       "retrieved_on": "2026-08-06"
@@ -52,6 +62,8 @@
       "billing_year": 2026,
       "nbt_vintage": 2026,
       "filename": "sdge26.zip",
+      "archive_path": "sources/nbt_export/sdge/2026-08-06/sdge26.zip",
+      "archive_status": "archived",
       "sha256": "688e8d741a2e5326ebf368ae6b1e2f59742b82b831fa356744ce39b3b57d5356",
       "source_url": "https://www.sdge.com/sites/default/files/LY2026%20NBT%20Pricing%20Upload%20MIDAS.zip",
       "retrieved_on": "2026-08-06"

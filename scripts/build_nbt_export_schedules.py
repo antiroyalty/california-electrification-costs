@@ -55,6 +55,19 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _archived_source_path(path: Path, manifest_path: Path) -> str:
+    """Return a manifest-relative path only for an archived source input."""
+
+    source_root = manifest_path.resolve().parent / "sources"
+    try:
+        relative_path = path.resolve().relative_to(source_root)
+    except ValueError as exc:
+        raise ValueError(
+            f"NBT source input must be archived under {source_root}; received {path.resolve()}"
+        ) from exc
+    return (Path("sources") / relative_path).as_posix()
+
+
 def _parse_retrieved_on(value: str) -> str:
     """Validate an explicitly supplied source-acquisition date."""
 
@@ -401,6 +414,8 @@ def main() -> None:
                 "billing_year": billing_year,
                 "nbt_vintage": vintage,
                 "filename": path.name,
+                "archive_path": _archived_source_path(path, args.manifest),
+                "archive_status": "archived",
                 "sha256": sha256(path),
                 "source_url": SOURCE_URLS[(utility, vintage)],
                 "retrieved_on": args.retrieved_on,

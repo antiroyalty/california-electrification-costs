@@ -9,6 +9,7 @@ import pytest
 from scripts.build_nbt_export_schedules import (
     EXPECTED_KEYS,
     MONTHS,
+    _archived_source_path,
     _parse_retrieved_on,
     _validate_component,
     _validate_midas_units,
@@ -136,6 +137,24 @@ def test_retrieval_date_is_explicit_strict_iso_provenance():
     for invalid in ("2026-8-6", "08/06/2026", "not-a-date"):
         with pytest.raises(argparse.ArgumentTypeError, match="retrieval date must be"):
             _parse_retrieved_on(invalid)
+
+
+def test_builder_records_only_sources_archived_beside_the_manifest(tmp_path):
+    manifest_path = tmp_path / "data" / "tariffs" / "source_manifest.json"
+    archived = (
+        manifest_path.parent / "sources" / "nbt_export" / "sce" / "source.zip"
+    )
+    archived.parent.mkdir(parents=True)
+    archived.touch()
+    assert _archived_source_path(archived, manifest_path) == (
+        "sources/nbt_export/sce/source.zip"
+    )
+
+    external = tmp_path / "downloads" / "source.zip"
+    external.parent.mkdir()
+    external.touch()
+    with pytest.raises(ValueError, match="must be archived under"):
+        _archived_source_path(external, manifest_path)
 
 
 def test_midas_unit_validation_accepts_utility_capitalization_difference():
