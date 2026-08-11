@@ -69,9 +69,8 @@ kept in two groups:
   methodology.
 
 Every manifest entry records its source URL, archive path, format, and SHA-256
-hash. The archived files are research evidence only at this stage: billing
-does not read them directly, and no NSC rate or settlement behavior is inferred
-until a normalized dataset and explicit true-up primitives are implemented.
+hash. Runtime code does not read the archived files directly; the normalized
+dataset described below is the source-linked interface for NSC rate lookup.
 
 `nsc_rates.csv` is the normalized monthly rate dataset derived from the three
 archived `monthly_nsc_rates` sources. It contains the eight months available in
@@ -85,6 +84,8 @@ python scripts/build_nsc_rates.py --year 2026 --through-month 8
 
 The normalizer verifies source hashes, document identity, table headers and
 units, complete month coverage, finite nonnegative values, and a broad NSC
-magnitude guardrail before writing. The dataset itself does not select a
-true-up month or perform annual settlement. The current research will select
-`2026-08` explicitly when true-up is integrated into billing.
+magnitude guardrail before writing. `NetSurplusCompensationSchedule` validates
+the normalized table and its manifest linkage, then resolves exactly one rate
+for an explicitly supplied utility and `YYYY-MM` true-up month. It never selects
+a month implicitly. Annual bill settlement is not implemented yet; the current
+research will select `2026-08` explicitly when that integration is added.

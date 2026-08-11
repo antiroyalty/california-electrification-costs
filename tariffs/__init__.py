@@ -12,6 +12,7 @@ from .models import (
     TariffBundle,
     Utility,
 )
+from .true_up import NetSurplusCompensationRate, NetSurplusCompensationSchedule
 
 __all__ = [
     "BillLedger",
@@ -21,6 +22,8 @@ __all__ = [
     "ImportRateSchedule",
     "MonthlyBill",
     "NBTScenario",
+    "NetSurplusCompensationRate",
+    "NetSurplusCompensationSchedule",
     "ServiceType",
     "TariffBundle",
     "TariffCatalog",
