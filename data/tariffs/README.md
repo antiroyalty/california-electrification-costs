@@ -72,3 +72,19 @@ Every manifest entry records its source URL, archive path, format, and SHA-256
 hash. The archived files are research evidence only at this stage: billing
 does not read them directly, and no NSC rate or settlement behavior is inferred
 until a normalized dataset and explicit true-up primitives are implemented.
+
+`nsc_rates.csv` is the normalized monthly rate dataset derived from the three
+archived `monthly_nsc_rates` sources. It contains the eight months available in
+the common 2026 snapshot, January through August, with one row per utility and
+true-up month. Rates retain five decimal places, declare `USD/kWh`, and carry a
+manifest `source_id`. Rebuild it with:
+
+```bash
+python scripts/build_nsc_rates.py --year 2026 --through-month 8
+```
+
+The normalizer verifies source hashes, document identity, table headers and
+units, complete month coverage, finite nonnegative values, and a broad NSC
+magnitude guardrail before writing. The dataset itself does not select a
+true-up month or perform annual settlement. The current research will select
+`2026-08` explicitly when true-up is integrated into billing.
