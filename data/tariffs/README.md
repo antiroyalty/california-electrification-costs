@@ -53,3 +53,18 @@ effective date, archive path, and SHA-256 hash when a local source copy has
 been archived. Runtime validation rejects missing hours, duplicate hour
 coverage, missing or non-finite values, generation/delivery mismatches,
 undeclared units, and likely cents-versus-dollars errors.
+
+## Annual true-up and net-surplus sources
+
+`true_up_source_manifest.json` indexes the official utility evidence acquired
+on 2026-08-10 for the future annual true-up implementation. Raw sources are
+kept in two groups:
+
+- `sources/nbt_rules/` contains each utility's complete NBT tariff schedule;
+- `sources/nsc/` contains monthly NSC rate tables and supplemental true-up
+  methodology.
+
+Every manifest entry records its source URL, archive path, format, and SHA-256
+hash. The archived files are research evidence only at this stage: billing
+does not read them directly, and no NSC rate or settlement behavior is inferred
+until a normalized dataset and explicit true-up primitives are implemented.
