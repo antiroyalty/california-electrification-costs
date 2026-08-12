@@ -12,6 +12,12 @@ from .models import (
     TariffBundle,
     Utility,
 )
+from .preflight import (
+    NBTPreflightResult,
+    discover_nbt_profile_counties,
+    preflight_nbt_county,
+    preflight_nbt_run,
+)
 from .true_up import (
     AverageRetailExportCompensationRate,
     AverageRetailExportCompensationSchedule,
@@ -31,6 +37,7 @@ __all__ = [
     "EnergyFlows",
     "ImportRateSchedule",
     "MonthlyBill",
+    "NBTPreflightResult",
     "NBTScenario",
     "NetSurplusCompensationRate",
     "NetSurplusCompensationSchedule",
@@ -42,6 +49,9 @@ __all__ = [
     "Utility",
     "calculate_nbt_bill",
     "calculate_true_up_settlement",
+    "discover_nbt_profile_counties",
+    "preflight_nbt_county",
+    "preflight_nbt_run",
     "required_nbt_import_plan",
     "resolve_county_service_assignment",
 ]

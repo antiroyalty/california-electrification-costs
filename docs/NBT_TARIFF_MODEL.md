@@ -110,6 +110,19 @@ than embedding the entire monthly ledger in the mixed-integer optimization;
 unused-credit saturation should therefore remain visible as an optimization
 versus realized-bill diagnostic.
 
+Before launching Step 12 across a completed set of county profiles, run the
+fail-loud input preflight. It validates complete physical 8,760-hour flows,
+county-to-utility assignment, import/export tariff source identity, and the
+true-up sources required by each annual net exporter:
+
+```bash
+python3 scripts/validate_nbt_run_inputs.py baseline_coopt --all-counties
+```
+
+PG&E annual net importers pass because they do not require a surplus-rate
+lookup. A PG&E annual net exporter fails with the known missing adjustment-rate
+source instead of allowing a long billing run to fail late or use a surrogate.
+
 ## Tests
 
 Tests pin source hashes, 576-point cardinality, hour conversion, component
