@@ -12,10 +12,18 @@ from .models import (
     TariffBundle,
     Utility,
 )
-from .true_up import NetSurplusCompensationRate, NetSurplusCompensationSchedule
+from .true_up import (
+    AverageRetailExportCompensationRate,
+    NetSurplusCompensationRate,
+    NetSurplusCompensationSchedule,
+    TrueUpPolicy,
+    TrueUpSettlement,
+    calculate_true_up_settlement,
+)
 
 __all__ = [
     "BillLedger",
+    "AverageRetailExportCompensationRate",
     "CustomerSegment",
     "CountyServiceAssignment",
     "EnergyFlows",
@@ -27,8 +35,11 @@ __all__ = [
     "ServiceType",
     "TariffBundle",
     "TariffCatalog",
+    "TrueUpPolicy",
+    "TrueUpSettlement",
     "Utility",
     "calculate_nbt_bill",
+    "calculate_true_up_settlement",
     "required_nbt_import_plan",
     "resolve_county_service_assignment",
 ]

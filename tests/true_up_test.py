@@ -4,7 +4,14 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from tariffs import NetSurplusCompensationSchedule, Utility
+from tariffs import (
+    AverageRetailExportCompensationRate,
+    NetSurplusCompensationRate,
+    NetSurplusCompensationSchedule,
+    TrueUpPolicy,
+    Utility,
+    calculate_true_up_settlement,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -126,3 +133,263 @@ def test_schedule_rejects_duplicate_monthly_source_ids(tmp_path):
 
     with pytest.raises(ValueError, match="duplicate monthly NSC source IDs"):
         NetSurplusCompensationSchedule.from_csv(DATA_PATH, manifest_path)
+
+
+def _adjustment_rate(
+    utility: Utility,
+) -> AverageRetailExportCompensationRate:
+    return AverageRetailExportCompensationRate(
+        utility=utility,
+        true_up_month="2026-08",
+        generation_rate_usd_per_kwh=0.05,
+        delivery_rate_usd_per_kwh=0.01,
+        source_id="synthetic-adjustment-rate-for-arithmetic-test",
+    )
+
+
+def _nsc_rate(utility: Utility) -> NetSurplusCompensationRate:
+    return NetSurplusCompensationRate(
+        utility=utility,
+        true_up_month="2026-08",
+        rate_usd_per_kwh=0.03,
+        source_id="synthetic-nsc-rate-for-arithmetic-test",
+    )
+
+
+@pytest.mark.parametrize(
+    "utility,apply_to_prior,carry,source_id",
+    [
+        (Utility.PGE, True, True, "pge_nbt_rules_2026-08-10"),
+        (Utility.SCE, True, False, "sce_nbt_rules_2026-08-10"),
+        (Utility.SDGE, False, False, "sdge_nbt_rules_2026-08-10"),
+    ],
+)
+def test_true_up_policy_is_explicit_and_source_linked(
+    utility,
+    apply_to_prior,
+    carry,
+    source_id,
+):
+    policy = TrueUpPolicy.for_utility(utility)
+    assert policy.apply_remaining_eec_to_prior_charges is apply_to_prior
+    assert policy.carry_remaining_eec_forward is carry
+    assert policy.source_id == source_id
+
+
+def test_pge_settlement_recoups_surplus_then_refunds_prior_charges_and_carries():
+    settlement = calculate_true_up_settlement(
+        policy=TrueUpPolicy.for_utility(Utility.PGE),
+        annual_import_kwh=4_000,
+        annual_export_kwh=5_000,
+        ending_generation_credit_bank=70,
+        ending_delivery_credit_bank=12,
+        ending_acc_plus_credit_bank=9,
+        remaining_offsettable_generation_charges=15,
+        remaining_offsettable_delivery_charges=5,
+        adjustment_rate=_adjustment_rate(Utility.PGE),
+        nsc_rate=_nsc_rate(Utility.PGE),
+    )
+
+    assert settlement.net_surplus_kwh == 1_000
+    assert settlement.annual_import_kwh == 4_000
+    assert settlement.annual_export_kwh == 5_000
+    assert settlement.generation_adjustment_rate_usd_per_kwh == pytest.approx(0.05)
+    assert settlement.delivery_adjustment_rate_usd_per_kwh == pytest.approx(0.01)
+    assert settlement.nsc_rate_usd_per_kwh == pytest.approx(0.03)
+    assert settlement.generation_eec_adjustment_charge == pytest.approx(50)
+    assert settlement.delivery_eec_adjustment_charge == pytest.approx(10)
+    assert settlement.generation_eec_applied_to_adjustment == pytest.approx(50)
+    assert settlement.delivery_eec_applied_to_adjustment == pytest.approx(10)
+    assert settlement.generation_eec_applied_to_prior_charges == pytest.approx(15)
+    assert settlement.delivery_eec_applied_to_prior_charges == pytest.approx(2)
+    assert settlement.nsc_credit == pytest.approx(30)
+    assert settlement.net_bill_adjustment == pytest.approx(-47)
+    assert settlement.ending_generation_credit_bank == pytest.approx(5)
+    assert settlement.ending_delivery_credit_bank == pytest.approx(0)
+    assert settlement.ending_acc_plus_credit_bank == pytest.approx(9)
+    assert settlement.total_forfeited_credit == pytest.approx(0)
+
+
+def test_sce_settlement_forfeits_only_credit_left_after_annual_offsets():
+    settlement = calculate_true_up_settlement(
+        policy=TrueUpPolicy.for_utility(Utility.SCE),
+        annual_import_kwh=4_000,
+        annual_export_kwh=5_000,
+        ending_generation_credit_bank=70,
+        ending_delivery_credit_bank=12,
+        ending_acc_plus_credit_bank=9,
+        remaining_offsettable_generation_charges=15,
+        remaining_offsettable_delivery_charges=5,
+        adjustment_rate=_adjustment_rate(Utility.SCE),
+        nsc_rate=_nsc_rate(Utility.SCE),
+    )
+
+    assert settlement.net_bill_adjustment == pytest.approx(-47)
+    assert settlement.ending_generation_credit_bank == 0
+    assert settlement.ending_delivery_credit_bank == 0
+    assert settlement.forfeited_generation_credit == pytest.approx(5)
+    assert settlement.forfeited_delivery_credit == 0
+    assert settlement.ending_acc_plus_credit_bank == pytest.approx(9)
+
+
+def test_sdge_settlement_does_not_retroactively_apply_or_carry_excess_eec():
+    settlement = calculate_true_up_settlement(
+        policy=TrueUpPolicy.for_utility(Utility.SDGE),
+        annual_import_kwh=4_000,
+        annual_export_kwh=5_000,
+        ending_generation_credit_bank=70,
+        ending_delivery_credit_bank=12,
+        ending_acc_plus_credit_bank=9,
+        remaining_offsettable_generation_charges=15,
+        remaining_offsettable_delivery_charges=5,
+        adjustment_rate=_adjustment_rate(Utility.SDGE),
+        nsc_rate=_nsc_rate(Utility.SDGE),
+    )
+
+    assert settlement.generation_eec_applied_to_prior_charges == 0
+    assert settlement.delivery_eec_applied_to_prior_charges == 0
+    assert settlement.net_bill_adjustment == pytest.approx(-30)
+    assert settlement.forfeited_generation_credit == pytest.approx(20)
+    assert settlement.forfeited_delivery_credit == pytest.approx(2)
+    assert settlement.ending_acc_plus_credit_bank == pytest.approx(9)
+
+
+def test_insufficient_banks_leave_a_true_up_charge_after_nsc_credit():
+    settlement = calculate_true_up_settlement(
+        policy=TrueUpPolicy.for_utility(Utility.PGE),
+        annual_import_kwh=4_000,
+        annual_export_kwh=5_000,
+        ending_generation_credit_bank=10,
+        ending_delivery_credit_bank=2,
+        ending_acc_plus_credit_bank=0,
+        remaining_offsettable_generation_charges=0,
+        remaining_offsettable_delivery_charges=0,
+        adjustment_rate=_adjustment_rate(Utility.PGE),
+        nsc_rate=_nsc_rate(Utility.PGE),
+    )
+
+    assert settlement.total_eec_adjustment_charge == pytest.approx(60)
+    assert settlement.nsc_credit == pytest.approx(30)
+    assert settlement.net_bill_adjustment == pytest.approx(18)
+
+
+def test_non_net_exporter_has_no_recoupment_or_nsc_but_still_reconciles_bank():
+    settlement = calculate_true_up_settlement(
+        policy=TrueUpPolicy.for_utility(Utility.SCE),
+        annual_import_kwh=5_000,
+        annual_export_kwh=4_000,
+        ending_generation_credit_bank=10,
+        ending_delivery_credit_bank=4,
+        ending_acc_plus_credit_bank=2,
+        remaining_offsettable_generation_charges=8,
+        remaining_offsettable_delivery_charges=1,
+        adjustment_rate=_adjustment_rate(Utility.SCE),
+        nsc_rate=_nsc_rate(Utility.SCE),
+    )
+
+    assert settlement.net_surplus_kwh == 0
+    assert settlement.total_eec_adjustment_charge == 0
+    assert settlement.nsc_credit == 0
+    assert settlement.net_bill_adjustment == pytest.approx(-9)
+    assert settlement.total_forfeited_credit == pytest.approx(5)
+
+
+@pytest.mark.parametrize(
+    "field,value,message",
+    [
+        ("annual_import_kwh", -1, "annual_import_kwh must be non-negative"),
+        ("annual_export_kwh", float("nan"), "annual_export_kwh must be finite"),
+        (
+            "ending_generation_credit_bank",
+            float("inf"),
+            "ending_generation_credit_bank must be finite",
+        ),
+        (
+            "remaining_offsettable_delivery_charges",
+            -0.01,
+            "remaining_offsettable_delivery_charges must be non-negative",
+        ),
+    ],
+)
+def test_settlement_rejects_invalid_energy_and_account_state(field, value, message):
+    kwargs = {
+        "policy": TrueUpPolicy.for_utility(Utility.PGE),
+        "annual_import_kwh": 4_000,
+        "annual_export_kwh": 5_000,
+        "ending_generation_credit_bank": 10,
+        "ending_delivery_credit_bank": 2,
+        "ending_acc_plus_credit_bank": 0,
+        "remaining_offsettable_generation_charges": 0,
+        "remaining_offsettable_delivery_charges": 0,
+        "adjustment_rate": _adjustment_rate(Utility.PGE),
+        "nsc_rate": _nsc_rate(Utility.PGE),
+    }
+    kwargs[field] = value
+    with pytest.raises(ValueError, match=message):
+        calculate_true_up_settlement(**kwargs)
+
+
+def test_settlement_requires_rate_identity_to_match_policy_and_month():
+    kwargs = {
+        "policy": TrueUpPolicy.for_utility(Utility.PGE),
+        "annual_import_kwh": 4_000,
+        "annual_export_kwh": 5_000,
+        "ending_generation_credit_bank": 0,
+        "ending_delivery_credit_bank": 0,
+        "ending_acc_plus_credit_bank": 0,
+        "remaining_offsettable_generation_charges": 0,
+        "remaining_offsettable_delivery_charges": 0,
+        "adjustment_rate": _adjustment_rate(Utility.PGE),
+        "nsc_rate": _nsc_rate(Utility.PGE),
+    }
+    with pytest.raises(ValueError, match="adjustment_rate utility"):
+        calculate_true_up_settlement(
+            **{**kwargs, "adjustment_rate": _adjustment_rate(Utility.SCE)}
+        )
+    with pytest.raises(ValueError, match="nsc_rate utility"):
+        calculate_true_up_settlement(
+            **{**kwargs, "nsc_rate": _nsc_rate(Utility.SCE)}
+        )
+    with pytest.raises(ValueError, match="true-up months"):
+        calculate_true_up_settlement(
+            **{
+                **kwargs,
+                "nsc_rate": NetSurplusCompensationRate(
+                    utility=Utility.PGE,
+                    true_up_month="2026-07",
+                    rate_usd_per_kwh=0.03,
+                    source_id="synthetic-nsc-rate-for-arithmetic-test",
+                ),
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "rate_factory,kwargs,message",
+    [
+        (
+            NetSurplusCompensationRate,
+            {
+                "utility": Utility.PGE,
+                "true_up_month": "2026-08",
+                "rate_usd_per_kwh": 2.684,
+                "source_id": "test-source",
+            },
+            "NSC magnitude guardrail",
+        ),
+        (
+            AverageRetailExportCompensationRate,
+            {
+                "utility": Utility.SDGE,
+                "true_up_month": "2026-08",
+                "generation_rate_usd_per_kwh": 8.672,
+                "delivery_rate_usd_per_kwh": 0.02427,
+                "source_id": "test-source",
+            },
+            "generation_rate_usd_per_kwh exceeds the 1 USD/kWh guardrail",
+        ),
+    ],
+)
+def test_direct_rate_primitives_reject_likely_cents_per_kwh(rate_factory, kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        rate_factory(**kwargs)

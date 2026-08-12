@@ -87,5 +87,23 @@ units, complete month coverage, finite nonnegative values, and a broad NSC
 magnitude guardrail before writing. `NetSurplusCompensationSchedule` validates
 the normalized table and its manifest linkage, then resolves exactly one rate
 for an explicitly supplied utility and `YYYY-MM` true-up month. It never selects
-a month implicitly. Annual bill settlement is not implemented yet; the current
+a month implicitly. Annual bill integration is not implemented yet; the current
 research will select `2026-08` explicitly when that integration is added.
+
+`TrueUpPolicy` and `calculate_true_up_settlement` implement the source-backed
+annual settlement rules independently of the monthly billing loop. The
+settlement first debits annual net-surplus kWh at the utility-wide average
+retail export compensation rate, then credits the same kWh at the selected NSC
+rate. Generation and delivery banks remain separate throughout. Remaining EEC
+is applied to prior eligible charges for PG&E and SCE; PG&E then carries any
+residual EEC, while SCE forfeits it. SDG&E does not retroactively apply residual
+EEC and sets it to zero after the net-surplus debit. ACC Plus is not recouped
+and carries unchanged. These rules are linked to the archived NBT schedules by
+the policy `source_id`.
+
+The average-retail-export adjustment prices are a separate source input from
+both hourly ACC export prices and monthly NSC prices. They have not yet been
+normalized into a runtime schedule. Until all three utilities' current values
+are source-locked, callers must construct an
+`AverageRetailExportCompensationRate` explicitly; the end-to-end bill must not
+guess or derive one from the representative household profile.

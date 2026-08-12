@@ -19,6 +19,19 @@ DEFAULT_TRUE_UP_SOURCE_MANIFEST = (
     ROOT / "data" / "tariffs" / "true_up_source_manifest.json"
 )
 MAX_NSC_RATE_USD_PER_KWH = 0.25
+MAX_AVERAGE_RETAIL_EXPORT_RATE_USD_PER_KWH = 1.0
+
+
+def _nonnegative_finite(value: float, field_name: str) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be numeric") from exc
+    if not math.isfinite(parsed):
+        raise ValueError(f"{field_name} must be finite")
+    if parsed < 0:
+        raise ValueError(f"{field_name} must be non-negative")
+    return parsed
 
 
 def _canonical_true_up_month(value: str) -> str:
@@ -39,6 +52,277 @@ class NetSurplusCompensationRate:
     true_up_month: str
     rate_usd_per_kwh: float
     source_id: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "utility", Utility.parse(self.utility))
+        object.__setattr__(
+            self, "true_up_month", _canonical_true_up_month(self.true_up_month)
+        )
+        object.__setattr__(
+            self,
+            "rate_usd_per_kwh",
+            _nonnegative_finite(self.rate_usd_per_kwh, "rate_usd_per_kwh"),
+        )
+        if self.rate_usd_per_kwh > MAX_NSC_RATE_USD_PER_KWH:
+            raise ValueError("rate_usd_per_kwh exceeds the NSC magnitude guardrail")
+        if not self.source_id:
+            raise ValueError("source_id must be non-empty")
+
+
+@dataclass(frozen=True)
+class AverageRetailExportCompensationRate:
+    """Utility-wide EEC recoupment rate for one true-up month.
+
+    This is distinct from both the customer's hourly ACC export schedule and
+    the monthly NSC rate. The two components preserve the utility tariff's
+    generation/delivery credit-bank separation.
+    """
+
+    utility: Utility
+    true_up_month: str
+    generation_rate_usd_per_kwh: float
+    delivery_rate_usd_per_kwh: float
+    source_id: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "utility", Utility.parse(self.utility))
+        object.__setattr__(
+            self, "true_up_month", _canonical_true_up_month(self.true_up_month)
+        )
+        for field_name in (
+            "generation_rate_usd_per_kwh",
+            "delivery_rate_usd_per_kwh",
+        ):
+            object.__setattr__(
+                self,
+                field_name,
+                _nonnegative_finite(getattr(self, field_name), field_name),
+            )
+            if getattr(self, field_name) > MAX_AVERAGE_RETAIL_EXPORT_RATE_USD_PER_KWH:
+                raise ValueError(f"{field_name} exceeds the 1 USD/kWh guardrail")
+        if not self.source_id:
+            raise ValueError("source_id must be non-empty")
+
+
+@dataclass(frozen=True)
+class TrueUpPolicy:
+    """Source-linked utility rules for disposing of base EEC at true-up."""
+
+    utility: Utility
+    apply_remaining_eec_to_prior_charges: bool
+    carry_remaining_eec_forward: bool
+    source_id: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "utility", Utility.parse(self.utility))
+        if not isinstance(self.apply_remaining_eec_to_prior_charges, bool):
+            raise TypeError("apply_remaining_eec_to_prior_charges must be boolean")
+        if not isinstance(self.carry_remaining_eec_forward, bool):
+            raise TypeError("carry_remaining_eec_forward must be boolean")
+        if not self.source_id:
+            raise ValueError("source_id must be non-empty")
+
+    @classmethod
+    def for_utility(cls, utility: str | Utility) -> "TrueUpPolicy":
+        parsed = Utility.parse(utility)
+        policies = {
+            Utility.PGE: cls(
+                utility=Utility.PGE,
+                apply_remaining_eec_to_prior_charges=True,
+                carry_remaining_eec_forward=True,
+                source_id="pge_nbt_rules_2026-08-10",
+            ),
+            Utility.SCE: cls(
+                utility=Utility.SCE,
+                apply_remaining_eec_to_prior_charges=True,
+                carry_remaining_eec_forward=False,
+                source_id="sce_nbt_rules_2026-08-10",
+            ),
+            Utility.SDGE: cls(
+                utility=Utility.SDGE,
+                apply_remaining_eec_to_prior_charges=False,
+                carry_remaining_eec_forward=False,
+                source_id="sdge_nbt_rules_2026-08-10",
+            ),
+        }
+        return policies[parsed]
+
+
+@dataclass(frozen=True)
+class TrueUpSettlement:
+    """Auditable result of the annual NBT credit reconciliation.
+
+    ``net_bill_adjustment`` is positive for an added charge and negative for
+    an added credit relative to the monthly amounts already paid.
+    """
+
+    utility: Utility
+    true_up_month: str
+    annual_import_kwh: float
+    annual_export_kwh: float
+    net_surplus_kwh: float
+    generation_adjustment_rate_usd_per_kwh: float
+    delivery_adjustment_rate_usd_per_kwh: float
+    nsc_rate_usd_per_kwh: float
+    generation_eec_adjustment_charge: float
+    delivery_eec_adjustment_charge: float
+    generation_eec_applied_to_adjustment: float
+    delivery_eec_applied_to_adjustment: float
+    generation_eec_applied_to_prior_charges: float
+    delivery_eec_applied_to_prior_charges: float
+    nsc_credit: float
+    net_bill_adjustment: float
+    ending_generation_credit_bank: float
+    ending_delivery_credit_bank: float
+    ending_acc_plus_credit_bank: float
+    forfeited_generation_credit: float
+    forfeited_delivery_credit: float
+    policy_source_id: str
+    adjustment_rate_source_id: str
+    nsc_rate_source_id: str
+
+    @property
+    def total_eec_adjustment_charge(self) -> float:
+        return (
+            self.generation_eec_adjustment_charge
+            + self.delivery_eec_adjustment_charge
+        )
+
+    @property
+    def total_forfeited_credit(self) -> float:
+        return self.forfeited_generation_credit + self.forfeited_delivery_credit
+
+
+def calculate_true_up_settlement(
+    *,
+    policy: TrueUpPolicy,
+    annual_import_kwh: float,
+    annual_export_kwh: float,
+    ending_generation_credit_bank: float,
+    ending_delivery_credit_bank: float,
+    ending_acc_plus_credit_bank: float,
+    remaining_offsettable_generation_charges: float,
+    remaining_offsettable_delivery_charges: float,
+    adjustment_rate: AverageRetailExportCompensationRate,
+    nsc_rate: NetSurplusCompensationRate,
+) -> TrueUpSettlement:
+    """Settle annual NBT base credits without double-paying net surplus.
+
+    The same annual net-surplus kWh are first recouped at the utility-wide
+    average retail export compensation rate and then credited at NSC. Base EEC
+    banks offset the component-matched recoupment first. When the utility
+    policy permits it, any remaining bank next offsets eligible charges paid
+    earlier in the relevant period. ACC Plus is never part of the recoupment
+    and passes through unchanged.
+    """
+
+    if not isinstance(policy, TrueUpPolicy):
+        raise TypeError("policy must be a TrueUpPolicy")
+    if not isinstance(adjustment_rate, AverageRetailExportCompensationRate):
+        raise TypeError(
+            "adjustment_rate must be an AverageRetailExportCompensationRate"
+        )
+    if not isinstance(nsc_rate, NetSurplusCompensationRate):
+        raise TypeError("nsc_rate must be a NetSurplusCompensationRate")
+    if adjustment_rate.utility is not policy.utility:
+        raise ValueError("adjustment_rate utility does not match true-up policy")
+    if nsc_rate.utility is not policy.utility:
+        raise ValueError("nsc_rate utility does not match true-up policy")
+    if adjustment_rate.true_up_month != nsc_rate.true_up_month:
+        raise ValueError("adjustment_rate and nsc_rate true-up months do not match")
+
+    imports = _nonnegative_finite(annual_import_kwh, "annual_import_kwh")
+    exports = _nonnegative_finite(annual_export_kwh, "annual_export_kwh")
+    generation_bank = _nonnegative_finite(
+        ending_generation_credit_bank, "ending_generation_credit_bank"
+    )
+    delivery_bank = _nonnegative_finite(
+        ending_delivery_credit_bank, "ending_delivery_credit_bank"
+    )
+    acc_plus_bank = _nonnegative_finite(
+        ending_acc_plus_credit_bank, "ending_acc_plus_credit_bank"
+    )
+    remaining_generation_charges = _nonnegative_finite(
+        remaining_offsettable_generation_charges,
+        "remaining_offsettable_generation_charges",
+    )
+    remaining_delivery_charges = _nonnegative_finite(
+        remaining_offsettable_delivery_charges,
+        "remaining_offsettable_delivery_charges",
+    )
+
+    net_surplus_kwh = max(exports - imports, 0.0)
+    generation_adjustment = (
+        net_surplus_kwh * adjustment_rate.generation_rate_usd_per_kwh
+    )
+    delivery_adjustment = (
+        net_surplus_kwh * adjustment_rate.delivery_rate_usd_per_kwh
+    )
+    generation_to_adjustment = min(generation_bank, generation_adjustment)
+    delivery_to_adjustment = min(delivery_bank, delivery_adjustment)
+    generation_bank -= generation_to_adjustment
+    delivery_bank -= delivery_to_adjustment
+
+    generation_to_prior_charges = 0.0
+    delivery_to_prior_charges = 0.0
+    if policy.apply_remaining_eec_to_prior_charges:
+        generation_to_prior_charges = min(
+            generation_bank, remaining_generation_charges
+        )
+        delivery_to_prior_charges = min(delivery_bank, remaining_delivery_charges)
+        generation_bank -= generation_to_prior_charges
+        delivery_bank -= delivery_to_prior_charges
+
+    forfeited_generation = 0.0
+    forfeited_delivery = 0.0
+    if not policy.carry_remaining_eec_forward:
+        forfeited_generation = generation_bank
+        forfeited_delivery = delivery_bank
+        generation_bank = 0.0
+        delivery_bank = 0.0
+
+    nsc_credit = net_surplus_kwh * nsc_rate.rate_usd_per_kwh
+    unoffset_adjustment = (
+        generation_adjustment
+        - generation_to_adjustment
+        + delivery_adjustment
+        - delivery_to_adjustment
+    )
+    prior_charge_credit = (
+        generation_to_prior_charges + delivery_to_prior_charges
+    )
+    net_bill_adjustment = unoffset_adjustment - prior_charge_credit - nsc_credit
+
+    return TrueUpSettlement(
+        utility=policy.utility,
+        true_up_month=adjustment_rate.true_up_month,
+        annual_import_kwh=imports,
+        annual_export_kwh=exports,
+        net_surplus_kwh=net_surplus_kwh,
+        generation_adjustment_rate_usd_per_kwh=(
+            adjustment_rate.generation_rate_usd_per_kwh
+        ),
+        delivery_adjustment_rate_usd_per_kwh=(
+            adjustment_rate.delivery_rate_usd_per_kwh
+        ),
+        nsc_rate_usd_per_kwh=nsc_rate.rate_usd_per_kwh,
+        generation_eec_adjustment_charge=generation_adjustment,
+        delivery_eec_adjustment_charge=delivery_adjustment,
+        generation_eec_applied_to_adjustment=generation_to_adjustment,
+        delivery_eec_applied_to_adjustment=delivery_to_adjustment,
+        generation_eec_applied_to_prior_charges=generation_to_prior_charges,
+        delivery_eec_applied_to_prior_charges=delivery_to_prior_charges,
+        nsc_credit=nsc_credit,
+        net_bill_adjustment=net_bill_adjustment,
+        ending_generation_credit_bank=generation_bank,
+        ending_delivery_credit_bank=delivery_bank,
+        ending_acc_plus_credit_bank=acc_plus_bank,
+        forfeited_generation_credit=forfeited_generation,
+        forfeited_delivery_credit=forfeited_delivery,
+        policy_source_id=policy.source_id,
+        adjustment_rate_source_id=adjustment_rate.source_id,
+        nsc_rate_source_id=nsc_rate.source_id,
+    )
 
 
 @dataclass(frozen=True)
