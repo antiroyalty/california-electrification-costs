@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Sequence
 
@@ -58,6 +58,7 @@ class NBTScenario:
     customer_segment: CustomerSegment = CustomerSegment.STANDARD
     include_acc_plus: bool = True
     tariff_snapshot_date: str = "2026-08-09"
+    true_up_month: str = "2026-08"
 
     def __post_init__(self) -> None:
         if self.billing_year < 2023:
@@ -72,6 +73,14 @@ class NBTScenario:
             date.fromisoformat(self.tariff_snapshot_date)
         except ValueError as exc:
             raise ValueError("tariff_snapshot_date must be an ISO date (YYYY-MM-DD)") from exc
+        try:
+            parsed_true_up_month = datetime.strptime(self.true_up_month, "%Y-%m")
+        except (TypeError, ValueError) as exc:
+            raise ValueError("true_up_month must be a canonical YYYY-MM string") from exc
+        if parsed_true_up_month.strftime("%Y-%m") != self.true_up_month:
+            raise ValueError("true_up_month must be a canonical YYYY-MM string")
+        if parsed_true_up_month.year != self.billing_year:
+            raise ValueError("true_up_month must fall within billing_year")
 
 
 @dataclass(frozen=True)

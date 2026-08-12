@@ -344,6 +344,8 @@ class TrueUpSettlement:
     delivery_eec_adjustment_charge: float
     generation_eec_applied_to_adjustment: float
     delivery_eec_applied_to_adjustment: float
+    remaining_offsettable_generation_charges: float
+    remaining_offsettable_delivery_charges: float
     generation_eec_applied_to_prior_charges: float
     delivery_eec_applied_to_prior_charges: float
     nsc_credit: float
@@ -354,8 +356,8 @@ class TrueUpSettlement:
     forfeited_generation_credit: float
     forfeited_delivery_credit: float
     policy_source_id: str
-    adjustment_rate_source_id: str
-    nsc_rate_source_id: str
+    adjustment_rate_source_id: str | None
+    nsc_rate_source_id: str | None
 
     @property
     def total_eec_adjustment_charge(self) -> float:
@@ -379,8 +381,9 @@ def calculate_true_up_settlement(
     ending_acc_plus_credit_bank: float,
     remaining_offsettable_generation_charges: float,
     remaining_offsettable_delivery_charges: float,
-    adjustment_rate: AverageRetailExportCompensationRate,
-    nsc_rate: NetSurplusCompensationRate,
+    adjustment_rate: AverageRetailExportCompensationRate | None = None,
+    nsc_rate: NetSurplusCompensationRate | None = None,
+    true_up_month: str | None = None,
 ) -> TrueUpSettlement:
     """Settle annual NBT base credits without double-paying net surplus.
 
@@ -394,19 +397,6 @@ def calculate_true_up_settlement(
 
     if not isinstance(policy, TrueUpPolicy):
         raise TypeError("policy must be a TrueUpPolicy")
-    if not isinstance(adjustment_rate, AverageRetailExportCompensationRate):
-        raise TypeError(
-            "adjustment_rate must be an AverageRetailExportCompensationRate"
-        )
-    if not isinstance(nsc_rate, NetSurplusCompensationRate):
-        raise TypeError("nsc_rate must be a NetSurplusCompensationRate")
-    if adjustment_rate.utility is not policy.utility:
-        raise ValueError("adjustment_rate utility does not match true-up policy")
-    if nsc_rate.utility is not policy.utility:
-        raise ValueError("nsc_rate utility does not match true-up policy")
-    if adjustment_rate.true_up_month != nsc_rate.true_up_month:
-        raise ValueError("adjustment_rate and nsc_rate true-up months do not match")
-
     imports = _nonnegative_finite(annual_import_kwh, "annual_import_kwh")
     exports = _nonnegative_finite(annual_export_kwh, "annual_export_kwh")
     generation_bank = _nonnegative_finite(
@@ -428,11 +418,63 @@ def calculate_true_up_settlement(
     )
 
     net_surplus_kwh = max(exports - imports, 0.0)
+    if (adjustment_rate is None) != (nsc_rate is None):
+        raise ValueError("adjustment_rate and nsc_rate must be supplied together")
+    if adjustment_rate is None:
+        if net_surplus_kwh > 0:
+            raise ValueError(
+                "Positive annual net exports require adjustment_rate and nsc_rate"
+            )
+        if true_up_month is None:
+            raise ValueError(
+                "true_up_month is required when no net-surplus rates apply"
+            )
+        resolved_true_up_month = _canonical_true_up_month(true_up_month)
+        generation_adjustment_rate = 0.0
+        delivery_adjustment_rate = 0.0
+        resolved_nsc_rate = 0.0
+        adjustment_source_id = None
+        nsc_source_id = None
+    else:
+        if not isinstance(
+            adjustment_rate, AverageRetailExportCompensationRate
+        ):
+            raise TypeError(
+                "adjustment_rate must be an AverageRetailExportCompensationRate"
+            )
+        if not isinstance(nsc_rate, NetSurplusCompensationRate):
+            raise TypeError("nsc_rate must be a NetSurplusCompensationRate")
+        if adjustment_rate.utility is not policy.utility:
+            raise ValueError(
+                "adjustment_rate utility does not match true-up policy"
+            )
+        if nsc_rate.utility is not policy.utility:
+            raise ValueError("nsc_rate utility does not match true-up policy")
+        if adjustment_rate.true_up_month != nsc_rate.true_up_month:
+            raise ValueError(
+                "adjustment_rate and nsc_rate true-up months do not match"
+            )
+        if true_up_month is not None and (
+            _canonical_true_up_month(true_up_month)
+            != adjustment_rate.true_up_month
+        ):
+            raise ValueError(
+                "explicit true_up_month does not match the supplied rates"
+            )
+        resolved_true_up_month = adjustment_rate.true_up_month
+        generation_adjustment_rate = (
+            adjustment_rate.generation_rate_usd_per_kwh
+        )
+        delivery_adjustment_rate = adjustment_rate.delivery_rate_usd_per_kwh
+        resolved_nsc_rate = nsc_rate.rate_usd_per_kwh
+        adjustment_source_id = adjustment_rate.source_id
+        nsc_source_id = nsc_rate.source_id
+
     generation_adjustment = (
-        net_surplus_kwh * adjustment_rate.generation_rate_usd_per_kwh
+        net_surplus_kwh * generation_adjustment_rate
     )
     delivery_adjustment = (
-        net_surplus_kwh * adjustment_rate.delivery_rate_usd_per_kwh
+        net_surplus_kwh * delivery_adjustment_rate
     )
     generation_to_adjustment = min(generation_bank, generation_adjustment)
     delivery_to_adjustment = min(delivery_bank, delivery_adjustment)
@@ -457,7 +499,7 @@ def calculate_true_up_settlement(
         generation_bank = 0.0
         delivery_bank = 0.0
 
-    nsc_credit = net_surplus_kwh * nsc_rate.rate_usd_per_kwh
+    nsc_credit = net_surplus_kwh * resolved_nsc_rate
     unoffset_adjustment = (
         generation_adjustment
         - generation_to_adjustment
@@ -471,21 +513,23 @@ def calculate_true_up_settlement(
 
     return TrueUpSettlement(
         utility=policy.utility,
-        true_up_month=adjustment_rate.true_up_month,
+        true_up_month=resolved_true_up_month,
         annual_import_kwh=imports,
         annual_export_kwh=exports,
         net_surplus_kwh=net_surplus_kwh,
         generation_adjustment_rate_usd_per_kwh=(
-            adjustment_rate.generation_rate_usd_per_kwh
+            generation_adjustment_rate
         ),
         delivery_adjustment_rate_usd_per_kwh=(
-            adjustment_rate.delivery_rate_usd_per_kwh
+            delivery_adjustment_rate
         ),
-        nsc_rate_usd_per_kwh=nsc_rate.rate_usd_per_kwh,
+        nsc_rate_usd_per_kwh=resolved_nsc_rate,
         generation_eec_adjustment_charge=generation_adjustment,
         delivery_eec_adjustment_charge=delivery_adjustment,
         generation_eec_applied_to_adjustment=generation_to_adjustment,
         delivery_eec_applied_to_adjustment=delivery_to_adjustment,
+        remaining_offsettable_generation_charges=remaining_generation_charges,
+        remaining_offsettable_delivery_charges=remaining_delivery_charges,
         generation_eec_applied_to_prior_charges=generation_to_prior_charges,
         delivery_eec_applied_to_prior_charges=delivery_to_prior_charges,
         nsc_credit=nsc_credit,
@@ -496,8 +540,8 @@ def calculate_true_up_settlement(
         forfeited_generation_credit=forfeited_generation,
         forfeited_delivery_credit=forfeited_delivery,
         policy_source_id=policy.source_id,
-        adjustment_rate_source_id=adjustment_rate.source_id,
-        nsc_rate_source_id=nsc_rate.source_id,
+        adjustment_rate_source_id=adjustment_source_id,
+        nsc_rate_source_id=nsc_source_id,
     )
 
 

@@ -90,8 +90,8 @@ units, complete month coverage, finite nonnegative values, and a broad NSC
 magnitude guardrail before writing. `NetSurplusCompensationSchedule` validates
 the normalized table and its manifest linkage, then resolves exactly one rate
 for an explicitly supplied utility and `YYYY-MM` true-up month. It never selects
-a month implicitly. Annual bill integration is not implemented yet; the current
-research will select `2026-08` explicitly when that integration is added.
+a month implicitly. `NBTScenario.true_up_month` makes the current research's
+`2026-08` selection explicit and requires it to fall within the billing year.
 
 `TrueUpPolicy` and `calculate_true_up_settlement` implement the source-backed
 annual settlement rules independently of the monthly billing loop. The
@@ -132,3 +132,18 @@ as of 2026-08-11. PG&E lookup therefore raises an explicit missing-rate error;
 the June 2025 illustrative statement values are not treated as August 2026
 data. Until that input is acquired, the end-to-end bill must not guess a rate
 or derive one from the representative household profile.
+
+`calculate_nbt_bill` performs the annual settlement after building its monthly
+ledger. `BillLedger.monthly_amount_due` preserves the pre-true-up total;
+`BillLedger.annual_amount_due` adds the signed true-up adjustment. The attached
+`true_up_settlement` exposes surplus kWh, component adjustment charges, EEC
+applied at settlement, the cash-paid charge eligible for backward application,
+NSC credit, forfeited or carried balances, and all source IDs. For the
+backward-looking EEC step, component-neutral ACC Plus is allocated proportionally
+across the remaining generation and delivery energy charges; only the residual
+cash-paid eligible charge is offered to true-up, preventing a second credit
+against a charge ACC Plus already offset. Annual net importers
+require no NSC or adjustment-rate lookup because both quantities are exactly
+zero. Annual net exporters for SCE and SDG&E resolve the source-locked monthly
+inputs. PG&E annual net exporters fail explicitly until PG&E's corresponding
+current adjustment-rate source is acquired.

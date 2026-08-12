@@ -46,6 +46,9 @@ class Config:
     # standardized 8,760-hour billing-year profile. A different date must have
     # its own source-locked snapshot; the catalog never falls back silently.
     nbt_tariff_snapshot_date: str = "2026-08-09"
+    # NSC and EEC adjustment inputs are selected by true-up month. The current
+    # research snapshot uses the August 2026 values explicitly.
+    nbt_true_up_month: str = "2026-08"
 
     # Representative-household storage sizing domain. This explicit upper
     # bound is also what makes the full-year meter-direction formulation
@@ -60,4 +63,5 @@ class Config:
             customer_segment=CustomerSegment(self.nbt_customer_segment),
             include_acc_plus=self.nbt_include_acc_plus,
             tariff_snapshot_date=self.nbt_tariff_snapshot_date,
+            true_up_month=self.nbt_true_up_month,
         )

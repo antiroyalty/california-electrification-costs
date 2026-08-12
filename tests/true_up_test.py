@@ -393,3 +393,44 @@ def test_settlement_requires_rate_identity_to_match_policy_and_month():
 def test_direct_rate_primitives_reject_likely_cents_per_kwh(rate_factory, kwargs, message):
     with pytest.raises(ValueError, match=message):
         rate_factory(**kwargs)
+
+
+def test_net_importer_settlement_does_not_require_net_surplus_rate_inputs():
+    settlement = calculate_true_up_settlement(
+        policy=TrueUpPolicy.for_utility(Utility.SCE),
+        annual_import_kwh=5_000,
+        annual_export_kwh=4_000,
+        ending_generation_credit_bank=10,
+        ending_delivery_credit_bank=4,
+        ending_acc_plus_credit_bank=2,
+        remaining_offsettable_generation_charges=8,
+        remaining_offsettable_delivery_charges=1,
+        true_up_month="2026-08",
+    )
+
+    assert settlement.net_surplus_kwh == 0
+    assert settlement.total_eec_adjustment_charge == 0
+    assert settlement.nsc_credit == 0
+    assert settlement.adjustment_rate_source_id is None
+    assert settlement.nsc_rate_source_id is None
+
+
+def test_net_exporter_settlement_requires_both_source_rate_inputs():
+    kwargs = {
+        "policy": TrueUpPolicy.for_utility(Utility.SCE),
+        "annual_import_kwh": 4_000,
+        "annual_export_kwh": 5_000,
+        "ending_generation_credit_bank": 10,
+        "ending_delivery_credit_bank": 4,
+        "ending_acc_plus_credit_bank": 2,
+        "remaining_offsettable_generation_charges": 8,
+        "remaining_offsettable_delivery_charges": 1,
+        "true_up_month": "2026-08",
+    }
+    with pytest.raises(ValueError, match="Positive annual net exports require"):
+        calculate_true_up_settlement(**kwargs)
+    with pytest.raises(ValueError, match="must be supplied together"):
+        calculate_true_up_settlement(
+            **kwargs,
+            adjustment_rate=_adjustment_rate(Utility.SCE),
+        )
