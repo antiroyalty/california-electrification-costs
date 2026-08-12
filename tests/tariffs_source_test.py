@@ -319,8 +319,9 @@ def test_every_import_schedule_has_an_honest_source_manifest_entry():
 
 def test_true_up_manifest_has_the_expected_source_groups_and_utility_coverage():
     manifest = json.loads(TRUE_UP_MANIFEST_PATH.read_text(encoding="utf-8"))
-    assert manifest["schema_version"] == 1
-    assert manifest["retrieved_on"] == "2026-08-10"
+    assert manifest["schema_version"] == 2
+    assert manifest["created_on"] == "2026-08-10"
+    assert manifest["updated_on"] == "2026-08-11"
 
     sources = manifest["sources"]
     assert {source["source_id"] for source in sources} == {
@@ -329,6 +330,7 @@ def test_true_up_manifest_has_the_expected_source_groups_and_utility_coverage():
         "sdge_nbt_rules_2026-08-10",
         "pge_monthly_nsc_rates_2026-08-10",
         "sce_monthly_nsc_rates_2026-08-10",
+        "sce_monthly_eec_adjustment_rates_2026-08-11",
         "sdge_monthly_nsc_rates_2026-08-10",
         "sdge_annual_true_up_methodology_2026-08-10",
     }
@@ -337,6 +339,13 @@ def test_true_up_manifest_has_the_expected_source_groups_and_utility_coverage():
         for source in sources
         if source["source_type"] == "tariff_schedule"
     } == {"PG&E", "SCE", "SDG&E"}
+    assert {
+        source["utility"]
+        for source in sources
+        if source.get("source_type") == "monthly_eec_adjustment_rates"
+        or "monthly_eec_adjustment_rates"
+        in source.get("additional_source_types", [])
+    } == {"SCE", "SDG&E"}
     assert {
         source["utility"]
         for source in sources
@@ -350,6 +359,9 @@ def test_true_up_source_archives_match_manifest_hashes_and_formats():
     manifest = json.loads(TRUE_UP_MANIFEST_PATH.read_text(encoding="utf-8"))
     for source in manifest["sources"]:
         assert source["archive_status"] == "archived"
+        assert source["retrieved_on"] in {"2026-08-10", "2026-08-11"}
+        assert source["source_id"].endswith(source["retrieved_on"])
+        assert f"/{source['retrieved_on']}/" in source["archive_path"]
         assert source["url"].startswith("https://")
         source_path = TRUE_UP_MANIFEST_PATH.parent / source["archive_path"]
         assert source_path.is_file(), source["source_id"]

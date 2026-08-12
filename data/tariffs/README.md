@@ -69,8 +69,11 @@ kept in two groups:
   methodology.
 
 Every manifest entry records its source URL, archive path, format, and SHA-256
-hash. Runtime code does not read the archived files directly; the normalized
-dataset described below is the source-linked interface for NSC rate lookup.
+hash. It also records its own `retrieved_on` date; the manifest-level
+`created_on` and `updated_on` dates describe the bundle rather than falsely
+assigning one retrieval date to every source. Runtime code does not read the
+archived files directly; the normalized dataset described below is the
+source-linked interface for NSC rate lookup.
 
 `nsc_rates.csv` is the normalized monthly rate dataset derived from the three
 archived `monthly_nsc_rates` sources. It contains the eight months available in
@@ -103,7 +106,29 @@ the policy `source_id`.
 
 The average-retail-export adjustment prices are a separate source input from
 both hourly ACC export prices and monthly NSC prices. They have not yet been
-normalized into a runtime schedule. Until all three utilities' current values
-are source-locked, callers must construct an
-`AverageRetailExportCompensationRate` explicitly; the end-to-end bill must not
-guess or derive one from the representative household profile.
+normalized into a runtime schedule for all three utilities.
+
+`eec_adjustment_rates.csv` contains the source-complete January–August 2026
+rates for SCE and SDG&E. Rebuild it with:
+
+```bash
+python scripts/build_eec_adjustment_rates.py --year 2026 --through-month 8
+```
+
+SCE publishes positive delivery and generation adjustment rates. SDG&E
+publishes the same economic debit as negative bill line items. The normalizer
+asserts each utility's source sign and stores positive debit magnitudes in
+USD/kWh, with generation and delivery kept separate. It also validates source
+identity, headers, hashes, complete month coverage, finite values, and a broad
+cents-versus-dollars guardrail. Because neither web table labels its unit, the
+builder additionally hash-checks each utility's archived NBT tariff and verifies
+the tariff's $/kWh language. Every normalized row retains both the table
+`source_id` and the tariff `unit_source_id`.
+
+`AverageRetailExportCompensationSchedule` performs strict utility and
+`YYYY-MM` lookup and returns the normalized rate with its source ID. No current
+PG&E adjustment-rate table could be source-locked from PG&E's public materials
+as of 2026-08-11. PG&E lookup therefore raises an explicit missing-rate error;
+the June 2025 illustrative statement values are not treated as August 2026
+data. Until that input is acquired, the end-to-end bill must not guess a rate
+or derive one from the representative household profile.

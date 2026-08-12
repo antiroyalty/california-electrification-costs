@@ -15,6 +15,9 @@ from .models import Utility
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_NSC_DATA = ROOT / "data" / "tariffs" / "nsc_rates.csv"
+DEFAULT_EEC_ADJUSTMENT_DATA = (
+    ROOT / "data" / "tariffs" / "eec_adjustment_rates.csv"
+)
 DEFAULT_TRUE_UP_SOURCE_MANIFEST = (
     ROOT / "data" / "tariffs" / "true_up_source_manifest.json"
 )
@@ -102,6 +105,179 @@ class AverageRetailExportCompensationRate:
                 raise ValueError(f"{field_name} exceeds the 1 USD/kWh guardrail")
         if not self.source_id:
             raise ValueError("source_id must be non-empty")
+
+
+@dataclass(frozen=True)
+class AverageRetailExportCompensationSchedule:
+    """Strict lookup for source-normalized true-up EEC adjustment rates."""
+
+    rows: pd.DataFrame
+    source_manifest_path: Path = DEFAULT_TRUE_UP_SOURCE_MANIFEST
+
+    @classmethod
+    def from_csv(
+        cls,
+        data_path: str | Path = DEFAULT_EEC_ADJUSTMENT_DATA,
+        source_manifest_path: str | Path = DEFAULT_TRUE_UP_SOURCE_MANIFEST,
+    ) -> "AverageRetailExportCompensationSchedule":
+        path = Path(data_path)
+        if not path.is_file():
+            raise FileNotFoundError(
+                f"Normalized EEC adjustment rate data not found: {path}"
+            )
+        return cls(pd.read_csv(path), Path(source_manifest_path))
+
+    def __post_init__(self) -> None:
+        required = {
+            "utility",
+            "true_up_month",
+            "generation_rate_usd_per_kwh",
+            "delivery_rate_usd_per_kwh",
+            "rate_unit",
+            "source_sign_convention",
+            "source_id",
+            "unit_source_id",
+        }
+        missing = required - set(self.rows.columns)
+        if missing:
+            raise ValueError(
+                f"EEC adjustment rate data is missing columns: {sorted(missing)}"
+            )
+        if self.rows.empty:
+            raise ValueError("EEC adjustment rate data is empty")
+
+        rows = self.rows.copy()
+        if rows[list(required)].isna().any().any():
+            raise ValueError("EEC adjustment rate data contains missing values")
+        rate_columns = [
+            "generation_rate_usd_per_kwh",
+            "delivery_rate_usd_per_kwh",
+        ]
+        try:
+            for column in rate_columns:
+                rows[column] = pd.to_numeric(rows[column], errors="raise")
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "EEC adjustment rate data contains non-numeric rates"
+            ) from exc
+        finite = rows[rate_columns].apply(lambda column: column.map(math.isfinite))
+        if not finite.all().all():
+            raise ValueError("EEC adjustment rate data contains non-finite rates")
+        if (rows[rate_columns] < 0).any().any():
+            raise ValueError("EEC adjustment rate data contains negative normalized rates")
+        if (
+            rows[rate_columns] > MAX_AVERAGE_RETAIL_EXPORT_RATE_USD_PER_KWH
+        ).any().any():
+            raise ValueError(
+                "EEC adjustment rate data exceeds the 1 USD/kWh guardrail"
+            )
+        if set(rows["rate_unit"]) != {"USD/kWh"}:
+            raise ValueError("EEC adjustment rate_unit must be exactly 'USD/kWh'")
+        allowed_sign_conventions = {
+            "positive_adjustment_rate",
+            "negative_bill_line_item",
+        }
+        if not set(rows["source_sign_convention"]) <= allowed_sign_conventions:
+            raise ValueError("EEC adjustment source_sign_convention is unsupported")
+
+        for month in rows["true_up_month"]:
+            _canonical_true_up_month(month)
+        for utility in rows["utility"]:
+            if Utility.parse(utility).value != utility:
+                raise ValueError(
+                    f"EEC adjustment rate data has non-canonical utility {utility!r}"
+                )
+        if rows.duplicated(["utility", "true_up_month"]).any():
+            raise ValueError(
+                "EEC adjustment rate data has duplicate utility/true_up_month rows"
+            )
+
+        manifest_path = Path(self.source_manifest_path)
+        if not manifest_path.is_file():
+            raise FileNotFoundError(f"True-up source manifest not found: {manifest_path}")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        adjustment_sources = [
+            source
+            for source in manifest["sources"]
+            if source.get("source_type") == "monthly_eec_adjustment_rates"
+            or "monthly_eec_adjustment_rates"
+            in source.get("additional_source_types", [])
+        ]
+        source_ids = [source["source_id"] for source in adjustment_sources]
+        if len(source_ids) != len(set(source_ids)):
+            raise ValueError(
+                "True-up source manifest has duplicate EEC adjustment source IDs"
+            )
+        sources = {source["source_id"]: source for source in adjustment_sources}
+        manifest_sources = {
+            source["source_id"]: source for source in manifest["sources"]
+        }
+        unique_sources = rows[
+            ["utility", "source_id", "unit_source_id"]
+        ].drop_duplicates()
+        for utility, source_id, unit_source_id in unique_sources.itertuples(
+            index=False, name=None
+        ):
+            if source_id not in sources:
+                raise ValueError(
+                    f"EEC adjustment source_id {source_id!r} is absent from the manifest"
+                )
+            if sources[source_id]["utility"] != utility:
+                raise ValueError(
+                    f"EEC adjustment source_id {source_id!r} belongs to "
+                    f"{sources[source_id]['utility']}, not {utility}"
+                )
+            if unit_source_id not in manifest_sources:
+                raise ValueError(
+                    f"EEC adjustment unit_source_id {unit_source_id!r} is absent "
+                    "from the manifest"
+                )
+            unit_source = manifest_sources[unit_source_id]
+            if unit_source["source_type"] != "tariff_schedule":
+                raise ValueError(
+                    f"EEC adjustment unit_source_id {unit_source_id!r} is not a "
+                    "tariff schedule"
+                )
+            if unit_source["utility"] != utility:
+                raise ValueError(
+                    f"EEC adjustment unit_source_id {unit_source_id!r} belongs to "
+                    f"{unit_source['utility']}, not {utility}"
+                )
+        object.__setattr__(self, "rows", rows.reset_index(drop=True))
+        object.__setattr__(self, "source_manifest_path", manifest_path)
+
+    def resolve(
+        self,
+        utility: str | Utility,
+        true_up_month: str,
+    ) -> AverageRetailExportCompensationRate:
+        parsed_utility = Utility.parse(utility)
+        canonical_month = _canonical_true_up_month(true_up_month)
+        matches = self.rows[
+            (self.rows["utility"] == parsed_utility.value)
+            & (self.rows["true_up_month"] == canonical_month)
+        ]
+        if len(matches) != 1:
+            available = sorted(
+                self.rows[self.rows["utility"] == parsed_utility.value][
+                    "true_up_month"
+                ].unique()
+            )
+            raise KeyError(
+                f"Expected one EEC adjustment rate for {parsed_utility.value}, "
+                f"true_up_month={canonical_month}; found {len(matches)}. "
+                f"Available: {available}"
+            )
+        row = matches.iloc[0]
+        return AverageRetailExportCompensationRate(
+            utility=parsed_utility,
+            true_up_month=canonical_month,
+            generation_rate_usd_per_kwh=float(
+                row["generation_rate_usd_per_kwh"]
+            ),
+            delivery_rate_usd_per_kwh=float(row["delivery_rate_usd_per_kwh"]),
+            source_id=str(row["source_id"]),
+        )
 
 
 @dataclass(frozen=True)

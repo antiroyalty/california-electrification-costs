@@ -14,6 +14,7 @@ from .models import (
 )
 from .true_up import (
     AverageRetailExportCompensationRate,
+    AverageRetailExportCompensationSchedule,
     NetSurplusCompensationRate,
     NetSurplusCompensationSchedule,
     TrueUpPolicy,
@@ -24,6 +25,7 @@ from .true_up import (
 __all__ = [
     "BillLedger",
     "AverageRetailExportCompensationRate",
+    "AverageRetailExportCompensationSchedule",
     "CustomerSegment",
     "CountyServiceAssignment",
     "EnergyFlows",

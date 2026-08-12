@@ -33,11 +33,13 @@ This project requires Python 3 with the following external dependencies:
 #### Development Dependencies
 - **pytest** - Testing framework
 - **matplotlib** - Plotting library (for notebooks)
+- **pdfplumber** - Parsing archived utility tariff PDFs
 
 #### Installation
 Install all dependencies using pip:
 ```bash
-pip install PySAM pandas geopandas folium numpy pulp "scipy>=1.9" requests boto3 botocore geopy python-dotenv pytest matplotlib
+pip install PySAM pandas geopandas folium numpy pulp "scipy>=1.9" requests \
+  boto3 botocore geopy python-dotenv pytest matplotlib pdfplumber
 ```
 
 ### Getting Started
