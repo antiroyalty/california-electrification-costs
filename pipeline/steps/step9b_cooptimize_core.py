@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+import math
 from typing import List, Optional, Tuple
 
 import pandas as pd
@@ -46,6 +47,12 @@ METER_BINARY_EAGER_THRESHOLD = 96
 # above the round count any real county needs (SDG&E, the worst case, converges
 # in a handful of rounds).
 MAX_METER_DIRECTION_ROUNDS = 64
+# HiGHS and CBC can return values a few billionths below a variable's zero
+# lower bound. Treating that solver residue as physical negative energy makes
+# downstream billing fail even though the mathematical solution is feasible.
+# This matches the meter-direction feasibility threshold below and is many
+# orders of magnitude below any reported household-energy result.
+SOLVER_OUTPUT_ABSOLUTE_TOLERANCE = 1e-7
 
 try:
     import pulp
@@ -100,6 +107,45 @@ class CooptResult:
     solver_rounds: int
 
 
+def _normalize_nonnegative_solver_value(
+    value: float,
+    *,
+    label: str,
+    tolerance: float = SOLVER_OUTPUT_ABSOLUTE_TOLERANCE,
+) -> float:
+    """Return a physical nonnegative value or reject a solver violation.
+
+    Values whose absolute magnitude is within the explicit solver-output
+    tolerance represent numerical zero. A more-negative value is not repaired:
+    it indicates an infeasible or incorrectly extracted solution and fails
+    loudly before any artifact is written.
+    """
+
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise RuntimeError(f"Non-finite solver output {label}={parsed}")
+    if parsed < -tolerance:
+        raise RuntimeError(
+            f"Solver output {label}={parsed:.12g} is below the allowed "
+            f"-{tolerance:.12g} numerical tolerance"
+        )
+    return 0.0 if abs(parsed) <= tolerance else parsed
+
+
+def _normalize_nonnegative_solver_series(
+    variables: list[object],
+    *,
+    label: str,
+) -> list[float]:
+    return [
+        _normalize_nonnegative_solver_value(
+            variable.value(),
+            label=f"{label}[{index}]",
+        )
+        for index, variable in enumerate(variables)
+    ]
+
+
 # Battery operating parameters — shared between LP constraints and post-solve verification.
 # If these change, both the LP and the invariant checks change together.
 _SOC_MIN_FR = 0.20
@@ -142,7 +188,7 @@ def _verify_invariants(
             ("grid_to_load", f.grid_to_load[h]),
             ("grid_to_batt", f.grid_to_batt[h]),
         ]:
-            assert val >= -tol, (
+            assert val >= 0.0, (
                 f"Negative flow {name}[{h}] = {val:.6f}"
             )
 
@@ -653,7 +699,10 @@ def _solve_lp(
         for h in range(H):
             imported = float(grid2load[h].value()) + float(grid2batt[h].value())
             exported = float(pv2grid[h].value()) + float(batt2grid[h].value())
-            if imported > 1e-7 and exported > 1e-7:
+            if (
+                imported > SOLVER_OUTPUT_ABSOLUTE_TOLERANCE
+                and exported > SOLVER_OUTPUT_ABSOLUTE_TOLERANCE
+            ):
                 if h in grid_import_mode:
                     raise RuntimeError(
                         f"Meter-direction constraint violated solver tolerance at hour {h}: "
@@ -693,35 +742,74 @@ def _solve_lp(
             ) * (1 - mode)
 
     # Extract values
-    pv_kw_val = float(pulp.value(PV_kw))
-    b_e_val = float(pulp.value(B_E))
-    b_p_val = float(pulp.value(B_P))
-    capex_annual_val = float(pulp.value(capex_annual))
-    import_cost_val = float(
-        pulp.value(
-            pulp.lpSum(
-                [float(weights[h]) * (grid2load[h] + grid2batt[h]) * float(p_imp[h]) for h in range(H)]
-            )
-        )
+    pv_kw_val = _normalize_nonnegative_solver_value(
+        pulp.value(PV_kw),
+        label="PV_kw",
     )
-    export_credit_val = float(
-        pulp.value(
-            pulp.lpSum(
-                [float(weights[h]) * (pv2grid[h] + batt2grid[h]) * float(p_exp[h]) for h in range(H)]
-            )
-        )
+    b_e_val = _normalize_nonnegative_solver_value(
+        pulp.value(B_E),
+        label="B_E_kWh",
     )
-    degradation_cost_val = float(pulp.value(degrade_cost))
-    total_cost_val = capex_annual_val + import_cost_val - export_credit_val + degradation_cost_val
+    b_p_val = _normalize_nonnegative_solver_value(
+        pulp.value(B_P),
+        label="B_P_kW",
+    )
     flows = FlowSeries(
-        pv_to_load=[float(v.value()) for v in pv2load],
-        pv_to_batt=[float(v.value()) for v in pv2batt],
-        pv_to_grid=[float(v.value()) for v in pv2grid],
-        batt_to_load=[float(v.value()) for v in batt2load],
-        batt_to_grid=[float(v.value()) for v in batt2grid],
-        grid_to_load=[float(v.value()) for v in grid2load],
-        grid_to_batt=[float(v.value()) for v in grid2batt],
-        soc=[float(v.value()) for v in soc],
+        pv_to_load=_normalize_nonnegative_solver_series(
+            pv2load, label="pv_to_load"
+        ),
+        pv_to_batt=_normalize_nonnegative_solver_series(
+            pv2batt, label="pv_to_batt"
+        ),
+        pv_to_grid=_normalize_nonnegative_solver_series(
+            pv2grid, label="pv_to_grid"
+        ),
+        batt_to_load=_normalize_nonnegative_solver_series(
+            batt2load, label="batt_to_load"
+        ),
+        batt_to_grid=_normalize_nonnegative_solver_series(
+            batt2grid, label="batt_to_grid"
+        ),
+        grid_to_load=_normalize_nonnegative_solver_series(
+            grid2load, label="grid_to_load"
+        ),
+        grid_to_batt=_normalize_nonnegative_solver_series(
+            grid2batt, label="grid_to_batt"
+        ),
+        soc=_normalize_nonnegative_solver_series(soc, label="soc"),
+    )
+    # Financial diagnostics must describe the physical flows written to the
+    # pipeline artifacts, not the unnormalized solver floats. Recompute them
+    # after normalization rather than preserving a billionth-of-a-dollar
+    # mismatch between the ledger and its flow series.
+    capex_annual_val = (
+        pv_kw_val * c_pv_kw * alpha_pv
+        + b_e_val * c_batt_kwh * alpha_batt
+        + b_p_val * c_batt_kw * alpha_batt
+    )
+    import_cost_val = sum(
+        float(weights[h])
+        * (flows.grid_to_load[h] + flows.grid_to_batt[h])
+        * float(p_imp[h])
+        for h in range(H)
+    )
+    export_credit_val = sum(
+        float(weights[h])
+        * (flows.pv_to_grid[h] + flows.batt_to_grid[h])
+        * float(p_exp[h])
+        for h in range(H)
+    )
+    degradation_cost_val = sum(
+        float(weights[h])
+        * c_deg_per_kwh
+        * (flows.batt_to_load[h] + flows.batt_to_grid[h])
+        for h in range(H)
+    )
+    total_cost_val = (
+        capex_annual_val
+        + import_cost_val
+        - export_credit_val
+        + degradation_cost_val
     )
     result = CooptResult(
         pv_kw=pv_kw_val,
