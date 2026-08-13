@@ -29,6 +29,14 @@ def test_billing_rejects_profile_year_that_differs_from_explicit_billing_year():
         calculate_nbt_bill(flows, tariff)
 
 
+@pytest.mark.parametrize("true_up_month", ["2026-8", "2025-08"])
+def test_nbt_scenario_requires_canonical_true_up_month_in_billing_year(
+    true_up_month,
+):
+    with pytest.raises(ValueError, match="true_up_month"):
+        NBTScenario(billing_year=2026, true_up_month=true_up_month)
+
+
 def test_acc_plus_is_separate_from_base_eec_and_can_offset_fixed_charges():
     tariff = TariffCatalog().bundle("SCE", NBTScenario(nbt_vintage=2026))
     flows = _single_month_flows([0.0], [100.0])
@@ -39,6 +47,43 @@ def test_acc_plus_is_separate_from_base_eec_and_can_offset_fixed_charges():
     assert month.base_credit_applied == 0
     assert month.acc_plus_credit_applied == pytest.approx(month.fixed_charge)
     assert month.amount_due == 0
+
+
+def test_true_up_only_recredits_energy_charges_paid_after_acc_plus():
+    tariff = TariffCatalog().bundle("SCE", NBTScenario(nbt_vintage=2026))
+    flows = EnergyFlows(
+        pd.DatetimeIndex(
+            ["2026-01-05 12:00", "2026-02-05 18:00", "2026-08-05 18:00"]
+        ),
+        [0.0, 130.0, 0.0],
+        [60.0, 0.0, 60.0],
+    )
+
+    ledger = calculate_nbt_bill(flows, tariff)
+    settlement = ledger.true_up_settlement
+    expected_cash_paid_eligible_energy = 0.0
+    acc_plus_applied_to_energy = 0.0
+    for month in ledger.months:
+        remaining_energy = month.import_energy_charge - month.base_credit_applied
+        month_acc_plus_to_energy = min(
+            month.acc_plus_credit_applied,
+            remaining_energy,
+        )
+        acc_plus_applied_to_energy += month_acc_plus_to_energy
+        expected_cash_paid_eligible_energy += (
+            remaining_energy - month_acc_plus_to_energy
+        )
+
+    true_up_eligible_energy = sum(
+        (
+            settlement.remaining_offsettable_generation_charges,
+            settlement.remaining_offsettable_delivery_charges,
+        )
+    )
+    assert acc_plus_applied_to_energy > 0.0
+    assert true_up_eligible_energy == pytest.approx(
+        expected_cash_paid_eligible_energy
+    )
 
 
 def test_sdge_nbc_is_not_offset_by_base_export_credit():
@@ -107,7 +152,86 @@ def test_zero_exports_exactly_matches_import_only_tariff_bill(utility):
 
     assert ledger.annual_base_export_credit == 0.0
     assert ledger.annual_acc_plus_credit == 0.0
+    assert ledger.true_up_settlement.net_surplus_kwh == 0.0
+    assert ledger.true_up_settlement.adjustment_rate_source_id is None
+    assert ledger.true_up_settlement.nsc_rate_source_id is None
     assert ledger.annual_amount_due == pytest.approx(hourly_charge + daily_charge, abs=1e-6)
+
+
+@pytest.mark.parametrize(
+    "utility,expected_adjustment_source,expected_nsc_source,expected_rates",
+    [
+        (
+            "SCE",
+            "sce_monthly_eec_adjustment_rates_2026-08-11",
+            "sce_monthly_nsc_rates_2026-08-10",
+            (0.04576, 0.01291, 0.01697),
+        ),
+        (
+            "SDG&E",
+            "sdge_annual_true_up_methodology_2026-08-10",
+            "sdge_monthly_nsc_rates_2026-08-10",
+            (0.08672, 0.02427, 0.01306),
+        ),
+    ],
+)
+def test_net_exporter_bill_uses_exact_source_locked_august_true_up_rates(
+    utility,
+    expected_adjustment_source,
+    expected_nsc_source,
+    expected_rates,
+):
+    tariff = TariffCatalog().bundle(
+        utility,
+        NBTScenario(include_acc_plus=False, true_up_month="2026-08"),
+    )
+    flows = EnergyFlows(
+        pd.DatetimeIndex(["2026-08-03 00:00", "2026-08-03 12:00"]),
+        [1.0, 0.0],
+        [0.0, 10.0],
+    )
+    ledger = calculate_nbt_bill(flows, tariff)
+    settlement = ledger.true_up_settlement
+
+    generation_rate, delivery_rate, nsc_rate = expected_rates
+    assert settlement.net_surplus_kwh == pytest.approx(9.0)
+    assert settlement.generation_adjustment_rate_usd_per_kwh == pytest.approx(
+        generation_rate
+    )
+    assert settlement.delivery_adjustment_rate_usd_per_kwh == pytest.approx(
+        delivery_rate
+    )
+    assert settlement.nsc_rate_usd_per_kwh == pytest.approx(nsc_rate)
+    assert settlement.generation_eec_adjustment_charge == pytest.approx(
+        9.0 * generation_rate
+    )
+    assert settlement.delivery_eec_adjustment_charge == pytest.approx(
+        9.0 * delivery_rate
+    )
+    assert settlement.nsc_credit == pytest.approx(9.0 * nsc_rate)
+    assert settlement.adjustment_rate_source_id == expected_adjustment_source
+    assert settlement.nsc_rate_source_id == expected_nsc_source
+    assert ledger.annual_amount_due == pytest.approx(
+        ledger.monthly_amount_due + settlement.net_bill_adjustment
+    )
+    assert ledger.unused_credit == pytest.approx(
+        ledger.ending_base_credit_bank + ledger.expired_base_credit
+    )
+
+
+def test_pge_net_exporter_fails_loudly_until_adjustment_rate_is_source_locked():
+    tariff = TariffCatalog().bundle(
+        "PG&E",
+        NBTScenario(include_acc_plus=False, true_up_month="2026-08"),
+    )
+    flows = EnergyFlows(
+        pd.DatetimeIndex(["2026-08-03 00:00", "2026-08-03 12:00"]),
+        [1.0, 0.0],
+        [0.0, 10.0],
+    )
+
+    with pytest.raises(KeyError, match=r"PG&E.*found 0.*Available: \[\]"):
+        calculate_nbt_bill(flows, tariff)
 
 
 def test_step12_file_integration_calendarizes_tmy_to_explicit_tariff_year(tmp_path):

@@ -355,6 +355,7 @@ def process(
             "nbt_billing_year": resolved_nbt_scenario.billing_year,
             "nbt_interconnection_vintage": resolved_nbt_scenario.nbt_vintage,
             "import_tariff_snapshot_as_of": resolved_nbt_scenario.tariff_snapshot_date,
+            "nbt_true_up_month": resolved_nbt_scenario.true_up_month,
         }
         for rate_plan in rate_plans:
             # Retail import-only costs
@@ -410,6 +411,33 @@ def process(
                     ),
                     f"nbt_expired_base_credit_{rate_plan}": to_number(
                         nbt_ledger.expired_base_credit
+                    ),
+                    f"nbt_true_up_net_surplus_kwh_{rate_plan}": to_number(
+                        nbt_ledger.true_up_settlement.net_surplus_kwh
+                    ),
+                    f"nbt_true_up_eec_adjustment_charge_{rate_plan}": to_number(
+                        nbt_ledger.true_up_settlement.total_eec_adjustment_charge
+                    ),
+                    f"nbt_true_up_prior_eligible_generation_charge_{rate_plan}": to_number(
+                        nbt_ledger.true_up_settlement.remaining_offsettable_generation_charges
+                    ),
+                    f"nbt_true_up_prior_eligible_delivery_charge_{rate_plan}": to_number(
+                        nbt_ledger.true_up_settlement.remaining_offsettable_delivery_charges
+                    ),
+                    f"nbt_true_up_nsc_credit_{rate_plan}": to_number(
+                        nbt_ledger.true_up_settlement.nsc_credit
+                    ),
+                    f"nbt_true_up_net_bill_adjustment_{rate_plan}": to_number(
+                        nbt_ledger.true_up_settlement.net_bill_adjustment
+                    ),
+                    f"nbt_true_up_policy_source_{rate_plan}": (
+                        nbt_ledger.true_up_settlement.policy_source_id
+                    ),
+                    f"nbt_true_up_adjustment_rate_source_{rate_plan}": (
+                        nbt_ledger.true_up_settlement.adjustment_rate_source_id
+                    ),
+                    f"nbt_true_up_nsc_rate_source_{rate_plan}": (
+                        nbt_ledger.true_up_settlement.nsc_rate_source_id
                     ),
                 })
 

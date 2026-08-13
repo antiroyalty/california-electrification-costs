@@ -65,12 +65,15 @@ imports, earns base EEC and ACC Plus separately, applies base EEC only to
 eligible volumetric charges, and then applies ACC Plus to remaining energy,
 NBC, and fixed charges.
 
-Annual net-surplus settlement is not yet a complete domain primitive. SDG&E
-profiles with annual net surplus currently fail loudly because an explicit
-net-surplus compensation price is required. The utility-specific true-up work
-and the known asymmetry in the current implementation are recorded in
-`docs/research_logs/2026-08-09.md`; neither a zero credit nor a retail-credit
-carryover should be interpreted as implemented NSC policy.
+The monthly ledger then runs the source-linked annual true-up primitive for the
+scenario's explicit `YYYY-MM` true-up month. It reconciles annual net-surplus
+kWh at the utility-wide EEC adjustment rate, adds the corresponding NSC credit,
+and applies each utility's carry/forfeiture rules. A backward-looking EEC can
+only offset eligible energy charges the household actually paid after ACC Plus;
+component-neutral ACC Plus is allocated proportionally to generation and
+delivery for that handoff. Annual net importers need no surplus-rate lookup.
+SCE and SDG&E net exporters use the normalized August 2026 sources; PG&E net
+exporters fail loudly until a current PG&E adjustment-rate source is available.
 
 Generation and delivery components are preserved on both sides of the ledger.
 Generation EEC can offset only eligible generation import charges, and delivery
@@ -106,6 +109,19 @@ monthly credit banks. Step 9b currently uses marginal hourly credits rather
 than embedding the entire monthly ledger in the mixed-integer optimization;
 unused-credit saturation should therefore remain visible as an optimization
 versus realized-bill diagnostic.
+
+Before launching Step 12 across a completed set of county profiles, run the
+fail-loud input preflight. It validates complete physical 8,760-hour flows,
+county-to-utility assignment, import/export tariff source identity, and the
+true-up sources required by each annual net exporter:
+
+```bash
+python3 scripts/validate_nbt_run_inputs.py baseline_coopt --all-counties
+```
+
+PG&E annual net importers pass because they do not require a surplus-rate
+lookup. A PG&E annual net exporter fails with the known missing adjustment-rate
+source instead of allowing a long billing run to fail late or use a surrogate.
 
 ## Tests
 

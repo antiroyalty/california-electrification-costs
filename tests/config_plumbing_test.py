@@ -37,6 +37,7 @@ def test_config_builds_an_explicit_nbt_policy_scenario():
         nbt_customer_segment=CustomerSegment.EQUITY.value,
         nbt_include_acc_plus=False,
         nbt_tariff_snapshot_date="2026-08-09",
+        nbt_true_up_month="2026-08",
     )
     scenario = cfg.nbt_scenario()
     assert scenario.billing_year == 2026
@@ -44,6 +45,7 @@ def test_config_builds_an_explicit_nbt_policy_scenario():
     assert scenario.customer_segment is CustomerSegment.EQUITY
     assert scenario.include_acc_plus is False
     assert scenario.tariff_snapshot_date == "2026-08-09"
+    assert scenario.true_up_month == "2026-08"
 
 
 def test_solar_storage_module_passes_discount_rate_to_lp():

@@ -5,6 +5,13 @@ from dataclasses import dataclass
 import pandas as pd
 
 from .models import EnergyFlows, TariffBundle, Utility
+from .true_up import (
+    AverageRetailExportCompensationSchedule,
+    NetSurplusCompensationSchedule,
+    TrueUpPolicy,
+    TrueUpSettlement,
+    calculate_true_up_settlement,
+)
 
 
 @dataclass(frozen=True)
@@ -38,15 +45,16 @@ class BillLedger:
     months: tuple[MonthlyBill, ...]
     ending_base_credit_bank: float
     ending_acc_plus_credit_bank: float
-    # Base EEC that was earned but expired unused at annual true-up. For SCE
-    # and SDG&E this is non-zero precisely when `ending_base_credit_bank` has
-    # been forced to zero by expiry, so the credit the household never realized
-    # stays visible instead of vanishing from the ledger.
-    expired_base_credit: float = 0.0
+    true_up_settlement: TrueUpSettlement
+
+    @property
+    def monthly_amount_due(self) -> float:
+        """Charges paid through monthly bills before the annual true-up."""
+        return sum(month.amount_due for month in self.months)
 
     @property
     def annual_amount_due(self) -> float:
-        return sum(month.amount_due for month in self.months)
+        return self.monthly_amount_due + self.true_up_settlement.net_bill_adjustment
 
     @property
     def annual_import_kwh(self) -> float:
@@ -66,7 +74,16 @@ class BillLedger:
 
     @property
     def annual_base_credit_applied(self) -> float:
-        return sum(month.base_credit_applied for month in self.months)
+        monthly = sum(month.base_credit_applied for month in self.months)
+        true_up = self.true_up_settlement
+        return monthly + sum(
+            (
+                true_up.generation_eec_applied_to_adjustment,
+                true_up.delivery_eec_applied_to_adjustment,
+                true_up.generation_eec_applied_to_prior_charges,
+                true_up.delivery_eec_applied_to_prior_charges,
+            )
+        )
 
     @property
     def annual_acc_plus_credit_applied(self) -> float:
@@ -79,6 +96,11 @@ class BillLedger:
     @property
     def annual_credit_applied(self) -> float:
         return self.annual_base_credit_applied + self.annual_acc_plus_credit_applied
+
+    @property
+    def expired_base_credit(self) -> float:
+        """Base EEC forfeited at true-up under the utility's policy."""
+        return self.true_up_settlement.total_forfeited_credit
 
     @property
     def unused_credit(self) -> float:
@@ -110,14 +132,20 @@ def _validate_billing_year(frame: pd.DataFrame, billing_year: int) -> None:
         )
 
 
-def calculate_nbt_bill(flows: EnergyFlows, tariff: TariffBundle) -> BillLedger:
+def calculate_nbt_bill(
+    flows: EnergyFlows,
+    tariff: TariffBundle,
+    *,
+    adjustment_schedule: AverageRetailExportCompensationSchedule | None = None,
+    nsc_schedule: NetSurplusCompensationSchedule | None = None,
+) -> BillLedger:
     """Calculate a monthly NBT ledger without hourly import/export netting.
 
     Base EEC credits offset volumetric import charges excluding the configured
     NBC portion. ACC Plus credits then offset any remaining energy, NBC, and
-    fixed charges. PG&E base credits carry across relevant periods; SCE base
-    credits expire after true-up. SDG&E's net-surplus compensation adjustment
-    is intentionally rejected until an explicit NSC price is supplied.
+    fixed charges. The annual true-up then reconciles remaining component EEC,
+    reverses compensation for annual net-surplus kWh at the utility-wide EEC
+    adjustment rate, and credits the same kWh at the selected NSC rate.
 
     Generation EEC offsets only eligible generation imports and delivery EEC
     offsets only eligible delivery imports. Non-offsettable volumetric charges
@@ -151,6 +179,8 @@ def calculate_nbt_bill(flows: EnergyFlows, tariff: TariffBundle) -> BillLedger:
     generation_bank = 0.0
     delivery_bank = 0.0
     acc_plus_bank = 0.0
+    annual_paid_eligible_generation_charge = 0.0
+    annual_paid_eligible_delivery_charge = 0.0
     month_rows: list[MonthlyBill] = []
     for month, group in frame.groupby("month", sort=True):
         imports = float(group["import_kwh"].sum())
@@ -161,8 +191,12 @@ def calculate_nbt_bill(flows: EnergyFlows, tariff: TariffBundle) -> BillLedger:
         delivery_import_charge = float(
             (group["import_kwh"] * group["delivery_import_rate"]).sum()
         )
-        generation_non_offsettable = imports * tariff.import_schedule.generation_non_offsettable_rate
-        delivery_non_offsettable = imports * tariff.import_schedule.delivery_non_offsettable_rate
+        generation_non_offsettable = (
+            imports * tariff.import_schedule.generation_non_offsettable_rate
+        )
+        delivery_non_offsettable = (
+            imports * tariff.import_schedule.delivery_non_offsettable_rate
+        )
         nbc_charge = generation_non_offsettable + delivery_non_offsettable
         if nbc_charge > generation_import_charge + delivery_import_charge + 1e-9:
             raise ValueError(
@@ -172,7 +206,9 @@ def calculate_nbt_bill(flows: EnergyFlows, tariff: TariffBundle) -> BillLedger:
         eligible_generation = generation_import_charge - generation_non_offsettable
         eligible_delivery = delivery_import_charge - delivery_non_offsettable
         if eligible_generation < -1e-9 or eligible_delivery < -1e-9:
-            raise ValueError(f"Non-offsettable charges exceed an import component in month {month}")
+            raise ValueError(
+                f"Non-offsettable charges exceed an import component in month {month}"
+            )
         generation_earned = float(
             (group["export_kwh"] * group["generation_export_rate"]).sum()
         )
@@ -190,8 +226,10 @@ def calculate_nbt_bill(flows: EnergyFlows, tariff: TariffBundle) -> BillLedger:
         generation_bank -= generation_applied
         delivery_bank -= delivery_applied
         base_applied = generation_applied + delivery_applied
+        remaining_generation = eligible_generation - generation_applied
+        remaining_delivery = eligible_delivery - delivery_applied
         eligible_import_charge = eligible_generation + eligible_delivery
-        remaining_energy = eligible_import_charge - base_applied
+        remaining_energy = remaining_generation + remaining_delivery
 
         days = pd.DatetimeIndex(group["timestamp"]).normalize().unique()
         fixed_charge = sum(
@@ -201,6 +239,31 @@ def calculate_nbt_bill(flows: EnergyFlows, tariff: TariffBundle) -> BillLedger:
         acc_plus_applied = min(acc_plus_bank, before_acc_plus)
         acc_plus_bank -= acc_plus_applied
         amount_due = before_acc_plus - acc_plus_applied
+
+        # ACC Plus is component-neutral. Allocate the portion that offsets
+        # eligible energy proportionally across the remaining generation and
+        # delivery charges. Only the residual cash-paid energy charge is
+        # eligible for a backward-looking EEC application at annual true-up;
+        # passing the pre-ACC-Plus amount would credit the same charge twice.
+        acc_plus_applied_to_energy = min(acc_plus_applied, remaining_energy)
+        if remaining_energy > 0.0:
+            generation_share = remaining_generation / remaining_energy
+            acc_plus_applied_to_generation = (
+                acc_plus_applied_to_energy * generation_share
+            )
+        else:
+            acc_plus_applied_to_generation = 0.0
+        acc_plus_applied_to_delivery = (
+            acc_plus_applied_to_energy - acc_plus_applied_to_generation
+        )
+        annual_paid_eligible_generation_charge += max(
+            remaining_generation - acc_plus_applied_to_generation,
+            0.0,
+        )
+        annual_paid_eligible_delivery_charge += max(
+            remaining_delivery - acc_plus_applied_to_delivery,
+            0.0,
+        )
         month_rows.append(
             MonthlyBill(
                 month=int(month),
@@ -225,25 +288,55 @@ def calculate_nbt_bill(flows: EnergyFlows, tariff: TariffBundle) -> BillLedger:
             )
         )
 
-    if tariff.utility is Utility.SDGE and flows.validated_frame()["export_kwh"].sum() > flows.validated_frame()["import_kwh"].sum():
-        raise NotImplementedError(
-            "SDG&E annual net-surplus compensation requires an explicit NSC price; "
-            "the profile exports more energy than it imports"
+    annual_import_kwh = float(frame["import_kwh"].sum())
+    annual_export_kwh = float(frame["export_kwh"].sum())
+    net_surplus_kwh = max(annual_export_kwh - annual_import_kwh, 0.0)
+    adjustment_rate = None
+    nsc_rate = None
+    if net_surplus_kwh > 0:
+        resolved_adjustment_schedule = (
+            adjustment_schedule
+            or AverageRetailExportCompensationSchedule.from_csv()
         )
-    expired_base_credit = 0.0
-    if tariff.utility in {Utility.SCE, Utility.SDGE}:
-        # Base EEC expires at true-up for these utilities. Record what expired
-        # before clearing it so the unused-credit diagnostic stays accurate.
-        expired_base_credit = generation_bank + delivery_bank
-        generation_bank = 0.0
-        delivery_bank = 0.0
+        resolved_nsc_schedule = (
+            nsc_schedule or NetSurplusCompensationSchedule.from_csv()
+        )
+        adjustment_rate = resolved_adjustment_schedule.resolve(
+            tariff.utility, tariff.scenario.true_up_month
+        )
+        nsc_rate = resolved_nsc_schedule.resolve(
+            tariff.utility, tariff.scenario.true_up_month
+        )
+
+    true_up_settlement = calculate_true_up_settlement(
+        policy=TrueUpPolicy.for_utility(tariff.utility),
+        annual_import_kwh=annual_import_kwh,
+        annual_export_kwh=annual_export_kwh,
+        ending_generation_credit_bank=generation_bank,
+        ending_delivery_credit_bank=delivery_bank,
+        ending_acc_plus_credit_bank=acc_plus_bank,
+        remaining_offsettable_generation_charges=(
+            annual_paid_eligible_generation_charge
+        ),
+        remaining_offsettable_delivery_charges=(
+            annual_paid_eligible_delivery_charge
+        ),
+        adjustment_rate=adjustment_rate,
+        nsc_rate=nsc_rate,
+        true_up_month=tariff.scenario.true_up_month,
+    )
 
     return BillLedger(
         utility=tariff.utility,
         billing_year=tariff.scenario.billing_year,
         nbt_vintage=tariff.scenario.nbt_vintage,
         months=tuple(month_rows),
-        ending_base_credit_bank=generation_bank + delivery_bank,
-        ending_acc_plus_credit_bank=acc_plus_bank,
-        expired_base_credit=expired_base_credit,
+        ending_base_credit_bank=(
+            true_up_settlement.ending_generation_credit_bank
+            + true_up_settlement.ending_delivery_credit_bank
+        ),
+        ending_acc_plus_credit_bank=(
+            true_up_settlement.ending_acc_plus_credit_bank
+        ),
+        true_up_settlement=true_up_settlement,
     )

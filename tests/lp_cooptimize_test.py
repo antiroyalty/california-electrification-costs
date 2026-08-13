@@ -30,7 +30,9 @@ if REPO_ROOT not in sys.path:
 
 from pipeline.steps.step9b_cooptimize_core import (
     CooptInputs,
+    SOLVER_OUTPUT_ABSOLUTE_TOLERANCE,
     _meter_direction_hours,
+    _normalize_nonnegative_solver_value,
     _solve_lp,
 )
 from tariffs import NBTScenario, TariffCatalog
@@ -50,6 +52,32 @@ P_EXP_RETAIL  = [0.40] * 24   # retail parity: same as import rate
 def _zero_capex_kwargs():
     """Return LP keyword args with zero capex so total_cost = operating cost only."""
     return dict(c_pv_kw=0.0, c_batt_kwh=0.0, c_batt_kw=0.0)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        -SOLVER_OUTPUT_ABSOLUTE_TOLERANCE,
+        -1e-12,
+        0.0,
+        1e-12,
+        SOLVER_OUTPUT_ABSOLUTE_TOLERANCE,
+    ],
+)
+def test_solver_scale_values_are_normalized_to_physical_zero(value):
+    assert _normalize_nonnegative_solver_value(value, label="flow[7]") == 0.0
+
+
+def test_materially_negative_solver_output_fails_instead_of_being_clamped():
+    value = -(SOLVER_OUTPUT_ABSOLUTE_TOLERANCE + 1e-12)
+
+    with pytest.raises(RuntimeError, match=r"flow\[7\].*below the allowed"):
+        _normalize_nonnegative_solver_value(value, label="flow[7]")
+
+
+def test_positive_flow_above_solver_tolerance_is_preserved_exactly():
+    value = SOLVER_OUTPUT_ABSOLUTE_TOLERANCE + 1e-12
+    assert _normalize_nonnegative_solver_value(value, label="flow[7]") == value
 
 
 # ---------------------------------------------------------------------------

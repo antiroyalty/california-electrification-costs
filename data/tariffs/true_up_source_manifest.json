@@ -1,0 +1,109 @@
+{
+  "schema_version": 2,
+  "description": "Official utility sources for NBT annual true-up and net-surplus compensation rules and rates.",
+  "created_on": "2026-08-10",
+  "updated_on": "2026-08-11",
+  "sources": [
+    {
+      "source_id": "pge_nbt_rules_2026-08-10",
+      "source_group": "nbt_rules",
+      "source_type": "tariff_schedule",
+      "utility": "PG&E",
+      "url": "https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_NBT.pdf",
+      "archive_path": "sources/nbt_rules/pge/2026-08-10/ELEC_SCHEDS_NBT.pdf",
+      "archive_status": "archived",
+      "retrieved_on": "2026-08-10",
+      "format": "pdf",
+      "sha256": "47024b7c8ef29189d870af29f8ef37480f59a2d881de900d5820d462c02f652e"
+    },
+    {
+      "source_id": "sce_nbt_rules_2026-08-10",
+      "source_group": "nbt_rules",
+      "source_type": "tariff_schedule",
+      "utility": "SCE",
+      "url": "https://www.sce.com/sites/default/files/custom-files/PDF_Files/ELECTRIC_SCHEDULES_NBT.pdf",
+      "archive_path": "sources/nbt_rules/sce/2026-08-10/ELECTRIC_SCHEDULES_NBT.pdf",
+      "archive_status": "archived",
+      "retrieved_on": "2026-08-10",
+      "format": "pdf",
+      "sha256": "9d1649261bb85c2139c1931bb0a3594427f75a1d2f8c0cc2971526ef5e6a8a10",
+      "notes": "The official endpoint returned a multipart response; this is the exact embedded PDF payload with the HTTP multipart wrapper removed."
+    },
+    {
+      "source_id": "sdge_nbt_rules_2026-08-10",
+      "source_group": "nbt_rules",
+      "source_type": "tariff_schedule",
+      "utility": "SDG&E",
+      "url": "https://scg-uofa-api-prd-hzczb4hja0g6dcfv.a03.azurefd.net/scg-uofa-wpubtm-prd/tariff/?utilId=SDGE&bookId=ELEC&tarfKey=1064",
+      "landing_url": "https://tariffsprd.sdge.com/view/tariff/?utilId=SDGE&bookId=ELEC&tarfKey=1064",
+      "archive_path": "sources/nbt_rules/sdge/2026-08-10/ELECTRIC_SCHEDULE_NBT.pdf",
+      "archive_status": "archived",
+      "retrieved_on": "2026-08-10",
+      "format": "pdf",
+      "sha256": "7980d0d4b5a88964974e2ece2a9bdfa609935bb6d9daa7ebc4e63e6863880551"
+    },
+    {
+      "source_id": "pge_monthly_nsc_rates_2026-08-10",
+      "source_group": "nsc",
+      "source_type": "monthly_nsc_rates",
+      "utility": "PG&E",
+      "url": "https://www.pge.com/assets/pge/docs/clean-energy/solar/AB920-RateTable.pdf",
+      "archive_path": "sources/nsc/pge/2026-08-10/AB920-RateTable.pdf",
+      "archive_status": "archived",
+      "retrieved_on": "2026-08-10",
+      "format": "pdf",
+      "sha256": "c17a197557e82e94e0f65f04eec7f8ae0683b118d5df36bf747d8ea818a26aac"
+    },
+    {
+      "source_id": "sce_monthly_nsc_rates_2026-08-10",
+      "source_group": "nsc",
+      "source_type": "monthly_nsc_rates",
+      "utility": "SCE",
+      "url": "https://www.sce.com/regulatory/regulatory-information/ferc-Standards-conduct/tariff-books/rates-pricing-choices/net-surplus-compensation",
+      "archive_path": "sources/nsc/sce/2026-08-10/net-surplus-compensation.html",
+      "archive_status": "archived",
+      "retrieved_on": "2026-08-10",
+      "format": "html",
+      "sha256": "7bb9ce4540a0a110518327a08efdf027e32884904998bd0c7ef3e225b069ba0a"
+    },
+    {
+      "source_id": "sce_monthly_eec_adjustment_rates_2026-08-11",
+      "source_group": "nsc",
+      "source_type": "monthly_eec_adjustment_rates",
+      "utility": "SCE",
+      "url": "https://www.sce.com/regulatory/regulatory-information/ferc-Standards-conduct/tariff-books/rates-pricing-choices/eec-adjustment-pricing",
+      "archive_path": "sources/nsc/sce/2026-08-11/eec-adjustment-pricing.html",
+      "archive_status": "archived",
+      "retrieved_on": "2026-08-11",
+      "format": "html",
+      "sha256": "970ed4e876764204f1ca01e8cfb408e02011518e0e4d1a6de2154b40582ae179"
+    },
+    {
+      "source_id": "sdge_monthly_nsc_rates_2026-08-10",
+      "source_group": "nsc",
+      "source_type": "monthly_nsc_rates",
+      "utility": "SDG&E",
+      "url": "https://www.sdge.com/residential/savings-center/solar-power-renewable-energy/net-energy-metering/billing-information/excess-generation",
+      "archive_path": "sources/nsc/sdge/2026-08-10/excess-generation.html",
+      "archive_status": "archived",
+      "retrieved_on": "2026-08-10",
+      "format": "html",
+      "sha256": "dffaf8fba156aa5d0aa7c08f6a637a56dccb8c8c6fb672c3ab8793ba1dbfd1e5"
+    },
+    {
+      "source_id": "sdge_annual_true_up_methodology_2026-08-10",
+      "source_group": "nsc",
+      "source_type": "annual_true_up_methodology",
+      "additional_source_types": [
+        "monthly_eec_adjustment_rates"
+      ],
+      "utility": "SDG&E",
+      "url": "https://www.sdge.com/fil/node/25491",
+      "archive_path": "sources/nsc/sdge/2026-08-10/understanding-your-solar-bill.html",
+      "archive_status": "archived",
+      "retrieved_on": "2026-08-10",
+      "format": "html",
+      "sha256": "e80aee5043ae39a4317634d0ba0dc72cc505e614e0e0b3110e7298f4f56da27d"
+    }
+  ]
+}
