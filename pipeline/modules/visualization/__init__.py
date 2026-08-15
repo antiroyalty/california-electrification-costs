@@ -19,13 +19,12 @@ from scenarios import SCENARIOS
 def _plan_pref_from(rate_plans: Optional[Dict[str, Dict[str, str]]]) -> Optional[List[str]]:
     if not rate_plans:
         return None
-    try:
-        return list({
-            v.get('electricity') for v in rate_plans.values()
-            if isinstance(v, dict) and v.get('electricity')
-        })
-    except Exception:
-        return None
+    preferences = [
+        utility_plans.get("electricity")
+        for utility_plans in rate_plans.values()
+        if isinstance(utility_plans, dict) and utility_plans.get("electricity")
+    ]
+    return list(dict.fromkeys(preferences)) or None
 
 
 def _is_coopt_scenario(name: str) -> bool:
@@ -140,6 +139,7 @@ def run(cfg: Config) -> None:
         incentive=cfg.incentive,
         discount_rate=cfg.discount_rate,
         agg=cfg.agg,
+        plan_preference=plan_preference,
     )
 
     # 21) With vs without PV for the current scenario

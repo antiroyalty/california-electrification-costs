@@ -9,12 +9,14 @@ EAC components per scenario:
   - capex_electric (annualized, excludes PV/storage)
   - capex_gas (annualized)
   - vehicle_om (annual O&M adders from the ledger; can be negative)
-  - annual_bill_default (from Step 13 totals, row = <scenario>)
+  - annual_bill_electric (configured retail import plan, row = <scenario>)
+  - annual_bill_gas (row = <scenario>)
 
 Notes
   - Uses Step 14 detailed capital ledger: data/loadprofiles/capital_costs/
     capital_costs_<scenario>_<housing>.csv
-  - Annual bill uses Step 13 totals for the default row (no .solarstorage).
+  - Annual bills use the separate electricity and gas results for the default
+    row (no .solarstorage).
   - Results may be negative (e.g., incentives exceeding capex for some items).
 """
 
@@ -22,7 +24,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import subprocess
 from typing import Dict, Iterable, List, Optional
 
 import numpy as np
@@ -30,19 +31,10 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from helpers.main_helpers import slugify_county_name, get_scenario_path, git_short_sha
-from helpers.capital_cost_map_builder import LIFETIMES
+from helpers.plot_scenario_comparison_helper import _annual_bill_parts
 from .step15_payback_periods import vehicle_annual_adders_from_ledger
 from scenarios import SCENARIOS
 from evaluations.eac import crf as _crf
-
-try:
-    # Helper to find latest totals CSV per county
-    from helpers.plot_scenario_comparison_helper import _latest_totals_csv
-except Exception:
-    _latest_totals_csv = None
-
-
-
 
 def _read_capital_ledger(base_input_dir: str, scenario: str, housing_type: str) -> Optional[pd.DataFrame]:
     cap_dir = os.path.join(base_input_dir, "capital_costs")
@@ -56,35 +48,6 @@ def _read_capital_ledger(base_input_dir: str, scenario: str, housing_type: str) 
         return None
 
 
-def _read_totals_cost_default(base_input_dir: str, scenario: str, housing_type: str, county_slug: str) -> float:
-    """Return total annual bill (default row, no solarstorage) for a county.
-    Falls back to 0.0 if not available.
-    """
-    try:
-        if _latest_totals_csv is None:
-            # Minimal inline finder (mirrors helper behavior)
-            results_dir = os.path.join(base_input_dir, scenario, housing_type, county_slug, "results", "totals")
-            if not os.path.isdir(results_dir):
-                return 0.0
-            files = [f for f in os.listdir(results_dir) if f.startswith("RESULTS_total_annual_costs_") and f.endswith(".csv")]
-            if not files:
-                return 0.0
-            # Pick lexicographically last as a crude latest; helper is smarter with timestamp
-            files.sort()
-            path = os.path.join(results_dir, files[-1])
-        else:
-            path = _latest_totals_csv(base_input_dir, scenario, housing_type, county_slug)
-        if not path or not os.path.exists(path):
-            return 0.0
-        df = pd.read_csv(path, index_col="scenario")
-        if scenario not in df.index:
-            # Fallback to the first row's first value
-            return float(df.iloc[0].iloc[0])
-        return float(df.loc[scenario].iloc[0])
-    except Exception:
-        return 0.0
-
-
 def collect_eac_no_pv(
     base_input_dir: str,
     housing_type: str,
@@ -94,6 +57,7 @@ def collect_eac_no_pv(
     incentive: str = "full_incentives",
     discount_rate: float = 0.07,
     agg: str = "mean",
+    electricity_plan_preference: Optional[Iterable[str]] = None,
 ) -> pd.DataFrame:
     """Collect EAC components WITHOUT PV/storage for each scenario (aggregated over counties).
 
@@ -113,14 +77,18 @@ def collect_eac_no_pv(
             capex_electric = 0.0
             capex_gas = 0.0
             vehicle_om = 0.0
-            # Split default (no PV/storage) bills into electric + gas
-            try:
-                from helpers.plot_scenario_comparison_helper import _annual_bill_parts as _bill_parts  # reuse helper
-                e_bill, g_bill = _bill_parts(base_input_dir, scen, housing_type, slug, with_solar=False)
-            except Exception:
-                # Fallback to totals if helper import fails
-                total_bill = _read_totals_cost_default(base_input_dir, scen, housing_type, slug)
-                e_bill, g_bill = total_bill, 0.0
+            # The counterfactual is billed on the configured retail import plan.
+            # Missing or ambiguous plan selection must fail rather than silently
+            # selecting the first tariff column in the results file.
+            e_bill, g_bill = _annual_bill_parts(
+                base_input_dir,
+                scen,
+                housing_type,
+                slug,
+                with_solar=False,
+                electricity_plan_preference=electricity_plan_preference,
+                electricity_variant="retail",
+            )
 
             # Annualize capital ledger rows (exclude PV/storage entirely)
             if ledger is not None and not ledger.empty:
@@ -191,6 +159,7 @@ def collect_eac_no_pv_by_county(
     *,
     incentive: str = "full_incentives",
     discount_rate: float = 0.07,
+    electricity_plan_preference: Optional[Iterable[str]] = None,
 ) -> pd.DataFrame:
     """Per-county EAC components WITHOUT PV/storage for each scenario.
 
@@ -206,15 +175,15 @@ def collect_eac_no_pv_by_county(
             capex_electric = 0.0
             capex_gas = 0.0
             vehicle_om = 0.0
-            e_bill = 0.0
-            g_bill = 0.0
-
-            total_bill = _read_totals_cost_default(base_input_dir, scen, housing_type, slug)
-            util = get_utility_for_county(slug)
-            if util and str(util).upper() in ("PG&E", "PGE"):
-                e_bill, g_bill = total_bill, 0.0
-            else:
-                e_bill, g_bill = total_bill, 0.0
+            e_bill, g_bill = _annual_bill_parts(
+                base_input_dir,
+                scen,
+                housing_type,
+                slug,
+                with_solar=False,
+                electricity_plan_preference=electricity_plan_preference,
+                electricity_variant="retail",
+            )
 
             if ledger is not None and not ledger.empty:
                 df = ledger.copy()
@@ -346,6 +315,12 @@ def main() -> None:
     p.add_argument("--agg", choices=["mean","median"], default="mean")
     p.add_argument("--incentive", default="full_incentives", choices=["full_incentives","half_incentives","no_incentives"])
     p.add_argument("--discount-rate", type=float, default=0.07)
+    p.add_argument(
+        "--electricity-plans",
+        nargs="+",
+        required=True,
+        help="Ordered retail electricity-plan tokens, one per utility as needed",
+    )
     args = p.parse_args()
 
     base = args.base_input_dir
@@ -355,7 +330,16 @@ def main() -> None:
     counties = _discover_counties(base, housing, scenarios) if args.all_counties else (args.counties or ["Alameda County"])
     os.makedirs(out_dir, exist_ok=True)
 
-    df = collect_eac_no_pv(base, housing, scenarios, counties, incentive=args.incentive, discount_rate=args.discount_rate, agg=args.agg)
+    df = collect_eac_no_pv(
+        base,
+        housing,
+        scenarios,
+        counties,
+        incentive=args.incentive,
+        discount_rate=args.discount_rate,
+        agg=args.agg,
+        electricity_plan_preference=args.electricity_plans,
+    )
     sha = git_short_sha()
     csv_path = os.path.join(out_dir, f"step20_eac_no_pv_summary_g{sha}.csv")
     if not df.empty:
@@ -390,10 +374,20 @@ def process(
     incentive: str = "full_incentives",
     discount_rate: float = 0.07,
     agg: str = "mean",
+    plan_preference: Optional[Iterable[str]] = None,
 ):
     os.makedirs(output_dir, exist_ok=True)
     sha = git_short_sha()
-    df = collect_eac_no_pv(base_input_dir, housing_type, scenarios, counties, incentive=incentive, discount_rate=discount_rate, agg=agg)
+    df = collect_eac_no_pv(
+        base_input_dir,
+        housing_type,
+        scenarios,
+        counties,
+        incentive=incentive,
+        discount_rate=discount_rate,
+        agg=agg,
+        electricity_plan_preference=plan_preference,
+    )
     if not df.empty:
         df.to_csv(os.path.join(output_dir, f"step20_eac_no_pv_summary_g{sha}.csv"), index=False)
     fig = plot_eac_no_pv_stacked_bar(df, scenario_order=scenarios, title=f"All-in Annualized Cost (No Solar + Storage)")
