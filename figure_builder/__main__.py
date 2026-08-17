@@ -17,23 +17,39 @@ from __future__ import annotations
 import argparse
 import json
 
+from appliances.incentive_policy import PolicyRegime
 from figure_builder import FIG_DIR, current_claims_doc, sweep_csv_path
 from figure_builder.datasets import collect_battery_capex_sweep
 from figure_builder.dispatch import CLAIM1_COUNTIES
 from figure_builder.pricing import live_prices
 
 
+SWEEP_REGIMES = (
+    PolicyRegime.POST_ITC_2026,
+    PolicyRegime.ITC_2025,
+)
+
+
 def _cmd_sweeps(args) -> list:
     slugs = args.counties or [s for s, _, _ in CLAIM1_COUNTIES]
-    prices = live_prices()
-    print(f"Regime {prices.regime}: solar fixed ${prices.pv_net_per_kw:,.0f}/kW, "
-          f"battery ${prices.batt_net_per_kwh:,.0f}/kWh net")
     out = []
-    for slug in slugs:
-        print(f"\n{slug}:")
-        collect_battery_capex_sweep(slug, force=args.force, fine=args.fine)
-        resolution = "8760" if args.fine else "288"
-        out.append(str(sweep_csv_path(slug, prices.regime, resolution)))
+    resolution = "8760" if args.fine else "288"
+    for regime in SWEEP_REGIMES:
+        prices = live_prices(regime)
+        print(
+            f"Regime {prices.regime}: solar fixed "
+            f"${prices.pv_net_per_kw:,.0f}/kW, battery "
+            f"${prices.batt_net_per_kwh:,.0f}/kWh net"
+        )
+        for slug in slugs:
+            print(f"\n{slug}:")
+            collect_battery_capex_sweep(
+                slug,
+                regime=regime,
+                force=args.force,
+                fine=args.fine,
+            )
+            out.append(str(sweep_csv_path(slug, prices.regime, resolution)))
     return out
 
 
