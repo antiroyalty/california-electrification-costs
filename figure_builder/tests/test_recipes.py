@@ -36,6 +36,7 @@ def test_marginal_value_meta_preserves_peak_rate_and_storage_adjustment():
     assert meta["peak_import_rate"] == pytest.approx(0.50)
     assert meta["v_peak"] == pytest.approx(0.45)
     assert meta["pv_lcoe"] == pytest.approx(0.19)
+    assert meta["storage_margin_after_solar"] == pytest.approx(0.26)
     assert meta["peak_share_pct"] == pytest.approx(10.0)
     assert meta["round_trip_eff"] == pytest.approx(0.90)
 
@@ -83,6 +84,7 @@ def test_mechanism_caption_uses_metrics_instead_of_stale_rate_literals():
             "peak_import_rate": 0.48,
             "v_peak": 0.432,
             "pv_lcoe": 0.196,
+            "storage_margin_after_solar": 0.236,
             "peak_share_pct": 10.0,
             "round_trip_eff": 0.90,
         },
@@ -103,6 +105,10 @@ def test_mechanism_caption_uses_metrics_instead_of_stale_rate_literals():
     assert "~$0.057/kWh when hourly prices are weighted by modeled PV generation" in html
     assert "solar-coincident export value of <strong>$0.057/kWh</strong>" in html
     assert "effective avoided-import value of <strong>$0.432/kWh</strong>" in html
+    assert "<strong>$0.236/kWh</strong>" in html
+    assert "not profit" in html
+    assert "not a solar-plus-storage LCOE" in html
+    assert "today&rsquo;s modeled <strong>$1,461/kWh net</strong>" in html
     assert "2-3" not in html
     assert "2&ndash;3" not in html
     assert "~$0.40/kWh" not in html

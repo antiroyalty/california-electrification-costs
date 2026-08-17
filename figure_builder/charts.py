@@ -217,6 +217,7 @@ def plot_marginal_solar_value_ladder(
         np.mean(p_imp[p_imp >= np.quantile(p_imp, peak_quantile)])
     )
     v_peak = peak_import_rate * round_trip_eff
+    storage_margin_after_solar = v_peak - pv_lcoe
     peak_share_pct = (1.0 - peak_quantile) * 100.0
     round_trip_loss_pct = (1.0 - round_trip_eff) * 100.0
 
@@ -227,8 +228,8 @@ def plot_marginal_solar_value_ladder(
     xb = [0, 1]
     ax.bar(xb, vals, width=0.5, color=[NEG, POS], zorder=3, edgecolor="white", lw=1)
     ax.axhline(pv_lcoe, ls=(0, (5, 3)), color=INK, lw=1.4, zorder=4)
-    ax.text(1.46, pv_lcoe + 0.004, f"solar's break-even (LCOE)  ${pv_lcoe:.3f}/kWh",
-            ha="right", va="bottom", color=INK, fontsize=9.5, **MONO)
+    ax.text(-0.50, pv_lcoe + 0.004, f"solar LCOE  ${pv_lcoe:.3f}/kWh",
+            ha="left", va="bottom", color=INK, fontsize=9.5, **MONO)
     for xi, v in zip(xb, vals):
         ax.text(xi, v + 0.008, f"${v:.3f}", ha="center", va="bottom", fontsize=13,
                 color=INK, **MONO)
@@ -237,21 +238,40 @@ def plot_marginal_solar_value_ladder(
     ax.text(1, v_peak + 0.085,
             f"illustrative peak-shift value\nafter {round_trip_loss_pct:.0f}% battery loss",
             ha="center", va="top", color=POS, fontsize=9, fontweight="bold", linespacing=1.25)
+    if storage_margin_after_solar > 0.0:
+        ax.annotate(
+            "",
+            xy=(1.36, v_peak),
+            xytext=(1.36, pv_lcoe),
+            arrowprops=dict(arrowstyle="<->", color=CAUT, lw=1.5),
+        )
+        ax.text(
+            1.41,
+            (v_peak + pv_lcoe) / 2.0,
+            f"${storage_margin_after_solar:.3f}/kWh\nleft to cover\nstorage cost",
+            ha="left",
+            va="center",
+            color=CAUT,
+            fontsize=8.7,
+            fontweight="bold",
+            linespacing=1.2,
+        )
     ax.set_xticks(xb)
     ax.set_xticklabels(cats, fontsize=9.8, color=INK_SOFT, linespacing=1.3)
     ax.set_ylabel("Illustrative value of surplus rooftop solar  ($/kWh)", fontsize=10.3)
     ax.set_ylim(0, max(0.54, v_peak * 1.25))
-    ax.set_xlim(-0.55, 1.55)
+    ax.set_xlim(-0.55, 1.82)
     for s in ["top", "right"]:
         ax.spines[s].set_visible(False)
     ax.tick_params(labelsize=9.5)
-    ax.set_title("Why storage can raise the value of solar that would otherwise be exported",
+    ax.set_title("Energy-value illustration only — battery capital cost is excluded",
                  fontsize=11.5, color=INK, pad=10, loc="left")
     return fig, {
         "v_export": v_export,
         "peak_import_rate": peak_import_rate,
         "v_peak": v_peak,
         "pv_lcoe": pv_lcoe,
+        "storage_margin_after_solar": storage_margin_after_solar,
         "peak_share_pct": peak_share_pct,
         "round_trip_eff": round_trip_eff,
     }
