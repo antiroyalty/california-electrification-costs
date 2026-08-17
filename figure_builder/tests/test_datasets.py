@@ -14,7 +14,9 @@ from unittest.mock import patch
 from figure_builder import sweep_csv_path
 from figure_builder.datasets import (
     SWEEP_COLUMNS,
+    canonical_battery_capex_points,
     collect_battery_capex_sweep,
+    normalize_battery_capex_points,
     resolve_pv_capex,
     sweep_cache_is_compatible,
 )
@@ -54,18 +56,78 @@ def test_explicit_override_is_respected_for_sensitivity_sweeps():
     assert resolve_pv_capex(1500.0) == 1500.0
 
 
-def test_sweep_cache_requires_current_schema_and_requested_battery_bound():
+def test_canonical_sweep_includes_exact_live_price_once_for_each_regime():
+    from appliances.incentive_policy import PolicyRegime
+
+    current = canonical_battery_capex_points()
+    itc = canonical_battery_capex_points(PolicyRegime.ITC_2025)
+
+    assert current == sorted(current)
+    assert itc == sorted(itc)
+    assert current.count(1460.64) == 1
+    assert itc.count(1022.448) == 1
+    assert 1460.64 not in itc
+    assert 1022.448 not in current
+
+
+def test_explicit_sweep_points_are_sorted_and_deduplicated():
+    assert normalize_battery_capex_points([500, 100.0, 500.0]) == [100.0, 500.0]
+
+
+@pytest.mark.parametrize(
+    "points,message",
+    [
+        ([], "cannot be empty"),
+        ([100, float("nan")], "must be finite"),
+        ([100, float("inf")], "must be finite"),
+        ([100, 0], "must be positive"),
+        ([100, -1], "must be positive"),
+    ],
+)
+def test_sweep_points_reject_invalid_values(points, message):
+    with pytest.raises(ValueError, match=message):
+        normalize_battery_capex_points(points)
+
+
+def test_sweep_cache_requires_schema_bound_and_complete_requested_grid():
     current = pd.DataFrame(
-        [[500.0, 3.0, 10.0, 2_000.0, 0.8, 40.0, 2, 2]],
+        [
+            [500.0, 3.0, 10.0, 2_000.0, 0.8, 40.0, 2, 2],
+            [1460.64, 2.0, 0.0, 2_500.0, 0.5, 40.0, 0, 1],
+        ],
         columns=SWEEP_COLUMNS,
     )
     old_unbounded = current.drop(
         columns=["max_battery_kwh", "meter_binary_count", "solver_rounds"]
     )
+    missing_live_price = current.iloc[[0]].copy()
+    duplicate = pd.concat([current, current.iloc[[0]]], ignore_index=True)
 
-    assert sweep_cache_is_compatible(current, 40.0)
-    assert not sweep_cache_is_compatible(current, 55.0)
-    assert not sweep_cache_is_compatible(old_unbounded, 40.0)
+    assert sweep_cache_is_compatible(
+        current,
+        40.0,
+        expected_points=[1460.64, 500.0],
+    )
+    assert not sweep_cache_is_compatible(
+        current,
+        55.0,
+        expected_points=[500.0, 1460.64],
+    )
+    assert not sweep_cache_is_compatible(
+        old_unbounded,
+        40.0,
+        expected_points=[500.0, 1460.64],
+    )
+    assert not sweep_cache_is_compatible(
+        missing_live_price,
+        40.0,
+        expected_points=[500.0, 1460.64],
+    )
+    assert not sweep_cache_is_compatible(
+        duplicate,
+        40.0,
+        expected_points=[500.0, 1460.64],
+    )
 
 
 def test_sweep_cache_path_separates_coarse_and_full_resolution():

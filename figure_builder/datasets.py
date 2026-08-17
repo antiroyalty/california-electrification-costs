@@ -8,8 +8,9 @@ Step-9b co-optimization model, holding solar's price fixed.
 """
 from __future__ import annotations
 
+import math
 import time
-from typing import List, Optional
+from typing import List, Optional, Sequence
 
 import pandas as pd
 
@@ -33,14 +34,44 @@ def sweep_cache_is_compatible(
     df: pd.DataFrame,
     max_battery_kwh: float,
     *,
+    expected_points: Sequence[float],
     expected_columns: Optional[List[str]] = None,
 ) -> bool:
-    """Whether cached results fully describe the requested sizing domain."""
+    """Whether cached results fully describe the requested sweep."""
+
+    expected = normalize_battery_capex_points(expected_points)
+    if "battery_capex_kwh" not in df.columns:
+        return False
+    actual = pd.to_numeric(df["battery_capex_kwh"], errors="coerce")
 
     return (
         list(df.columns) == (SWEEP_COLUMNS if expected_columns is None else expected_columns)
         and not df.empty
         and set(df["max_battery_kwh"].astype(float)) == {float(max_battery_kwh)}
+        and not actual.isna().any()
+        and not actual.duplicated().any()
+        and sorted(actual.astype(float).tolist()) == expected
+    )
+
+
+def normalize_battery_capex_points(points: Sequence[float]) -> List[float]:
+    """Validate, sort, and deduplicate an explicitly requested capex grid."""
+
+    normalized = [float(point) for point in points]
+    if not normalized:
+        raise ValueError("Battery capex sweep points cannot be empty")
+    if not all(math.isfinite(point) for point in normalized):
+        raise ValueError("Battery capex sweep points must be finite")
+    if any(point <= 0.0 for point in normalized):
+        raise ValueError("Battery capex sweep points must be positive")
+    return sorted(set(normalized))
+
+
+def canonical_battery_capex_points(regime=None) -> List[float]:
+    """Publication grid including the regime's exact modeled battery price."""
+
+    return normalize_battery_capex_points(
+        [*SWEEP_POINTS, live_prices(regime).batt_net_per_kwh]
     )
 
 
@@ -65,7 +96,7 @@ def collect_battery_capex_sweep(
     *,
     regime=None,
     scenario: str = "full_electric_ev_coopt",
-    points: List[int] = SWEEP_POINTS,
+    points: Optional[Sequence[float]] = None,
     pv_capex_per_kw: Optional[float] = None,
     max_battery_kwh: float = 40.0,
     fine: bool = False,
@@ -80,17 +111,29 @@ def collect_battery_capex_sweep(
     solver diagnostics.
 
     Solar capex is fixed at the live net price for `regime` (default: current
-    law), or `pv_capex_per_kw` if given. Results cache per (county, regime) to
+    law), or `pv_capex_per_kw` if given. The default publication grid includes
+    the regime's exact modeled net battery price. An explicit ``points``
+    argument is treated as a deliberate custom grid and is only validated,
+    sorted, and deduplicated. Results cache per (county, regime) to
     figure_builder/sweeps/; pass `force=True` to recompute. Sensitivity grids
     use weighted 12x24 monthly-hour intervals by default; `fine=True` requests
     the substantially slower full 8,760-hour chronology.
     """
     prices = live_prices(regime)
+    requested_points = (
+        canonical_battery_capex_points(regime)
+        if points is None
+        else normalize_battery_capex_points(points)
+    )
     resolution = "8760" if fine else "288"
     path = sweep_csv_path(slug, prices.regime, resolution)
     if cache and not force and path.exists():
         df = pd.read_csv(path)
-        if sweep_cache_is_compatible(df, max_battery_kwh):
+        if sweep_cache_is_compatible(
+            df,
+            max_battery_kwh,
+            expected_points=requested_points,
+        ):
             return df.sort_values("battery_capex_kwh").reset_index(drop=True)
 
     from pipeline.steps.step9b_cooptimize_core import (
@@ -111,7 +154,7 @@ def collect_battery_capex_sweep(
         cycle_monthly = True
 
     rows = []
-    for cb in points:
+    for cb in requested_points:
         t0 = time.time()
         r = _solve_lp(
             inp, allow_grid_charging=False, allow_batt_export=True,

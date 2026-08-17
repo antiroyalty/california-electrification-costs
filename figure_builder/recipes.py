@@ -235,6 +235,7 @@ def _installer_rule_fixed_pv_sweep(county, pv_offset, prices):
         if sweep_cache_is_compatible(
             cached,
             max_battery_kwh,
+            expected_points=SWEEP_POINTS,
             expected_columns=required_columns,
         ):
             return cached
