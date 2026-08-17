@@ -10,13 +10,38 @@ from __future__ import annotations
 
 import math
 import time
+from dataclasses import dataclass
 from typing import List, Optional, Sequence
 
 import pandas as pd
 
 from figure_builder import SWEEP_DIR, sweep_csv_path
-from figure_builder.dispatch import SWEEP_POINTS, county_dispatch_inputs
+from figure_builder.dispatch import (
+    DEFAULT_SCENARIO,
+    SWEEP_POINTS,
+    county_dispatch_inputs,
+)
 from figure_builder.pricing import live_prices
+
+
+@dataclass(frozen=True)
+class SweepModelSettings:
+    """Fixed modeling choices shared by the sweep solver and run metadata."""
+
+    billing_year: int = 2026
+    max_battery_kwh: float = 40.0
+    max_pv_to_annual_load_ratio: float = 1.5
+    allow_grid_charging: bool = False
+    allow_battery_export: bool = True
+    battery_power_cost_usd_per_kw: float = 0.0
+    battery_degradation_cost_usd_per_kwh: float = 0.0
+    pv_lifetime_years: int = 25
+    battery_lifetime_years: int = 15
+    discount_rate: float = 0.07
+    solver_backend: str = "highs"
+
+
+SWEEP_MODEL_SETTINGS = SweepModelSettings()
 
 SWEEP_COLUMNS = [
     "battery_capex_kwh",
@@ -95,10 +120,10 @@ def collect_battery_capex_sweep(
     slug: str,
     *,
     regime=None,
-    scenario: str = "full_electric_ev_coopt",
+    scenario: str = DEFAULT_SCENARIO,
     points: Optional[Sequence[float]] = None,
     pv_capex_per_kw: Optional[float] = None,
-    max_battery_kwh: float = 40.0,
+    max_battery_kwh: float = SWEEP_MODEL_SETTINGS.max_battery_kwh,
     fine: bool = False,
     cache: bool = True,
     force: bool = False,
@@ -150,18 +175,35 @@ def collect_battery_capex_sweep(
     weights = None
     cycle_monthly = False
     if not fine:
-        inp, weights = build_monthly_hourly_inputs(inp, year=2026)
+        inp, weights = build_monthly_hourly_inputs(
+            inp,
+            year=SWEEP_MODEL_SETTINGS.billing_year,
+        )
         cycle_monthly = True
 
     rows = []
     for cb in requested_points:
         t0 = time.time()
         r = _solve_lp(
-            inp, allow_grid_charging=False, allow_batt_export=True,
-            c_pv_kw=c_pv, c_batt_kwh=float(cb), c_batt_kw=0.0,
-            pv_life_yrs=25, batt_life_yrs=15, discount_rate=0.07,
-            c_deg_per_kwh=0.0, weights=weights, cycle_monthly=cycle_monthly,
+            inp,
+            allow_grid_charging=SWEEP_MODEL_SETTINGS.allow_grid_charging,
+            allow_batt_export=SWEEP_MODEL_SETTINGS.allow_battery_export,
+            c_pv_kw=c_pv,
+            c_batt_kwh=float(cb),
+            c_batt_kw=SWEEP_MODEL_SETTINGS.battery_power_cost_usd_per_kw,
+            pv_life_yrs=SWEEP_MODEL_SETTINGS.pv_lifetime_years,
+            batt_life_yrs=SWEEP_MODEL_SETTINGS.battery_lifetime_years,
+            discount_rate=SWEEP_MODEL_SETTINGS.discount_rate,
+            c_deg_per_kwh=(
+                SWEEP_MODEL_SETTINGS.battery_degradation_cost_usd_per_kwh
+            ),
+            weights=weights,
+            cycle_monthly=cycle_monthly,
             max_battery_kwh=max_battery_kwh,
+            max_pv_to_annual_load_ratio=(
+                SWEEP_MODEL_SETTINGS.max_pv_to_annual_load_ratio
+            ),
+            solver_backend=SWEEP_MODEL_SETTINGS.solver_backend,
         )
         rows.append({
             "battery_capex_kwh": cb, "pv_kw": r.pv_kw, "batt_kwh": r.batt_kwh,

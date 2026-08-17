@@ -128,9 +128,13 @@ class TariffCatalog:
             )
         return ExportCreditSchedule(parsed, scenario.billing_year, scenario.nbt_vintage, rows)
 
-    def acc_plus_rate(self, utility: str | Utility, scenario: NBTScenario) -> float:
+    def acc_plus_record(
+        self,
+        utility: str | Utility,
+        scenario: NBTScenario,
+    ) -> tuple[float, str | None]:
         if not scenario.include_acc_plus:
-            return 0.0
+            return 0.0, None
         parsed = Utility.parse(utility)
         if not self.acc_plus_data_path.exists():
             raise FileNotFoundError(f"ACC Plus source data not found: {self.acc_plus_data_path}")
@@ -152,7 +156,13 @@ class TariffCatalog:
         rate = float(rows["rate_usd_per_kwh"].item())
         if rate < 0:
             raise ValueError("ACC Plus rate cannot be negative")
-        return rate
+        source_id = str(rows["source_id"].item()).strip()
+        if not source_id:
+            raise ValueError("ACC Plus rate is missing source_id")
+        return rate, source_id
+
+    def acc_plus_rate(self, utility: str | Utility, scenario: NBTScenario) -> float:
+        return self.acc_plus_record(utility, scenario)[0]
 
     def bundle(
         self,
@@ -163,6 +173,7 @@ class TariffCatalog:
         non_bypassable_rate: float | None = None,
     ) -> TariffBundle:
         parsed = Utility.parse(utility)
+        acc_plus_rate, acc_plus_source_id = self.acc_plus_record(parsed, scenario)
         return TariffBundle(
             utility=parsed,
             scenario=scenario,
@@ -174,5 +185,6 @@ class TariffCatalog:
                 snapshot_data_path=self.import_snapshot_data_path,
             ),
             export_schedule=self.export_schedule(parsed, scenario),
-            acc_plus_rate=self.acc_plus_rate(parsed, scenario),
+            acc_plus_rate=acc_plus_rate,
+            acc_plus_source_id=acc_plus_source_id,
         )

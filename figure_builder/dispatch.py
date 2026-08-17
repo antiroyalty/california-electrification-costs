@@ -7,9 +7,9 @@ here once.
 """
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
-from typing import Dict, List
+from pathlib import Path
+from typing import List
 
 import numpy as np
 
@@ -66,17 +66,16 @@ def county_dispatch_inputs(
 ) -> DispatchInputs:
     """Assemble the 8760-hour arrays for one county, mirroring the setup Step 9b
     performs before solving the model."""
-    from helpers.main_helpers import get_scenario_path
     from tariffs import NBTScenario, TariffCatalog, resolve_county_service_assignment
     from tariffs.calendar import full_year_hourly_index
     from pipeline.steps.step9_solar_storage_dispatch_core import (
         prepare_weather_and_load, pv_timeseries_ac_kwh,
     )
 
-    cdir = os.path.join(get_scenario_path(base, scenario, HOUSING_TYPE), slug)
+    weather_path, load_path = county_dispatch_input_paths(slug, scenario, base)
     wdf, load = prepare_weather_and_load(
-        os.path.join(cdir, f"weather_TMY_{slug}.csv"),
-        os.path.join(cdir, f"combined_profiles_{scenario}_{slug}.csv"),
+        str(weather_path),
+        str(load_path),
         LOAD_COL,
     )
     pvgen = pv_timeseries_ac_kwh(wdf, 1.0)
@@ -86,3 +85,21 @@ def county_dispatch_inputs(
     p_imp = np.array(tariff.import_schedule.rates_for(ts))
     p_exp = np.array(tariff.export_schedule.rates_for(ts)) + tariff.acc_plus_rate
     return DispatchInputs(slug, assignment.utility.value, load, pvgen, p_imp, p_exp)
+
+
+def county_dispatch_input_paths(
+    slug: str,
+    scenario: str = DEFAULT_SCENARIO,
+    base: str | Path = BASE_INPUT_DIR,
+    housing_type: str = HOUSING_TYPE,
+) -> tuple[Path, Path]:
+    """Return the exact weather and load-profile files consumed by a sweep."""
+
+    from helpers.main_helpers import get_scenario_path
+
+    scenario_path = Path(get_scenario_path(str(base), scenario, housing_type))
+    county_dir = scenario_path / slug
+    return (
+        county_dir / f"weather_TMY_{slug}.csv",
+        county_dir / f"combined_profiles_{scenario}_{slug}.csv",
+    )

@@ -15,7 +15,6 @@ figure run is reproducible.
 from __future__ import annotations
 
 import argparse
-import json
 
 from appliances.incentive_policy import PolicyRegime
 from figure_builder import FIG_DIR, current_claims_doc, sweep_csv_path
@@ -88,25 +87,32 @@ def _cmd_all(args):
     artifacts += _cmd_counties(args)
     artifacts += _cmd_bridge(args)
     artifacts += _cmd_split(args)
-    _write_metadata(artifacts, fine=args.fine)
+    _write_metadata(
+        artifacts,
+        fine=args.fine,
+        force=args.force,
+        requested_counties=args.counties,
+    )
     return artifacts
 
 
-def _write_metadata(artifacts, *, fine: bool) -> None:
-    from figure_builder import git_short_sha
-    prices = live_prices()
-    meta = {
-        "regime": prices.regime,
-        "git_sha": git_short_sha(),
-        "pv_net_per_kw": prices.pv_net_per_kw,
-        "batt_net_per_kwh": prices.batt_net_per_kwh,
-        "sweep_resolution": "8760" if fine else "288_weighted_monthly_hour",
-        "combined_doc": str(current_claims_doc(seed=False)),
-        "artifacts": artifacts,
-    }
+def _write_metadata(
+    artifacts,
+    *,
+    fine: bool,
+    force: bool,
+    requested_counties,
+) -> None:
+    from figure_builder.metadata import build_run_metadata, write_run_metadata
+
+    metadata = build_run_metadata(
+        artifacts,
+        fine=fine,
+        force=force,
+        requested_counties=requested_counties,
+    )
     path = FIG_DIR / "run_metadata.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(meta, indent=2, sort_keys=True))
+    write_run_metadata(path, metadata)
     print(f"\nWrote {path}")
 
 

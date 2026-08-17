@@ -62,6 +62,20 @@ The mechanism/counties recipes patch the current commit's
 filename) in place between HTML-comment markers, so re-running is idempotent
 (no duplicated blocks).
 
+## Run metadata
+
+`python3 -m figure_builder all` writes `figures/run_metadata.json` after all
+artifacts exist. The manifest records the Git SHA and runtime, hashes the exact
+weather/load inputs and output artifacts, and identifies both policy regimes,
+capital-cost sources, sweep points, solver assumptions, and utility tariff
+source IDs. Values come from the same primitives used by the sweep rather than
+being copied into a parallel configuration.
+
+The sweep objective uses hourly import prices, NBT export prices, and ACC Plus.
+It does not apply annual net-surplus compensation; the manifest records that
+boundary explicitly instead of listing NSC source data as if it affected the
+sizing result.
+
 The headline Claim-1 figure is a **before/after** comparison
 (`plot_pv_batt_vs_capex_compare`): a 2025 panel (with the 30% federal ITC,
 battery `$1,022/kWh` net) beside a current-law panel (ITC expired,

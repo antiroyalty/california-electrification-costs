@@ -121,7 +121,10 @@ class TariffBundle:
     import_schedule: "ImportRateSchedule"
     export_schedule: "ExportCreditSchedule"
     acc_plus_rate: float
+    acc_plus_source_id: str | None
 
     def __post_init__(self) -> None:
         if self.acc_plus_rate < 0:
             raise ValueError("ACC Plus rate cannot be negative")
+        if self.scenario.include_acc_plus and not self.acc_plus_source_id:
+            raise ValueError("Included ACC Plus rate must declare a source_id")
