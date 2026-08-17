@@ -187,7 +187,10 @@ def plot_marginal_solar_value_ladder(
     p_imp = np.asarray(dispatch.p_imp)
     p_exp = np.asarray(dispatch.p_exp)
     v_export = float(p_exp.mean())
-    v_peak = float(np.mean(p_imp[p_imp >= np.quantile(p_imp, peak_quantile)]) * round_trip_eff)
+    peak_import_rate = float(
+        np.mean(p_imp[p_imp >= np.quantile(p_imp, peak_quantile)])
+    )
+    v_peak = peak_import_rate * round_trip_eff
 
     fig, ax = plt.subplots(figsize=(7.4, 4.5))
     cats = ["No battery:\nsurplus solar exported",
@@ -215,7 +218,12 @@ def plot_marginal_solar_value_ladder(
     ax.tick_params(labelsize=9.5)
     ax.set_title("Why: a battery flips the marginal kWh of solar from a loss to a profit",
                  fontsize=11.5, color=INK, pad=10, loc="left")
-    return fig, {"v_export": v_export, "v_peak": v_peak, "pv_lcoe": pv_lcoe}
+    return fig, {
+        "v_export": v_export,
+        "peak_import_rate": peak_import_rate,
+        "v_peak": v_peak,
+        "pv_lcoe": pv_lcoe,
+    }
 
 
 def plot_pv_ceiling(sweep: pd.DataFrame, dispatch, *, batt_price_net: float
