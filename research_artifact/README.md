@@ -34,3 +34,22 @@ or inputs change.
 
 For a publication release, run the exporter from the clean commit used for the
 paper and verify that `researchRepository.dirtyAtExport` is `false`.
+
+## Completed-run validation
+
+Run the fail-loud validator after the complete pipeline finishes:
+
+```bash
+python3 -m research_artifact.validation baseline_coopt --all-counties
+```
+
+The validator requires all 47 county outputs and shared capital-cost files. It
+checks hourly completeness, meter direction, energy balance, tariff identity,
+hourly prices, bill ranges, cost reconciliation, capacity bounds, and source
+hashes. It writes immutable JSON and text reports under
+`analysis_results/research_validation/`.
+
+The default command requires a clean repository. It also requires generated
+artifacts to be newer than the source commit. The explicit `--allow-dirty` and
+`--allow-stale-artifacts` options support diagnosis only. Do not use those
+options for a publication validation report.
