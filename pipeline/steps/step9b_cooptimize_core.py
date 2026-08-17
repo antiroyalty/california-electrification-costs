@@ -47,12 +47,12 @@ METER_BINARY_EAGER_THRESHOLD = 96
 # above the round count any real county needs (SDG&E, the worst case, converges
 # in a handful of rounds).
 MAX_METER_DIRECTION_ROUNDS = 64
-# HiGHS and CBC can return values a few billionths below a variable's zero
-# lower bound. Treating that solver residue as physical negative energy makes
-# downstream billing fail even though the mathematical solution is feasible.
-# This matches the meter-direction feasibility threshold below and is many
-# orders of magnitude below any reported household-energy result.
-SOLVER_OUTPUT_ABSOLUTE_TOLERANCE = 1e-7
+# HiGHS' default MIP feasibility tolerance is 1e-6. Treat solver values within
+# that documented boundary as numerical zero; applying a stricter post-solve
+# threshold can reject a solution that HiGHS correctly reports as feasible.
+# The same threshold governs meter-direction checks and output normalization so
+# billing artifacts contain exact physical zeros rather than solver residue.
+SOLVER_OUTPUT_ABSOLUTE_TOLERANCE = 1e-6
 
 try:
     import pulp

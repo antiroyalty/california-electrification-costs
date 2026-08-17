@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import subprocess
 from typing import List, Optional
 
 import numpy as np
@@ -28,8 +27,14 @@ import matplotlib.pyplot as plt
 from scenarios import SCENARIOS
 from helpers.main_helpers import slugify_county_name, get_scenario_path, git_short_sha
 
-from helpers.plot_scenario_comparison_helper import collect_eac_components
-from .step20_no_solar_storage_electrification import collect_eac_no_pv
+from helpers.plot_scenario_comparison_helper import (
+    collect_eac_components,
+    collect_eac_components_by_county,
+)
+from .step20_no_solar_storage_electrification import (
+    collect_eac_no_pv,
+    collect_eac_no_pv_by_county,
+)
 
 
 
@@ -68,6 +73,95 @@ def _prepare_combined_df(df_with: pd.DataFrame, df_no: pd.DataFrame) -> pd.DataF
 
     keep_cols = ['scenario', 'variant', 'capex_pv', 'capex_storage', 'capex_electric', 'capex_gas', 'vehicle_om', 'annual_bill_electric', 'annual_bill_gas']
     return pd.concat([a[keep_cols], b[keep_cols]], ignore_index=True)
+
+
+def _build_county_comparison(
+    with_by_county: pd.DataFrame,
+    no_by_county: pd.DataFrame,
+) -> pd.DataFrame:
+    """Reconcile per-county EAC inputs and calculate with-minus-without deltas."""
+    keys = ["scenario", "county_slug"]
+    if with_by_county.empty or no_by_county.empty:
+        raise ValueError("Step 21 requires non-empty with-PV and no-PV county data")
+    for label, frame in (
+        ("with-PV", with_by_county),
+        ("no-PV", no_by_county),
+    ):
+        missing = [column for column in keys if column not in frame.columns]
+        if missing:
+            raise KeyError(f"{label} county data missing key columns: {missing}")
+        duplicates = frame.duplicated(keys, keep=False)
+        if duplicates.any():
+            duplicate_keys = frame.loc[duplicates, keys].to_dict("records")
+            raise ValueError(
+                f"{label} county data has duplicate scenario/county rows: "
+                f"{duplicate_keys}"
+            )
+
+    with_components = [
+        "capex_pv",
+        "capex_storage",
+        "capex_electric",
+        "capex_gas",
+        "vehicle_om",
+        "annual_bill_electric",
+        "annual_bill_gas",
+    ]
+    no_components = [
+        "capex_electric",
+        "capex_gas",
+        "vehicle_om",
+        "annual_bill_electric",
+        "annual_bill_gas",
+    ]
+    for label, frame, columns in (
+        ("with-PV", with_by_county, with_components),
+        ("no-PV", no_by_county, no_components),
+    ):
+        missing = [column for column in columns if column not in frame.columns]
+        if missing:
+            raise KeyError(f"{label} county data missing EAC columns: {missing}")
+        if frame[columns].isna().any().any():
+            raise ValueError(f"{label} county data contains missing EAC values")
+
+    with_totals = with_by_county.copy()
+    with_totals["total_eac"] = with_totals[with_components].sum(axis=1)
+    no_totals = no_by_county.copy()
+    no_totals["total_eac_no_pv"] = no_totals[no_components].sum(axis=1)
+
+    reconciled = with_totals.merge(
+        no_totals[keys + ["total_eac_no_pv"]],
+        on=keys,
+        how="outer",
+        validate="one_to_one",
+        indicator=True,
+    )
+    unmatched = reconciled[reconciled["_merge"] != "both"]
+    if not unmatched.empty:
+        missing_keys = unmatched[keys + ["_merge"]].to_dict("records")
+        raise ValueError(
+            "With-PV and no-PV county results do not cover the same rows: "
+            f"{missing_keys}"
+        )
+    reconciled = reconciled.drop(columns="_merge")
+
+    if (reconciled["total_eac_no_pv"] == 0).any():
+        zero_keys = reconciled.loc[
+            reconciled["total_eac_no_pv"] == 0, keys
+        ].to_dict("records")
+        raise ValueError(f"Cannot calculate percent delta for zero no-PV EAC: {zero_keys}")
+
+    reconciled["delta_with_minus_without"] = (
+        reconciled["total_eac"] - reconciled["total_eac_no_pv"]
+    )
+    reconciled["delta_pct"] = (
+        reconciled["delta_with_minus_without"]
+        / reconciled["total_eac_no_pv"]
+        * 100.0
+    )
+    if not np.isfinite(reconciled["delta_pct"]).all():
+        raise ValueError("Step 21 county percent deltas contain non-finite values")
+    return reconciled
 
 
 def plot_grouped_eac(df: pd.DataFrame, scenario_order: Optional[List[str]] = None, county_label: str = "All Counties") -> plt.Figure:
@@ -157,6 +251,17 @@ def main() -> None:
     p.add_argument("--agg", choices=["mean","median"], default="mean")
     p.add_argument("--incentive", default="full_incentives", choices=["full_incentives","half_incentives","no_incentives"])
     p.add_argument("--discount-rate", type=float, default=0.07)
+    p.add_argument(
+        "--electricity-plans",
+        nargs="+",
+        required=True,
+        help="Ordered retail electricity-plan tokens, one per utility as needed",
+    )
+    p.add_argument(
+        "--electricity-variant",
+        choices=["nem3", "retail"],
+        default="nem3",
+    )
     args = p.parse_args()
 
     base = args.base_input_dir
@@ -167,8 +272,27 @@ def main() -> None:
     os.makedirs(out_dir, exist_ok=True)
 
     # Collect
-    df_with = collect_eac_components(base, housing, scenarios, counties, incentive=args.incentive)
-    df_no = collect_eac_no_pv(base, housing, scenarios, counties, incentive=args.incentive, discount_rate=args.discount_rate, agg=args.agg)
+    df_with = collect_eac_components(
+        base,
+        housing,
+        scenarios,
+        counties,
+        incentive=args.incentive,
+        discount_rate=args.discount_rate,
+        agg=args.agg,
+        electricity_plan_preference=args.electricity_plans,
+        electricity_variant=args.electricity_variant,
+    )
+    df_no = collect_eac_no_pv(
+        base,
+        housing,
+        scenarios,
+        counties,
+        incentive=args.incentive,
+        discount_rate=args.discount_rate,
+        agg=args.agg,
+        electricity_plan_preference=args.electricity_plans,
+    )
     merged = _prepare_combined_df(df_with, df_no)
 
     # Save merged CSV
@@ -215,6 +339,7 @@ def process(
         [scenario],
         counties,
         incentive=incentive,
+        discount_rate=discount_rate,
         agg=agg,
         electricity_plan_preference=plan_preference,
         electricity_variant=electricity_variant,
@@ -227,49 +352,41 @@ def process(
         incentive=incentive,
         discount_rate=discount_rate,
         agg=agg,
+        electricity_plan_preference=plan_preference,
     )
     merged = _prepare_combined_df(df_with, df_no)
     merged.to_csv(os.path.join(output_dir, f"step21_eac_with_vs_without_g{sha}.csv"), index=False)
     fig = plot_grouped_eac(merged, scenario_order=[scenario], county_label="All Counties")
     fig.savefig(os.path.join(output_dir, f"step21_eac_with_vs_without_g{sha}.png"), dpi=150, bbox_inches='tight')
 
-    # Per-county delta export
-    try:
-        from helpers.plot_scenario_comparison_helper import collect_eac_components_by_county
-        from .step20_no_solar_storage_electrification import collect_eac_no_pv_by_county
-        with_by_cty = collect_eac_components_by_county(
-            base_input_dir,
-            housing_type,
-            [scenario],
-            counties,
-            incentive=incentive,
-            electricity_plan_preference=plan_preference,
-            electricity_variant=electricity_variant,
-        )
-        no_by_cty = collect_eac_no_pv_by_county(
-            base_input_dir,
-            housing_type,
-            [scenario],
-            counties,
-            incentive=incentive,
-            discount_rate=discount_rate,
-        )
-        if not with_by_cty.empty and not no_by_cty.empty:
-            with_by_cty = with_by_cty.copy()
-            with_by_cty['total_eac'] = (
-                with_by_cty[['capex_pv','capex_storage','capex_electric','capex_gas','vehicle_om']].sum(axis=1)
-                + with_by_cty['annual_bill_electric'].fillna(0) + with_by_cty['annual_bill_gas'].fillna(0)
-            )
-            no_by_cty = no_by_cty.copy()
-            no_by_cty['total_eac_no_pv'] = (
-                no_by_cty[['capex_electric','capex_gas','vehicle_om']].sum(axis=1)
-                + no_by_cty['annual_bill_electric'].fillna(0) + no_by_cty['annual_bill_gas'].fillna(0)
-            )
-            merged_cty = with_by_cty.merge(no_by_cty[['scenario','county_slug','total_eac_no_pv']], on=['scenario','county_slug'], how='inner')
-            merged_cty['delta_with_minus_without'] = merged_cty['total_eac'] - merged_cty['total_eac_no_pv']
-            merged_cty['delta_pct'] = (merged_cty['delta_with_minus_without'] / merged_cty['total_eac_no_pv']).replace([pd.NA, float('inf'), float('-inf')], 0.0) * 100.0
-            merged_cty.to_csv(os.path.join(output_dir, f"step21_with_vs_without_by_county_g{sha}.csv"), index=False)
-    except Exception:
-        pass
+    # Per-county delta export is a required research output. Any missing,
+    # duplicate, or non-reconciling rows now stop the reporting run.
+    with_by_cty = collect_eac_components_by_county(
+        base_input_dir,
+        housing_type,
+        [scenario],
+        counties,
+        incentive=incentive,
+        discount_rate=discount_rate,
+        electricity_plan_preference=plan_preference,
+        electricity_variant=electricity_variant,
+    )
+    no_by_cty = collect_eac_no_pv_by_county(
+        base_input_dir,
+        housing_type,
+        [scenario],
+        counties,
+        incentive=incentive,
+        discount_rate=discount_rate,
+        electricity_plan_preference=plan_preference,
+    )
+    merged_cty = _build_county_comparison(with_by_cty, no_by_cty)
+    merged_cty.to_csv(
+        os.path.join(
+            output_dir,
+            f"step21_with_vs_without_by_county_g{sha}.csv",
+        ),
+        index=False,
+    )
 
     return merged

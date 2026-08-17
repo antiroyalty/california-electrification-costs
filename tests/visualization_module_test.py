@@ -7,6 +7,7 @@ if REPO_ROOT not in sys.path:
 
 from pipeline.modules.visualization import (  # noqa: E402
     _cross_scenario_list,
+    _plan_pref_from,
     _vehicle_compare_pair,
 )
 from pipeline.steps.step18_cross_scenario_comparisons import _default_scenarios  # noqa: E402
@@ -40,3 +41,18 @@ def test_vehicle_compare_pair_tracks_scenario_family() -> None:
 def test_step18_default_scenarios_are_non_coopt() -> None:
     expected = [s for s in SCENARIOS.keys() if not s.endswith("_coopt")]
     assert _default_scenarios() == expected
+
+
+def test_plan_preferences_preserve_configured_utility_order() -> None:
+    rate_plans = {
+        "PG&E": {"electricity": "E-TOU-D", "gas": "G-1"},
+        "SCE": {"electricity": "TOU-D-4-9PM", "gas": "GR"},
+        "duplicate": {"electricity": "E-TOU-D", "gas": "G-1"},
+        "SDG&E": {"electricity": "TOU-DR1", "gas": "GR"},
+    }
+
+    assert _plan_pref_from(rate_plans) == [
+        "E-TOU-D",
+        "TOU-D-4-9PM",
+        "TOU-DR1",
+    ]

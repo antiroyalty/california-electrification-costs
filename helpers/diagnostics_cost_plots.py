@@ -17,9 +17,14 @@ from helpers.diagnostics_data import (
 
 
 def _fig_to_b64(fig) -> str:
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
-    return base64.b64encode(buf.getvalue()).decode("utf-8")
+    import matplotlib.pyplot as plt
+
+    try:
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+        return base64.b64encode(buf.getvalue()).decode("utf-8")
+    finally:
+        plt.close(fig)
 
 
 def _pv_storage_net_breakdown(

@@ -136,3 +136,49 @@ def test_example_calculations() -> None:
     pv_energy = lcoe.present_value_energy(1000.0, 2, 0.1, degradation_rate=0.1)
     expected_pv = (1000.0 / 1.1) + (900.0 / (1.1**2))
     assert pv_energy == pytest.approx(expected_pv)
+
+
+def test_tariff_selector_allows_a_unique_variant_without_plan_match() -> None:
+    row = pd.Series(
+        {
+            "electricity.PG&E.E-TOU-D": 300.0,
+            "electricity.PG&E.E-ELEC_NEM3": 250.0,
+        }
+    )
+
+    assert tariffs.select_row_value_for_plan(
+        row,
+        plan_preference=["E-TOU-D"],
+        variant="nem3",
+    ) == pytest.approx(250.0)
+
+
+def test_tariff_selector_rejects_ambiguous_or_missing_retail_plan() -> None:
+    row = pd.Series(
+        {
+            "electricity.PG&E.E-TOU-C": 400.0,
+            "electricity.PG&E.E-TOU-D": 300.0,
+            "electricity.PG&E.E-ELEC_NEM3": 250.0,
+        }
+    )
+
+    with pytest.raises(ValueError, match="ambiguous"):
+        tariffs.select_row_value_for_plan(row, variant="retail")
+    with pytest.raises(ValueError, match="ambiguous"):
+        tariffs.select_row_value_for_plan(
+            row,
+            plan_preference=["NOT-A-PLAN"],
+            variant="retail",
+        )
+
+
+def test_tariff_selector_rejects_unknown_variant_and_non_electric_rows() -> None:
+    row = pd.Series({"gas.PG&E.G-1": 100.0})
+
+    with pytest.raises(ValueError, match=r"no electricity\.\*"):
+        tariffs.select_row_value_for_plan(row, variant="retail")
+    with pytest.raises(ValueError, match="Unknown electricity tariff variant"):
+        tariffs.select_row_value_for_plan(
+            pd.Series({"electricity.PG&E.E-TOU-D": 300.0}),
+            variant="future",
+        )

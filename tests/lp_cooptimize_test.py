@@ -68,6 +68,22 @@ def test_solver_scale_values_are_normalized_to_physical_zero(value):
     assert _normalize_nonnegative_solver_value(value, label="flow[7]") == 0.0
 
 
+def test_highs_feasible_meter_residue_is_normalized_to_zero():
+    """Pin the San Diego full-year residue that exposed a tolerance mismatch."""
+
+    observed_export_kwh = 5.400264010162599e-7
+
+    assert SOLVER_OUTPUT_ABSOLUTE_TOLERANCE == 1e-6
+    assert observed_export_kwh < SOLVER_OUTPUT_ABSOLUTE_TOLERANCE
+    assert (
+        _normalize_nonnegative_solver_value(
+            observed_export_kwh,
+            label="pv_to_grid[5129]",
+        )
+        == 0.0
+    )
+
+
 def test_materially_negative_solver_output_fails_instead_of_being_clamped():
     value = -(SOLVER_OUTPUT_ABSOLUTE_TOLERANCE + 1e-12)
 
