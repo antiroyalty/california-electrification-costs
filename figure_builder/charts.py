@@ -45,6 +45,33 @@ def apply_style(serif_first: str = "Georgia") -> None:
 Meta = Dict[str, float]
 
 
+def solar_generation_weighted_export_rate(dispatch) -> float:
+    """Average hourly export credit weighted by modeled PV production.
+
+    An unweighted 8,760-hour mean gives nighttime prices weight even though
+    rooftop solar cannot export at night. This metric describes the export
+    value faced by an incremental PV production profile before accounting for
+    household load, storage dispatch, or export-credit saturation.
+    """
+    pv_generation = np.asarray(dispatch.pv_gen_per_kw, dtype=float)
+    export_rates = np.asarray(dispatch.p_exp, dtype=float)
+    if pv_generation.ndim != 1 or export_rates.ndim != 1:
+        raise ValueError("PV generation and export rates must be one-dimensional")
+    if len(pv_generation) == 0 or len(pv_generation) != len(export_rates):
+        raise ValueError(
+            "PV generation and export rates must have identical non-zero lengths"
+        )
+    if not np.isfinite(pv_generation).all() or not np.isfinite(export_rates).all():
+        raise ValueError("PV generation and export rates must contain only finite values")
+    if (pv_generation < 0).any():
+        raise ValueError("PV generation cannot be negative")
+    if (export_rates < 0).any():
+        raise ValueError("Export rates cannot be negative")
+    if float(pv_generation.sum()) <= 0.0:
+        raise ValueError("PV generation must have a positive annual total")
+    return float(np.average(export_rates, weights=pv_generation))
+
+
 def plot_pv_batt_vs_capex(
     sweep: pd.DataFrame,
     *,
@@ -185,16 +212,17 @@ def plot_marginal_solar_value_ladder(
 
     pv_lcoe = prices.pv_lcoe(dispatch.yield_per_kw, discount_rate, 25)
     p_imp = np.asarray(dispatch.p_imp)
-    p_exp = np.asarray(dispatch.p_exp)
-    v_export = float(p_exp.mean())
+    v_export = solar_generation_weighted_export_rate(dispatch)
     peak_import_rate = float(
         np.mean(p_imp[p_imp >= np.quantile(p_imp, peak_quantile)])
     )
     v_peak = peak_import_rate * round_trip_eff
+    peak_share_pct = (1.0 - peak_quantile) * 100.0
+    round_trip_loss_pct = (1.0 - round_trip_eff) * 100.0
 
     fig, ax = plt.subplots(figsize=(7.4, 4.5))
-    cats = ["No battery:\nsurplus solar exported",
-            "With battery:\nsurplus solar " + r"$\rightarrow$ evening peak"]
+    cats = ["Solar-coincident export:\nPV-generation-weighted credit",
+            "Illustrative storage case:\nshift to top-price hours"]
     vals = [v_export, v_peak]
     xb = [0, 1]
     ax.bar(xb, vals, width=0.5, color=[NEG, POS], zorder=3, edgecolor="white", lw=1)
@@ -204,25 +232,28 @@ def plot_marginal_solar_value_ladder(
     for xi, v in zip(xb, vals):
         ax.text(xi, v + 0.008, f"${v:.3f}", ha="center", va="bottom", fontsize=13,
                 color=INK, **MONO)
-    ax.text(0, v_export + 0.045, "below the line\n" + r"$\rightarrow$ NOT worth building",
+    ax.text(0, v_export + 0.045, "below solar break-even",
             ha="center", va="bottom", color=NEG, fontsize=9, fontweight="bold", linespacing=1.25)
-    ax.text(1, v_peak + 0.028, "above the line\n" + r"$\rightarrow$ build 2-3$\times$ more solar",
-            ha="center", va="bottom", color=POS, fontsize=9, fontweight="bold", linespacing=1.25)
+    ax.text(1, v_peak + 0.085,
+            f"illustrative peak-shift value\nafter {round_trip_loss_pct:.0f}% battery loss",
+            ha="center", va="top", color=POS, fontsize=9, fontweight="bold", linespacing=1.25)
     ax.set_xticks(xb)
     ax.set_xticklabels(cats, fontsize=9.8, color=INK_SOFT, linespacing=1.3)
-    ax.set_ylabel("Value of the last kWh of rooftop solar  ($/kWh)", fontsize=10.3)
-    ax.set_ylim(0, max(0.44, v_peak * 1.15))
+    ax.set_ylabel("Illustrative value of surplus rooftop solar  ($/kWh)", fontsize=10.3)
+    ax.set_ylim(0, max(0.54, v_peak * 1.25))
     ax.set_xlim(-0.55, 1.55)
     for s in ["top", "right"]:
         ax.spines[s].set_visible(False)
     ax.tick_params(labelsize=9.5)
-    ax.set_title("Why: a battery flips the marginal kWh of solar from a loss to a profit",
+    ax.set_title("Why storage can raise the value of solar that would otherwise be exported",
                  fontsize=11.5, color=INK, pad=10, loc="left")
     return fig, {
         "v_export": v_export,
         "peak_import_rate": peak_import_rate,
         "v_peak": v_peak,
         "pv_lcoe": pv_lcoe,
+        "peak_share_pct": peak_share_pct,
+        "round_trip_eff": round_trip_eff,
     }
 
 

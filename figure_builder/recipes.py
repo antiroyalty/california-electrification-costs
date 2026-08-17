@@ -13,6 +13,7 @@ from figure_builder import docio
 from figure_builder.charts import (
     plot_battery_value_waterfall, plot_marginal_solar_value_ladder,
     plot_pv_batt_vs_capex, plot_pv_batt_vs_capex_compare, plot_pv_ceiling,
+    solar_generation_weighted_export_rate,
 )
 from figure_builder.datasets import collect_battery_capex_sweep
 from figure_builder.dispatch import CLAIM1_COUNTIES, county_dispatch_inputs
@@ -79,16 +80,16 @@ def _mechanism_fragment(
     <div class="obj-eq"><span class="ot-cap">PV&middot;c<sub>pv</sub>&middot;&alpha;<sub>pv</sub></span> <span class="op">+</span> <span class="ot-cap">B&middot;c<sub>batt</sub>&middot;&alpha;<sub>batt</sub></span> <span class="op">+</span> <span class="ot-imp">&sum;<sub>h</sub> w<sub>h</sub>&middot;(grid&rarr;load)<sub>h</sub>&middot;p<sub>imp,h</sub></span> <span class="op">&minus;</span> <span class="ot-exp">&sum;<sub>h</sub> w<sub>h</sub>&middot;(pv&rarr;grid)<sub>h</sub>&middot;p<sub>exp,h</sub></span> <span class="op">+</span> <span class="ot-plain">deg</span></div>
     <ul class="obj-gloss">
       <li><span class="chip chip-cap">capex</span> annualized cost of the solar and battery you build.</li>
-      <li><span class="chip chip-imp">p<sub>imp</sub></span> solar is paid the <strong>full retail price</strong> (averaging ~${mB['peak_import_rate']:.3f}/kWh across the modeled peak-price hours) on every kWh it lets you <em>not</em> import.</li>
-      <li><span class="chip chip-exp">p<sub>exp</sub></span> but only the lower <strong>ACC export credit</strong> (~${mB['v_export']:.3f}/kWh annual average) on what it sends to the grid.</li>
+      <li><span class="chip chip-imp">p<sub>imp</sub></span> solar is paid the <strong>full retail price</strong> (averaging ~${mB['peak_import_rate']:.3f}/kWh across the top {mB['peak_share_pct']:.0f}% of modeled import-price hours) on every kWh it lets you <em>not</em> import.</li>
+      <li><span class="chip chip-exp">p<sub>exp</sub></span> but only the lower <strong>ACC export credit</strong> (~${mB['v_export']:.3f}/kWh when hourly prices are weighted by modeled PV generation) on what it sends to the grid.</li>
     </ul>
-    <p class="obj-punch">A battery earns only the <strong>difference</strong> between those two prices, net of ~10% round-trip loss and a mid-life replacement. So the battery only enters when it is cheap. The moment it does, it lets surplus midday solar reach the evening peak, lifting the value of the marginal kWh of solar from p<sub>exp</sub> to p<sub>imp</sub>. Cheaper storage <strong>raises</strong> the optimal amount of solar. It never replaces it.</p>
+    <p class="obj-punch">A battery earns only the <strong>difference</strong> between those two prices, net of ~{(1.0 - mB['round_trip_eff']) * 100:.0f}% round-trip loss and a mid-life replacement. So the battery only enters when it is cheap. When it does, it can let surplus midday solar reach higher-valued hours instead of being exported immediately. Cheaper storage <strong>raises</strong> the optimal amount of solar in the modeled sweeps. It never replaces it.</p>
   </div>
 
   <figure class="fig"><img src="data:image/png;base64,{b64A}" alt="Optimal solar and battery vs battery cost, 2025 with ITC versus current law, Alameda" /><figcaption><strong>2025 vs. now: removing the federal ITC.</strong> Left, 2025, with the 30% ITC (battery {b_2025}): the solar-only optimum sat at {mA['before']['pv_flat']:.2f}&nbsp;kW, rising toward {mA['before']['pv_max']:.2f}&nbsp;kW as cheaper storage enters. Right, current law, the ITC expired (battery {b_now}): pricier storage pushes the battery firmly to zero at market prices and the solar-only optimum settles at {mA['after']['pv_flat']:.2f}&nbsp;kW. Removing the credit makes storage pencil out <em>less</em>, so Claim&nbsp;1 strengthens. Both panels share axes. Only battery capex is swept; <strong>solar&rsquo;s price is fixed at its net installed cost within each panel: {s_2025} in 2025 (gross $3,300/kW less the 30% ITC), {s_now} under current law (ITC repealed, net = gross)</strong>. Step&nbsp;9b {resolution_label}, Alameda / PG&amp;E, full-electrification load.</figcaption></figure>
 
   <div class="fig-grid">
-    <figure class="fig"><img src="data:image/png;base64,{b64B}" alt="A battery raises the value of the marginal kWh of solar" /><figcaption><strong>The mechanism.</strong> The last kWh of solar is worth only <strong>${mB['v_export']:.3f}</strong> if exported at the ACC rate, below solar&rsquo;s own ${mB['pv_lcoe']:.3f}/kWh break-even, so the model stops building. A battery shifts that same kWh into the evening peak, where its effective avoided-import value is <strong>${mB['v_peak']:.3f}/kWh</strong> after round-trip loss. That is well above break-even, so the model builds more. Alameda / PG&amp;E, current law.</figcaption></figure>
+    <figure class="fig"><img src="data:image/png;base64,{b64B}" alt="Illustrative values for solar-coincident export and storage-mediated peak shifting" /><figcaption><strong>The value spread behind the mechanism.</strong> Weighting the hourly ACC schedule by Alameda&rsquo;s modeled PV generation gives a solar-coincident export value of <strong>${mB['v_export']:.3f}/kWh</strong>, below solar&rsquo;s ${mB['pv_lcoe']:.3f}/kWh break-even. For comparison, an illustrative surplus kWh shifted to the top {mB['peak_share_pct']:.0f}% of import-price hours would have an effective avoided-import value of <strong>${mB['v_peak']:.3f}/kWh</strong> after {(1.0 - mB['round_trip_eff']) * 100:.0f}% round-trip loss. This comparison explains the value spread; the optimization itself dispatches against every hourly rate, load, state-of-charge constraint, and battery limit rather than assigning every stored kWh the illustrated peak value. Alameda / PG&amp;E, current law.</figcaption></figure>
     <figure class="fig"><img src="data:image/png;base64,{b64C}" alt="Even a near-free household battery caps optimal solar near annual load coverage" /><figcaption><strong>The ceiling.</strong> Drive battery cost toward zero within the model&rsquo;s explicit 40&nbsp;kWh representative-household sizing domain: optimal solar rises, then flattens near total annual consumption ({mC['pv_100']:.1f}&ndash;{mC['pv_100_rte']:.1f}&nbsp;kW). At $1/kWh the solution reaches a {mC['batt_min']:,.0f}&nbsp;kWh battery, while solar is {mC['pv_min']:.1f}&nbsp;kW ({mC['cover_min'] * 100:.0f}% of load), because additional generation primarily earns the much lower export rate. Near-free household storage raises the solar ceiling; it does not remove it.</figcaption></figure>
   </div>
 
@@ -301,10 +302,10 @@ def _plot_installer_rule(free, fixed, prices, pv_offset, title):
     return fig, {"thr_free": thr_free, "thr_fix": thr_fix}
 
 
-def _installer_rule_fragment(prices, pv_offset, export_rate, m, b64) -> str:
+def _installer_rule_fragment(prices, pv_offset, solar_weighted_export_rate, m, b64) -> str:
     return f'''  <!-- INSTALLER-RULE body -->
   <div class="callout" style="border-left-color:var(--accent-ink);">
-    <strong>Robustness: what if installers oversize solar?</strong> In practice a system is often sized to offset 100% of annual consumption, not to the economic optimum. That larger array (here {pv_offset:.1f}&nbsp;kW, versus the ~2&nbsp;kW optimum) spills far more midday surplus, which under NEM&nbsp;3.0 earns an annual-average export credit of ~${export_rate:.3f}/kWh, so a battery has more to store. Does storage then pencil?
+    <strong>Robustness: what if installers oversize solar?</strong> In practice a system is often sized to offset 100% of annual consumption, not to the economic optimum. That larger array (here {pv_offset:.1f}&nbsp;kW, versus the ~2&nbsp;kW optimum) spills far more midday surplus; the modeled PV-generation-weighted export credit is ~${solar_weighted_export_rate:.3f}/kWh, so a battery has more to store. Does storage then pencil?
   </div>
 
   <figure class="fig"><img src="data:image/png;base64,{b64}" alt="Optimal battery vs battery cost, PV economically optimized versus PV fixed at annual offset, Alameda" /><figcaption><strong>Oversizing raises the battery threshold, but not to today&rsquo;s price.</strong> With PV fixed to the installer rule, a battery pencils out at a higher price (~${m['thr_fix']:,.0f}/kWh) than under the economic optimum (~${m['thr_free']:,.0f}/kWh), exactly as intuition suggests. But today&rsquo;s net battery price (${prices.batt_net_per_kwh:,.0f}/kWh) is still well above both thresholds, so the optimal battery is zero under either sizing rule. Alameda / PG&amp;E, current law, PV fixed at its ${prices.pv_net_per_kw:,.0f}/kW net cost. Weighted 12&times;24 monthly-hour sensitivity using the modeled 2026 hourly EEC and ACC&nbsp;Plus schedule.</figcaption></figure>
@@ -329,7 +330,7 @@ def build_installer_rule_figure(doc=None, county="alameda", label="Alameda (PG&E
     frag = _installer_rule_fragment(
         prices,
         pv_offset,
-        float(di.p_exp.mean()),
+        solar_generation_weighted_export_rate(di),
         m,
         docio.embed_png(fig),
     )
