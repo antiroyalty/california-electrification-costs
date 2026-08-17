@@ -177,6 +177,30 @@ def _artifact(
     )
 
 
+def _record_artifacts_by_provenance(
+    *,
+    repo_root: Path,
+    reusable_inputs: Iterable[Path],
+    generated_outputs: Iterable[Path],
+    minimum_generated_time: datetime | None,
+) -> tuple[ArtifactRecord, ...]:
+    """Record inputs and require generated outputs from the current run."""
+
+    records = [
+        _artifact(path, repo_root=repo_root, minimum_time=None)
+        for path in reusable_inputs
+    ]
+    records.extend(
+        _artifact(
+            path,
+            repo_root=repo_root,
+            minimum_time=minimum_generated_time,
+        )
+        for path in generated_outputs
+    )
+    return tuple(records)
+
+
 def _source_manifest_artifacts(
     manifest_path: Path,
     *,
@@ -448,19 +472,26 @@ def _validate_county(
     county_dir = (
         spec.base_input_dir / spec.scenario / spec.housing_type / county_slug
     )
-    paths = {
+    reusable_input_paths = {
         "weather": county_dir / f"weather_TMY_{county_slug}.csv",
         "combined": county_dir / f"combined_profiles_{spec.scenario}_{county_slug}.csv",
+    }
+    generated_output_paths = {
         "dispatch": county_dir / f"solar_storage_dispatch_profiles_{county_slug}.csv",
         "exports": county_dir
         / f"solar_storage_dispatch_profiles_with_exports_{county_slug}.csv",
         "rates": county_dir / f"loadprofiles_for_rates_{county_slug}.csv",
         "prices": county_dir / f"coopt_price_series_{county_slug}.csv",
     }
-    artifacts = [
-        _artifact(path, repo_root=spec.repo_root, minimum_time=minimum_time)
-        for path in paths.values()
-    ]
+    paths = {**reusable_input_paths, **generated_output_paths}
+    artifacts = list(
+        _record_artifacts_by_provenance(
+            repo_root=spec.repo_root,
+            reusable_inputs=reusable_input_paths.values(),
+            generated_outputs=generated_output_paths.values(),
+            minimum_generated_time=minimum_time,
+        )
+    )
 
     electricity_path, electricity_time = _latest_result(
         county_dir,

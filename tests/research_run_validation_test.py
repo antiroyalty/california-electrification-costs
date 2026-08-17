@@ -13,6 +13,7 @@ from research_artifact.validation import (
     ResearchValidationReport,
     ValidationCheck,
     _artifact,
+    _record_artifacts_by_provenance,
     _reconcile_bills,
     _source_manifest_artifacts,
     _validate_bill_frame,
@@ -76,6 +77,35 @@ def test_generated_artifact_must_postdate_source_commit(tmp_path):
             artifact,
             repo_root=tmp_path,
             minimum_time=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        )
+
+
+def test_reusable_inputs_can_predate_commit_but_generated_outputs_cannot(tmp_path):
+    reusable_input = tmp_path / "weather.csv"
+    generated_output = tmp_path / "dispatch.csv"
+    reusable_input.write_text("input\n")
+    generated_output.write_text("output\n")
+    old_timestamp = datetime(2025, 1, 1, tzinfo=timezone.utc).timestamp()
+    new_timestamp = datetime(2027, 1, 1, tzinfo=timezone.utc).timestamp()
+    os.utime(reusable_input, (old_timestamp, old_timestamp))
+    os.utime(generated_output, (new_timestamp, new_timestamp))
+    source_commit_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    records = _record_artifacts_by_provenance(
+        repo_root=tmp_path,
+        reusable_inputs=(reusable_input,),
+        generated_outputs=(generated_output,),
+        minimum_generated_time=source_commit_time,
+    )
+
+    assert [record.path for record in records] == ["weather.csv", "dispatch.csv"]
+    os.utime(generated_output, (old_timestamp, old_timestamp))
+    with pytest.raises(ValueError, match="predates the source commit"):
+        _record_artifacts_by_provenance(
+            repo_root=tmp_path,
+            reusable_inputs=(reusable_input,),
+            generated_outputs=(generated_output,),
+            minimum_generated_time=source_commit_time,
         )
 
 

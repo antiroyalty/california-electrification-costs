@@ -49,7 +49,9 @@ hourly prices, bill ranges, cost reconciliation, capacity bounds, and source
 hashes. It writes immutable JSON and text reports under
 `analysis_results/research_validation/`.
 
-The default command requires a clean repository. It also requires generated
-artifacts to be newer than the source commit. The explicit `--allow-dirty` and
+The default command requires a clean repository. It requires generated result
+artifacts to be newer than the source commit. Reusable weather and combined
+load-profile inputs may predate the commit, but the report records their exact
+SHA-256 fingerprints. The explicit `--allow-dirty` and
 `--allow-stale-artifacts` options support diagnosis only. Do not use those
 options for a publication validation report.
