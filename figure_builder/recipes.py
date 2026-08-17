@@ -17,6 +17,7 @@ from figure_builder.charts import (
 )
 from figure_builder.datasets import collect_battery_capex_sweep
 from figure_builder.dispatch import CLAIM1_COUNTIES, county_dispatch_inputs
+from figure_builder.metadata import tariff_metadata
 from figure_builder.pricing import live_prices
 
 MECH_ANCHOR = "Battery capex ($25-$1,200/kWh) is the swept variable itself.</div>"
@@ -201,6 +202,12 @@ def build_bridge(out=None) -> Path:
 # Kept as one self-contained recipe rather than a full collector/chart/grid build,
 # since it is a single robustness figure. It caches its own sweep so it is
 # reproducible and not a lost one-off.
+def installer_rule_sweep_path(county: str, regime: str) -> Path:
+    from figure_builder import SWEEP_DIR
+
+    return SWEEP_DIR / f"sweep_288_{county}_fixedpv_{regime}.csv"
+
+
 def _entry_threshold(cap, batt) -> float:
     """Highest battery cost at which the optimal battery is still non-trivial."""
     import numpy as np
@@ -212,9 +219,10 @@ def _installer_rule_fixed_pv_sweep(county, pv_offset, prices):
     """Optimal battery vs battery cost with PV FIXED at the annual-offset size.
     Cached as a weighted 12x24 sensitivity sweep."""
     import pandas as pd
-    from figure_builder import SWEEP_DIR
-    from figure_builder.dispatch import SWEEP_POINTS
-    from figure_builder.datasets import sweep_cache_is_compatible
+    from figure_builder.datasets import (
+        canonical_battery_capex_points,
+        sweep_cache_is_compatible,
+    )
     from pipeline.steps.step9b_cooptimize_core import (
         CooptInputs,
         _solve_lp,
@@ -222,7 +230,8 @@ def _installer_rule_fixed_pv_sweep(county, pv_offset, prices):
     )
 
     max_battery_kwh = 40.0
-    path = SWEEP_DIR / f"sweep_288_{county}_fixedpv_{prices.regime}.csv"
+    requested_points = canonical_battery_capex_points(prices.regime)
+    path = installer_rule_sweep_path(county, prices.regime)
     if path.exists():
         cached = pd.read_csv(path)
         required_columns = [
@@ -235,7 +244,7 @@ def _installer_rule_fixed_pv_sweep(county, pv_offset, prices):
         if sweep_cache_is_compatible(
             cached,
             max_battery_kwh,
-            expected_points=SWEEP_POINTS,
+            expected_points=requested_points,
             expected_columns=required_columns,
         ):
             return cached
@@ -244,7 +253,7 @@ def _installer_rule_fixed_pv_sweep(county, pv_offset, prices):
                       import_rates=di.p_imp, export_rates=di.p_exp)
     inp, weights = build_monthly_hourly_inputs(inp, year=2026)
     rows = []
-    for cb in SWEEP_POINTS:
+    for cb in requested_points:
         r = _solve_lp(inp, allow_grid_charging=False, allow_batt_export=True,
                       c_pv_kw=prices.pv_net_per_kw, c_batt_kwh=float(cb), c_batt_kw=0.0,
                       pv_life_yrs=25, batt_life_yrs=15, discount_rate=0.07,
@@ -258,7 +267,7 @@ def _installer_rule_fixed_pv_sweep(county, pv_offset, prices):
             "solver_rounds": int(r.solver_rounds),
         })
     df = pd.DataFrame(rows)
-    SWEEP_DIR.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(path, index=False)
     return df
 
@@ -338,6 +347,73 @@ def build_installer_rule_figure(doc=None, county="alameda", label="Alameda (PG&E
     html = _read(doc)
     html = docio.upsert_marked_block(html, "INSTALLER-RULE", frag,
                                      anchor=docio.end_marker("MECH-BLOCK"))
+    _write(doc, html)
+    return doc
+
+
+_LEGACY_TARIFF_STATUS_PATTERN = (
+    r'    <li>Retail rate and export-credit data have a mix of resolved and open '
+    r'staleness gaps.*?      </ul>\n    </li>'
+)
+
+
+def _tariff_status_fragment(metadata: dict) -> str:
+    scenario = metadata["scenario"]
+    utilities = metadata["utilities"]
+    if len(utilities) != 3:
+        raise ValueError(
+            "Claim 1 tariff status requires exactly three utility records; "
+            f"found {len(utilities)}"
+        )
+
+    import_items = []
+    export_items = []
+    for record in utilities:
+        utility = record["utility"].replace("&", "&amp;")
+        import_schedule = record["import"]
+        export_schedule = record["export"]
+        acc_plus = record["acc_plus"]
+        import_items.append(
+            f"{utility} {import_schedule['plan_name']} "
+            f"(<code>{import_schedule['source_id']}</code>)"
+        )
+        export_items.append(
+            f"{utility} <code>{', '.join(export_schedule['source_ids'])}</code> "
+            f"plus ACC Plus <code>{acc_plus['source_id']}</code>"
+        )
+
+    customer_segment = scenario["customer_segment"].replace("_", " ")
+    scenario_line = (
+        f"billing year {scenario['billing_year']}, NBT {scenario['nbt_vintage']} "
+        f"application vintage, {customer_segment}, bundled service, tariff snapshot "
+        f"{scenario['tariff_snapshot_date']}"
+    )
+    import_line = "; ".join(import_items)
+    export_line = "; ".join(export_items)
+
+    return f'''    <li>Claim 1 uses source-locked 2026 import and NBT export schedules.
+      <ul class="sub-limitations">
+        <li>Scenario: {scenario_line}.</li>
+        <li>Import schedules: {import_line}.</li>
+        <li>Export schedules: {export_line}.</li>
+        <li>Annual NSC settlement is not part of the sizing-sweep objective. The sweep uses hourly import and NBT export prices.</li>
+      </ul>
+    </li>'''
+
+
+def build_tariff_status_block(doc=None) -> Path:
+    """Replace Claim 1's tariff-status limitation with current model sources."""
+    doc = Path(doc) if doc is not None else current_claims_doc()
+    fragment = _tariff_status_fragment(tariff_metadata())
+    html = _read(doc)
+    if docio.has_markers(html, "TARIFF-STATUS"):
+        html = docio.replace_between_markers(html, "TARIFF-STATUS", fragment)
+    else:
+        html = docio.replace_first(
+            html,
+            _LEGACY_TARIFF_STATUS_PATTERN,
+            docio.wrap_markers("TARIFF-STATUS", fragment),
+        )
     _write(doc, html)
     return doc
 

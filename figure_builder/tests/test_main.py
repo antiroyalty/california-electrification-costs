@@ -2,7 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import call, patch
 
 from appliances.incentive_policy import PolicyRegime
-from figure_builder.__main__ import _cmd_all, _cmd_sweeps
+from figure_builder.__main__ import _cmd_all, _cmd_installer, _cmd_sweeps
 
 
 def test_sweeps_force_rebuilds_both_policy_regimes():
@@ -51,17 +51,56 @@ def test_sweeps_force_rebuilds_both_policy_regimes():
     ]
 
 
+def test_installer_returns_document_and_sweep_cache_for_metadata(tmp_path):
+    doc = tmp_path / "claims.html"
+    cache = tmp_path / "fixed-pv.csv"
+    cache.write_text("battery_capex_kwh,batt_kwh\n")
+
+    with (
+        patch(
+            "figure_builder.recipes.build_installer_rule_figure",
+            return_value=doc,
+        ),
+        patch(
+            "figure_builder.recipes.installer_rule_sweep_path",
+            return_value=cache,
+        ),
+        patch(
+            "figure_builder.__main__.live_prices",
+            return_value=SimpleNamespace(regime="post_itc_2026"),
+        ),
+    ):
+        artifacts = _cmd_installer(SimpleNamespace())
+
+    assert artifacts == [str(doc), str(cache)]
+
+
 def test_all_passes_cli_run_identity_to_metadata_writer():
     args = SimpleNamespace(counties=None, force=True, fine=False)
-    command_names = ("sweeps", "mechanism", "counties", "bridge", "split")
+    command_names = (
+        "sweeps",
+        "mechanism",
+        "installer",
+        "counties",
+        "tariff_status",
+        "bridge",
+        "split",
+    )
     patches = [
         patch(f"figure_builder.__main__._cmd_{name}", return_value=[name])
         for name in command_names
     ]
 
-    with patches[0], patches[1], patches[2], patches[3], patches[4], patch(
-        "figure_builder.__main__._write_metadata"
-    ) as write_metadata:
+    with (
+        patches[0],
+        patches[1],
+        patches[2],
+        patches[3],
+        patches[4],
+        patches[5],
+        patches[6],
+        patch("figure_builder.__main__._write_metadata") as write_metadata,
+    ):
         artifacts = _cmd_all(args)
 
     assert artifacts == list(command_names)

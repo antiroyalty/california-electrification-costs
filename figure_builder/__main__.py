@@ -7,7 +7,7 @@
     python3 -m figure_builder counties               # patch Claim-1 county grid
     python3 -m figure_builder bridge                 # render bridge waterfall PNG
     python3 -m figure_builder split                  # split combined -> claim1/2/3.html
-    python3 -m figure_builder all                    # sweeps + mechanism + counties + bridge + split
+    python3 -m figure_builder all                    # rebuild all report inputs and sections
 
 `all` writes a run_metadata.json (regime, git sha, prices, artifacts) so any
 figure run is reproducible.
@@ -62,6 +62,24 @@ def _cmd_counties(args):
     return [str(build_county_grid(fine=args.fine))]
 
 
+def _cmd_installer(_args):
+    from figure_builder.recipes import (
+        build_installer_rule_figure,
+        installer_rule_sweep_path,
+    )
+
+    doc = build_installer_rule_figure()
+    cache = installer_rule_sweep_path("alameda", live_prices().regime)
+    if not cache.exists():
+        raise FileNotFoundError(f"Installer-rule sweep cache was not written: {cache}")
+    return [str(doc), str(cache)]
+
+
+def _cmd_tariff_status(_args):
+    from figure_builder.recipes import build_tariff_status_block
+    return [str(build_tariff_status_block())]
+
+
 def _cmd_bridge(_args):
     from figure_builder.recipes import build_bridge
     return [str(build_bridge())]
@@ -84,7 +102,9 @@ def _cmd_all(args):
     artifacts = []
     artifacts += _cmd_sweeps(args)
     artifacts += _cmd_mechanism(args)
+    artifacts += _cmd_installer(args)
     artifacts += _cmd_counties(args)
+    artifacts += _cmd_tariff_status(args)
     artifacts += _cmd_bridge(args)
     artifacts += _cmd_split(args)
     _write_metadata(

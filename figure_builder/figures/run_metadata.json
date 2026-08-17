@@ -1,19 +1,378 @@
 {
   "artifacts": [
-    "/Users/ana/Documents/Berkeley/CCAI/cost-of-solar-storage/figure_builder/sweeps/sweep_8760_alameda_post_itc_2026.csv",
-    "/Users/ana/Documents/Berkeley/CCAI/cost-of-solar-storage/figure_builder/sweeps/sweep_8760_fresno_post_itc_2026.csv",
-    "/Users/ana/Documents/Berkeley/CCAI/cost-of-solar-storage/figure_builder/sweeps/sweep_8760_los-angeles_post_itc_2026.csv",
-    "/Users/ana/Documents/Berkeley/CCAI/cost-of-solar-storage/figure_builder/sweeps/sweep_8760_san-diego_post_itc_2026.csv",
-    "/Users/ana/Documents/Berkeley/CCAI/cost-of-solar-storage/claims-c459506.html",
-    "/Users/ana/Documents/Berkeley/CCAI/cost-of-solar-storage/claims-c459506.html",
-    "/Users/ana/Documents/Berkeley/CCAI/cost-of-solar-storage/figure_builder/figures/bridge_waterfall.png",
-    "/Users/ana/Documents/Berkeley/CCAI/cost-of-solar-storage/claim1.html",
-    "/Users/ana/Documents/Berkeley/CCAI/cost-of-solar-storage/claim2.html",
-    "/Users/ana/Documents/Berkeley/CCAI/cost-of-solar-storage/claim3.html"
+    {
+      "path": "figure_builder/sweeps/sweep_288_alameda_post_itc_2026.csv",
+      "sha256": "277bc71408ea2857773532f84d553bbedec238bf2d170273bfb88a39a3211cbd",
+      "size_bytes": 1579
+    },
+    {
+      "path": "figure_builder/sweeps/sweep_288_fresno_post_itc_2026.csv",
+      "sha256": "9f30be9fa38ef8d642c48d05ceb7116a1a3e72a20f32fb23e2a1ff3159aa7918",
+      "size_bytes": 1593
+    },
+    {
+      "path": "figure_builder/sweeps/sweep_288_los-angeles_post_itc_2026.csv",
+      "sha256": "f30078eb6fb8df4e15e1449c146024059d13e6494688767d33a7dfc5a404c845",
+      "size_bytes": 1615
+    },
+    {
+      "path": "figure_builder/sweeps/sweep_288_san-diego_post_itc_2026.csv",
+      "sha256": "21ed2ad31099f13efe93317056d29279532cc791f053c9269a46391e4cf9af21",
+      "size_bytes": 1730
+    },
+    {
+      "path": "figure_builder/sweeps/sweep_288_alameda_itc_2025.csv",
+      "sha256": "81a89b073a80ad08ad15fa31de032f41b8ab552a484563b8d751e0562180472a",
+      "size_bytes": 1537
+    },
+    {
+      "path": "figure_builder/sweeps/sweep_288_fresno_itc_2025.csv",
+      "sha256": "c1ed9ff77ad1ce0a3a41672ea31cc63f266f4a3130ef9bcb1ff56175f228c955",
+      "size_bytes": 1573
+    },
+    {
+      "path": "figure_builder/sweeps/sweep_288_los-angeles_itc_2025.csv",
+      "sha256": "dc7d3aed8fd8db4192b98c131da77c90725720c1b0d9fc077ec93c20f9b7412b",
+      "size_bytes": 1644
+    },
+    {
+      "path": "figure_builder/sweeps/sweep_288_san-diego_itc_2025.csv",
+      "sha256": "39976efa1077a8db6bc8f9fd4fadd159e60387d2c1c6a5fea4959df146decdea",
+      "size_bytes": 1683
+    },
+    {
+      "path": "claims-de1f921.html",
+      "sha256": "9e6b57d23412e05f7d7c75be73650f07936a0898c3f0c59c102526b68f7b9f0a",
+      "size_bytes": 2073060
+    },
+    {
+      "path": "figure_builder/sweeps/sweep_288_alameda_fixedpv_post_itc_2026.csv",
+      "sha256": "46b9b153f827e60f108a6b01f038658671dc53cff92f1adeba71d74f191ec003",
+      "size_bytes": 528
+    },
+    {
+      "path": "figure_builder/figures/bridge_waterfall.png",
+      "sha256": "c7177e917fd84e43e0385c93a258fc8d168fe34a0ca9f1d446078c28455ffdd0",
+      "size_bytes": 122949
+    },
+    {
+      "path": "claim1.html",
+      "sha256": "16e0257834431781c53dff467b7b31bf54d6ac47d12113a3ea7729baf77f8c96",
+      "size_bytes": 1429034
+    },
+    {
+      "path": "claim2.html",
+      "sha256": "84992022838110c95adb425475c3e68607de55bf39f9971ea4038f1f1e4834bb",
+      "size_bytes": 651098
+    },
+    {
+      "path": "claim3.html",
+      "sha256": "f021056476510432670bc114ca23040be660ac9d2e09a1187df7fde0e4b84980",
+      "size_bytes": 15094
+    }
   ],
-  "batt_net_per_kwh": 1460.64,
-  "combined_doc": "/Users/ana/Documents/Berkeley/CCAI/cost-of-solar-storage/claims-c459506.html",
-  "git_sha": "a3e7549",
-  "pv_net_per_kw": 3300.0,
-  "regime": "post_itc_2026"
+  "capital_costs": {
+    "gross_cost_basis": {
+      "battery": {
+        "basis_year": 2023,
+        "source_id": "nrel_atb_2024_via_cec_200_2024_011",
+        "source_urls": [
+          "https://atb.nrel.gov/electricity/2024/data",
+          "https://www.energy.ca.gov/sites/default/files/2024-07/CEC-200-2024-011.pdf"
+        ],
+        "unit_capacity_kwh": 12.5,
+        "unit_cost_usd": 18258.0,
+        "value_usd_per_kwh": 1460.64
+      },
+      "pv": {
+        "basis_year": 2023,
+        "source_id": "cpuc_2023_residential_pv_cost",
+        "source_urls": [
+          "https://docs.cpuc.ca.gov/PublishedDocs/Published/G000/M499/K921/499921246.PDF"
+        ],
+        "value_usd_per_kw": 3300.0
+      }
+    },
+    "incentive_scenario": "full_incentives",
+    "policy_regimes": [
+      {
+        "battery_net_usd_per_kwh": 1460.64,
+        "battery_sweep_points_usd_per_kwh": [
+          1.0,
+          5.0,
+          10.0,
+          25.0,
+          50.0,
+          100.0,
+          150.0,
+          200.0,
+          300.0,
+          400.0,
+          500.0,
+          600.0,
+          700.0,
+          800.0,
+          1000.0,
+          1200.0,
+          1400.0,
+          1460.64,
+          1500.0
+        ],
+        "exact_battery_sweep_observation_usd_per_kwh": 1460.64,
+        "federal_itc_fraction": 0.0,
+        "pv_net_usd_per_kw": 3300.0,
+        "regime": "post_itc_2026"
+      },
+      {
+        "battery_net_usd_per_kwh": 1022.448,
+        "battery_sweep_points_usd_per_kwh": [
+          1.0,
+          5.0,
+          10.0,
+          25.0,
+          50.0,
+          100.0,
+          150.0,
+          200.0,
+          300.0,
+          400.0,
+          500.0,
+          600.0,
+          700.0,
+          800.0,
+          1000.0,
+          1022.448,
+          1200.0,
+          1400.0,
+          1500.0
+        ],
+        "exact_battery_sweep_observation_usd_per_kwh": 1022.448,
+        "federal_itc_fraction": 0.3,
+        "pv_net_usd_per_kw": 2310.0,
+        "regime": "itc_2025"
+      }
+    ]
+  },
+  "inputs": [
+    {
+      "county_slug": "alameda",
+      "path": "data/loadprofiles/full_electric_ev_coopt/single-family-detached/alameda/weather_TMY_alameda.csv",
+      "role": "weather_tmy",
+      "sha256": "6bf38bd9240b0676c9cda683f92111846dbaa0c83c6d7f8a96509f5837ba9dd5",
+      "size_bytes": 456970
+    },
+    {
+      "county_slug": "alameda",
+      "path": "data/loadprofiles/full_electric_ev_coopt/single-family-detached/alameda/combined_profiles_full_electric_ev_coopt_alameda.csv",
+      "role": "combined_load_profile",
+      "sha256": "03fd9308f187547071300b311ddf2c9a80aa3fe75c76d3c77cac2f7f1bc87da3",
+      "size_bytes": 392527
+    },
+    {
+      "county_slug": "fresno",
+      "path": "data/loadprofiles/full_electric_ev_coopt/single-family-detached/fresno/weather_TMY_fresno.csv",
+      "role": "weather_tmy",
+      "sha256": "5cfedbb64e562d41c3af3d9fc11d27438b0414b8d099ff4884e9c6f22aa87982",
+      "size_bytes": 453384
+    },
+    {
+      "county_slug": "fresno",
+      "path": "data/loadprofiles/full_electric_ev_coopt/single-family-detached/fresno/combined_profiles_full_electric_ev_coopt_fresno.csv",
+      "role": "combined_load_profile",
+      "sha256": "cc9c66339a2f049c7195b8cee2477b18c904008a236bf4f25418d146a9558b37",
+      "size_bytes": 392777
+    },
+    {
+      "county_slug": "los-angeles",
+      "path": "data/loadprofiles/full_electric_ev_coopt/single-family-detached/los-angeles/weather_TMY_los-angeles.csv",
+      "role": "weather_tmy",
+      "sha256": "7896b360572f23824860faec022f4136afa3fd869a2392585df23e2113064851",
+      "size_bytes": 472505
+    },
+    {
+      "county_slug": "los-angeles",
+      "path": "data/loadprofiles/full_electric_ev_coopt/single-family-detached/los-angeles/combined_profiles_full_electric_ev_coopt_los-angeles.csv",
+      "role": "combined_load_profile",
+      "sha256": "e4984a5d0438c9bea11cfb371a37e4a312ec4f2b9134b2ac8ecdffbb36bb688f",
+      "size_bytes": 392686
+    },
+    {
+      "county_slug": "san-diego",
+      "path": "data/loadprofiles/full_electric_ev_coopt/single-family-detached/san-diego/weather_TMY_san-diego.csv",
+      "role": "weather_tmy",
+      "sha256": "4a94d5605eda9c6c4b1c21ac3b7fd58e0603201b5515fddac0e14ff093efa23e",
+      "size_bytes": 493574
+    },
+    {
+      "county_slug": "san-diego",
+      "path": "data/loadprofiles/full_electric_ev_coopt/single-family-detached/san-diego/combined_profiles_full_electric_ev_coopt_san-diego.csv",
+      "role": "combined_load_profile",
+      "sha256": "f28fc3e67393cb03924cefc82f4aed74303d919956eb65d186e566bbad3bbf59",
+      "size_bytes": 392676
+    }
+  ],
+  "optimization": {
+    "battery_physics": {
+      "allow_battery_export": true,
+      "allow_grid_charging": false,
+      "maximum_soc_fraction": 0.9,
+      "minimum_soc_fraction": 0.2,
+      "round_trip_efficiency": 0.96
+    },
+    "billing_year": 2026,
+    "financial_assumptions": {
+      "battery_degradation_cost_usd_per_kwh": 0.0,
+      "battery_lifetime_years": 15,
+      "battery_power_cost_usd_per_kw": 0.0,
+      "battery_replacement_within_pv_horizon": true,
+      "discount_rate": 0.07,
+      "pv_lifetime_years": 25
+    },
+    "sizing_domain": {
+      "battery_power_limit_c_rate": 1.0,
+      "max_battery_kwh": 40.0,
+      "max_pv_to_annual_load_ratio": 1.5
+    },
+    "solver": {
+      "backend": "highs",
+      "mip_relative_gap": 1e-06,
+      "output_absolute_tolerance": 1e-06
+    },
+    "temporal_resolution": {
+      "interval_count": 288,
+      "name": "weighted_12x24_monthly_hour",
+      "soc_cycle": "monthly"
+    }
+  },
+  "run": {
+    "command": "python3 -m figure_builder all",
+    "counties": [
+      {
+        "county_name": "Alameda County",
+        "county_slug": "alameda",
+        "utility": "PG&E",
+        "utility_assignment_method": "existing_research_dominant_iou_crosswalk"
+      },
+      {
+        "county_name": "Fresno County",
+        "county_slug": "fresno",
+        "utility": "PG&E",
+        "utility_assignment_method": "existing_research_dominant_iou_crosswalk"
+      },
+      {
+        "county_name": "Los Angeles County",
+        "county_slug": "los-angeles",
+        "utility": "SCE",
+        "utility_assignment_method": "existing_research_dominant_iou_crosswalk"
+      },
+      {
+        "county_name": "San Diego County",
+        "county_slug": "san-diego",
+        "utility": "SDG&E",
+        "utility_assignment_method": "existing_research_dominant_iou_crosswalk"
+      }
+    ],
+    "fine": false,
+    "force": false,
+    "generated_at_utc": "2026-08-17T20:09:38.081149+00:00",
+    "git_sha": "de1f921",
+    "housing_type": "single-family-detached",
+    "requested_counties": null,
+    "scenario": "full_electric_ev_coopt"
+  },
+  "schema_version": 1,
+  "software": {
+    "matplotlib": "3.8.2",
+    "numpy": "1.26.4",
+    "pandas": "2.1.4",
+    "pulp": "3.3.0",
+    "python": "3.11.13",
+    "scipy": "1.11.4"
+  },
+  "tariffs": {
+    "annual_true_up": {
+      "reason": "The sizing sweep uses hourly import and NBT export prices; annual NSC settlement is not part of this objective.",
+      "used_by_sweep": false
+    },
+    "scenario": {
+      "billing_year": 2026,
+      "customer_segment": "standard_non_equity",
+      "nbt_vintage": 2026,
+      "service_type": "bundled",
+      "tariff_snapshot_date": "2026-08-09"
+    },
+    "source_manifests": [
+      "data/tariffs/import_source_manifest.json",
+      "data/tariffs/source_manifest.json",
+      "data/tariffs/acc_plus_rates.csv"
+    ],
+    "utilities": [
+      {
+        "acc_plus": {
+          "included": true,
+          "rate_unit": "USD/kWh",
+          "rate_usd_per_kwh": 0.0088,
+          "source_id": "pge_advice_7174_e"
+        },
+        "export": {
+          "rate_unit": "USD/kWh",
+          "source_ids": [
+            "pge_nbt2026"
+          ]
+        },
+        "import": {
+          "effective_date": "2026-06-01",
+          "fixed_charge_unit": "USD/meter/day",
+          "plan_name": "E-ELEC",
+          "rate_unit": "USD/kWh",
+          "source_id": "pge_e_elec_2026-06-01"
+        },
+        "utility": "PG&E"
+      },
+      {
+        "acc_plus": {
+          "included": true,
+          "rate_unit": "USD/kWh",
+          "rate_usd_per_kwh": 0.016,
+          "source_id": "sce_schedule_nbt"
+        },
+        "export": {
+          "rate_unit": "USD/kWh",
+          "source_ids": [
+            "sce_nbt2026"
+          ]
+        },
+        "import": {
+          "effective_date": "2026-06-01",
+          "fixed_charge_unit": "USD/meter/day",
+          "plan_name": "TOU-D-PRIME",
+          "rate_unit": "USD/kWh",
+          "source_id": "sce_tou_d_prime_2026-06-01"
+        },
+        "utility": "SCE"
+      },
+      {
+        "acc_plus": {
+          "included": true,
+          "rate_unit": "USD/kWh",
+          "rate_usd_per_kwh": 0.0,
+          "source_id": "cpuc_nbt_policy"
+        },
+        "export": {
+          "rate_unit": "USD/kWh",
+          "source_ids": [
+            "sdge_nbt2026"
+          ]
+        },
+        "import": {
+          "effective_date": "2026-08-01",
+          "fixed_charge_unit": "USD/meter/day",
+          "plan_name": "EV-TOU-5",
+          "rate_unit": "USD/kWh",
+          "source_id": "sdge_ev_tou_5_2026-08-01"
+        },
+        "utility": "SDG&E"
+      }
+    ]
+  }
 }

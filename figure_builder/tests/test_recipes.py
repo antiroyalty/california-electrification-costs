@@ -13,7 +13,9 @@ from figure_builder.charts import (
 from figure_builder.recipes import (
     _installer_rule_fragment,
     _mechanism_fragment,
+    _tariff_status_fragment,
     build_installer_rule_figure,
+    build_tariff_status_block,
 )
 
 
@@ -169,3 +171,72 @@ def test_installer_rule_builder_passes_county_schedule_mean_to_caption(tmp_path)
         build_installer_rule_figure(doc=doc)
 
     assert fragment.call_args.args[2] == pytest.approx(0.11)
+
+
+def _tariff_metadata_fixture():
+    return {
+        "scenario": {
+            "billing_year": 2026,
+            "nbt_vintage": 2026,
+            "customer_segment": "standard_non_equity",
+            "tariff_snapshot_date": "2026-08-09",
+        },
+        "utilities": [
+            {
+                "utility": "PG&E",
+                "import": {"plan_name": "E-ELEC", "source_id": "pge-import"},
+                "export": {"source_ids": ["pge-export"]},
+                "acc_plus": {"source_id": "pge-adder"},
+            },
+            {
+                "utility": "SCE",
+                "import": {"plan_name": "TOU-D-PRIME", "source_id": "sce-import"},
+                "export": {"source_ids": ["sce-export"]},
+                "acc_plus": {"source_id": "sce-adder"},
+            },
+            {
+                "utility": "SDG&E",
+                "import": {"plan_name": "EV-TOU-5", "source_id": "sdge-import"},
+                "export": {"source_ids": ["sdge-export"]},
+                "acc_plus": {"source_id": "sdge-adder"},
+            },
+        ],
+    }
+
+
+def test_tariff_status_fragment_uses_current_model_source_identity():
+    html = _tariff_status_fragment(_tariff_metadata_fixture())
+
+    assert "billing year 2026, NBT 2026 application vintage" in html
+    assert "PG&amp;E E-ELEC (<code>pge-import</code>)" in html
+    assert "SCE TOU-D-PRIME (<code>sce-import</code>)" in html
+    assert "SDG&amp;E EV-TOU-5 (<code>sdge-import</code>)" in html
+    assert "<code>pge-export</code> plus ACC Plus <code>pge-adder</code>" in html
+    assert "Annual NSC settlement is not part of the sizing-sweep objective" in html
+
+
+def test_tariff_status_builder_replaces_legacy_text_and_is_idempotent(tmp_path):
+    doc = tmp_path / "claims.html"
+    doc.write_text(
+        "before\n"
+        "    <li>Retail rate and export-credit data have a mix of resolved and "
+        "open staleness gaps.\n"
+        "      <ul class=\"sub-limitations\">\n"
+        "        <li>obsolete tariff text</li>\n"
+        "      </ul>\n"
+        "    </li>\n"
+        "after"
+    )
+
+    with patch(
+        "figure_builder.recipes.tariff_metadata",
+        return_value=_tariff_metadata_fixture(),
+    ):
+        build_tariff_status_block(doc=doc)
+        first = doc.read_text()
+        build_tariff_status_block(doc=doc)
+
+    assert doc.read_text() == first
+    assert "<!-- TARIFF-STATUS-START -->" in first
+    assert "obsolete tariff text" not in first
+    assert "sdge-export" in first
