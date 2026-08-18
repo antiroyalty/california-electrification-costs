@@ -6,6 +6,8 @@ model's sourced net price. No model-default test caught it, because $4,000 was a
 figure parameter, not a model value. These tests bind the figure data path to
 the model's tested price by default, so the class of bug can't recur silently.
 """
+import json
+
 import pandas as pd
 import pytest
 from types import SimpleNamespace
@@ -18,9 +20,12 @@ from figure_builder.datasets import (
     MARKET_OBSERVATION_COLUMNS,
     SWEEP_COLUMNS,
     canonical_battery_capex_points,
+    build_claims_eac_source,
+    claims_eac_manifest_path,
     collect_battery_capex_sweep,
     collect_claims_eac_results,
     collect_market_price_observation,
+    load_claims_eac_manifest,
     normalize_battery_capex_points,
     resolve_pv_capex,
     select_market_observation,
@@ -272,6 +277,7 @@ def test_claims_eac_collector_requires_complete_paired_county_coverage(tmp_path)
     eac = collect_claims_eac_results(
         source,
         expected_counties={"alpha", "beta"},
+        require_manifest=False,
     )
     summary = summarize_claims_eac(eac).set_index("county_slug")
 
@@ -313,6 +319,132 @@ def test_claims_eac_collector_rejects_incomplete_or_malformed_sources(
         collect_claims_eac_results(
             source,
             expected_counties={"alpha", "beta"},
+            require_manifest=False,
+        )
+
+
+def test_claims_source_builder_uses_exact_scenario_runs_and_writes_receipt(
+    tmp_path,
+):
+    counties = {"alpha", "beta"}
+    model_sha = "abc1234"
+    timestamps = {
+        "baseline_ice_car": "20260817_17",
+        "full_electric_ev": "20260817_17",
+        "full_electric_ev_coopt": "20260817_18",
+    }
+    completion_dir = tmp_path / "completion"
+    for scenario in CLAIMS_EAC_SCENARIOS:
+        scenario_dir = completion_dir / scenario
+        scenario_dir.mkdir(parents=True)
+        for county in counties:
+            (scenario_dir / f"{county}_diagnostics_g{model_sha}.html").write_text(
+                "complete",
+                encoding="utf-8",
+            )
+    fixture = _eac_source_fixture()
+
+    def collect(_base, _housing, scenarios, _counties, **kwargs):
+        assert len(scenarios) == 1
+        scenario = scenarios[0]
+        assert kwargs["timestamp"] == timestamps[scenario]
+        assert kwargs["electricity_variant"] == "nem3"
+        return fixture[fixture["scenario"] == scenario].copy()
+
+    source = tmp_path / "claims.csv"
+    with patch(
+        "helpers.plot_scenario_comparison_helper.collect_eac_components_by_county",
+        side_effect=collect,
+    ):
+        result = build_claims_eac_source(
+            model_run_sha=model_sha,
+            run_timestamps=timestamps,
+            source=source,
+            completion_dir=completion_dir,
+            expected_counties=counties,
+        )
+
+    assert result == source
+    assert len(pd.read_csv(source)) == 6
+    manifest = load_claims_eac_manifest(source)
+    assert manifest["model_git_sha"] == model_sha
+    assert manifest["scenario_run_timestamps"] == timestamps
+    assert manifest["completion_marker_count"] == 6
+    assert manifest["source_csv"]["row_count"] == 6
+
+
+def test_claims_source_builder_rejects_incomplete_model_run(tmp_path):
+    with pytest.raises(FileNotFoundError, match="completion markers missing"):
+        build_claims_eac_source(
+            model_run_sha="abc1234",
+            run_timestamps={
+                "baseline_ice_car": "20260817_17",
+                "full_electric_ev": "20260817_17",
+                "full_electric_ev_coopt": "20260817_18",
+            },
+            source=tmp_path / "claims.csv",
+            completion_dir=tmp_path / "completion",
+            expected_counties={"alpha"},
+        )
+
+
+def test_claims_source_manifest_detects_csv_replacement(tmp_path):
+    source = tmp_path / "claims.csv"
+    _eac_source_fixture().to_csv(source, index=False)
+    manifest_path = claims_eac_manifest_path(source)
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "model_git_sha": "abc1234",
+                "scenario_run_timestamps": {
+                    "baseline_ice_car": "20260817_17",
+                    "full_electric_ev": "20260817_17",
+                    "full_electric_ev_coopt": "20260817_18",
+                },
+                "scenario_cases": CLAIMS_EAC_SCENARIOS,
+                "source_csv": {"sha256": "not-the-real-fingerprint"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="fingerprint"):
+        load_claims_eac_manifest(source)
+
+
+@pytest.mark.parametrize(
+    "run_timestamps,message",
+    [
+        (
+            {
+                "baseline_ice_car": "20260817_17",
+                "full_electric_ev": "20260817_17",
+            },
+            "identify exactly",
+        ),
+        (
+            {
+                "baseline_ice_car": "20260817_17",
+                "full_electric_ev": "latest",
+                "full_electric_ev_coopt": "20260817_18",
+            },
+            "YYYYMMDD_HH",
+        ),
+    ],
+)
+def test_claims_source_builder_rejects_ambiguous_run_identity(
+    tmp_path,
+    run_timestamps,
+    message,
+):
+    with pytest.raises(ValueError, match=message):
+        build_claims_eac_source(
+            model_run_sha="abc1234",
+            run_timestamps=run_timestamps,
+            source=tmp_path / "claims.csv",
+            completion_dir=tmp_path / "completion",
+            expected_counties={"alpha"},
         )
 
 

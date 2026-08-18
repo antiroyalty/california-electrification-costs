@@ -1,12 +1,16 @@
 from types import SimpleNamespace
 from unittest.mock import call, patch
 
+import pytest
+
 from appliances.incentive_policy import PolicyRegime
 from figure_builder.__main__ import (
     _cmd_all,
+    _cmd_claims_source,
     _cmd_installer,
     _cmd_market,
     _cmd_sweeps,
+    _parse_scenario_runs,
 )
 
 
@@ -103,7 +107,12 @@ def test_market_command_builds_current_law_exact_observations_only():
 
 
 def test_all_passes_cli_run_identity_to_metadata_writer():
-    args = SimpleNamespace(counties=None, force=True, fine=False)
+    args = SimpleNamespace(
+        counties=None,
+        force=True,
+        fine=False,
+        claims_source="analysis_results/exact-claims.csv",
+    )
     command_names = (
         "sweeps",
         "market",
@@ -140,4 +149,43 @@ def test_all_passes_cli_run_identity_to_metadata_writer():
         fine=False,
         force=True,
         requested_counties=None,
+        statewide_claims_source="analysis_results/exact-claims.csv",
     )
+
+
+def test_claims_source_command_requires_explicit_unique_scenario_runs(tmp_path):
+    args = SimpleNamespace(
+        model_run_sha="abc1234",
+        scenario_run=[
+            "baseline_ice_car=20260817_17",
+            "full_electric_ev=20260817_17",
+            "full_electric_ev_coopt=20260817_18",
+        ],
+        claims_source=tmp_path / "claims.csv",
+    )
+    manifest = (tmp_path / "claims.csv").with_suffix(".manifest.json")
+
+    with patch(
+        "figure_builder.datasets.build_claims_eac_source",
+        return_value=tmp_path / "claims.csv",
+    ) as build:
+        artifacts = _cmd_claims_source(args)
+
+    build.assert_called_once_with(
+        model_run_sha="abc1234",
+        run_timestamps={
+            "baseline_ice_car": "20260817_17",
+            "full_electric_ev": "20260817_17",
+            "full_electric_ev_coopt": "20260817_18",
+        },
+        source=tmp_path / "claims.csv",
+    )
+    assert artifacts == [str(tmp_path / "claims.csv"), str(manifest)]
+
+    with pytest.raises(ValueError, match="Duplicate"):
+        _parse_scenario_runs(
+            [
+                "baseline_ice_car=20260817_17",
+                "baseline_ice_car=20260817_18",
+            ]
+        )

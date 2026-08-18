@@ -17,6 +17,8 @@ from figure_builder.datasets import (
     CLAIMS_EAC_SCENARIOS,
     SWEEP_MODEL_SETTINGS,
     canonical_battery_capex_points,
+    claims_eac_manifest_path,
+    load_claims_eac_manifest,
 )
 from figure_builder.dispatch import (
     BASE_INPUT_DIR,
@@ -33,7 +35,7 @@ from tariffs import (
     resolve_county_service_assignment,
 )
 
-METADATA_SCHEMA_VERSION = 2
+METADATA_SCHEMA_VERSION = 3
 
 
 def _display_path(path: Path) -> str:
@@ -307,12 +309,31 @@ def build_run_metadata(
         )
 
     statewide_claims = None
+    command_argv = ["python3", "-m", "figure_builder", "all"]
+    if force:
+        command_argv.append("--force")
+    if fine:
+        command_argv.append("--fine")
+    if requested_counties:
+        command_argv.extend(["--counties", *requested_counties])
     if statewide_claims_source is not None:
         claims_source = file_identity(statewide_claims_source)
         claims_source["role"] = "statewide_claims_eac_source"
         inputs.append(claims_source)
+        manifest_payload = load_claims_eac_manifest(statewide_claims_source)
+        claims_manifest = file_identity(
+            claims_eac_manifest_path(statewide_claims_source)
+        )
+        claims_manifest["role"] = "statewide_claims_eac_manifest"
+        inputs.append(claims_manifest)
+        command_argv.extend(["--claims-source", claims_source["path"]])
         statewide_claims = {
             "source_path": claims_source["path"],
+            "source_manifest_path": claims_manifest["path"],
+            "model_run_git_sha": manifest_payload["model_git_sha"],
+            "scenario_run_timestamps": manifest_payload[
+                "scenario_run_timestamps"
+            ],
             "scenario_cases": dict(CLAIMS_EAC_SCENARIOS),
             "expected_county_count": 47,
             "electricity_variant": "nem3",
@@ -323,7 +344,7 @@ def build_run_metadata(
         "run": {
             "generated_at_utc": timestamp.astimezone(timezone.utc).isoformat(),
             "git_sha": git_short_sha(),
-            "command": "python3 -m figure_builder all",
+            "command_argv": command_argv,
             "force": bool(force),
             "fine": bool(fine),
             "requested_counties": (

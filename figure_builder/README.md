@@ -34,8 +34,17 @@ automatically.
 ```bash
 python3 -m figure_builder snapshot                  # ensure claims-<sha>.html exists
 
-# Regenerate everything (sweeps -> figures -> patch combined doc -> split)
-python3 -m figure_builder all
+# Normalize three completed scenario runs. Use the exact Git SHA and the
+# YYYYMMDD_HH suffixes written by each run's electricity/gas result files.
+python3 -m figure_builder claims-source \
+  --model-run-sha <model-sha> \
+  --scenario-run baseline_ice_car=<timestamp> \
+  --scenario-run full_electric_ev=<timestamp> \
+  --scenario-run full_electric_ev_coopt=<timestamp>
+
+# Regenerate everything from that exact normalized statewide source.
+python3 -m figure_builder all \
+  --claims-source analysis_results/claims_eac_by_county_nem3_g<model-sha>.csv
 
 # Or step by step:
 python3 -m figure_builder sweeps                    # weighted 12x24 sensitivity sweeps
@@ -78,12 +87,15 @@ capital-cost sources, sweep points, solver assumptions, and utility tariff
 source IDs. Values come from the same primitives used by the sweep rather than
 being copied into a parallel configuration.
 
-The manifest also hashes the exact Step 18 EAC table used for statewide Claims
-2 and 3 and records the three scenario-to-case mappings. The statewide builder
-requires exactly the declared 47 counties for every case, rejects duplicate or
-non-finite rows, and constructs each reported total as the exact sum of its
-seven cost components. It never fills a missing scenario/county from another
-run.
+The manifest also hashes the exact claims-only EAC table assembled from the
+Step 18 accounting primitives and its sidecar source receipt. The receipt records the model Git SHA,
+the exact billing-output timestamp for each scenario, the three scenario-to-case
+mappings, and the 141 SHA-tagged scenario/county completion markers checked
+before normalization. The statewide builder requires exactly the declared 47
+counties for every case, rejects duplicate or non-finite rows, and constructs
+each reported total as the exact sum of its seven cost components. It never
+fills a missing scenario/county from another run or from Step 18's broader
+sibling-scenario family.
 
 The sweep objective uses hourly import prices, NBT export prices, and ACC Plus.
 It does not apply annual net-surplus compensation; the manifest records that

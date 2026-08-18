@@ -8,11 +8,14 @@ annotations.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import math
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Sequence
+from typing import List, Mapping, Optional, Sequence
 
 import pandas as pd
 
@@ -24,7 +27,9 @@ from figure_builder import (
     sweep_csv_path,
 )
 from figure_builder.dispatch import (
+    BASE_INPUT_DIR,
     DEFAULT_SCENARIO,
+    HOUSING_TYPE,
     SWEEP_POINTS,
     county_dispatch_inputs,
 )
@@ -82,13 +87,78 @@ EAC_COMPONENT_COLUMNS = [
     "annual_bill_gas",
     "vehicle_om",
 ]
+CLAIMS_ELECTRICITY_PLAN_PREFERENCE = (
+    "E-TOU-D",
+    "TOU-D-4-9PM",
+    "TOU-DR1",
+)
+CLAIMS_SOURCE_MANIFEST_SCHEMA_VERSION = 1
 
 
 def claims_eac_source_path(run_sha: str | None = None) -> Path:
-    """Step 18 source produced by a clean run at the specified model SHA."""
+    """Claims-only EAC source assembled from a clean model run SHA."""
 
     sha = run_sha or git_short_sha()
-    return REPO / "analysis_results" / f"step18_eac_by_county_nem3_g{sha}.csv"
+    return REPO / "analysis_results" / f"claims_eac_by_county_nem3_g{sha}.csv"
+
+
+def claims_eac_manifest_path(source: str | Path) -> Path:
+    """Sidecar receipt for one normalized statewide claims source."""
+
+    return Path(source).with_suffix(".manifest.json")
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def load_claims_eac_manifest(source: str | Path) -> dict:
+    """Load and verify the source receipt, including the CSV fingerprint."""
+
+    source_path = Path(source)
+    manifest_path = claims_eac_manifest_path(source_path)
+    if not manifest_path.is_file():
+        raise FileNotFoundError(f"Claims 2/3 source manifest not found: {manifest_path}")
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if payload.get("schema_version") != CLAIMS_SOURCE_MANIFEST_SCHEMA_VERSION:
+        raise ValueError(
+            f"Unsupported Claims 2/3 source manifest schema: "
+            f"{payload.get('schema_version')}"
+        )
+    if payload.get("scenario_cases") != CLAIMS_EAC_SCENARIOS:
+        raise ValueError("Claims 2/3 source manifest scenario mapping does not match")
+    model_run_sha = payload.get("model_git_sha")
+    if not isinstance(model_run_sha, str) or not re.fullmatch(
+        r"[0-9a-f]{7,40}", model_run_sha
+    ):
+        raise ValueError("Claims 2/3 source manifest has an invalid model_git_sha")
+    run_timestamps = payload.get("scenario_run_timestamps")
+    if not isinstance(run_timestamps, dict) or set(run_timestamps) != set(
+        CLAIMS_EAC_SCENARIOS
+    ):
+        raise ValueError(
+            "Claims 2/3 source manifest must identify all scenario run timestamps"
+        )
+    if any(
+        not isinstance(value, str) or not re.fullmatch(r"\d{8}_\d{2}", value)
+        for value in run_timestamps.values()
+    ):
+        raise ValueError(
+            "Claims 2/3 source manifest timestamps must use YYYYMMDD_HH"
+        )
+    source_identity = payload.get("source_csv")
+    if not isinstance(source_identity, dict):
+        raise ValueError("Claims 2/3 source manifest is missing source_csv identity")
+    actual_sha256 = _file_sha256(source_path)
+    if source_identity.get("sha256") != actual_sha256:
+        raise ValueError(
+            "Claims 2/3 source CSV fingerprint does not match its manifest"
+        )
+    return payload
 
 
 def expected_claim_counties() -> set[str]:
@@ -107,28 +177,20 @@ def expected_claim_counties() -> set[str]:
     }
 
 
-def collect_claims_eac_results(
-    source: str | Path | None = None,
+def _validate_claims_eac_frame(
+    frame: pd.DataFrame,
     *,
-    expected_counties: set[str] | None = None,
+    expected_counties: set[str],
 ) -> pd.DataFrame:
-    """Load and strictly validate the three statewide EAC cases for Claims 2/3."""
+    """Validate and normalize the exact case/county EAC table."""
 
-    path = Path(source) if source is not None else claims_eac_source_path()
-    if not path.is_file():
-        raise FileNotFoundError(
-            f"Claims 2/3 EAC source not found: {path}. Run baseline_ice_car, "
-            "full_electric_ev, and full_electric_ev_coopt at the current clean SHA."
-        )
-    frame = pd.read_csv(path)
     required = ["scenario", "county_slug", *EAC_COMPONENT_COLUMNS]
     missing = [column for column in required if column not in frame.columns]
     if missing:
         raise ValueError(f"Claims 2/3 EAC source is missing columns: {missing}")
     selected = frame[frame["scenario"].isin(CLAIMS_EAC_SCENARIOS)].copy()
     selected["case"] = selected["scenario"].map(CLAIMS_EAC_SCENARIOS)
-    expected = expected_counties if expected_counties is not None else expected_claim_counties()
-    if not expected:
+    if not expected_counties:
         raise ValueError("Claims 2/3 expected county set cannot be empty")
     if selected[["scenario", "county_slug"]].isna().any().any():
         raise ValueError("Claims 2/3 EAC source has missing scenario/county identity")
@@ -138,9 +200,9 @@ def collect_claims_eac_results(
         raise ValueError(f"Claims 2/3 EAC source has duplicate keys: {keys[:5]}")
     for scenario in CLAIMS_EAC_SCENARIOS:
         actual = set(selected.loc[selected["scenario"] == scenario, "county_slug"])
-        if actual != expected:
-            missing_counties = sorted(expected - actual)
-            extra_counties = sorted(actual - expected)
+        if actual != expected_counties:
+            missing_counties = sorted(expected_counties - actual)
+            extra_counties = sorted(actual - expected_counties)
             raise ValueError(
                 f"{scenario} county coverage mismatch: missing={missing_counties}, "
                 f"extra={extra_counties}"
@@ -160,11 +222,144 @@ def collect_claims_eac_results(
     selected["total_eac"] = numeric.sum(axis=1)
     if (selected["total_eac"] <= 0.0).any():
         raise ValueError("Claims 2/3 EAC totals must be positive")
-    selected = selected[
+    return selected[
         ["scenario", "case", "county_slug", *EAC_COMPONENT_COLUMNS, "total_eac"]
     ].sort_values(["county_slug", "scenario"]).reset_index(drop=True)
+
+
+def collect_claims_eac_results(
+    source: str | Path | None = None,
+    *,
+    expected_counties: set[str] | None = None,
+    require_manifest: bool = True,
+) -> pd.DataFrame:
+    """Load and strictly validate the three statewide EAC cases for Claims 2/3."""
+
+    path = Path(source) if source is not None else claims_eac_source_path()
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"Claims 2/3 EAC source not found: {path}. Run baseline_ice_car, "
+            "full_electric_ev, and full_electric_ev_coopt at the current clean SHA."
+        )
+    if require_manifest:
+        load_claims_eac_manifest(path)
+    frame = pd.read_csv(path)
+    expected = (
+        expected_counties
+        if expected_counties is not None
+        else expected_claim_counties()
+    )
+    selected = _validate_claims_eac_frame(frame, expected_counties=expected)
     selected.attrs["source_path"] = str(path)
     return selected
+
+
+def build_claims_eac_source(
+    *,
+    model_run_sha: str,
+    run_timestamps: Mapping[str, str],
+    source: str | Path | None = None,
+    base_input_dir: str | Path = BASE_INPUT_DIR,
+    completion_dir: str | Path = REPO / "analysis_results" / "county_diagnostics",
+    expected_counties: set[str] | None = None,
+) -> Path:
+    """Normalize the three explicit completed scenario runs for Claims 2/3."""
+
+    if not re.fullmatch(r"[0-9a-f]{7,40}", model_run_sha):
+        raise ValueError("model_run_sha must be a 7-40 character lowercase Git SHA")
+    timestamps = dict(run_timestamps)
+    expected_scenarios = set(CLAIMS_EAC_SCENARIOS)
+    if set(timestamps) != expected_scenarios:
+        raise ValueError(
+            "Claims 2/3 run timestamps must identify exactly "
+            f"{sorted(expected_scenarios)}"
+        )
+    invalid_timestamps = {
+        scenario: timestamp
+        for scenario, timestamp in timestamps.items()
+        if not re.fullmatch(r"\d{8}_\d{2}", str(timestamp))
+    }
+    if invalid_timestamps:
+        raise ValueError(
+            f"Claims 2/3 run timestamps must use YYYYMMDD_HH: {invalid_timestamps}"
+        )
+    counties = (
+        expected_claim_counties()
+        if expected_counties is None
+        else expected_counties
+    )
+    if not counties:
+        raise ValueError("Claims 2/3 expected county set cannot be empty")
+    markers = [
+        Path(completion_dir)
+        / scenario
+        / f"{county}_diagnostics_g{model_run_sha}.html"
+        for scenario in CLAIMS_EAC_SCENARIOS
+        for county in sorted(counties)
+    ]
+    missing_markers = [path for path in markers if not path.is_file()]
+    if missing_markers:
+        raise FileNotFoundError(
+            f"Claims 2/3 model run is incomplete for {model_run_sha}: "
+            f"{len(missing_markers)} completion markers missing; "
+            f"first={missing_markers[0]}"
+        )
+
+    from helpers.plot_scenario_comparison_helper import (
+        collect_eac_components_by_county,
+    )
+
+    frames = []
+    for scenario in CLAIMS_EAC_SCENARIOS:
+        frames.append(
+            collect_eac_components_by_county(
+                str(base_input_dir),
+                HOUSING_TYPE,
+                [scenario],
+                sorted(counties),
+                incentive="full_incentives",
+                discount_rate=0.07,
+                timestamp=timestamps[scenario],
+                electricity_plan_preference=CLAIMS_ELECTRICITY_PLAN_PREFERENCE,
+                electricity_variant="nem3",
+            )
+        )
+    raw = pd.concat(frames, ignore_index=True)
+    normalized = _validate_claims_eac_frame(raw, expected_counties=counties)
+    destination = Path(source) if source is not None else claims_eac_source_path(model_run_sha)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    normalized[["scenario", "county_slug", *EAC_COMPONENT_COLUMNS]].to_csv(
+        destination,
+        index=False,
+    )
+    manifest = {
+        "schema_version": CLAIMS_SOURCE_MANIFEST_SCHEMA_VERSION,
+        "model_git_sha": model_run_sha,
+        "scenario_run_timestamps": timestamps,
+        "scenario_cases": CLAIMS_EAC_SCENARIOS,
+        "expected_counties": sorted(counties),
+        "completion_marker_count": len(markers),
+        "housing_type": HOUSING_TYPE,
+        "incentive_scenario": "full_incentives",
+        "discount_rate": 0.07,
+        "electricity_variant": "nem3",
+        "electricity_plan_preference": list(CLAIMS_ELECTRICITY_PLAN_PREFERENCE),
+        "source_csv": {
+            "path": str(destination),
+            "sha256": _file_sha256(destination),
+            "row_count": len(normalized),
+        },
+    }
+    claims_eac_manifest_path(destination).write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    collect_claims_eac_results(
+        destination,
+        expected_counties=counties,
+        require_manifest=True,
+    )
+    return destination
 
 
 def summarize_claims_eac(eac: pd.DataFrame) -> pd.DataFrame:

@@ -4,6 +4,7 @@
     python3 -m figure_builder sweeps                 # (re)compute all county sweeps
     python3 -m figure_builder sweeps --counties alameda --force
     python3 -m figure_builder market                 # exact current-law market points
+    python3 -m figure_builder claims-source          # normalize three explicit model runs
     python3 -m figure_builder mechanism              # patch Claim-1 mechanism block
     python3 -m figure_builder counties               # patch Claim-1 county grid
     python3 -m figure_builder statewide              # rebuild Claims 2 and 3
@@ -117,10 +118,39 @@ def _cmd_tariff_status(_args):
     return [str(build_tariff_status_block())]
 
 
-def _cmd_statewide(_args):
+def _parse_scenario_runs(entries) -> dict[str, str]:
+    if not entries:
+        raise ValueError("claims-source requires one --scenario-run per claims case")
+    parsed = {}
+    for entry in entries:
+        if "=" not in entry:
+            raise ValueError(
+                f"Invalid --scenario-run {entry!r}; expected SCENARIO=YYYYMMDD_HH"
+            )
+        scenario, timestamp = entry.split("=", 1)
+        if scenario in parsed:
+            raise ValueError(f"Duplicate --scenario-run for {scenario}")
+        parsed[scenario] = timestamp
+    return parsed
+
+
+def _cmd_claims_source(args):
+    from figure_builder.datasets import build_claims_eac_source
+
+    if not args.model_run_sha:
+        raise ValueError("claims-source requires --model-run-sha")
+    source = build_claims_eac_source(
+        model_run_sha=args.model_run_sha,
+        run_timestamps=_parse_scenario_runs(args.scenario_run),
+        source=args.claims_source,
+    )
+    return [str(source), str(source.with_suffix(".manifest.json"))]
+
+
+def _cmd_statewide(args):
     from figure_builder.recipes import build_statewide_claims
 
-    return [str(build_statewide_claims())]
+    return [str(build_statewide_claims(source=getattr(args, "claims_source", None)))]
 
 
 def _cmd_bridge(_args):
@@ -142,6 +172,9 @@ def _cmd_snapshot(_args):
 
 
 def _cmd_all(args):
+    from figure_builder.datasets import claims_eac_source_path
+
+    claims_source = getattr(args, "claims_source", None) or claims_eac_source_path()
     artifacts = []
     artifacts += _cmd_sweeps(args)
     artifacts += _cmd_market(args)
@@ -157,6 +190,7 @@ def _cmd_all(args):
         fine=args.fine,
         force=args.force,
         requested_counties=args.counties,
+        statewide_claims_source=claims_source,
     )
     return artifacts
 
@@ -167,8 +201,8 @@ def _write_metadata(
     fine: bool,
     force: bool,
     requested_counties,
+    statewide_claims_source,
 ) -> None:
-    from figure_builder.datasets import claims_eac_source_path
     from figure_builder.metadata import build_run_metadata, write_run_metadata
 
     metadata = build_run_metadata(
@@ -176,7 +210,7 @@ def _write_metadata(
         fine=fine,
         force=force,
         requested_counties=requested_counties,
-        statewide_claims_source=claims_eac_source_path(),
+        statewide_claims_source=statewide_claims_source,
     )
     path = FIG_DIR / "run_metadata.json"
     write_run_metadata(path, metadata)
@@ -185,6 +219,7 @@ def _write_metadata(
 
 _COMMANDS = {
     "snapshot": _cmd_snapshot, "sweeps": _cmd_sweeps, "market": _cmd_market,
+    "claims-source": _cmd_claims_source,
     "mechanism": _cmd_mechanism,
     "counties": _cmd_counties, "statewide": _cmd_statewide,
     "bridge": _cmd_bridge, "split": _cmd_split,
@@ -200,6 +235,23 @@ def main() -> None:
                     help="County slugs (default: all four Claim-1 counties).")
     ap.add_argument("--force", action="store_true",
                     help="Recompute sweeps even if cached.")
+    ap.add_argument(
+        "--claims-source",
+        default=None,
+        help="Exact normalized Claims 2/3 EAC CSV (default: current-SHA source).",
+    )
+    ap.add_argument(
+        "--model-run-sha",
+        default=None,
+        help="Git SHA of the completed model runs used by claims-source.",
+    )
+    ap.add_argument(
+        "--scenario-run",
+        action="append",
+        default=None,
+        metavar="SCENARIO=YYYYMMDD_HH",
+        help="Exact scenario billing-output timestamp; repeat for all three cases.",
+    )
     ap.add_argument(
         "--fine",
         action="store_true",

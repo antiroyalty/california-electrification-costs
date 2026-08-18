@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from figure_builder.datasets import CLAIMS_EAC_SCENARIOS
+from figure_builder.datasets import CLAIMS_EAC_SCENARIOS, claims_eac_manifest_path
 from figure_builder.dispatch import CLAIM1_COUNTIES
 from figure_builder.metadata import (
     build_run_metadata,
@@ -134,9 +134,16 @@ def test_build_run_metadata_hashes_inputs_and_deduplicates_artifacts(
     )
 
     assert metadata["run"]["generated_at_utc"] == "2026-08-17T12:00:00+00:00"
-    assert metadata["schema_version"] == 2
+    assert metadata["schema_version"] == 3
     assert metadata["run"]["git_sha"] == "abc1234"
     assert metadata["run"]["force"] is True
+    assert metadata["run"]["command_argv"] == [
+        "python3",
+        "-m",
+        "figure_builder",
+        "all",
+        "--force",
+    ]
     assert len(metadata["run"]["counties"]) == 4
     assert len(metadata["inputs"]) == 8
     assert {row["role"] for row in metadata["inputs"]} == {
@@ -167,6 +174,24 @@ def test_build_run_metadata_hashes_and_identifies_statewide_claims_source(
         )
     claims_source = tmp_path / "step18_eac.csv"
     claims_source.write_text("scenario,county_slug,total_eac\n", encoding="utf-8")
+    claims_eac_manifest_path(claims_source).write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "model_git_sha": "abc1234",
+                "scenario_run_timestamps": {
+                    "baseline_ice_car": "20260817_17",
+                    "full_electric_ev": "20260817_17",
+                    "full_electric_ev_coopt": "20260817_18",
+                },
+                "scenario_cases": CLAIMS_EAC_SCENARIOS,
+                "source_csv": {
+                    "sha256": file_identity(claims_source)["sha256"],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
     monkeypatch.setattr("figure_builder.metadata.git_short_sha", lambda: "abc1234")
 
     metadata = build_run_metadata(
@@ -182,11 +207,20 @@ def test_build_run_metadata_hashes_and_identifies_statewide_claims_source(
     statewide = metadata["statewide_claims"]
     assert statewide == {
         "source_path": str(claims_source.resolve()),
+        "source_manifest_path": str(
+            claims_eac_manifest_path(claims_source).resolve()
+        ),
+        "model_run_git_sha": "abc1234",
+        "scenario_run_timestamps": {
+            "baseline_ice_car": "20260817_17",
+            "full_electric_ev": "20260817_17",
+            "full_electric_ev_coopt": "20260817_18",
+        },
         "scenario_cases": CLAIMS_EAC_SCENARIOS,
         "expected_county_count": 47,
         "electricity_variant": "nem3",
     }
-    assert len(metadata["inputs"]) == 9
+    assert len(metadata["inputs"]) == 10
     claims_input = next(
         row
         for row in metadata["inputs"]
@@ -194,6 +228,14 @@ def test_build_run_metadata_hashes_and_identifies_statewide_claims_source(
     )
     assert claims_input["path"] == str(claims_source.resolve())
     assert claims_input["sha256"] == file_identity(claims_source)["sha256"]
+    assert metadata["run"]["command_argv"] == [
+        "python3",
+        "-m",
+        "figure_builder",
+        "all",
+        "--claims-source",
+        str(claims_source.resolve()),
+    ]
 
 
 def test_build_run_metadata_rejects_naive_timestamp(tmp_path):
