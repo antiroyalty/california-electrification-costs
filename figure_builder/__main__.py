@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import argparse
 
-from appliances.incentive_policy import PolicyRegime
 from figure_builder import (
     FIG_DIR,
     current_claims_doc,
@@ -31,24 +30,21 @@ from figure_builder.datasets import (
     collect_market_price_observation,
 )
 from figure_builder.dispatch import CLAIM1_COUNTIES
-from figure_builder.pricing import live_prices
-
-
-SWEEP_REGIMES = (
-    PolicyRegime.POST_ITC_2026,
-    PolicyRegime.ITC_2025,
+from figure_builder.policy_cases import (
+    FULL_HOURLY_POLICY_CASES,
+    POLICY_CASES,
 )
-MARKET_OBSERVATION_REGIMES = (PolicyRegime.POST_ITC_2026,)
+from figure_builder.pricing import live_prices
 
 
 def _cmd_sweeps(args) -> list:
     slugs = args.counties or [s for s, _, _ in CLAIM1_COUNTIES]
     out = []
     resolution = "8760" if args.fine else "288"
-    for regime in SWEEP_REGIMES:
-        prices = live_prices(regime)
+    for case in POLICY_CASES:
+        prices = live_prices(case.capital_policy_regime)
         print(
-            f"Regime {prices.regime}: solar fixed "
+            f"Case {case.case_id}: solar fixed "
             f"${prices.pv_net_per_kw:,.0f}/kW, battery "
             f"${prices.batt_net_per_kwh:,.0f}/kWh net"
         )
@@ -56,37 +52,60 @@ def _cmd_sweeps(args) -> list:
             print(f"\n{slug}:")
             collect_battery_capex_sweep(
                 slug,
-                regime=regime,
+                regime=case.capital_policy_regime,
+                export_compensation_regime=(
+                    case.export_compensation_regime
+                ),
                 force=args.force,
                 fine=args.fine,
             )
-            out.append(str(sweep_csv_path(slug, prices.regime, resolution)))
+            out.append(
+                str(
+                    sweep_csv_path(
+                        slug,
+                        prices.regime,
+                        resolution,
+                        case.export_compensation_regime,
+                    )
+                )
+            )
     return out
 
 
 def _cmd_market(args) -> list:
-    """Build current-law exact-price, full-chronology Claim 1 observations.
+    """Build declared exact-price, full-chronology observations.
 
-    The 2025 ITC side is explicitly a 12x24 sensitivity: corrected full-year
+    The NBT/2025-ITC case remains a 12x24 sensitivity. Its corrected full-year
     Southern California MILPs do not complete within the publication workflow's
-    bounded runtime, so the builder must not mislabel them as exact results.
+    bounded runtime. The builder must not mislabel that case as exact.
     """
 
     slugs = args.counties or [slug for slug, _, _ in CLAIM1_COUNTIES]
     out = []
-    for regime in MARKET_OBSERVATION_REGIMES:
-        prices = live_prices(regime)
+    for case in FULL_HOURLY_POLICY_CASES:
+        prices = live_prices(case.capital_policy_regime)
         for slug in slugs:
             print(
                 f"\nExact 8,760-hour market observation: {slug}, "
-                f"{prices.regime}, ${prices.batt_net_per_kwh:,.3f}/kWh"
+                f"{case.case_id}, ${prices.batt_net_per_kwh:,.3f}/kWh"
             )
             collect_market_price_observation(
                 slug,
-                regime=regime,
+                regime=case.capital_policy_regime,
+                export_compensation_regime=(
+                    case.export_compensation_regime
+                ),
                 force=args.force,
             )
-            out.append(str(market_observation_csv_path(slug, prices.regime)))
+            out.append(
+                str(
+                    market_observation_csv_path(
+                        slug,
+                        prices.regime,
+                        case.export_compensation_regime,
+                    )
+                )
+            )
     return out
 
 

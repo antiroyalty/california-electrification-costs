@@ -19,6 +19,8 @@ from typing import List, Mapping, Optional, Sequence
 
 import pandas as pd
 
+from tariffs import ExportCompensationRegime
+
 from figure_builder import (
     REPO,
     SWEEP_DIR,
@@ -495,6 +497,9 @@ def collect_market_price_observation(
     slug: str,
     *,
     regime=None,
+    export_compensation_regime: (
+        str | ExportCompensationRegime
+    ) = ExportCompensationRegime.NBT_2026,
     scenario: str = DEFAULT_SCENARIO,
     max_battery_kwh: float = SWEEP_MODEL_SETTINGS.max_battery_kwh,
     cache: bool = True,
@@ -509,8 +514,15 @@ def collect_market_price_observation(
     """
 
     prices = live_prices(regime)
+    export_regime = ExportCompensationRegime.parse(
+        export_compensation_regime
+    )
     market_price = prices.batt_net_per_kwh
-    path = market_observation_csv_path(slug, prices.regime)
+    path = market_observation_csv_path(
+        slug,
+        prices.regime,
+        export_regime,
+    )
     if cache and not force and path.exists():
         cached = pd.read_csv(path)
         try:
@@ -532,6 +544,7 @@ def collect_market_price_observation(
     frame = collect_battery_capex_sweep(
         slug,
         regime=regime,
+        export_compensation_regime=export_regime,
         scenario=scenario,
         points=[market_price],
         max_battery_kwh=max_battery_kwh,
@@ -572,6 +585,9 @@ def collect_battery_capex_sweep(
     slug: str,
     *,
     regime=None,
+    export_compensation_regime: (
+        str | ExportCompensationRegime
+    ) = ExportCompensationRegime.NBT_2026,
     scenario: str = DEFAULT_SCENARIO,
     points: Optional[Sequence[float]] = None,
     pv_capex_per_kw: Optional[float] = None,
@@ -591,19 +607,27 @@ def collect_battery_capex_sweep(
     law), or `pv_capex_per_kw` if given. The default publication grid includes
     the regime's exact modeled net battery price. An explicit ``points``
     argument is treated as a deliberate custom grid and is only validated,
-    sorted, and deduplicated. Results cache per (county, regime) to
-    figure_builder/sweeps/; pass `force=True` to recompute. Sensitivity grids
-    use weighted 12x24 monthly-hour intervals by default; `fine=True` requests
-    the substantially slower full 8,760-hour chronology.
+    sorted, and deduplicated. Results cache per county, export-compensation
+    regime, and capital-policy regime. Sensitivity grids use weighted 12x24
+    monthly-hour intervals by default. ``fine=True`` requests the full
+    8,760-hour chronology.
     """
     prices = live_prices(regime)
+    export_regime = ExportCompensationRegime.parse(
+        export_compensation_regime
+    )
     requested_points = (
         canonical_battery_capex_points(regime)
         if points is None
         else normalize_battery_capex_points(points)
     )
     resolution = "8760" if fine else "288"
-    path = sweep_csv_path(slug, prices.regime, resolution)
+    path = sweep_csv_path(
+        slug,
+        prices.regime,
+        resolution,
+        export_regime,
+    )
     if cache and not force and path.exists():
         df = pd.read_csv(path)
         if sweep_cache_is_compatible(
@@ -614,15 +638,17 @@ def collect_battery_capex_sweep(
             return df.sort_values("battery_capex_kwh").reset_index(drop=True)
 
     from pipeline.steps.step9b_cooptimize_core import (
-        CooptInputs,
         _solve_lp,
         build_monthly_hourly_inputs,
     )
 
     c_pv = resolve_pv_capex(pv_capex_per_kw, regime)
-    di = county_dispatch_inputs(slug, scenario)
-    inp = CooptInputs(load_kwh=di.load, pv_gen_per_kw=di.pv_gen_per_kw,
-                      import_rates=di.p_imp, export_rates=di.p_exp)
+    di = county_dispatch_inputs(
+        slug,
+        scenario,
+        export_compensation_regime=export_regime,
+    )
+    inp = di.coopt_inputs()
     load, ypk = di.annual_load, di.yield_per_kw
     weights = None
     cycle_monthly = False
@@ -652,9 +678,6 @@ def collect_battery_capex_sweep(
             weights=weights,
             cycle_monthly=cycle_monthly,
             max_battery_kwh=max_battery_kwh,
-            max_pv_to_annual_load_ratio=(
-                SWEEP_MODEL_SETTINGS.max_pv_to_annual_load_ratio
-            ),
             solver_backend=SWEEP_MODEL_SETTINGS.solver_backend,
         )
         rows.append({

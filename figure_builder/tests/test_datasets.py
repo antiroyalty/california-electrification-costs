@@ -10,6 +10,7 @@ import json
 
 import pandas as pd
 import pytest
+import numpy as np
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -34,7 +35,8 @@ from figure_builder.datasets import (
     sweep_cache_is_compatible,
 )
 from figure_builder.pricing import live_prices
-from figure_builder.dispatch import CLAIM1_COUNTIES
+from figure_builder.dispatch import CLAIM1_COUNTIES, DispatchInputs
+from tariffs import ExportCompensationRegime
 
 
 def _eac_source_fixture(counties=("alpha", "beta")) -> pd.DataFrame:
@@ -173,17 +175,37 @@ def test_sweep_cache_requires_schema_bound_and_complete_requested_grid():
 
 
 def test_sweep_cache_path_separates_coarse_and_full_resolution():
-    assert sweep_csv_path("alameda").name == "sweep_288_alameda_post_itc_2026.csv"
+    assert sweep_csv_path("alameda").name == (
+        "sweep_288_alameda_nbt_2026_post_itc_2026.csv"
+    )
     assert sweep_csv_path("alameda", resolution="8760").name == (
-        "sweep_8760_alameda_post_itc_2026.csv"
+        "sweep_8760_alameda_nbt_2026_post_itc_2026.csv"
     )
     with pytest.raises(ValueError, match="resolution"):
         sweep_csv_path("alameda", resolution="hourly-ish")
 
+    nem2_path = sweep_csv_path(
+        "alameda",
+        export_compensation_regime=(
+            ExportCompensationRegime.NEM2_AT_2026_RETAIL_RATES
+        ),
+    )
+    assert nem2_path.name == (
+        "sweep_288_alameda_nem2_at_2026_retail_rates_post_itc_2026.csv"
+    )
+
 
 def test_market_observation_path_is_separate_from_sensitivity_sweeps():
     assert market_observation_csv_path("alameda").name == (
-        "market_8760_alameda_post_itc_2026.csv"
+        "market_8760_alameda_nbt_2026_post_itc_2026.csv"
+    )
+    assert market_observation_csv_path(
+        "alameda",
+        export_compensation_regime=(
+            ExportCompensationRegime.NEM2_AT_2026_RETAIL_RATES
+        ),
+    ).name == (
+        "market_8760_alameda_nem2_at_2026_retail_rates_post_itc_2026.csv"
     )
 
 
@@ -240,6 +262,7 @@ def test_market_collector_runs_only_exact_price_at_full_resolution(tmp_path):
     collect.assert_called_once_with(
         "alameda",
         regime=None,
+        export_compensation_regime=ExportCompensationRegime.NBT_2026,
         scenario="full_electric_ev_coopt",
         points=[1460.64],
         max_battery_kwh=40.0,
@@ -463,13 +486,15 @@ def test_claims_source_builder_rejects_ambiguous_run_identity(
 def test_sweep_collector_wires_declared_temporal_resolution(
     fine, expected_intervals, expected_cycle_monthly
 ):
-    dispatch = SimpleNamespace(
-        load=[1.0] * 8760,
-        pv_gen_per_kw=[0.5] * 8760,
-        p_imp=[0.30] * 8760,
-        p_exp=[0.05] * 8760,
-        annual_load=8760.0,
-        yield_per_kw=4380.0,
+    dispatch = DispatchInputs(
+        slug="alameda",
+        util="PG&E",
+        load=np.array([1.0] * 8760),
+        pv_gen_per_kw=np.array([0.5] * 8760),
+        p_imp=np.array([0.30] * 8760),
+        p_exp=np.array([0.05] * 8760),
+        export_compensation_regime=ExportCompensationRegime.NBT_2026,
+        nem2_terms=None,
     )
     result = SimpleNamespace(
         pv_kw=2.0,
@@ -492,6 +517,7 @@ def test_sweep_collector_wires_declared_temporal_resolution(
         )
 
     solved_inputs = solve.call_args.args[0]
+    assert solved_inputs.max_pv_to_annual_load_ratio == pytest.approx(1.5)
     assert len(solved_inputs.load_kwh) == expected_intervals
     assert solve.call_args.kwargs["cycle_monthly"] is expected_cycle_monthly
     if fine:

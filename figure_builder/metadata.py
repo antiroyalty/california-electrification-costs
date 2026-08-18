@@ -27,15 +27,21 @@ from figure_builder.dispatch import (
     HOUSING_TYPE,
     county_dispatch_input_paths,
 )
+from figure_builder.policy_cases import (
+    FULL_HOURLY_POLICY_CASES,
+    POLICY_CASES,
+)
 from figure_builder.pricing import live_prices
 from tariffs import (
+    ExportCompensationRegime,
     NBTScenario,
+    NEM2Scenario,
     TariffCatalog,
     Utility,
     resolve_county_service_assignment,
 )
 
-METADATA_SCHEMA_VERSION = 3
+METADATA_SCHEMA_VERSION = 4
 
 
 def _display_path(path: Path) -> str:
@@ -111,6 +117,8 @@ def tariff_metadata() -> dict:
     scenario = NBTScenario()
     catalog = TariffCatalog()
     utilities = []
+    nem2_scenario = NEM2Scenario()
+    nem2_utilities = []
     for utility in Utility:
         bundle = catalog.bundle(utility, scenario)
         export_source_ids = sorted(
@@ -143,6 +151,47 @@ def tariff_metadata() -> dict:
                 },
             }
         )
+        nem2_bundle = catalog.nem2_bundle(utility, nem2_scenario)
+        treatment = nem2_bundle.rate_treatment
+        if nem2_bundle.nsc_rate is None:
+            raise ValueError(f"{utility.value} NEM 2 bundle has no NSC rate")
+        nem2_utilities.append(
+            {
+                "utility": utility.value,
+                "import": {
+                    "plan_name": nem2_bundle.import_schedule.plan_name,
+                    "source_id": nem2_bundle.import_schedule.source_id,
+                    "effective_date": nem2_bundle.import_schedule.effective_date,
+                    "rate_unit": nem2_bundle.import_schedule.plan_details[
+                        "rate_unit"
+                    ],
+                },
+                "settlement": {
+                    "interval_nbc_rate_usd_per_kwh": (
+                        treatment.interval_nbc_rate_usd_per_kwh
+                    ),
+                    "monthly_net_consumption_rate_usd_per_kwh": (
+                        treatment.monthly_net_consumption_rate_usd_per_kwh
+                    ),
+                    "retail_credit_exclusion_rate_usd_per_kwh": (
+                        treatment.retail_credit_exclusion_rate_usd_per_kwh
+                    ),
+                    "regulatory_decision_source_id": (
+                        treatment.regulatory_decision_source_id
+                    ),
+                    "utility_rules_source_id": (
+                        treatment.utility_rules_source_id
+                    ),
+                    "billing_method_source_id": (
+                        treatment.billing_method_source_id
+                    ),
+                    "nsc_rate_usd_per_kwh": (
+                        nem2_bundle.nsc_rate.rate_usd_per_kwh
+                    ),
+                    "nsc_rate_source_id": nem2_bundle.nsc_rate.source_id,
+                },
+            }
+        )
     return {
         "scenario": {
             "billing_year": scenario.billing_year,
@@ -155,6 +204,10 @@ def tariff_metadata() -> dict:
             "data/tariffs/import_source_manifest.json",
             "data/tariffs/source_manifest.json",
             "data/tariffs/acc_plus_rates.csv",
+            "data/tariffs/nem2_source_manifest.json",
+            "data/tariffs/nem2_rate_treatment.json",
+            "data/tariffs/true_up_source_manifest.json",
+            "data/tariffs/nsc_rates.csv",
         ],
         "utilities": utilities,
         "annual_true_up": {
@@ -163,6 +216,33 @@ def tariff_metadata() -> dict:
                 "The sizing sweep uses hourly import and NBT export prices; "
                 "annual NSC settlement is not part of this objective."
             ),
+        },
+        "comparison": {
+            "research_design": (
+                "Controlled policy counterfactual, not a historical bill replay. "
+                "Both export-compensation regimes use the source-locked 2026 "
+                "retail tariff snapshot."
+            ),
+            "policy_cases": [
+                {
+                    "case_id": case.case_id,
+                    "export_compensation_regime": (
+                        case.export_compensation_regime.value
+                    ),
+                    "capital_policy_regime": case.capital_policy_regime.value,
+                }
+                for case in POLICY_CASES
+            ],
+            "nem2_scenario": {
+                "research_label": nem2_scenario.research_label,
+                "billing_year": nem2_scenario.billing_year,
+                "service_type": nem2_scenario.service_type.value,
+                "tariff_snapshot_date": nem2_scenario.tariff_snapshot_date,
+                "true_up_month": nem2_scenario.true_up_month,
+                "retail_credit_true_up": "annual_dollar_balance",
+                "annual_net_surplus_compensation": "monthly_nsc_rate",
+                "utilities": nem2_utilities,
+            },
         },
     }
 
@@ -190,12 +270,19 @@ def optimization_metadata(*, fine: bool) -> dict:
             "name": "full_8760_hour",
             "interval_count": 8760,
             "soc_cycle": "annual",
-            "points_per_county_and_regime": 1,
-            "policy_regimes": [PolicyRegime.POST_ITC_2026.value],
+            "points_per_county_and_case": 1,
+            "policy_cases": [
+                case.case_id for case in FULL_HOURLY_POLICY_CASES
+            ],
+            "excluded_policy_cases": [
+                case.case_id
+                for case in POLICY_CASES
+                if case not in FULL_HOURLY_POLICY_CASES
+            ],
             "purpose": (
-                "Exact current-law solved observations for publication "
-                "market-price annotations; the 2025 ITC comparison remains "
-                "an explicitly labeled 12x24 sensitivity."
+                "Exact solved observations for declared publication policy "
+                "cases. NBT with 2025 ITC capital prices remains an explicitly "
+                "labeled 12x24 sensitivity."
             ),
         },
         "solver": {
@@ -206,6 +293,10 @@ def optimization_metadata(*, fine: bool) -> dict:
         "sizing_domain": {
             "max_battery_kwh": settings.max_battery_kwh,
             "max_pv_to_annual_load_ratio": settings.max_pv_to_annual_load_ratio,
+            "max_pv_to_annual_load_ratio_by_export_compensation_regime": {
+                regime.value: regime.max_pv_to_annual_load_ratio
+                for regime in ExportCompensationRegime
+            },
             "battery_power_limit_c_rate": 1.0,
         },
         "battery_physics": {

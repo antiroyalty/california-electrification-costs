@@ -44,6 +44,37 @@ class CustomerSegment(str, Enum):
     EQUITY = "equity"
 
 
+class ExportCompensationRegime(str, Enum):
+    """Export-compensation policy used by a sizing counterfactual."""
+
+    NBT_2026 = "nbt_2026"
+    NEM2_AT_2026_RETAIL_RATES = "nem2_at_2026_retail_rates"
+
+    @classmethod
+    def parse(
+        cls,
+        value: str | "ExportCompensationRegime",
+    ) -> "ExportCompensationRegime":
+        if isinstance(value, cls):
+            return value
+        try:
+            return cls(str(value))
+        except ValueError as exc:
+            expected = ", ".join(member.value for member in cls)
+            raise ValueError(
+                f"Unsupported export-compensation regime {value!r}; "
+                f"expected one of: {expected}"
+            ) from exc
+
+    @property
+    def max_pv_to_annual_load_ratio(self) -> float:
+        """Policy-specific annual PV-generation sizing limit."""
+
+        if self is ExportCompensationRegime.NBT_2026:
+            return 1.5
+        return 1.0
+
+
 @dataclass(frozen=True)
 class NBTScenario:
     """Explicit policy choices needed to resolve one NBT tariff bundle.

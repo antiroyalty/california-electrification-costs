@@ -47,6 +47,11 @@ def test_capital_cost_metadata_records_both_exact_regime_prices_and_sources():
 def test_tariff_metadata_records_every_source_used_by_the_sweep():
     metadata = tariff_metadata()
     utilities = {row["utility"]: row for row in metadata["utilities"]}
+    comparison = metadata["comparison"]
+    nem2_utilities = {
+        row["utility"]: row
+        for row in comparison["nem2_scenario"]["utilities"]
+    }
 
     assert metadata["scenario"] == {
         "billing_year": 2026,
@@ -65,6 +70,29 @@ def test_tariff_metadata_records_every_source_used_by_the_sweep():
     assert utilities["SDG&E"]["export"]["source_ids"] == ["sdge_nbt2026"]
     assert utilities["SDG&E"]["acc_plus"]["source_id"] == "cpuc_nbt_policy"
     assert metadata["annual_true_up"]["used_by_sweep"] is False
+    assert comparison["nem2_scenario"]["research_label"] == (
+        "nem2_at_2026_retail_rates"
+    )
+    assert comparison["nem2_scenario"]["tariff_snapshot_date"] == (
+        "2026-08-09"
+    )
+    assert len(comparison["policy_cases"]) == 4
+    assert "not a historical bill replay" in comparison["research_design"]
+    assert nem2_utilities["PG&E"]["settlement"][
+        "retail_credit_exclusion_rate_usd_per_kwh"
+    ] == pytest.approx(0.01621)
+    assert nem2_utilities["SCE"]["settlement"][
+        "monthly_net_consumption_rate_usd_per_kwh"
+    ] == pytest.approx(0.00619)
+    assert nem2_utilities["SDG&E"]["settlement"][
+        "nsc_rate_source_id"
+    ] == "sdge_monthly_nsc_rates_2026-08-10"
+    assert "data/tariffs/nem2_source_manifest.json" in metadata[
+        "source_manifests"
+    ]
+    assert "data/tariffs/true_up_source_manifest.json" in metadata[
+        "source_manifests"
+    ]
 
 
 def test_optimization_metadata_matches_declared_coarse_sweep_settings():
@@ -79,18 +107,29 @@ def test_optimization_metadata_matches_declared_coarse_sweep_settings():
         "name": "full_8760_hour",
         "interval_count": 8760,
         "soc_cycle": "annual",
-        "points_per_county_and_regime": 1,
-        "policy_regimes": ["post_itc_2026"],
+        "points_per_county_and_case": 1,
+        "policy_cases": [
+            "nbt_2026__post_itc_2026",
+            "nem2_at_2026_retail_rates__post_itc_2026",
+            "nem2_at_2026_retail_rates__itc_2025",
+        ],
+        "excluded_policy_cases": ["nbt_2026__itc_2025"],
         "purpose": (
-            "Exact current-law solved observations for publication "
-            "market-price annotations; the 2025 ITC comparison remains "
-            "an explicitly labeled 12x24 sensitivity."
+            "Exact solved observations for declared publication policy "
+            "cases. NBT with 2025 ITC capital prices remains an explicitly "
+            "labeled 12x24 sensitivity."
         ),
     }
     assert metadata["solver"]["backend"] == "highs"
     assert metadata["solver"]["mip_relative_gap"] == 1e-6
     assert metadata["sizing_domain"]["max_battery_kwh"] == 40.0
     assert metadata["sizing_domain"]["max_pv_to_annual_load_ratio"] == 1.5
+    assert metadata["sizing_domain"][
+        "max_pv_to_annual_load_ratio_by_export_compensation_regime"
+    ] == {
+        "nbt_2026": 1.5,
+        "nem2_at_2026_retail_rates": 1.0,
+    }
     assert metadata["battery_physics"]["round_trip_efficiency"] == 0.96
     assert metadata["battery_physics"]["allow_grid_charging"] is False
     assert metadata["battery_physics"]["allow_battery_export"] is True
@@ -134,7 +173,7 @@ def test_build_run_metadata_hashes_inputs_and_deduplicates_artifacts(
     )
 
     assert metadata["run"]["generated_at_utc"] == "2026-08-17T12:00:00+00:00"
-    assert metadata["schema_version"] == 3
+    assert metadata["schema_version"] == 4
     assert metadata["run"]["git_sha"] == "abc1234"
     assert metadata["run"]["force"] is True
     assert metadata["run"]["command_argv"] == [

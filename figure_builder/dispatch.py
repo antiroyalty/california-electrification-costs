@@ -13,6 +13,8 @@ from typing import List
 
 import numpy as np
 
+from tariffs import ExportCompensationRegime, NEM2OptimizationTerms
+
 # --- domain constants -------------------------------------------------------
 DEFAULT_SCENARIO = "full_electric_ev_coopt"
 HOUSING_TYPE = "single-family-detached"
@@ -41,7 +43,9 @@ class DispatchInputs:
     load: np.ndarray           # 8760 hourly load, kWh
     pv_gen_per_kw: np.ndarray  # 8760 hourly AC yield per installed kW
     p_imp: np.ndarray          # 8760 hourly import price, $/kWh
-    p_exp: np.ndarray          # 8760 hourly NEM 3.0 export price, $/kWh
+    p_exp: np.ndarray          # 8760 hourly export value, $/kWh
+    export_compensation_regime: ExportCompensationRegime
+    nem2_terms: NEM2OptimizationTerms | None
 
     @property
     def annual_load(self) -> float:
@@ -58,15 +62,39 @@ class DispatchInputs:
         cover = self.annual_load / self.yield_per_kw
         return cover, cover / round_trip_eff
 
+    def coopt_inputs(self):
+        """Return the exact tariff-aware input object used by Step 9b."""
+
+        from pipeline.steps.step9b_cooptimize_core import CooptInputs
+
+        return CooptInputs(
+            load_kwh=list(self.load),
+            pv_gen_per_kw=list(self.pv_gen_per_kw),
+            import_rates=list(self.p_imp),
+            export_rates=list(self.p_exp),
+            nem2_terms=self.nem2_terms,
+            max_pv_to_annual_load_ratio=(
+                self.export_compensation_regime.max_pv_to_annual_load_ratio
+            ),
+        )
+
 
 def county_dispatch_inputs(
     slug: str,
     scenario: str = DEFAULT_SCENARIO,
     base: str = BASE_INPUT_DIR,
+    export_compensation_regime: (
+        str | ExportCompensationRegime
+    ) = ExportCompensationRegime.NBT_2026,
 ) -> DispatchInputs:
     """Assemble the 8760-hour arrays for one county, mirroring the setup Step 9b
     performs before solving the model."""
-    from tariffs import NBTScenario, TariffCatalog, resolve_county_service_assignment
+    from tariffs import (
+        NBTScenario,
+        NEM2Scenario,
+        TariffCatalog,
+        resolve_county_service_assignment,
+    )
     from tariffs.calendar import full_year_hourly_index
     from pipeline.steps.step9_solar_storage_dispatch_core import (
         prepare_weather_and_load, pv_timeseries_ac_kwh,
@@ -80,11 +108,32 @@ def county_dispatch_inputs(
     )
     pvgen = pv_timeseries_ac_kwh(wdf, 1.0)
     assignment = resolve_county_service_assignment(slug)
-    tariff = TariffCatalog().bundle(assignment.utility, NBTScenario())
+    regime = ExportCompensationRegime.parse(export_compensation_regime)
+    catalog = TariffCatalog()
     ts = full_year_hourly_index(2026)
-    p_imp = np.array(tariff.import_schedule.rates_for(ts))
-    p_exp = np.array(tariff.export_schedule.rates_for(ts)) + tariff.acc_plus_rate
-    return DispatchInputs(slug, assignment.utility.value, load, pvgen, p_imp, p_exp)
+    nem2_terms = None
+    if regime is ExportCompensationRegime.NBT_2026:
+        tariff = catalog.bundle(assignment.utility, NBTScenario())
+        p_imp = np.array(tariff.import_schedule.rates_for(ts))
+        p_exp = (
+            np.array(tariff.export_schedule.rates_for(ts))
+            + tariff.acc_plus_rate
+        )
+    else:
+        tariff = catalog.nem2_bundle(assignment.utility, NEM2Scenario())
+        nem2_terms = tariff.optimization_terms_for(ts)
+        p_imp = np.array(nem2_terms.offsettable_rates_usd_per_kwh)
+        p_exp = np.array(nem2_terms.offsettable_rates_usd_per_kwh)
+    return DispatchInputs(
+        slug=slug,
+        util=assignment.utility.value,
+        load=load,
+        pv_gen_per_kw=pvgen,
+        p_imp=p_imp,
+        p_exp=p_exp,
+        export_compensation_regime=regime,
+        nem2_terms=nem2_terms,
+    )
 
 
 def county_dispatch_input_paths(

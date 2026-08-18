@@ -7,6 +7,7 @@ from .import_rates import ImportRateSchedule, required_nbt_import_plan
 from .models import (
     CustomerSegment,
     EnergyFlows,
+    ExportCompensationRegime,
     NBTScenario,
     ServiceType,
     TariffBundle,
@@ -46,6 +47,7 @@ __all__ = [
     "CustomerSegment",
     "CountyServiceAssignment",
     "EnergyFlows",
+    "ExportCompensationRegime",
     "ImportRateSchedule",
     "MonthlyBill",
     "NEM2BillLedger",

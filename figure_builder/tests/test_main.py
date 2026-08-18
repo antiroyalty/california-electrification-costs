@@ -12,16 +12,17 @@ from figure_builder.__main__ import (
     _cmd_sweeps,
     _parse_scenario_runs,
 )
+from tariffs import ExportCompensationRegime
 
 
-def test_sweeps_force_rebuilds_both_policy_regimes():
+def test_sweeps_force_rebuilds_all_four_policy_cases():
     args = SimpleNamespace(counties=["alameda", "fresno"], force=True, fine=False)
 
     with patch(
         "figure_builder.__main__.collect_battery_capex_sweep"
     ) as collect, patch("figure_builder.__main__.sweep_csv_path") as cache_path:
-        cache_path.side_effect = lambda slug, regime, resolution: (
-            f"{slug}-{regime}-{resolution}.csv"
+        cache_path.side_effect = lambda slug, regime, resolution, export: (
+            f"{slug}-{export.value}-{regime}-{resolution}.csv"
         )
 
         artifacts = _cmd_sweeps(args)
@@ -30,33 +31,77 @@ def test_sweeps_force_rebuilds_both_policy_regimes():
         call(
             "alameda",
             regime=PolicyRegime.POST_ITC_2026,
+            export_compensation_regime=ExportCompensationRegime.NBT_2026,
             force=True,
             fine=False,
         ),
         call(
             "fresno",
             regime=PolicyRegime.POST_ITC_2026,
+            export_compensation_regime=ExportCompensationRegime.NBT_2026,
             force=True,
             fine=False,
         ),
         call(
             "alameda",
             regime=PolicyRegime.ITC_2025,
+            export_compensation_regime=ExportCompensationRegime.NBT_2026,
             force=True,
             fine=False,
         ),
         call(
             "fresno",
             regime=PolicyRegime.ITC_2025,
+            export_compensation_regime=ExportCompensationRegime.NBT_2026,
+            force=True,
+            fine=False,
+        ),
+        call(
+            "alameda",
+            regime=PolicyRegime.POST_ITC_2026,
+            export_compensation_regime=(
+                ExportCompensationRegime.NEM2_AT_2026_RETAIL_RATES
+            ),
+            force=True,
+            fine=False,
+        ),
+        call(
+            "fresno",
+            regime=PolicyRegime.POST_ITC_2026,
+            export_compensation_regime=(
+                ExportCompensationRegime.NEM2_AT_2026_RETAIL_RATES
+            ),
+            force=True,
+            fine=False,
+        ),
+        call(
+            "alameda",
+            regime=PolicyRegime.ITC_2025,
+            export_compensation_regime=(
+                ExportCompensationRegime.NEM2_AT_2026_RETAIL_RATES
+            ),
+            force=True,
+            fine=False,
+        ),
+        call(
+            "fresno",
+            regime=PolicyRegime.ITC_2025,
+            export_compensation_regime=(
+                ExportCompensationRegime.NEM2_AT_2026_RETAIL_RATES
+            ),
             force=True,
             fine=False,
         ),
     ]
     assert artifacts == [
-        "alameda-post_itc_2026-288.csv",
-        "fresno-post_itc_2026-288.csv",
-        "alameda-itc_2025-288.csv",
-        "fresno-itc_2025-288.csv",
+        "alameda-nbt_2026-post_itc_2026-288.csv",
+        "fresno-nbt_2026-post_itc_2026-288.csv",
+        "alameda-nbt_2026-itc_2025-288.csv",
+        "fresno-nbt_2026-itc_2025-288.csv",
+        "alameda-nem2_at_2026_retail_rates-post_itc_2026-288.csv",
+        "fresno-nem2_at_2026_retail_rates-post_itc_2026-288.csv",
+        "alameda-nem2_at_2026_retail_rates-itc_2025-288.csv",
+        "fresno-nem2_at_2026_retail_rates-itc_2025-288.csv",
     ]
 
 
@@ -84,7 +129,7 @@ def test_installer_returns_document_and_sweep_cache_for_metadata(tmp_path):
     assert artifacts == [str(doc), str(cache)]
 
 
-def test_market_command_builds_current_law_exact_observations_only():
+def test_market_command_builds_only_declared_full_hourly_policy_cases():
     args = SimpleNamespace(counties=["alameda"], force=True, fine=False)
 
     with (
@@ -95,14 +140,39 @@ def test_market_command_builds_current_law_exact_observations_only():
             "figure_builder.__main__.market_observation_csv_path"
         ) as cache_path,
     ):
-        cache_path.side_effect = lambda slug, regime: f"{slug}-{regime}.csv"
+        cache_path.side_effect = lambda slug, regime, export: (
+            f"{slug}-{export.value}-{regime}.csv"
+        )
         artifacts = _cmd_market(args)
 
     assert collect.call_args_list == [
-        call("alameda", regime=PolicyRegime.POST_ITC_2026, force=True),
+        call(
+            "alameda",
+            regime=PolicyRegime.POST_ITC_2026,
+            export_compensation_regime=ExportCompensationRegime.NBT_2026,
+            force=True,
+        ),
+        call(
+            "alameda",
+            regime=PolicyRegime.POST_ITC_2026,
+            export_compensation_regime=(
+                ExportCompensationRegime.NEM2_AT_2026_RETAIL_RATES
+            ),
+            force=True,
+        ),
+        call(
+            "alameda",
+            regime=PolicyRegime.ITC_2025,
+            export_compensation_regime=(
+                ExportCompensationRegime.NEM2_AT_2026_RETAIL_RATES
+            ),
+            force=True,
+        ),
     ]
     assert artifacts == [
-        "alameda-post_itc_2026.csv",
+        "alameda-nbt_2026-post_itc_2026.csv",
+        "alameda-nem2_at_2026_retail_rates-post_itc_2026.csv",
+        "alameda-nem2_at_2026_retail_rates-itc_2025.csv",
     ]
 
 
