@@ -12,14 +12,23 @@ from pathlib import Path
 from figure_builder import FIG_DIR, current_claims_doc
 from figure_builder import docio
 from figure_builder.charts import (
-    plot_battery_value_waterfall, plot_marginal_solar_value_ladder,
-    plot_pv_batt_vs_capex, plot_pv_batt_vs_capex_compare, plot_pv_ceiling,
+    plot_battery_value_waterfall,
+    plot_case_study_eac,
+    plot_marginal_solar_value_ladder,
+    plot_pv_batt_vs_capex,
+    plot_pv_batt_vs_capex_compare,
+    plot_pv_ceiling,
+    plot_statewide_cooptimization_savings,
+    plot_statewide_electrification_savings,
     solar_generation_weighted_export_rate,
 )
 from figure_builder.datasets import (
     collect_battery_capex_sweep,
+    collect_claims_eac_results,
     collect_market_price_observation,
+    claims_eac_source_path,
     select_market_observation,
+    summarize_claims_eac,
 )
 from figure_builder.dispatch import CLAIM1_COUNTIES, county_dispatch_inputs
 from figure_builder.metadata import tariff_metadata
@@ -521,6 +530,125 @@ def build_tariff_status_block(doc=None) -> Path:
             _LEGACY_TARIFF_STATUS_PATTERN,
             docio.wrap_markers("TARIFF-STATUS", fragment),
         )
+    _write(doc, html)
+    return doc
+
+
+def _claim2_fragment(
+    source_label: str,
+    case_image: str,
+    statewide_image: str,
+    statewide_meta: dict,
+) -> str:
+    total = statewide_meta["county_count"]
+    wins = statewide_meta["positive_count"]
+    median = statewide_meta["median"]
+    low = statewide_meta["minimum"]
+    high = statewide_meta["maximum"]
+    qualifier = "all" if wins == total else f"{wins} of"
+    return f'''<section class="claim" id="claim-2">
+  <div class="claim-head"><span class="claim-num">CLAIM 2</span></div>
+  <h2 class="claim-title">Full electrification with co-optimized PV/storage has lower modeled annual cost than the gas-appliance + ICE reference in {qualifier} {total} counties</h2>
+  <p class="claim-sub">This is a like-for-like comparison of the repository&rsquo;s <code>baseline_ice_car</code> reference and <code>full_electric_ev_coopt</code> case. The reference retains gas space/water heating and cooking plus an internal-combustion vehicle; it also retains the fixed PV/storage convention used by the non-co-optimized scenario family, so it is <strong>not</strong> a no-solar household.</p>
+
+  <div class="stat-row">
+    <div class="stat"><span class="num">{wins} of {total}</span><span class="lbl">counties where the co-optimized all-electric case has lower equivalent annual cost</span></div>
+    <div class="stat"><span class="num">{median:.1f}%</span><span class="lbl">median modeled annual-cost reduction</span></div>
+    <div class="stat"><span class="num">{low:.1f}% to {high:.1f}%</span><span class="lbl">county range; negative values mean the all-electric case costs more</span></div>
+  </div>
+
+  <figure class="fig"><img src="data:image/png;base64,{case_image}" alt="Equivalent annual cost components for three modeled choices in four case-study counties" /><figcaption><strong>What is included in equivalent annual cost.</strong> Annualized solar, storage, electric-equipment, and gas-equipment capital costs are stacked with annual electricity, gas, and vehicle O&amp;M costs. All bars come from the same refreshed Step&nbsp;18 source. The shared legend sits below the four panels so it does not obscure a bar.</figcaption></figure>
+
+  <figure class="fig"><img src="data:image/png;base64,{statewide_image}" alt="Sorted statewide annual-cost reduction from full electrification with co-optimized solar and storage" /><figcaption><strong>Statewide distribution, not four selected examples.</strong> Every one of the {total} modeled counties is shown and sorted by the percent reduction relative to the gas-appliance + ICE reference. Green bars favor the all-electric case; red bars favor the reference.</figcaption></figure>
+
+  <div class="method">
+    <h3>Calculation</h3>
+    <p><code>EAC = annualized PV + annualized storage + annualized electric equipment + annualized gas equipment + electricity bill + gas bill + vehicle O&amp;M</code>. Claim&nbsp;2 reports <code>100 &times; (reference EAC &minus; co-optimized electric EAC) / reference EAC</code>.</p>
+    <p>Source: <code>{source_label}</code>. The builder requires exactly one finite, non-negative row for each of the three cases in every one of the repository&rsquo;s 47 counties; missing or duplicate coverage fails the build.</p>
+  </div>
+
+  <div class="evidence"><h3>Checks tied to this claim</h3><ul>
+    <li><code>tests/total_annual_costs_test.py</code> checks EAC reconciliation and NaN propagation.</li>
+    <li><code>tests/capital_costs_test.py</code> checks annualized capital-cost inputs.</li>
+    <li><code>tests/tariffs_source_test.py</code> checks the source-locked import, export, ACC Plus, and NBC tariff primitives used in annual bills.</li>
+    <li><code>figure_builder/tests/test_datasets.py</code> checks complete scenario/county coverage and exact comparison arithmetic.</li>
+  </ul></div>
+</section>'''
+
+
+def _claim3_fragment(
+    source_label: str,
+    statewide_image: str,
+    statewide_meta: dict,
+) -> str:
+    total = statewide_meta["county_count"]
+    wins = statewide_meta["positive_count"]
+    mean = statewide_meta["mean"]
+    median = statewide_meta["median"]
+    low = statewide_meta["minimum"]
+    high = statewide_meta["maximum"]
+    qualifier = "all" if wins == total else f"{wins} of"
+    return f'''<section class="claim" id="claim-3">
+  <div class="claim-head"><span class="claim-num">CLAIM 3</span></div>
+  <h2 class="claim-title">Co-optimizing PV/storage lowers modeled annual cost relative to fixed sizing in {qualifier} {total} counties</h2>
+  <p class="claim-sub">The appliance mix is held fixed at full electrification plus an EV. The comparison changes the solar/storage sizing and dispatch convention: <code>full_electric_ev</code> uses the fixed-system path, while <code>full_electric_ev_coopt</code> chooses PV and battery capacity jointly with hourly dispatch under the same current tariff and capital-cost assumptions.</p>
+
+  <div class="stat-row">
+    <div class="stat"><span class="num">${mean:,.0f}/yr</span><span class="lbl">mean EAC reduction from co-optimization</span></div>
+    <div class="stat"><span class="num">${median:,.0f}/yr</span><span class="lbl">median EAC reduction</span></div>
+    <div class="stat"><span class="num">${low:,.0f} to ${high:,.0f}</span><span class="lbl">county range; negative values mean fixed sizing costs less</span></div>
+  </div>
+
+  <figure class="fig"><img src="data:image/png;base64,{statewide_image}" alt="Sorted statewide annual EAC savings from co-optimizing solar and storage" /><figcaption><strong>The value of choosing system size rather than imposing it.</strong> Each bar is <code>fixed-system EAC &minus; co-optimized EAC</code> for the same county and full-electric appliance/vehicle mix. The chart shows all {total} counties, rather than only the four case studies.</figcaption></figure>
+
+  <div class="method">
+    <h3>Calculation and interpretation</h3>
+    <p>Claim&nbsp;3 is an incremental modeling result, not a claim that rooftop PV or storage is free. Positive savings mean the optimized capacity/dispatch combination has lower total EAC after its own capital cost is included. Source: <code>{source_label}</code>.</p>
+  </div>
+
+  <div class="evidence"><h3>Checks tied to this claim</h3><ul>
+    <li><code>tests/solar_storage_dispatch_test.py</code> checks hourly energy balance, state of charge, and physical meter direction.</li>
+    <li><code>tests/total_annual_costs_test.py</code> checks that the component sum used here reconciles to total EAC.</li>
+    <li><code>figure_builder/tests/test_datasets.py</code> checks that fixed and co-optimized rows cover identical counties and that savings are computed from exact paired totals.</li>
+  </ul></div>
+</section>'''
+
+
+def build_statewide_claims(doc=None, *, source=None) -> Path:
+    """Rebuild Claims 2 and 3 from one strict, current Step 18 source."""
+
+    doc = Path(doc) if doc is not None else current_claims_doc()
+    source_path = Path(source) if source is not None else claims_eac_source_path()
+    eac = collect_claims_eac_results(source_path)
+    summary = summarize_claims_eac(eac)
+    fig_cases, _ = plot_case_study_eac(eac)
+    fig_claim2, meta_claim2 = plot_statewide_electrification_savings(summary)
+    fig_claim3, meta_claim3 = plot_statewide_cooptimization_savings(summary)
+    source_label = str(source_path.relative_to(source_path.parents[1]))
+    claim2 = _claim2_fragment(
+        source_label,
+        docio.embed_png(fig_cases),
+        docio.embed_png(fig_claim2),
+        meta_claim2,
+    )
+    claim3 = _claim3_fragment(
+        source_label,
+        docio.embed_png(fig_claim3),
+        meta_claim3,
+    )
+    html = _read(doc)
+    html = docio.replace_first(
+        html,
+        r'<section class="claim" id="claim-2">.*?'
+        r'(?=<section class="claim" id="claim-3">)',
+        claim2 + "\n\n",
+    )
+    html = docio.replace_first(
+        html,
+        r'<section class="claim" id="claim-3">.*?'
+        r'(?=<section class="claim" id="limitations">)',
+        claim3 + "\n\n",
+    )
     _write(doc, html)
     return doc
 

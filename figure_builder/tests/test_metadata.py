@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 import pytest
 
+from figure_builder.datasets import CLAIMS_EAC_SCENARIOS
 from figure_builder.dispatch import CLAIM1_COUNTIES
 from figure_builder.metadata import (
     build_run_metadata,
@@ -133,6 +134,7 @@ def test_build_run_metadata_hashes_inputs_and_deduplicates_artifacts(
     )
 
     assert metadata["run"]["generated_at_utc"] == "2026-08-17T12:00:00+00:00"
+    assert metadata["schema_version"] == 2
     assert metadata["run"]["git_sha"] == "abc1234"
     assert metadata["run"]["force"] is True
     assert len(metadata["run"]["counties"]) == 4
@@ -142,7 +144,56 @@ def test_build_run_metadata_hashes_inputs_and_deduplicates_artifacts(
         "combined_load_profile",
     }
     assert len(metadata["artifacts"]) == 1
+    assert metadata["statewide_claims"] is None
     json.dumps(metadata)
+
+
+def test_build_run_metadata_hashes_and_identifies_statewide_claims_source(
+    tmp_path,
+    monkeypatch,
+):
+    scenario = "test_scenario"
+    housing_type = "single-family-detached"
+    for slug, _, _ in CLAIM1_COUNTIES:
+        county_dir = tmp_path / scenario / housing_type / slug
+        county_dir.mkdir(parents=True)
+        (county_dir / f"weather_TMY_{slug}.csv").write_text(
+            f"weather,{slug}\n",
+            encoding="utf-8",
+        )
+        (county_dir / f"combined_profiles_{scenario}_{slug}.csv").write_text(
+            f"load,{slug}\n",
+            encoding="utf-8",
+        )
+    claims_source = tmp_path / "step18_eac.csv"
+    claims_source.write_text("scenario,county_slug,total_eac\n", encoding="utf-8")
+    monkeypatch.setattr("figure_builder.metadata.git_short_sha", lambda: "abc1234")
+
+    metadata = build_run_metadata(
+        [],
+        fine=False,
+        force=False,
+        generated_at=datetime(2026, 8, 17, 12, 0, tzinfo=timezone.utc),
+        scenario=scenario,
+        base_input_dir=tmp_path,
+        statewide_claims_source=claims_source,
+    )
+
+    statewide = metadata["statewide_claims"]
+    assert statewide == {
+        "source_path": str(claims_source.resolve()),
+        "scenario_cases": CLAIMS_EAC_SCENARIOS,
+        "expected_county_count": 47,
+        "electricity_variant": "nem3",
+    }
+    assert len(metadata["inputs"]) == 9
+    claims_input = next(
+        row
+        for row in metadata["inputs"]
+        if row["role"] == "statewide_claims_eac_source"
+    )
+    assert claims_input["path"] == str(claims_source.resolve())
+    assert claims_input["sha256"] == file_identity(claims_source)["sha256"]
 
 
 def test_build_run_metadata_rejects_naive_timestamp(tmp_path):

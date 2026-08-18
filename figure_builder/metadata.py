@@ -14,6 +14,7 @@ from appliances.incentive_policy import PolicyRegime, federal_itc_fraction
 from appliances.solar_system import SolarSystemAppliance
 from figure_builder import REPO, git_short_sha
 from figure_builder.datasets import (
+    CLAIMS_EAC_SCENARIOS,
     SWEEP_MODEL_SETTINGS,
     canonical_battery_capex_points,
 )
@@ -32,7 +33,7 @@ from tariffs import (
     resolve_county_service_assignment,
 )
 
-METADATA_SCHEMA_VERSION = 1
+METADATA_SCHEMA_VERSION = 2
 
 
 def _display_path(path: Path) -> str:
@@ -267,6 +268,7 @@ def build_run_metadata(
     generated_at: datetime | None = None,
     scenario: str = DEFAULT_SCENARIO,
     base_input_dir: str | Path = BASE_INPUT_DIR,
+    statewide_claims_source: str | Path | None = None,
 ) -> dict:
     """Build a complete, JSON-serializable receipt for one figure run."""
 
@@ -304,6 +306,18 @@ def build_run_metadata(
             }
         )
 
+    statewide_claims = None
+    if statewide_claims_source is not None:
+        claims_source = file_identity(statewide_claims_source)
+        claims_source["role"] = "statewide_claims_eac_source"
+        inputs.append(claims_source)
+        statewide_claims = {
+            "source_path": claims_source["path"],
+            "scenario_cases": dict(CLAIMS_EAC_SCENARIOS),
+            "expected_county_count": 47,
+            "electricity_variant": "nem3",
+        }
+
     return {
         "schema_version": METADATA_SCHEMA_VERSION,
         "run": {
@@ -322,6 +336,7 @@ def build_run_metadata(
         "optimization": optimization_metadata(fine=fine),
         "capital_costs": capital_cost_metadata(),
         "tariffs": tariff_metadata(),
+        "statewide_claims": statewide_claims,
         "inputs": inputs,
         "software": software_metadata(),
         "artifacts": _deduplicated_file_identities(artifacts),

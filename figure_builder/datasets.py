@@ -11,11 +11,18 @@ from __future__ import annotations
 import math
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import List, Optional, Sequence
 
 import pandas as pd
 
-from figure_builder import SWEEP_DIR, market_observation_csv_path, sweep_csv_path
+from figure_builder import (
+    REPO,
+    SWEEP_DIR,
+    git_short_sha,
+    market_observation_csv_path,
+    sweep_csv_path,
+)
 from figure_builder.dispatch import (
     DEFAULT_SCENARIO,
     SWEEP_POINTS,
@@ -60,6 +67,134 @@ MARKET_OBSERVATION_COLUMNS = [
     "policy_regime",
     "interval_count",
 ]
+
+CLAIMS_EAC_SCENARIOS = {
+    "baseline_ice_car": "gas_ice_reference",
+    "full_electric_ev": "fixed_pv_electric",
+    "full_electric_ev_coopt": "cooptimized_electric",
+}
+EAC_COMPONENT_COLUMNS = [
+    "capex_pv",
+    "capex_storage",
+    "capex_electric",
+    "capex_gas",
+    "annual_bill_electric",
+    "annual_bill_gas",
+    "vehicle_om",
+]
+
+
+def claims_eac_source_path(run_sha: str | None = None) -> Path:
+    """Step 18 source produced by a clean run at the specified model SHA."""
+
+    sha = run_sha or git_short_sha()
+    return REPO / "analysis_results" / f"step18_eac_by_county_nem3_g{sha}.csv"
+
+
+def expected_claim_counties() -> set[str]:
+    """The repository's explicit 47-county research domain."""
+
+    from helpers.main_helpers import (
+        central_counties,
+        norcal_counties,
+        socal_counties,
+        slugify_county_name,
+    )
+
+    return {
+        slugify_county_name(county)
+        for county in norcal_counties + central_counties + socal_counties
+    }
+
+
+def collect_claims_eac_results(
+    source: str | Path | None = None,
+    *,
+    expected_counties: set[str] | None = None,
+) -> pd.DataFrame:
+    """Load and strictly validate the three statewide EAC cases for Claims 2/3."""
+
+    path = Path(source) if source is not None else claims_eac_source_path()
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"Claims 2/3 EAC source not found: {path}. Run baseline_ice_car, "
+            "full_electric_ev, and full_electric_ev_coopt at the current clean SHA."
+        )
+    frame = pd.read_csv(path)
+    required = ["scenario", "county_slug", *EAC_COMPONENT_COLUMNS]
+    missing = [column for column in required if column not in frame.columns]
+    if missing:
+        raise ValueError(f"Claims 2/3 EAC source is missing columns: {missing}")
+    selected = frame[frame["scenario"].isin(CLAIMS_EAC_SCENARIOS)].copy()
+    selected["case"] = selected["scenario"].map(CLAIMS_EAC_SCENARIOS)
+    expected = expected_counties if expected_counties is not None else expected_claim_counties()
+    if not expected:
+        raise ValueError("Claims 2/3 expected county set cannot be empty")
+    if selected[["scenario", "county_slug"]].isna().any().any():
+        raise ValueError("Claims 2/3 EAC source has missing scenario/county identity")
+    duplicates = selected.duplicated(["scenario", "county_slug"], keep=False)
+    if duplicates.any():
+        keys = selected.loc[duplicates, ["scenario", "county_slug"]].to_dict("records")
+        raise ValueError(f"Claims 2/3 EAC source has duplicate keys: {keys[:5]}")
+    for scenario in CLAIMS_EAC_SCENARIOS:
+        actual = set(selected.loc[selected["scenario"] == scenario, "county_slug"])
+        if actual != expected:
+            missing_counties = sorted(expected - actual)
+            extra_counties = sorted(actual - expected)
+            raise ValueError(
+                f"{scenario} county coverage mismatch: missing={missing_counties}, "
+                f"extra={extra_counties}"
+            )
+    numeric = selected[EAC_COMPONENT_COLUMNS].apply(pd.to_numeric, errors="coerce")
+    if numeric.isna().any().any():
+        bad = numeric.isna().any(axis=1)
+        keys = selected.loc[bad, ["scenario", "county_slug"]].to_dict("records")
+        raise ValueError(f"Claims 2/3 EAC source has missing/non-numeric costs: {keys[:5]}")
+    if not all(math.isfinite(value) for value in numeric.to_numpy().ravel()):
+        raise ValueError("Claims 2/3 EAC source has non-finite costs")
+    if (numeric < 0.0).any().any():
+        bad = (numeric < 0.0).any(axis=1)
+        keys = selected.loc[bad, ["scenario", "county_slug"]].to_dict("records")
+        raise ValueError(f"Claims 2/3 EAC source has negative costs: {keys[:5]}")
+    selected[EAC_COMPONENT_COLUMNS] = numeric
+    selected["total_eac"] = numeric.sum(axis=1)
+    if (selected["total_eac"] <= 0.0).any():
+        raise ValueError("Claims 2/3 EAC totals must be positive")
+    selected = selected[
+        ["scenario", "case", "county_slug", *EAC_COMPONENT_COLUMNS, "total_eac"]
+    ].sort_values(["county_slug", "scenario"]).reset_index(drop=True)
+    selected.attrs["source_path"] = str(path)
+    return selected
+
+
+def summarize_claims_eac(eac: pd.DataFrame) -> pd.DataFrame:
+    """One county per row with the exact comparisons used by Claims 2 and 3."""
+
+    required_cases = set(CLAIMS_EAC_SCENARIOS.values())
+    if set(eac["case"]) != required_cases:
+        raise ValueError(
+            f"Claims EAC cases must be {sorted(required_cases)}; "
+            f"found {sorted(set(eac['case']))}"
+        )
+    if eac.duplicated(["case", "county_slug"]).any():
+        raise ValueError("Claims EAC input has duplicate case/county rows")
+    wide = eac.pivot(index="county_slug", columns="case", values="total_eac")
+    if wide.isna().any().any():
+        raise ValueError("Claims EAC cases do not cover identical counties")
+    wide = wide.reset_index()
+    wide["gas_to_coopt_savings"] = (
+        wide["gas_ice_reference"] - wide["cooptimized_electric"]
+    )
+    wide["gas_to_coopt_pct"] = (
+        100.0 * wide["gas_to_coopt_savings"] / wide["gas_ice_reference"]
+    )
+    wide["fixed_to_coopt_savings"] = (
+        wide["fixed_pv_electric"] - wide["cooptimized_electric"]
+    )
+    wide["fixed_to_coopt_pct"] = (
+        100.0 * wide["fixed_to_coopt_savings"] / wide["fixed_pv_electric"]
+    )
+    return wide.sort_values("county_slug").reset_index(drop=True)
 
 
 def sweep_cache_is_compatible(

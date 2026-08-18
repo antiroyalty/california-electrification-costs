@@ -111,6 +111,7 @@ def test_all_passes_cli_run_identity_to_metadata_writer():
         "installer",
         "counties",
         "tariff_status",
+        "statewide",
         "bridge",
         "split",
     )
@@ -128,6 +129,7 @@ def test_all_passes_cli_run_identity_to_metadata_writer():
         patches[5],
         patches[6],
         patches[7],
+        patches[8],
         patch("figure_builder.__main__._write_metadata") as write_metadata,
     ):
         artifacts = _cmd_all(args)

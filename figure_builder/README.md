@@ -15,10 +15,10 @@ redefined here.
 |---|---|
 | `dispatch.py` | Turn a county slug into 8760-hour load / PV / import / export arrays. |
 | `pricing.py` | `live_prices(regime)` — net capital costs, read from the appliance classes so captions can't drift from the model. |
-| `datasets.py` | Collectors (`collect_*`) that run the model and return tidy DataFrames. |
+| `datasets.py` | Strict collectors (`collect_*`) that run the model or validate complete, source-locked result tables and return tidy DataFrames. |
 | `charts.py` | Pure plot functions (`plot_*`): DataFrame → matplotlib Figure. No IO. |
 | `docio.py` | Pure string primitives: embed PNGs, patch/splice HTML documents idempotently. |
-| `recipes.py` | Compose the above into specific document figures (mechanism block, county grid, bridge, split). |
+| `recipes.py` | Compose the above into specific document figures (Claim 1 mechanism/county figures, statewide Claims 2/3, bridge, split). |
 | `__main__.py` | CLI driver; `all` emits `figures/run_metadata.json`. |
 | `tests/` | Unit tests for collectors, charts, document IO, pricing, and metadata. |
 
@@ -44,6 +44,7 @@ python3 -m figure_builder sweeps --counties alameda --fine  # deliberate 8760 ru
 python3 -m figure_builder market                    # exact 8760 current-law market points
 python3 -m figure_builder mechanism                 # Claim-1 Figures A/B/C + objective box
 python3 -m figure_builder counties                  # Claim-1 four-county grid
+python3 -m figure_builder statewide                 # Claims 2/3 from complete paired EAC results
 python3 -m figure_builder bridge                    # assumption-bridge waterfall PNG
 python3 -m figure_builder split                     # combined doc -> claim1/2/3.html
 ```
@@ -77,6 +78,13 @@ capital-cost sources, sweep points, solver assumptions, and utility tariff
 source IDs. Values come from the same primitives used by the sweep rather than
 being copied into a parallel configuration.
 
+The manifest also hashes the exact Step 18 EAC table used for statewide Claims
+2 and 3 and records the three scenario-to-case mappings. The statewide builder
+requires exactly the declared 47 counties for every case, rejects duplicate or
+non-finite rows, and constructs each reported total as the exact sum of its
+seven cost components. It never fills a missing scenario/county from another
+run.
+
 The sweep objective uses hourly import prices, NBT export prices, and ACC Plus.
 It does not apply annual net-surplus compensation; the manifest records that
 boundary explicitly instead of listing NSC source data as if it affected the
@@ -106,11 +114,11 @@ recipes load both regimes deliberately; callers do not select one implicitly.
 python3 -m pytest figure_builder/tests/ -q
 ```
 
-## Not yet migrated
+## Remaining migration boundary
 
-The scenario-comparison figures still live in
-`helpers/plot_scenario_comparison_helper.py` (used by pipeline steps 18–23, the
-sensitivity runner, and the `experiments/` sweeps) and in
-`skills/research-figure-builder/scripts/build_research_figures.py`. Folding those
-`collect_*` / `plot_*` functions into this package — behind a re-export shim so
-the existing importers keep working — is the planned second step.
+The publication figures for statewide Claims 2 and 3 are now generated here
+from the paired Step 18 EAC result table. Other exploratory scenario-comparison
+figures still live in `helpers/plot_scenario_comparison_helper.py` (used by
+pipeline steps 18–23, the sensitivity runner, and the `experiments/` sweeps) and
+in `skills/research-figure-builder/scripts/build_research_figures.py`. They are
+outside the Claims 1–3 publication path and have not been migrated.

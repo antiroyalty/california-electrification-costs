@@ -12,10 +12,13 @@ from figure_builder.charts import (
 )
 from figure_builder.recipes import (
     _claim1_summary_fragment,
+    _claim2_fragment,
+    _claim3_fragment,
     _installer_rule_fragment,
     _mechanism_fragment,
     _tariff_status_fragment,
     build_installer_rule_figure,
+    build_statewide_claims,
     build_tariff_status_block,
 )
 
@@ -278,3 +281,99 @@ def test_tariff_status_builder_replaces_legacy_text_and_is_idempotent(tmp_path):
     assert "<!-- TARIFF-STATUS-START -->" in first
     assert "obsolete tariff text" not in first
     assert "sdge-export" in first
+
+
+def test_claim2_fragment_reports_distribution_without_overstating_unanimity():
+    html = _claim2_fragment(
+        "analysis_results/step18.csv",
+        "case-image",
+        "statewide-image",
+        {
+            "county_count": 47,
+            "positive_count": 46,
+            "median": 14.6,
+            "minimum": -1.2,
+            "maximum": 24.8,
+        },
+    )
+
+    assert "in 46 of 47 counties" in html
+    assert "14.6%" in html
+    assert "-1.2% to 24.8%" in html
+    assert "not</strong> a no-solar household" in html
+    assert "nem3_billing_test.py" not in html
+    assert "total_annual_costs_test.py" in html
+
+
+def test_claim3_fragment_uses_paired_fixed_vs_cooptimized_metrics():
+    html = _claim3_fragment(
+        "analysis_results/step18.csv",
+        "statewide-image",
+        {
+            "county_count": 47,
+            "positive_count": 47,
+            "mean": 646.4,
+            "median": 625.0,
+            "minimum": 271.0,
+            "maximum": 826.0,
+        },
+    )
+
+    assert "in all 47 counties" in html
+    assert "$646/yr" in html
+    assert "$271 to $826" in html
+    assert "full_electric_ev_coopt" in html
+
+
+def test_statewide_claims_builder_replaces_both_stale_sections(tmp_path):
+    doc = tmp_path / "claims.html"
+    source = tmp_path / "step18.csv"
+    source.write_text("fixture")
+    doc.write_text(
+        '<section class="claim" id="claim-2">stale claim 2</section>\n'
+        '<section class="claim" id="claim-3">stale claim 3</section>\n'
+        '<section class="claim" id="limitations">keep limitations</section>'
+    )
+    eac = SimpleNamespace()
+    summary = SimpleNamespace()
+    meta2 = {
+        "county_count": 47,
+        "positive_count": 46,
+        "median": 14.6,
+        "minimum": -1.2,
+        "maximum": 24.8,
+    }
+    meta3 = {
+        "county_count": 47,
+        "positive_count": 47,
+        "mean": 646.4,
+        "median": 625.0,
+        "minimum": 271.0,
+        "maximum": 826.0,
+    }
+
+    with (
+        patch("figure_builder.recipes.collect_claims_eac_results", return_value=eac),
+        patch("figure_builder.recipes.summarize_claims_eac", return_value=summary),
+        patch("figure_builder.recipes.plot_case_study_eac", return_value=("case", {})),
+        patch(
+            "figure_builder.recipes.plot_statewide_electrification_savings",
+            return_value=("claim2", meta2),
+        ),
+        patch(
+            "figure_builder.recipes.plot_statewide_cooptimization_savings",
+            return_value=("claim3", meta3),
+        ),
+        patch(
+            "figure_builder.recipes.docio.embed_png",
+            side_effect=["case-image", "claim2-image", "claim3-image"],
+        ),
+    ):
+        build_statewide_claims(doc, source=source)
+
+    html = doc.read_text()
+    assert "stale claim 2" not in html
+    assert "stale claim 3" not in html
+    assert "CLAIM 2" in html
+    assert "CLAIM 3" in html
+    assert "keep limitations" in html

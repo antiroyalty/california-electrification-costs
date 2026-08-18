@@ -42,7 +42,27 @@ def apply_style(serif_first: str = "Georgia") -> None:
     })
 
 
-Meta = Dict[str, float | str]
+Meta = Dict[str, float | str | int]
+
+EAC_CASE_ORDER = [
+    "gas_ice_reference",
+    "fixed_pv_electric",
+    "cooptimized_electric",
+]
+EAC_CASE_LABELS = {
+    "gas_ice_reference": "Gas appliances + ICE\n(fixed PV/storage)",
+    "fixed_pv_electric": "Full electric + fixed PV",
+    "cooptimized_electric": "Full electric + co-optimized PV/storage",
+}
+EAC_COMPONENT_STYLE = [
+    ("capex_pv", "Solar capex", "#2B6E63"),
+    ("capex_storage", "Storage capex", "#8A5A12"),
+    ("capex_electric", "Electric equipment capex", "#5B7FA3"),
+    ("capex_gas", "Gas equipment capex", "#9B7355"),
+    ("annual_bill_electric", "Electricity bill", "#84B7A8"),
+    ("annual_bill_gas", "Gas bill", "#D7A86E"),
+    ("vehicle_om", "Vehicle O&M", "#8A968F"),
+]
 
 
 def solar_generation_weighted_export_rate(dispatch) -> float:
@@ -370,6 +390,188 @@ def plot_pv_ceiling(sweep: pd.DataFrame, dispatch, *, batt_price_net: float
     return fig, {"pv_100": pv_100, "pv_100_rte": pv_100_rte,
                  "batt_min": float(btc[imin]), "pv_min": float(pvc[imin]),
                  "cover_min": float(pvc[imin] * yield_kw / annual_load)}
+
+
+def plot_case_study_eac(
+    eac: pd.DataFrame,
+    *,
+    counties: tuple[str, ...] = (
+        "alameda",
+        "fresno",
+        "los-angeles",
+        "san-diego",
+    ),
+) -> Tuple["object", Meta]:
+    """Four-panel stacked EAC comparison with one unobstructed shared legend."""
+
+    apply_style()
+    import matplotlib.pyplot as plt
+
+    missing = set(counties) - set(eac["county_slug"])
+    if missing:
+        raise ValueError(f"Case-study EAC data missing counties: {sorted(missing)}")
+    fig, axes = plt.subplots(2, 2, figsize=(12.8, 9.2))
+    maximum = 0.0
+    totals: dict[tuple[str, str], float] = {}
+    for axis, county in zip(axes.ravel(), counties):
+        rows = eac[eac["county_slug"] == county].set_index("case")
+        if set(rows.index) != set(EAC_CASE_ORDER):
+            raise ValueError(f"{county} does not contain all three EAC cases")
+        rows = rows.loc[EAC_CASE_ORDER]
+        bottom = np.zeros(len(rows))
+        x = np.arange(len(rows))
+        for column, label, color in EAC_COMPONENT_STYLE:
+            values = rows[column].to_numpy(dtype=float)
+            axis.bar(
+                x,
+                values,
+                bottom=bottom,
+                width=0.68,
+                color=color,
+                label=label,
+                edgecolor="white",
+                linewidth=0.4,
+            )
+            bottom += values
+        maximum = max(maximum, float(bottom.max()))
+        for xi, total in zip(x, bottom):
+            axis.text(
+                xi,
+                total + 120.0,
+                f"${total:,.0f}",
+                ha="center",
+                va="bottom",
+                fontsize=8.5,
+                color=INK,
+                **MONO,
+            )
+        totals.update(
+            {(county, case): float(total) for case, total in zip(EAC_CASE_ORDER, bottom)}
+        )
+        axis.set_xticks(x)
+        axis.set_xticklabels(
+            [EAC_CASE_LABELS[case] for case in EAC_CASE_ORDER],
+            fontsize=8.4,
+            linespacing=1.15,
+        )
+        axis.set_title(
+            county.replace("-", " ").title() + " County",
+            fontsize=11,
+            loc="left",
+            color=INK,
+        )
+        axis.spines["top"].set_visible(False)
+        axis.spines["right"].set_visible(False)
+        axis.grid(axis="y", color=RULE, linewidth=0.6, alpha=0.55)
+        axis.set_axisbelow(True)
+    for axis in axes.ravel():
+        axis.set_ylim(0.0, maximum * 1.14)
+        axis.set_ylabel("Equivalent annual cost ($/year)", fontsize=9.5)
+    handles, labels = axes.ravel()[0].get_legend_handles_labels()
+    fig.legend(
+        handles,
+        labels,
+        loc="lower center",
+        ncol=4,
+        frameon=False,
+        bbox_to_anchor=(0.5, 0.005),
+        fontsize=8.7,
+    )
+    fig.suptitle(
+        "Household energy and vehicle cost under three modeled choices",
+        x=0.04,
+        y=0.99,
+        ha="left",
+        fontsize=13,
+        color=INK,
+    )
+    fig.tight_layout(rect=(0.0, 0.08, 1.0, 0.96))
+    return fig, {
+        "case_study_count": len(counties),
+        "maximum_total_eac": max(totals.values()),
+    }
+
+
+def _plot_statewide_sorted_savings(
+    summary: pd.DataFrame,
+    *,
+    column: str,
+    title: str,
+    xlabel: str,
+    value_format,
+) -> Tuple["object", Meta]:
+    apply_style()
+    import matplotlib.pyplot as plt
+
+    if summary.empty or column not in summary:
+        raise ValueError(f"Statewide savings data missing {column}")
+    rows = summary.sort_values(column, ascending=True).reset_index(drop=True)
+    values = rows[column].to_numpy(dtype=float)
+    if not np.isfinite(values).all():
+        raise ValueError(f"Statewide savings {column} contains non-finite values")
+    labels = rows["county_slug"].str.replace("-", " ").str.title()
+    colors = [POS if value > 0 else NEG if value < 0 else INK_FAINT for value in values]
+    fig, axis = plt.subplots(figsize=(8.2, 11.2))
+    y = np.arange(len(rows))
+    axis.barh(y, values, color=colors, height=0.72, edgecolor="white", linewidth=0.3)
+    axis.axvline(0.0, color=INK, linewidth=1.0)
+    axis.set_yticks(y)
+    axis.set_yticklabels(labels, fontsize=7.8)
+    axis.set_xlabel(xlabel, fontsize=10)
+    axis.set_title(title, fontsize=12, loc="left", color=INK, pad=10)
+    axis.spines["top"].set_visible(False)
+    axis.spines["right"].set_visible(False)
+    axis.spines["left"].set_visible(False)
+    axis.grid(axis="x", color=RULE, linewidth=0.6, alpha=0.7)
+    axis.set_axisbelow(True)
+    for index in {0, len(rows) - 1}:
+        axis.text(
+            values[index],
+            index,
+            "  " + value_format(values[index]),
+            va="center",
+            ha="left" if values[index] >= 0 else "right",
+            fontsize=8.2,
+            color=INK,
+            **MONO,
+        )
+    fig.tight_layout()
+    return fig, {
+        "county_count": len(rows),
+        "positive_count": int((values > 0.0).sum()),
+        "zero_count": int((values == 0.0).sum()),
+        "negative_count": int((values < 0.0).sum()),
+        "mean": float(np.mean(values)),
+        "median": float(np.median(values)),
+        "minimum": float(np.min(values)),
+        "maximum": float(np.max(values)),
+        "minimum_county": str(rows.iloc[0]["county_slug"]),
+        "maximum_county": str(rows.iloc[-1]["county_slug"]),
+    }
+
+
+def plot_statewide_electrification_savings(
+    summary: pd.DataFrame,
+) -> Tuple["object", Meta]:
+    return _plot_statewide_sorted_savings(
+        summary,
+        column="gas_to_coopt_pct",
+        title="Full electrification vs. gas-appliance + ICE reference",
+        xlabel="Reduction in equivalent annual cost (%); positive = lower cost",
+        value_format=lambda value: f"{value:.1f}%",
+    )
+
+
+def plot_statewide_cooptimization_savings(
+    summary: pd.DataFrame,
+) -> Tuple["object", Meta]:
+    return _plot_statewide_sorted_savings(
+        summary,
+        column="fixed_to_coopt_savings",
+        title="Value of co-optimizing PV/storage instead of using fixed sizing",
+        xlabel="Annual EAC savings from co-optimization ($/year); positive = lower cost",
+        value_format=lambda value: f"${value:,.0f}",
+    )
 
 
 @dataclass

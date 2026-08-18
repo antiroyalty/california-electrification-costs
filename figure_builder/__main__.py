@@ -6,6 +6,7 @@
     python3 -m figure_builder market                 # exact current-law market points
     python3 -m figure_builder mechanism              # patch Claim-1 mechanism block
     python3 -m figure_builder counties               # patch Claim-1 county grid
+    python3 -m figure_builder statewide              # rebuild Claims 2 and 3
     python3 -m figure_builder bridge                 # render bridge waterfall PNG
     python3 -m figure_builder split                  # split combined -> claim1/2/3.html
     python3 -m figure_builder all                    # rebuild all report inputs and sections
@@ -116,6 +117,12 @@ def _cmd_tariff_status(_args):
     return [str(build_tariff_status_block())]
 
 
+def _cmd_statewide(_args):
+    from figure_builder.recipes import build_statewide_claims
+
+    return [str(build_statewide_claims())]
+
+
 def _cmd_bridge(_args):
     from figure_builder.recipes import build_bridge
     return [str(build_bridge())]
@@ -142,6 +149,7 @@ def _cmd_all(args):
     artifacts += _cmd_installer(args)
     artifacts += _cmd_counties(args)
     artifacts += _cmd_tariff_status(args)
+    artifacts += _cmd_statewide(args)
     artifacts += _cmd_bridge(args)
     artifacts += _cmd_split(args)
     _write_metadata(
@@ -160,6 +168,7 @@ def _write_metadata(
     force: bool,
     requested_counties,
 ) -> None:
+    from figure_builder.datasets import claims_eac_source_path
     from figure_builder.metadata import build_run_metadata, write_run_metadata
 
     metadata = build_run_metadata(
@@ -167,6 +176,7 @@ def _write_metadata(
         fine=fine,
         force=force,
         requested_counties=requested_counties,
+        statewide_claims_source=claims_eac_source_path(),
     )
     path = FIG_DIR / "run_metadata.json"
     write_run_metadata(path, metadata)
@@ -176,7 +186,8 @@ def _write_metadata(
 _COMMANDS = {
     "snapshot": _cmd_snapshot, "sweeps": _cmd_sweeps, "market": _cmd_market,
     "mechanism": _cmd_mechanism,
-    "counties": _cmd_counties, "bridge": _cmd_bridge, "split": _cmd_split,
+    "counties": _cmd_counties, "statewide": _cmd_statewide,
+    "bridge": _cmd_bridge, "split": _cmd_split,
     "all": _cmd_all,
 }
 

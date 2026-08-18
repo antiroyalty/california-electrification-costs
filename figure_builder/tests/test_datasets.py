@@ -13,18 +13,50 @@ from unittest.mock import patch
 
 from figure_builder import market_observation_csv_path, sweep_csv_path
 from figure_builder.datasets import (
+    CLAIMS_EAC_SCENARIOS,
+    EAC_COMPONENT_COLUMNS,
     MARKET_OBSERVATION_COLUMNS,
     SWEEP_COLUMNS,
     canonical_battery_capex_points,
     collect_battery_capex_sweep,
+    collect_claims_eac_results,
     collect_market_price_observation,
     normalize_battery_capex_points,
     resolve_pv_capex,
     select_market_observation,
+    summarize_claims_eac,
     sweep_cache_is_compatible,
 )
 from figure_builder.pricing import live_prices
 from figure_builder.dispatch import CLAIM1_COUNTIES
+
+
+def _eac_source_fixture(counties=("alpha", "beta")) -> pd.DataFrame:
+    totals = {
+        "alpha": {
+            "baseline_ice_car": 14_000.0,
+            "full_electric_ev": 13_500.0,
+            "full_electric_ev_coopt": 12_000.0,
+        },
+        "beta": {
+            "baseline_ice_car": 10_000.0,
+            "full_electric_ev": 11_000.0,
+            "full_electric_ev_coopt": 10_500.0,
+        },
+    }
+    rows = []
+    for county in counties:
+        for scenario in CLAIMS_EAC_SCENARIOS:
+            components = {column: 0.0 for column in EAC_COMPONENT_COLUMNS}
+            components["annual_bill_electric"] = totals[county][scenario]
+            rows.append(
+                {
+                    "scenario": scenario,
+                    "county_slug": county,
+                    **components,
+                }
+            )
+    return pd.DataFrame(rows)
 
 
 def test_default_pv_capex_is_the_model_net_price():
@@ -231,6 +263,57 @@ def test_committed_current_law_market_observations_are_complete_and_plausible():
         assert 0.0 <= row["batt_kwh"] <= 0.1
         assert 1_000.0 < row["total_cost"] < 5_000.0
         assert 1 <= row["solver_rounds"] <= 10
+
+
+def test_claims_eac_collector_requires_complete_paired_county_coverage(tmp_path):
+    source = tmp_path / "step18.csv"
+    _eac_source_fixture().to_csv(source, index=False)
+
+    eac = collect_claims_eac_results(
+        source,
+        expected_counties={"alpha", "beta"},
+    )
+    summary = summarize_claims_eac(eac).set_index("county_slug")
+
+    assert len(eac) == 6
+    assert summary.loc["alpha", "gas_to_coopt_savings"] == pytest.approx(2_000.0)
+    assert summary.loc["alpha", "gas_to_coopt_pct"] == pytest.approx(100 / 7)
+    assert summary.loc["alpha", "fixed_to_coopt_savings"] == pytest.approx(1_500.0)
+    assert summary.loc["beta", "gas_to_coopt_savings"] == pytest.approx(-500.0)
+    assert summary.loc["beta", "fixed_to_coopt_savings"] == pytest.approx(500.0)
+
+
+@pytest.mark.parametrize("defect,message", [
+    ("missing", "coverage mismatch"),
+    ("duplicate", "duplicate keys"),
+    ("nan", "missing/non-numeric costs"),
+    ("infinite", "non-finite costs"),
+    ("negative", "negative costs"),
+])
+def test_claims_eac_collector_rejects_incomplete_or_malformed_sources(
+    tmp_path,
+    defect,
+    message,
+):
+    source = tmp_path / "step18.csv"
+    frame = _eac_source_fixture()
+    if defect == "missing":
+        frame = frame.iloc[1:].copy()
+    elif defect == "duplicate":
+        frame = pd.concat([frame, frame.iloc[[0]]], ignore_index=True)
+    elif defect == "nan":
+        frame.loc[0, "annual_bill_electric"] = float("nan")
+    elif defect == "infinite":
+        frame.loc[0, "annual_bill_electric"] = float("inf")
+    else:
+        frame.loc[0, "annual_bill_electric"] = -1.0
+    frame.to_csv(source, index=False)
+
+    with pytest.raises(ValueError, match=message):
+        collect_claims_eac_results(
+            source,
+            expected_counties={"alpha", "beta"},
+        )
 
 
 @pytest.mark.parametrize(
