@@ -13,7 +13,7 @@ import pytest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from figure_builder import market_observation_csv_path, sweep_csv_path
+from figure_builder import REPO, market_observation_csv_path, sweep_csv_path
 from figure_builder.datasets import (
     CLAIMS_EAC_SCENARIOS,
     EAC_COMPONENT_COLUMNS,
@@ -26,6 +26,7 @@ from figure_builder.datasets import (
     collect_claims_eac_results,
     collect_market_price_observation,
     load_claims_eac_manifest,
+    _manifest_display_path,
     normalize_battery_capex_points,
     resolve_pv_capex,
     select_market_observation,
@@ -371,6 +372,13 @@ def test_claims_source_builder_uses_exact_scenario_runs_and_writes_receipt(
     assert manifest["scenario_run_timestamps"] == timestamps
     assert manifest["completion_marker_count"] == 6
     assert manifest["source_csv"]["row_count"] == 6
+    assert manifest["source_csv"]["path"] == str(source.resolve())
+
+
+def test_claims_source_manifest_uses_repo_relative_path_for_public_source():
+    source = REPO / "analysis_results" / "claims.csv"
+
+    assert _manifest_display_path(source) == "analysis_results/claims.csv"
 
 
 def test_claims_source_builder_rejects_incomplete_model_run(tmp_path):

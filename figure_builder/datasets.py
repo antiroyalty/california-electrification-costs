@@ -116,6 +116,16 @@ def _file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _manifest_display_path(path: str | Path) -> str:
+    """Use a portable path for repository-owned source artifacts."""
+
+    resolved = Path(path).resolve()
+    try:
+        return str(resolved.relative_to(REPO.resolve()))
+    except ValueError:
+        return str(resolved)
+
+
 def load_claims_eac_manifest(source: str | Path) -> dict:
     """Load and verify the source receipt, including the CSV fingerprint."""
 
@@ -345,7 +355,7 @@ def build_claims_eac_source(
         "electricity_variant": "nem3",
         "electricity_plan_preference": list(CLAIMS_ELECTRICITY_PLAN_PREFERENCE),
         "source_csv": {
-            "path": str(destination),
+            "path": _manifest_display_path(destination),
             "sha256": _file_sha256(destination),
             "row_count": len(normalized),
         },
