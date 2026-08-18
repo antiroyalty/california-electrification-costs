@@ -27,13 +27,11 @@ def test_policy_matrix_has_exactly_four_unique_cases():
     }
 
 
-def test_full_hourly_cases_exclude_only_the_known_slow_nbt_itc_case():
-    excluded = set(POLICY_CASES) - set(FULL_HOURLY_POLICY_CASES)
-
-    assert excluded == {
+def test_full_hourly_command_retains_only_the_separate_current_law_check():
+    assert set(FULL_HOURLY_POLICY_CASES) == {
         policy_case(
             ExportCompensationRegime.NBT_2026,
-            PolicyRegime.ITC_2025,
+            PolicyRegime.POST_ITC_2026,
         )
     }
 

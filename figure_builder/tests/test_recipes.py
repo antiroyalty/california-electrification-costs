@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from figure_builder.charts import (
@@ -18,12 +19,15 @@ from figure_builder.recipes import (
     _installer_rule_fragment,
     _limitations_fragment,
     _mechanism_fragment,
+    _policy_matrix_fragment,
     _tariff_status_fragment,
     build_installer_rule_figure,
+    build_policy_matrix_figure,
     build_publication_scope,
     build_statewide_claims,
     build_tariff_status_block,
 )
+from figure_builder.policy_cases import POLICY_CASES
 
 
 def test_marginal_value_meta_preserves_peak_rate_and_storage_adjustment():
@@ -199,6 +203,47 @@ def test_installer_rule_caption_uses_county_export_schedule_mean():
     assert "~$0.05/kWh" not in html
 
 
+def test_policy_matrix_fragment_reports_dynamic_results_and_counterfactual_scope():
+    rows = []
+    summaries = {}
+    for case in POLICY_CASES:
+        summaries[case.case_id] = {
+            "median_pv_kw": 7.25,
+            "median_battery_kwh": 0.0,
+            "nontrivial_battery_count": 0,
+            "pv_sizing_limit_count": 4,
+        }
+        for county in ("a", "b", "c", "d"):
+            rows.append(
+                {
+                    "export_compensation_regime": (
+                        case.export_compensation_regime.value
+                    ),
+                    "battery_kwh": 0.0,
+                    "at_pv_sizing_limit": True,
+                    "county_slug": county,
+                }
+            )
+    html = _policy_matrix_fragment(
+        pd.DataFrame(rows),
+        {"case_summaries": summaries, "county_count": 4},
+        {
+            "exact_pv_kw": 7.317,
+            "exact_battery_kwh": 0.0,
+            "pv_difference_kw": 0.0001,
+            "battery_difference_kwh": 0.0,
+        },
+        "image",
+    )
+
+    assert "not a historical reconstruction" in html
+    assert "8 of 8" in html
+    assert "only <strong>0</strong>" in html
+    assert "7.317&nbsp;kW PV" in html
+    assert "0.0001&nbsp;kW PV" in html
+    assert "weighted 12&times;24 resolution" in html
+
+
 def test_publication_scope_removes_inherited_draft_claims(tmp_path):
     doc = tmp_path / "claims.html"
     doc.write_text(
@@ -206,6 +251,9 @@ def test_publication_scope_removes_inherited_draft_claims(tmp_path):
         '<span>branch <b>main</b></span><span><b>260</b> tests passing</span></div>'
         '<section class="claim" id="claim-1">\n'
         '<!-- INSTALLER-RULE-END -->\n'
+        '<!-- POLICY-MATRIX-START -->\n'
+        '<figure>current NEM 2 comparison</figure>\n'
+        '<!-- POLICY-MATRIX-END -->\n'
         '<figure>stale discount-rate result</figure>\n'
         '<div class="fig-pending">Figure TBD</div>\n'
         '</section>\n<!-- ============ CLAIM 2 ============ -->\n'
@@ -225,6 +273,7 @@ def test_publication_scope_removes_inherited_draft_claims(tmp_path):
 
     html = doc.read_text()
     assert "stale discount-rate result" not in html
+    assert "current NEM 2 comparison" in html
     assert "Figure TBD" not in html
     assert "old NBC limitation" not in html
     assert "$1,460.64/kWh" in html
@@ -310,6 +359,27 @@ def _tariff_metadata_fixture():
                 "acc_plus": {"source_id": "sdge-adder"},
             },
         ],
+        "comparison": {
+            "nem2_scenario": {
+                "research_label": "nem2_at_2026_retail_rates",
+                "tariff_snapshot_date": "2026-08-09",
+                "utilities": [
+                    {
+                        "utility": utility,
+                        "settlement": {
+                            "utility_rules_source_id": f"{slug}-rules",
+                            "billing_method_source_id": f"{slug}-billing",
+                            "nsc_rate_source_id": f"{slug}-nsc",
+                        },
+                    }
+                    for utility, slug in (
+                        ("PG&E", "pge"),
+                        ("SCE", "sce"),
+                        ("SDG&E", "sdge"),
+                    )
+                ],
+            }
+        },
     }
 
 
@@ -321,7 +391,9 @@ def test_tariff_status_fragment_uses_current_model_source_identity():
     assert "SCE TOU-D-PRIME (<code>sce-import</code>)" in html
     assert "SDG&amp;E EV-TOU-5 (<code>sdge-import</code>)" in html
     assert "<code>pge-export</code> plus ACC Plus <code>pge-adder</code>" in html
-    assert "Annual NSC settlement is not part of the sizing-sweep objective" in html
+    assert "Annual NSC settlement is not part of the NBT sizing-sweep objective" in html
+    assert "nem2_at_2026_retail_rates" in html
+    assert "pge-rules" in html
 
 
 def test_tariff_status_builder_replaces_legacy_text_and_is_idempotent(tmp_path):

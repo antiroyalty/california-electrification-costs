@@ -574,6 +574,202 @@ def plot_statewide_cooptimization_savings(
     )
 
 
+def plot_policy_matrix_optimal_sizes(
+    results: pd.DataFrame,
+) -> Tuple["object", dict]:
+    """Plot optimal PV and battery capacity for the four policy cases."""
+
+    from appliances.incentive_policy import PolicyRegime
+    from tariffs import ExportCompensationRegime
+
+    required = {
+        "county_slug",
+        "county_name",
+        "case_id",
+        "export_compensation_regime",
+        "capital_policy_regime",
+        "pv_kw",
+        "battery_kwh",
+        "at_pv_sizing_limit",
+        "temporal_resolution",
+    }
+    missing = required - set(results.columns)
+    if missing:
+        raise ValueError(f"Policy matrix chart is missing columns: {sorted(missing)}")
+    if results.empty:
+        raise ValueError("Policy matrix chart input cannot be empty")
+    numeric = results[["pv_kw", "battery_kwh"]].apply(
+        pd.to_numeric,
+        errors="coerce",
+    )
+    if numeric.isna().any().any() or not np.isfinite(numeric.to_numpy()).all():
+        raise ValueError("Policy matrix chart capacities must be finite numbers")
+    if (numeric < 0.0).any().any():
+        raise ValueError("Policy matrix chart capacities cannot be negative")
+    if set(results["temporal_resolution"]) != {
+        "weighted_12x24_monthly_hour"
+    }:
+        raise ValueError("Policy matrix chart requires one common resolution")
+
+    export_order = (
+        ExportCompensationRegime.NEM2_AT_2026_RETAIL_RATES,
+        ExportCompensationRegime.NBT_2026,
+    )
+    capital_order = (
+        PolicyRegime.ITC_2025,
+        PolicyRegime.POST_ITC_2026,
+    )
+    counties = list(dict.fromkeys(results["county_slug"]))
+    labels = []
+    for county in counties:
+        names = results.loc[results["county_slug"] == county, "county_name"].unique()
+        if len(names) != 1:
+            raise ValueError(f"Policy matrix county label is ambiguous for {county}")
+        labels.append(str(names[0]).replace(" County", ""))
+
+    expected_rows = len(counties) * len(export_order) * len(capital_order)
+    if len(results) != expected_rows or results.duplicated(
+        ["county_slug", "export_compensation_regime", "capital_policy_regime"]
+    ).any():
+        raise ValueError("Policy matrix chart requires one row per county and case")
+
+    apply_style()
+    import matplotlib.pyplot as plt
+
+    pv_ymax = max(float(numeric["pv_kw"].max()) * 1.20, 1.0)
+    battery_ymax = max(float(numeric["battery_kwh"].max()) * 1.20, 1.0)
+    fig, axes = plt.subplots(2, 2, figsize=(12.4, 8.0), sharex=True)
+    summaries = {}
+    legend_handles = None
+    for row_index, capital_regime in enumerate(capital_order):
+        for column_index, export_regime in enumerate(export_order):
+            axis = axes[row_index, column_index]
+            battery_axis = axis.twinx()
+            panel = results[
+                (results["capital_policy_regime"] == capital_regime.value)
+                & (
+                    results["export_compensation_regime"]
+                    == export_regime.value
+                )
+            ].set_index("county_slug").loc[counties]
+            x = np.arange(len(counties))
+            pv_values = panel["pv_kw"].to_numpy(dtype=float)
+            battery_values = panel["battery_kwh"].to_numpy(dtype=float)
+            bars = axis.bar(
+                x,
+                pv_values,
+                width=0.58,
+                color=ACCENT,
+                alpha=0.86,
+                label="Optimal solar (kW)",
+                zorder=2,
+            )
+            battery_points = battery_axis.scatter(
+                x,
+                battery_values,
+                marker="D",
+                s=42,
+                color=CAUT,
+                edgecolor="white",
+                linewidth=0.7,
+                label="Optimal battery (kWh)",
+                zorder=4,
+            )
+            if legend_handles is None:
+                legend_handles = (bars[0], battery_points)
+            for bar, at_limit in zip(bars, panel["at_pv_sizing_limit"]):
+                if bool(at_limit):
+                    axis.text(
+                        bar.get_x() + bar.get_width() / 2,
+                        bar.get_height() + pv_ymax * 0.018,
+                        "at cap",
+                        ha="center",
+                        va="bottom",
+                        fontsize=7.7,
+                        color=ACCENT_INK,
+                    )
+            axis.set_ylim(0.0, pv_ymax)
+            battery_axis.set_ylim(0.0, battery_ymax)
+            axis.set_xticks(x)
+            axis.set_xticklabels(labels, fontsize=8.5)
+            axis.grid(axis="y", color=RULE, linewidth=0.6, alpha=0.65)
+            axis.set_axisbelow(True)
+            axis.spines["top"].set_visible(False)
+            battery_axis.spines["top"].set_visible(False)
+            if column_index == 0:
+                axis.set_ylabel("Optimal solar (kW)", color=ACCENT_INK)
+                battery_axis.set_yticklabels([])
+                battery_axis.set_ylabel("")
+            else:
+                axis.set_yticklabels([])
+                axis.set_ylabel("")
+                battery_axis.set_ylabel(
+                    "Optimal battery (kWh)",
+                    color=CAUT,
+                )
+            export_label = (
+                "NEM 2 at 2026 retail rates"
+                if export_regime
+                is ExportCompensationRegime.NEM2_AT_2026_RETAIL_RATES
+                else "NBT 2026"
+            )
+            capital_label = (
+                "2025 ITC capital costs"
+                if capital_regime is PolicyRegime.ITC_2025
+                else "Post-ITC 2026 capital costs"
+            )
+            axis.set_title(
+                f"{export_label}\n{capital_label}",
+                fontsize=10.5,
+                loc="left",
+                color=INK,
+                pad=8,
+            )
+            case_id = str(panel["case_id"].iloc[0])
+            summaries[case_id] = {
+                "median_pv_kw": float(np.median(pv_values)),
+                "median_battery_kwh": float(np.median(battery_values)),
+                "nontrivial_battery_count": int((battery_values > 0.1).sum()),
+                "pv_sizing_limit_count": int(
+                    panel["at_pv_sizing_limit"].astype(bool).sum()
+                ),
+            }
+
+    if legend_handles is None:
+        raise ValueError("Policy matrix chart did not create panel artists")
+    fig.legend(
+        list(legend_handles),
+        ["Optimal solar (kW)", "Optimal battery (kWh)"],
+        loc="lower center",
+        ncol=2,
+        frameon=False,
+        bbox_to_anchor=(0.5, 0.01),
+    )
+    fig.suptitle(
+        "Optimal household solar and storage under export and capital policy",
+        x=0.04,
+        y=0.995,
+        ha="left",
+        fontsize=13,
+        color=INK,
+    )
+    fig.text(
+        0.04,
+        0.955,
+        "Four case-study counties · weighted 12×24 resolution in every panel",
+        ha="left",
+        va="top",
+        fontsize=9,
+        color=INK_SOFT,
+    )
+    fig.tight_layout(rect=(0.0, 0.06, 1.0, 0.93))
+    return fig, {
+        "county_count": len(counties),
+        "case_summaries": summaries,
+        "temporal_resolution": "weighted_12x24_monthly_hour",
+    }
+
+
 @dataclass
 class WaterfallStep:
     label: str

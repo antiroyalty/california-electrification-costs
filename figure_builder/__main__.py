@@ -4,6 +4,7 @@
     python3 -m figure_builder sweeps                 # (re)compute all county sweeps
     python3 -m figure_builder sweeps --counties alameda --force
     python3 -m figure_builder market                 # exact current-law market points
+    python3 -m figure_builder policy-matrix          # NBT/NEM 2 x ITC comparison
     python3 -m figure_builder claims-source          # normalize three explicit model runs
     python3 -m figure_builder mechanism              # patch Claim-1 mechanism block
     python3 -m figure_builder counties               # patch Claim-1 county grid
@@ -75,9 +76,8 @@ def _cmd_sweeps(args) -> list:
 def _cmd_market(args) -> list:
     """Build declared exact-price, full-chronology observations.
 
-    The NBT/2025-ITC case remains a 12x24 sensitivity. Its corrected full-year
-    Southern California MILPs do not complete within the publication workflow's
-    bounded runtime. The builder must not mislabel that case as exact.
+    The four-cell NBT/NEM 2 comparison uses one common 12x24 resolution. This
+    command retains the separate exact current-law NBT check used by Claim 1.
     """
 
     slugs = args.counties or [slug for slug, _, _ in CLAIM1_COUNTIES]
@@ -130,6 +130,20 @@ def _cmd_installer(_args):
     if not cache.exists():
         raise FileNotFoundError(f"Installer-rule sweep cache was not written: {cache}")
     return [str(doc), str(cache)]
+
+
+def _cmd_policy_matrix(args):
+    from figure_builder.recipes import build_policy_matrix_figure
+
+    force_sweeps = getattr(args, "force_sweeps", args.force)
+    force_exact = getattr(args, "force_exact", args.force)
+    return [
+        str(path)
+        for path in build_policy_matrix_figure(
+            force_sweeps=force_sweeps,
+            force_exact=force_exact,
+        )
+    ]
 
 
 def _cmd_tariff_status(_args):
@@ -205,6 +219,16 @@ def _cmd_all(args):
     artifacts += _cmd_market(args)
     artifacts += _cmd_mechanism(args)
     artifacts += _cmd_installer(args)
+    # _cmd_sweeps already honored --force for all four policy cases. The
+    # matrix builder must reuse those fresh caches instead of solving them a
+    # second time in the same command.
+    artifacts += _cmd_policy_matrix(
+        argparse.Namespace(
+            force=False,
+            force_sweeps=False,
+            force_exact=args.force,
+        )
+    )
     artifacts += _cmd_counties(args)
     artifacts += _cmd_publication_scope(args)
     artifacts += _cmd_statewide(args)
@@ -246,6 +270,7 @@ _COMMANDS = {
     "snapshot": _cmd_snapshot, "sweeps": _cmd_sweeps, "market": _cmd_market,
     "claims-source": _cmd_claims_source,
     "mechanism": _cmd_mechanism,
+    "policy-matrix": _cmd_policy_matrix,
     "counties": _cmd_counties, "publication-scope": _cmd_publication_scope,
     "statewide": _cmd_statewide,
     "bridge": _cmd_bridge, "split": _cmd_split,

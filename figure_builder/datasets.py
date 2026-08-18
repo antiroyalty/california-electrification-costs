@@ -30,11 +30,13 @@ from figure_builder import (
 )
 from figure_builder.dispatch import (
     BASE_INPUT_DIR,
+    CLAIM1_COUNTIES,
     DEFAULT_SCENARIO,
     HOUSING_TYPE,
     SWEEP_POINTS,
     county_dispatch_inputs,
 )
+from figure_builder.policy_cases import POLICY_CASES
 from figure_builder.pricing import live_prices
 
 
@@ -73,6 +75,28 @@ MARKET_OBSERVATION_COLUMNS = [
     "scenario",
     "policy_regime",
     "interval_count",
+]
+
+POLICY_MATRIX_COLUMNS = [
+    "county_slug",
+    "county_name",
+    "utility",
+    "case_id",
+    "export_compensation_regime",
+    "capital_policy_regime",
+    "temporal_resolution",
+    "interval_count",
+    "pv_capex_usd_per_kw",
+    "battery_capex_usd_per_kwh",
+    "pv_kw",
+    "battery_kwh",
+    "annual_generation_coverage",
+    "pv_sizing_limit_ratio",
+    "at_pv_sizing_limit",
+    "total_cost_usd_per_year",
+    "max_battery_kwh",
+    "meter_binary_count",
+    "solver_rounds",
 ]
 
 CLAIMS_EAC_SCENARIOS = {
@@ -696,3 +720,257 @@ def collect_battery_capex_sweep(
         SWEEP_DIR.mkdir(parents=True, exist_ok=True)
         df.to_csv(path, index=False)
     return df
+
+
+def validate_policy_matrix_results(
+    frame: pd.DataFrame,
+    *,
+    expected_counties: Sequence[str],
+) -> pd.DataFrame:
+    """Validate the complete four-case, common-resolution result table."""
+
+    if list(frame.columns) != POLICY_MATRIX_COLUMNS:
+        raise ValueError(
+            "Policy matrix columns do not match the publication schema"
+        )
+    counties = list(dict.fromkeys(str(value) for value in expected_counties))
+    if not counties:
+        raise ValueError("Policy matrix expected counties cannot be empty")
+    expected_cases = [case.case_id for case in POLICY_CASES]
+    expected_keys = {
+        (county, case_id)
+        for county in counties
+        for case_id in expected_cases
+    }
+    if frame[["county_slug", "case_id"]].isna().any().any():
+        raise ValueError("Policy matrix contains missing county/case identity")
+    if frame.duplicated(["county_slug", "case_id"]).any():
+        raise ValueError("Policy matrix contains duplicate county/case rows")
+    actual_keys = set(
+        frame[["county_slug", "case_id"]].itertuples(index=False, name=None)
+    )
+    if actual_keys != expected_keys:
+        raise ValueError(
+            "Policy matrix county/case coverage mismatch: "
+            f"missing={sorted(expected_keys - actual_keys)}, "
+            f"extra={sorted(actual_keys - expected_keys)}"
+        )
+
+    numeric_columns = [
+        "interval_count",
+        "pv_capex_usd_per_kw",
+        "battery_capex_usd_per_kwh",
+        "pv_kw",
+        "battery_kwh",
+        "annual_generation_coverage",
+        "pv_sizing_limit_ratio",
+        "total_cost_usd_per_year",
+        "max_battery_kwh",
+        "meter_binary_count",
+        "solver_rounds",
+    ]
+    numeric = frame[numeric_columns].apply(pd.to_numeric, errors="coerce")
+    if numeric.isna().any().any():
+        raise ValueError("Policy matrix contains missing or non-numeric results")
+    if not all(math.isfinite(value) for value in numeric.to_numpy().ravel()):
+        raise ValueError("Policy matrix contains non-finite results")
+    if set(frame["temporal_resolution"]) != {
+        "weighted_12x24_monthly_hour"
+    } or set(numeric["interval_count"].astype(int)) != {288}:
+        raise ValueError("Policy matrix must use one common weighted 12x24 resolution")
+    if not pd.api.types.is_bool_dtype(frame["at_pv_sizing_limit"]):
+        raise ValueError("Policy matrix sizing-limit flag must be boolean")
+
+    case_lookup = {case.case_id: case for case in POLICY_CASES}
+    for row in frame.itertuples(index=False):
+        case = case_lookup[row.case_id]
+        if row.export_compensation_regime != (
+            case.export_compensation_regime.value
+        ) or row.capital_policy_regime != case.capital_policy_regime.value:
+            raise ValueError("Policy matrix case identity does not reconcile")
+        limit = case.export_compensation_regime.max_pv_to_annual_load_ratio
+        if not math.isclose(
+            float(row.pv_sizing_limit_ratio),
+            limit,
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        ):
+            raise ValueError("Policy matrix PV sizing limit does not reconcile")
+        at_limit = math.isclose(
+            float(row.annual_generation_coverage),
+            limit,
+            rel_tol=0.0,
+            abs_tol=1e-5,
+        )
+        if bool(row.at_pv_sizing_limit) is not at_limit:
+            raise ValueError("Policy matrix sizing-limit flag does not reconcile")
+
+    # Assumption-based research guardrails. These do not replace exact source
+    # tests. They catch unit errors, unbounded capacities, and broken annual
+    # aggregation before a publication artifact is written.
+    if not numeric["pv_kw"].between(0.0, 20.0).all():
+        raise ValueError("Policy matrix PV capacity is outside 0-20 kW")
+    if not (
+        (numeric["battery_kwh"] >= 0.0)
+        & (numeric["battery_kwh"] <= numeric["max_battery_kwh"] + 1e-6)
+    ).all():
+        raise ValueError("Policy matrix battery capacity violates its bound")
+    if not (
+        (numeric["annual_generation_coverage"] >= 0.0)
+        & (
+            numeric["annual_generation_coverage"]
+            <= numeric["pv_sizing_limit_ratio"] + 1e-5
+        )
+    ).all():
+        raise ValueError("Policy matrix annual generation exceeds its sizing limit")
+    if not numeric["total_cost_usd_per_year"].between(500.0, 10_000.0).all():
+        raise ValueError("Policy matrix annual objective is outside $500-$10,000")
+    if not (numeric["solver_rounds"] >= 1).all():
+        raise ValueError("Policy matrix solver rounds must be positive")
+
+    case_order = {case.case_id: index for index, case in enumerate(POLICY_CASES)}
+    county_order = {county: index for index, county in enumerate(counties)}
+    result = frame.copy()
+    result["_case_order"] = result["case_id"].map(case_order)
+    result["_county_order"] = result["county_slug"].map(county_order)
+    return result.sort_values(
+        ["_case_order", "_county_order"]
+    ).drop(columns=["_case_order", "_county_order"]).reset_index(drop=True)
+
+
+def collect_policy_matrix_results(
+    *,
+    counties: Sequence[tuple[str, str, str]] = CLAIM1_COUNTIES,
+    scenario: str = DEFAULT_SCENARIO,
+    force: bool = False,
+    verbose: bool = True,
+) -> pd.DataFrame:
+    """Collect optimal market-cost sizing for all four policy cases."""
+
+    rows = []
+    for case in POLICY_CASES:
+        prices = live_prices(case.capital_policy_regime)
+        for slug, county_name, utility in counties:
+            sweep = collect_battery_capex_sweep(
+                slug,
+                regime=case.capital_policy_regime,
+                export_compensation_regime=(
+                    case.export_compensation_regime
+                ),
+                scenario=scenario,
+                fine=False,
+                cache=True,
+                force=force,
+                verbose=verbose,
+            )
+            solved = select_market_observation(
+                sweep,
+                prices.batt_net_per_kwh,
+            )
+            coverage = float(solved["coverage"])
+            limit = (
+                case.export_compensation_regime.max_pv_to_annual_load_ratio
+            )
+            rows.append(
+                {
+                    "county_slug": slug,
+                    "county_name": county_name,
+                    "utility": utility,
+                    "case_id": case.case_id,
+                    "export_compensation_regime": (
+                        case.export_compensation_regime.value
+                    ),
+                    "capital_policy_regime": case.capital_policy_regime.value,
+                    "temporal_resolution": "weighted_12x24_monthly_hour",
+                    "interval_count": 288,
+                    "pv_capex_usd_per_kw": prices.pv_net_per_kw,
+                    "battery_capex_usd_per_kwh": prices.batt_net_per_kwh,
+                    "pv_kw": float(solved["pv_kw"]),
+                    "battery_kwh": float(solved["batt_kwh"]),
+                    "annual_generation_coverage": coverage,
+                    "pv_sizing_limit_ratio": limit,
+                    "at_pv_sizing_limit": math.isclose(
+                        coverage,
+                        limit,
+                        rel_tol=0.0,
+                        abs_tol=1e-5,
+                    ),
+                    "total_cost_usd_per_year": float(solved["total_cost"]),
+                    "max_battery_kwh": float(solved["max_battery_kwh"]),
+                    "meter_binary_count": int(solved["meter_binary_count"]),
+                    "solver_rounds": int(solved["solver_rounds"]),
+                }
+            )
+    return validate_policy_matrix_results(
+        pd.DataFrame(rows, columns=POLICY_MATRIX_COLUMNS),
+        expected_counties=[slug for slug, _name, _utility in counties],
+    )
+
+
+def validate_policy_matrix_exact_check(
+    policy_results: pd.DataFrame,
+    exact_observation: pd.DataFrame,
+    *,
+    county_slug: str = "alameda",
+) -> dict:
+    """Reconcile one NEM 2 coarse result to a full-year solved check."""
+
+    from appliances.incentive_policy import PolicyRegime
+    from figure_builder.policy_cases import policy_case
+
+    case = policy_case(
+        ExportCompensationRegime.NEM2_AT_2026_RETAIL_RATES,
+        PolicyRegime.POST_ITC_2026,
+    )
+    coarse = policy_results[
+        (policy_results["county_slug"] == county_slug)
+        & (policy_results["case_id"] == case.case_id)
+    ]
+    if len(coarse) != 1:
+        raise ValueError(
+            "Exact policy check requires one coarse NEM 2/post-ITC county row"
+        )
+    coarse_row = coarse.iloc[0]
+    exact_row = select_market_observation(
+        exact_observation,
+        float(coarse_row["battery_capex_usd_per_kwh"]),
+    )
+    if set(exact_observation["interval_count"].astype(int)) != {8760}:
+        raise ValueError("Exact policy check must use 8,760 intervals")
+    if set(exact_observation["policy_regime"]) != {
+        PolicyRegime.POST_ITC_2026.value
+    }:
+        raise ValueError("Exact policy check uses the wrong capital-policy regime")
+    pv_difference = float(exact_row["pv_kw"]) - float(coarse_row["pv_kw"])
+    battery_difference = float(exact_row["batt_kwh"]) - float(
+        coarse_row["battery_kwh"]
+    )
+    coverage_difference = float(exact_row["coverage"]) - float(
+        coarse_row["annual_generation_coverage"]
+    )
+    if abs(pv_difference) > 0.05:
+        raise ValueError("Exact policy check PV capacity differs by more than 0.05 kW")
+    if abs(battery_difference) > 0.05:
+        raise ValueError(
+            "Exact policy check battery capacity differs by more than 0.05 kWh"
+        )
+    if abs(coverage_difference) > 0.005:
+        raise ValueError(
+            "Exact policy check annual coverage differs by more than 0.5 percentage points"
+        )
+    return {
+        "county_slug": county_slug,
+        "case_id": case.case_id,
+        "coarse_pv_kw": float(coarse_row["pv_kw"]),
+        "exact_pv_kw": float(exact_row["pv_kw"]),
+        "pv_difference_kw": pv_difference,
+        "coarse_battery_kwh": float(coarse_row["battery_kwh"]),
+        "exact_battery_kwh": float(exact_row["batt_kwh"]),
+        "battery_difference_kwh": battery_difference,
+        "coarse_coverage": float(
+            coarse_row["annual_generation_coverage"]
+        ),
+        "exact_coverage": float(exact_row["coverage"]),
+        "coverage_difference": coverage_difference,
+        "exact_interval_count": 8760,
+    }

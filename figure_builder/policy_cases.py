@@ -31,16 +31,16 @@ POLICY_CASES = tuple(
     )
 )
 
-# NBT with the lower ITC-era capital prices remains a weighted 12x24
-# sensitivity. Its corrected Southern California full-year MILPs exceed the
-# bounded publication workflow. Both NEM 2 market-price cases solve with one
-# annual settlement binary and retain the full 8,760-hour chronology.
+# The main Claim 1 current-law NBT observation retains its exact 8,760-hour
+# check. The four-cell NBT/NEM 2 comparison uses the same weighted 12x24
+# resolution in every cell. This avoids mixing temporal resolutions inside one
+# policy comparison. Targeted NEM 2 full-year checks remain separate evidence.
 FULL_HOURLY_POLICY_CASES = tuple(
     case
     for case in POLICY_CASES
-    if not (
+    if (
         case.export_compensation_regime is ExportCompensationRegime.NBT_2026
-        and case.capital_policy_regime is PolicyRegime.ITC_2025
+        and case.capital_policy_regime is PolicyRegime.POST_ITC_2026
     )
 )
 

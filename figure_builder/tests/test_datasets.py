@@ -19,6 +19,7 @@ from figure_builder.datasets import (
     CLAIMS_EAC_SCENARIOS,
     EAC_COMPONENT_COLUMNS,
     MARKET_OBSERVATION_COLUMNS,
+    POLICY_MATRIX_COLUMNS,
     SWEEP_COLUMNS,
     canonical_battery_capex_points,
     build_claims_eac_source,
@@ -26,6 +27,7 @@ from figure_builder.datasets import (
     collect_battery_capex_sweep,
     collect_claims_eac_results,
     collect_market_price_observation,
+    collect_policy_matrix_results,
     load_claims_eac_manifest,
     _manifest_display_path,
     normalize_battery_capex_points,
@@ -33,9 +35,12 @@ from figure_builder.datasets import (
     select_market_observation,
     summarize_claims_eac,
     sweep_cache_is_compatible,
+    validate_policy_matrix_results,
+    validate_policy_matrix_exact_check,
 )
 from figure_builder.pricing import live_prices
 from figure_builder.dispatch import CLAIM1_COUNTIES, DispatchInputs
+from figure_builder.policy_cases import POLICY_CASES
 from tariffs import ExportCompensationRegime
 
 
@@ -525,3 +530,184 @@ def test_sweep_collector_wires_declared_temporal_resolution(
     else:
         assert len(solve.call_args.kwargs["weights"]) == 288
     assert frame.loc[0, "max_battery_kwh"] == 40.0
+
+
+def _policy_matrix_fixture(counties=("alpha", "beta")) -> pd.DataFrame:
+    rows = []
+    for case in POLICY_CASES:
+        limit = case.export_compensation_regime.max_pv_to_annual_load_ratio
+        for county in counties:
+            rows.append(
+                {
+                    "county_slug": county,
+                    "county_name": county.title(),
+                    "utility": "SCE",
+                    "case_id": case.case_id,
+                    "export_compensation_regime": (
+                        case.export_compensation_regime.value
+                    ),
+                    "capital_policy_regime": case.capital_policy_regime.value,
+                    "temporal_resolution": "weighted_12x24_monthly_hour",
+                    "interval_count": 288,
+                    "pv_capex_usd_per_kw": 3_300.0,
+                    "battery_capex_usd_per_kwh": 1_460.64,
+                    "pv_kw": 5.0,
+                    "battery_kwh": 0.0,
+                    "annual_generation_coverage": limit,
+                    "pv_sizing_limit_ratio": limit,
+                    "at_pv_sizing_limit": True,
+                    "total_cost_usd_per_year": 2_500.0,
+                    "max_battery_kwh": 40.0,
+                    "meter_binary_count": 0,
+                    "solver_rounds": 1,
+                }
+            )
+    return pd.DataFrame(rows, columns=POLICY_MATRIX_COLUMNS)
+
+
+def test_policy_matrix_validation_requires_complete_four_case_coverage():
+    result = validate_policy_matrix_results(
+        _policy_matrix_fixture(),
+        expected_counties=["alpha", "beta"],
+    )
+
+    assert len(result) == 8
+    assert list(result["case_id"].drop_duplicates()) == [
+        case.case_id for case in POLICY_CASES
+    ]
+
+
+@pytest.mark.parametrize(
+    "defect,message",
+    [
+        ("missing", "coverage mismatch"),
+        ("duplicate", "duplicate"),
+        ("oversized_pv", "annual generation exceeds"),
+        ("oversized_battery", "battery capacity violates"),
+        ("bad_objective", r"outside \$500-\$10,000"),
+        ("string_flag", "must be boolean"),
+    ],
+)
+def test_policy_matrix_validation_rejects_malformed_results(defect, message):
+    frame = _policy_matrix_fixture()
+    if defect == "missing":
+        frame = frame.iloc[1:].copy()
+    elif defect == "duplicate":
+        frame = pd.concat([frame, frame.iloc[[0]]], ignore_index=True)
+    elif defect == "oversized_pv":
+        frame.loc[0, "annual_generation_coverage"] = 2.0
+        frame.loc[0, "at_pv_sizing_limit"] = False
+    elif defect == "oversized_battery":
+        frame.loc[0, "battery_kwh"] = 40.1
+    elif defect == "bad_objective":
+        frame.loc[0, "total_cost_usd_per_year"] = 10.0
+    else:
+        frame["at_pv_sizing_limit"] = frame[
+            "at_pv_sizing_limit"
+        ].astype(str)
+
+    with pytest.raises(ValueError, match=message):
+        validate_policy_matrix_results(
+            frame,
+            expected_counties=["alpha", "beta"],
+        )
+
+
+def test_policy_matrix_collector_selects_exact_market_price_for_every_case():
+    counties = (("alpha", "Alpha", "SCE"),)
+
+    def sweep(_slug, *, regime, **_kwargs):
+        prices = live_prices(regime)
+        return pd.DataFrame(
+            [
+                [
+                    prices.batt_net_per_kwh,
+                    5.0,
+                    0.0,
+                    2_500.0,
+                    1.0,
+                    40.0,
+                    0,
+                    1,
+                ]
+            ],
+            columns=SWEEP_COLUMNS,
+        )
+
+    with patch(
+        "figure_builder.datasets.collect_battery_capex_sweep",
+        side_effect=sweep,
+    ) as collect:
+        result = collect_policy_matrix_results(
+            counties=counties,
+            verbose=False,
+        )
+
+    assert len(result) == 4
+    assert collect.call_count == 4
+    assert set(result["battery_capex_usd_per_kwh"]) == {
+        1_022.448,
+        1_460.64,
+    }
+    assert set(result["interval_count"]) == {288}
+
+
+def test_policy_matrix_exact_check_reconciles_alameda_full_year_result():
+    matrix = _policy_matrix_fixture(counties=("alameda",))
+    target = matrix[
+        matrix["case_id"]
+        == "nem2_at_2026_retail_rates__post_itc_2026"
+    ].index[0]
+    matrix.loc[target, "pv_kw"] = 7.31734
+    matrix.loc[target, "battery_kwh"] = 0.0
+    matrix.loc[target, "annual_generation_coverage"] = 1.0
+    exact = pd.DataFrame(
+        [
+            [
+                1_460.64,
+                7.31735,
+                0.0,
+                2_180.0,
+                1.0,
+                40.0,
+                0,
+                1,
+                "full_electric_ev_coopt",
+                "post_itc_2026",
+                8760,
+            ]
+        ],
+        columns=MARKET_OBSERVATION_COLUMNS,
+    )
+
+    check = validate_policy_matrix_exact_check(matrix, exact)
+
+    assert check["county_slug"] == "alameda"
+    assert check["pv_difference_kw"] == pytest.approx(0.00001)
+    assert check["battery_difference_kwh"] == pytest.approx(0.0)
+    assert check["exact_interval_count"] == 8760
+
+
+def test_policy_matrix_exact_check_rejects_material_coarse_error():
+    matrix = _policy_matrix_fixture(counties=("alameda",))
+    exact = pd.DataFrame(
+        [
+            [
+                1_460.64,
+                6.0,
+                0.0,
+                2_180.0,
+                1.0,
+                40.0,
+                0,
+                1,
+                "full_electric_ev_coopt",
+                "post_itc_2026",
+                8760,
+            ]
+        ],
+        columns=MARKET_OBSERVATION_COLUMNS,
+    )
+
+    with pytest.raises(ValueError, match="differs by more than 0.05 kW"):
+        validate_policy_matrix_exact_check(matrix, exact)

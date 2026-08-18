@@ -69,7 +69,17 @@ def test_tariff_metadata_records_every_source_used_by_the_sweep():
     assert utilities["SDG&E"]["import"]["source_id"] == "sdge_ev_tou_5_2026-08-01"
     assert utilities["SDG&E"]["export"]["source_ids"] == ["sdge_nbt2026"]
     assert utilities["SDG&E"]["acc_plus"]["source_id"] == "cpuc_nbt_policy"
-    assert metadata["annual_true_up"]["used_by_sweep"] is False
+    annual_true_up = metadata["annual_true_up"]
+    assert annual_true_up["nbt_2026"]["used_by_sizing_objective"] is False
+    assert (
+        annual_true_up["nem2_at_2026_retail_rates"][
+            "used_by_sizing_objective"
+        ]
+        is True
+    )
+    assert "credit expiration at true-up" in annual_true_up[
+        "nem2_at_2026_retail_rates"
+    ]["reason"]
     assert comparison["nem2_scenario"]["research_label"] == (
         "nem2_at_2026_retail_rates"
     )
@@ -110,14 +120,16 @@ def test_optimization_metadata_matches_declared_coarse_sweep_settings():
         "points_per_county_and_case": 1,
         "policy_cases": [
             "nbt_2026__post_itc_2026",
+        ],
+        "excluded_policy_cases": [
+            "nbt_2026__itc_2025",
             "nem2_at_2026_retail_rates__post_itc_2026",
             "nem2_at_2026_retail_rates__itc_2025",
         ],
-        "excluded_policy_cases": ["nbt_2026__itc_2025"],
         "purpose": (
-            "Exact solved observations for declared publication policy "
-            "cases. NBT with 2025 ITC capital prices remains an explicitly "
-            "labeled 12x24 sensitivity."
+            "Exact current-law NBT observations for Claim 1 market-price "
+            "annotations. The four-cell NBT/NEM 2 comparison uses one "
+            "common weighted 12x24 resolution."
         ),
     }
     assert metadata["solver"]["backend"] == "highs"
@@ -173,7 +185,7 @@ def test_build_run_metadata_hashes_inputs_and_deduplicates_artifacts(
     )
 
     assert metadata["run"]["generated_at_utc"] == "2026-08-17T12:00:00+00:00"
-    assert metadata["schema_version"] == 4
+    assert metadata["schema_version"] == 5
     assert metadata["run"]["git_sha"] == "abc1234"
     assert metadata["run"]["force"] is True
     assert metadata["run"]["command_argv"] == [

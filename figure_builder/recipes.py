@@ -6,15 +6,24 @@ not reusable plumbing.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import math
 from pathlib import Path
+import re
 
-from figure_builder import FIG_DIR, current_claims_doc, git_short_sha
+from figure_builder import (
+    FIG_DIR,
+    current_claims_doc,
+    git_short_sha,
+    market_observation_csv_path,
+    sweep_csv_path,
+)
 from figure_builder import docio
 from figure_builder.charts import (
     plot_battery_value_waterfall,
     plot_case_study_eac,
     plot_marginal_solar_value_ladder,
+    plot_policy_matrix_optimal_sizes,
     plot_pv_batt_vs_capex,
     plot_pv_batt_vs_capex_compare,
     plot_pv_ceiling,
@@ -26,16 +35,30 @@ from figure_builder.datasets import (
     collect_battery_capex_sweep,
     collect_claims_eac_results,
     collect_market_price_observation,
+    collect_policy_matrix_results,
     claims_eac_source_path,
     expected_claim_counties,
     select_market_observation,
     summarize_claims_eac,
+    validate_policy_matrix_exact_check,
 )
 from figure_builder.dispatch import CLAIM1_COUNTIES, county_dispatch_inputs
-from figure_builder.metadata import tariff_metadata
+from figure_builder.metadata import (
+    capital_cost_metadata,
+    file_identity,
+    optimization_metadata,
+    tariff_metadata,
+    write_run_metadata,
+)
+from figure_builder.policy_cases import POLICY_CASES
 from figure_builder.pricing import live_prices
+from tariffs import ExportCompensationRegime
 
 MECH_ANCHOR = "Battery capex ($25-$1,200/kWh) is the swept variable itself.</div>"
+POLICY_MATRIX_CSV = FIG_DIR / "policy_matrix_optimal_sizes.csv"
+POLICY_MATRIX_PNG = FIG_DIR / "policy_matrix_optimal_sizes.png"
+POLICY_MATRIX_METADATA = FIG_DIR / "policy_matrix_metadata.json"
+_POLICY_MATRIX_CSS = """.data-table{width:100%;border-collapse:collapse;margin:0 0 24px;font-size:13px}.data-table th,.data-table td{padding:9px 10px;border-bottom:1px solid var(--rule);text-align:left}.data-table th{color:var(--ink-soft);font-size:11px;text-transform:uppercase;letter-spacing:.04em}"""
 
 _MECH_CSS = """.obj-box{ border:1px solid var(--rule); border-radius:10px; background:var(--surface); padding:20px 22px; margin:0 0 24px; box-shadow:var(--shadow); }
 .obj-label{ font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-faint); margin-bottom:12px; }
@@ -488,6 +511,153 @@ def build_installer_rule_figure(doc=None, county="alameda", label="Alameda (PG&E
     return doc
 
 
+def _policy_matrix_fragment(results, chart_meta, exact_check, image: str) -> str:
+    summaries = chart_meta["case_summaries"]
+    rows = []
+    labels = {
+        "nbt_2026__post_itc_2026": "NBT 2026 / post-ITC",
+        "nbt_2026__itc_2025": "NBT 2026 / 2025 ITC",
+        "nem2_at_2026_retail_rates__post_itc_2026": (
+            "NEM 2 at 2026 rates / post-ITC"
+        ),
+        "nem2_at_2026_retail_rates__itc_2025": (
+            "NEM 2 at 2026 rates / 2025 ITC"
+        ),
+    }
+    for case in POLICY_CASES:
+        summary = summaries[case.case_id]
+        rows.append(
+            "<tr>"
+            f"<td>{labels[case.case_id]}</td>"
+            f"<td>{summary['median_pv_kw']:.2f}&nbsp;kW</td>"
+            f"<td>{summary['median_battery_kwh']:.2f}&nbsp;kWh</td>"
+            f"<td>{summary['pv_sizing_limit_count']} of "
+            f"{chart_meta['county_count']}</td>"
+            "</tr>"
+        )
+    nontrivial_battery = int((results["battery_kwh"] > 0.1).sum())
+    nem2_rows = results[
+        results["export_compensation_regime"]
+        == ExportCompensationRegime.NEM2_AT_2026_RETAIL_RATES.value
+    ]
+    nem2_at_limit = int(nem2_rows["at_pv_sizing_limit"].sum())
+    return f'''  <div class="callout" style="border-left-color:var(--accent-ink);">
+    <strong>Policy counterfactual: what would optimal sizing look like under NEM&nbsp;2?</strong> This comparison holds the 2026 retail tariff snapshot and household profiles fixed. It changes export compensation and the federal solar/storage ITC as two separate axes. It is not a historical reconstruction of a pre-2023 bill.
+  </div>
+
+  <figure class="fig"><img src="data:image/png;base64,{image}" alt="Optimal solar and battery size across NEM 2 and NBT export compensation with and without the 2025 federal ITC" /><figcaption><strong>NEM&nbsp;2 supports more solar, but does not make an expensive battery necessary.</strong> Retail-rate annual netting drives PV to its tariff sizing limit in <strong>{nem2_at_limit} of {len(nem2_rows)}</strong> NEM&nbsp;2 county/capital-policy cases. Across all 16 case-study results, only <strong>{nontrivial_battery}</strong> select more than 0.1&nbsp;kWh of storage at the modeled market cost. NEM&nbsp;2 values exported solar at retail until annual true-up; that makes the PV itself more valuable and reduces the need to shift every surplus kWh through a battery. Every panel uses the same weighted 12&times;24 resolution.</figcaption></figure>
+
+  <table class="data-table"><thead><tr><th>Policy case</th><th>Median optimal PV</th><th>Median optimal battery</th><th>Count at PV sizing cap</th></tr></thead><tbody>{''.join(rows)}</tbody></table>
+
+  <div class="method"><h3>Interpretation and full-year check</h3>
+    <p>The NEM&nbsp;2 model applies annual retail-dollar credit netting, interval non-bypassable charges, positive monthly net-consumption recovery charges, credit expiration at true-up, and monthly net-surplus compensation. NBT uses the source-locked hourly Energy Export Credit plus ACC&nbsp;Plus schedules.</p>
+    <p>A targeted Alameda NEM&nbsp;2/post-ITC 8,760-hour solve selected {exact_check['exact_pv_kw']:.3f}&nbsp;kW PV and {exact_check['exact_battery_kwh']:.3f}&nbsp;kWh storage. The common-resolution panel differs by {abs(exact_check['pv_difference_kw']):.4f}&nbsp;kW PV and {abs(exact_check['battery_difference_kwh']):.4f}&nbsp;kWh storage. This check supports the panel&rsquo;s sizing result without mixing resolutions across the four-cell comparison.</p>
+    <p>Sources and exact input fingerprints are recorded in <code>figure_builder/figures/policy_matrix_metadata.json</code>. The normalized results are in <code>figure_builder/figures/policy_matrix_optimal_sizes.csv</code>.</p>
+  </div>'''
+
+
+def build_policy_matrix_figure(
+    doc=None,
+    *,
+    force_sweeps: bool = False,
+    force_exact: bool = False,
+) -> list[Path]:
+    """Build, validate, document, and patch the four-case policy matrix."""
+
+    from appliances.incentive_policy import PolicyRegime
+
+    doc = Path(doc) if doc is not None else current_claims_doc()
+    results = collect_policy_matrix_results(force=force_sweeps)
+    exact = collect_market_price_observation(
+        "alameda",
+        regime=PolicyRegime.POST_ITC_2026,
+        export_compensation_regime=(
+            ExportCompensationRegime.NEM2_AT_2026_RETAIL_RATES
+        ),
+        cache=True,
+        force=force_exact,
+    )
+    exact_check = validate_policy_matrix_exact_check(results, exact)
+
+    FIG_DIR.mkdir(parents=True, exist_ok=True)
+    results.to_csv(POLICY_MATRIX_CSV, index=False)
+    figure, chart_meta = plot_policy_matrix_optimal_sizes(results)
+    figure.savefig(POLICY_MATRIX_PNG, dpi=180, bbox_inches="tight")
+    image = docio.embed_png(figure)
+    import matplotlib.pyplot as plt
+
+    plt.close(figure)
+
+    input_paths = [
+        sweep_csv_path(
+            slug,
+            live_prices(case.capital_policy_regime).regime,
+            "288",
+            case.export_compensation_regime,
+        )
+        for case in POLICY_CASES
+        for slug, _name, _utility in CLAIM1_COUNTIES
+    ]
+    exact_path = market_observation_csv_path(
+        "alameda",
+        live_prices(PolicyRegime.POST_ITC_2026).regime,
+        ExportCompensationRegime.NEM2_AT_2026_RETAIL_RATES,
+    )
+    metadata = {
+        "schema_version": 1,
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "model_git_sha": git_short_sha(),
+        "command_argv": [
+            "python3",
+            "-m",
+            "figure_builder",
+            "policy-matrix",
+            *(["--force"] if force_sweeps and force_exact else []),
+        ],
+        "force_sweeps": bool(force_sweeps),
+        "force_exact_validation": bool(force_exact),
+        "scenario": "full_electric_ev_coopt",
+        "research_design": (
+            "Controlled current-rate counterfactual. Both export-compensation "
+            "regimes use the source-locked 2026 retail tariff snapshot."
+        ),
+        "common_temporal_resolution": {
+            "name": "weighted_12x24_monthly_hour",
+            "interval_count": 288,
+            "soc_cycle": "monthly",
+        },
+        "policy_cases": [case.case_id for case in POLICY_CASES],
+        "capital_costs": capital_cost_metadata(),
+        "tariffs": tariff_metadata(),
+        "optimization": optimization_metadata(fine=False),
+        "input_sweep_caches": [file_identity(path) for path in input_paths],
+        "exact_validation_input": file_identity(exact_path),
+        "exact_validation": exact_check,
+        "result_summary": chart_meta,
+        "outputs": [
+            file_identity(POLICY_MATRIX_CSV),
+            file_identity(POLICY_MATRIX_PNG),
+        ],
+    }
+    write_run_metadata(POLICY_MATRIX_METADATA, metadata)
+
+    fragment = _policy_matrix_fragment(results, chart_meta, exact_check, image)
+    html = _read(doc)
+    html = docio.upsert_marked_block(
+        html,
+        "POLICY-MATRIX",
+        fragment,
+        anchor=docio.end_marker("INSTALLER-RULE"),
+    )
+    html = docio.inject_css(
+        html,
+        "POLICY-MATRIX-CSS",
+        _POLICY_MATRIX_CSS,
+    )
+    _write(doc, html)
+    return [doc, POLICY_MATRIX_CSV, POLICY_MATRIX_PNG, POLICY_MATRIX_METADATA]
+
+
 _LEGACY_TARIFF_STATUS_PATTERN = (
     r'    <li>Retail rate and export-credit data have a mix of resolved and open '
     r'staleness gaps.*?      </ul>\n    </li>'
@@ -497,10 +667,18 @@ _LEGACY_TARIFF_STATUS_PATTERN = (
 def _tariff_status_fragment(metadata: dict) -> str:
     scenario = metadata["scenario"]
     utilities = metadata["utilities"]
+    comparison = metadata["comparison"]
+    nem2_scenario = comparison["nem2_scenario"]
+    nem2_utilities = nem2_scenario["utilities"]
     if len(utilities) != 3:
         raise ValueError(
             "Claim 1 tariff status requires exactly three utility records; "
             f"found {len(utilities)}"
+        )
+    if len(nem2_utilities) != 3:
+        raise ValueError(
+            "NEM 2 tariff status requires exactly three utility records; "
+            f"found {len(nem2_utilities)}"
         )
 
     import_items = []
@@ -527,13 +705,24 @@ def _tariff_status_fragment(metadata: dict) -> str:
     )
     import_line = "; ".join(import_items)
     export_line = "; ".join(export_items)
+    nem2_items = []
+    for record in nem2_utilities:
+        utility = record["utility"].replace("&", "&amp;")
+        settlement = record["settlement"]
+        nem2_items.append(
+            f"{utility} rules <code>{settlement['utility_rules_source_id']}</code>, "
+            f"billing <code>{settlement['billing_method_source_id']}</code>, "
+            f"NSC <code>{settlement['nsc_rate_source_id']}</code>"
+        )
+    nem2_line = "; ".join(nem2_items)
 
-    return f'''    <li>Claim 1 uses source-locked 2026 import and NBT export schedules.
+    return f'''    <li>Claim 1 uses source-locked 2026 NBT schedules and a source-locked NEM 2 current-rate counterfactual.
       <ul class="sub-limitations">
         <li>Scenario: {scenario_line}.</li>
         <li>Import schedules: {import_line}.</li>
         <li>Export schedules: {export_line}.</li>
-        <li>Annual NSC settlement is not part of the sizing-sweep objective. The sweep uses hourly import and NBT export prices.</li>
+        <li>NEM 2 comparison: {nem2_scenario['research_label']}, tariff snapshot {nem2_scenario['tariff_snapshot_date']}; {nem2_line}.</li>
+        <li>Annual NSC settlement is not part of the NBT sizing-sweep objective. The NEM 2 objective applies annual credit expiration and source-selected NSC.</li>
       </ul>
     </li>'''
 
@@ -589,8 +778,8 @@ def _limitations_fragment(metadata: dict, county_count: int) -> str:
       <p>The capex sensitivities cover Alameda, Fresno, Los Angeles, and San Diego. The current-law market observations use the full 8,760-hour chronology; the 2025 ITC observations use the weighted 12&times;24 sensitivity model. That resolution difference is disclosed in every Claim 1 comparison and limits causal interpretation of the before/after contrast.</p>
     </li>
 {tariff_status}
-    <li>The Claim 1 sizing objective does not reproduce every monthly NBT settlement rule.
-      <p>It values hourly imports and exports using the source-locked schedules. The annual-bill path used by Claims 2 and 3 separately applies the generation/delivery split, utility-specific NBCs, ACC Plus credits, and annual NSC settlement when required. Monthly credit ordering and annual NSC true-up are not part of the Claim 1 sizing objective.</p>
+    <li>The Claim 1 NBT sizing objective does not reproduce every monthly NBT settlement rule.
+      <p>Its NBT panels value hourly imports and exports using the source-locked schedules. The separate NEM 2 policy matrix applies annual retail-dollar netting, utility-specific non-bypassable and recovery charges, credit expiration, and annual net-surplus compensation. The annual-bill path used by Claims 2 and 3 separately applies the complete NBT generation/delivery and true-up primitives.</p>
     </li>
     <li>Claims 2 and 3 are annualized modeled counterfactuals for one representative household per county.
       <p>They combine standardized 8,760-hour household profiles with one source-locked 2026 tariff snapshot. They are not a longitudinal pre/post study, an adoption forecast, or evidence about household heterogeneity within a county.</p>
@@ -618,11 +807,16 @@ def build_publication_scope(doc=None) -> Path:
         _claim1_support_fragment(prices_now, prices_2025),
     )
     html = _read(doc)
+    support_anchor = (
+        docio.end_marker("POLICY-MATRIX")
+        if docio.has_markers(html, "POLICY-MATRIX")
+        else docio.end_marker("INSTALLER-RULE")
+    )
     html = docio.replace_first(
         html,
-        r'<!-- INSTALLER-RULE-END -->.*?'
+        re.escape(support_anchor) + r'.*?'
         r'(?=\n</section>\s*<!-- =+\s*CLAIM 2\s*=+ -->)',
-        '<!-- INSTALLER-RULE-END -->\n\n' + support,
+        support_anchor + '\n\n' + support,
     )
     html = docio.replace_first(
         html,

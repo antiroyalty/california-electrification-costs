@@ -41,7 +41,7 @@ from tariffs import (
     resolve_county_service_assignment,
 )
 
-METADATA_SCHEMA_VERSION = 4
+METADATA_SCHEMA_VERSION = 5
 
 
 def _display_path(path: Path) -> str:
@@ -211,11 +211,21 @@ def tariff_metadata() -> dict:
         ],
         "utilities": utilities,
         "annual_true_up": {
-            "used_by_sweep": False,
-            "reason": (
-                "The sizing sweep uses hourly import and NBT export prices; "
-                "annual NSC settlement is not part of this objective."
-            ),
+            ExportCompensationRegime.NBT_2026.value: {
+                "used_by_sizing_objective": False,
+                "reason": (
+                    "The NBT sizing objective uses interval import and export "
+                    "prices. Annual NSC settlement is not part of that objective."
+                ),
+            },
+            ExportCompensationRegime.NEM2_AT_2026_RETAIL_RATES.value: {
+                "used_by_sizing_objective": True,
+                "reason": (
+                    "The NEM 2 sizing objective applies annual retail-dollar "
+                    "netting, credit expiration at true-up, and source-selected "
+                    "net-surplus compensation."
+                ),
+            },
         },
         "comparison": {
             "research_design": (
@@ -280,9 +290,9 @@ def optimization_metadata(*, fine: bool) -> dict:
                 if case not in FULL_HOURLY_POLICY_CASES
             ],
             "purpose": (
-                "Exact solved observations for declared publication policy "
-                "cases. NBT with 2025 ITC capital prices remains an explicitly "
-                "labeled 12x24 sensitivity."
+                "Exact current-law NBT observations for Claim 1 market-price "
+                "annotations. The four-cell NBT/NEM 2 comparison uses one "
+                "common weighted 12x24 resolution."
             ),
         },
         "solver": {

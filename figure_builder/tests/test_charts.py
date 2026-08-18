@@ -3,11 +3,17 @@ import pytest
 
 from figure_builder.charts import (
     plot_case_study_eac,
+    plot_policy_matrix_optimal_sizes,
     plot_pv_batt_vs_capex_compare,
     plot_statewide_cooptimization_savings,
     plot_statewide_electrification_savings,
 )
-from figure_builder.datasets import EAC_COMPONENT_COLUMNS, SWEEP_COLUMNS
+from figure_builder.datasets import (
+    EAC_COMPONENT_COLUMNS,
+    POLICY_MATRIX_COLUMNS,
+    SWEEP_COLUMNS,
+)
+from figure_builder.policy_cases import POLICY_CASES
 
 
 def _sweep() -> pd.DataFrame:
@@ -134,3 +140,53 @@ def test_statewide_savings_charts_report_exact_distribution_metrics():
 
         plt.close(fig2)
         plt.close(fig3)
+
+
+def test_policy_matrix_chart_uses_four_complete_common_resolution_panels():
+    rows = []
+    counties = (("alpha", "Alpha County"), ("beta", "Beta County"))
+    for case_index, case in enumerate(POLICY_CASES):
+        for county_index, (slug, name) in enumerate(counties):
+            limit = case.export_compensation_regime.max_pv_to_annual_load_ratio
+            rows.append(
+                {
+                    "county_slug": slug,
+                    "county_name": name,
+                    "utility": "SCE",
+                    "case_id": case.case_id,
+                    "export_compensation_regime": (
+                        case.export_compensation_regime.value
+                    ),
+                    "capital_policy_regime": case.capital_policy_regime.value,
+                    "temporal_resolution": "weighted_12x24_monthly_hour",
+                    "interval_count": 288,
+                    "pv_capex_usd_per_kw": 3_300.0,
+                    "battery_capex_usd_per_kwh": 1_460.64,
+                    "pv_kw": 4.0 + case_index + county_index,
+                    "battery_kwh": float(case_index),
+                    "annual_generation_coverage": limit,
+                    "pv_sizing_limit_ratio": limit,
+                    "at_pv_sizing_limit": True,
+                    "total_cost_usd_per_year": 2_500.0,
+                    "max_battery_kwh": 40.0,
+                    "meter_binary_count": 0,
+                    "solver_rounds": 1,
+                }
+            )
+    frame = pd.DataFrame(rows, columns=POLICY_MATRIX_COLUMNS)
+
+    fig, meta = plot_policy_matrix_optimal_sizes(frame)
+    try:
+        assert len(fig.axes) == 8
+        assert meta["county_count"] == 2
+        assert len(meta["case_summaries"]) == 4
+        assert meta["temporal_resolution"] == "weighted_12x24_monthly_hour"
+        text = "\n".join(axis.get_title(loc="left") for axis in fig.axes)
+        assert "NEM 2 at 2026 retail rates" in text
+        assert "NBT 2026" in text
+        assert "2025 ITC capital costs" in text
+        assert "Post-ITC 2026 capital costs" in text
+    finally:
+        import matplotlib.pyplot as plt
+
+        plt.close(fig)

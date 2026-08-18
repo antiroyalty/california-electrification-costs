@@ -9,6 +9,7 @@ from figure_builder.__main__ import (
     _cmd_claims_source,
     _cmd_installer,
     _cmd_market,
+    _cmd_policy_matrix,
     _cmd_sweeps,
     _parse_scenario_runs,
 )
@@ -152,28 +153,29 @@ def test_market_command_builds_only_declared_full_hourly_policy_cases():
             export_compensation_regime=ExportCompensationRegime.NBT_2026,
             force=True,
         ),
-        call(
-            "alameda",
-            regime=PolicyRegime.POST_ITC_2026,
-            export_compensation_regime=(
-                ExportCompensationRegime.NEM2_AT_2026_RETAIL_RATES
-            ),
-            force=True,
-        ),
-        call(
-            "alameda",
-            regime=PolicyRegime.ITC_2025,
-            export_compensation_regime=(
-                ExportCompensationRegime.NEM2_AT_2026_RETAIL_RATES
-            ),
-            force=True,
-        ),
     ]
     assert artifacts == [
         "alameda-nbt_2026-post_itc_2026.csv",
-        "alameda-nem2_at_2026_retail_rates-post_itc_2026.csv",
-        "alameda-nem2_at_2026_retail_rates-itc_2025.csv",
     ]
+
+
+def test_policy_matrix_command_returns_document_data_figure_and_metadata(tmp_path):
+    artifacts = [
+        tmp_path / "claims.html",
+        tmp_path / "matrix.csv",
+        tmp_path / "matrix.png",
+        tmp_path / "matrix.json",
+    ]
+    args = SimpleNamespace(force=True)
+
+    with patch(
+        "figure_builder.recipes.build_policy_matrix_figure",
+        return_value=artifacts,
+    ) as build:
+        result = _cmd_policy_matrix(args)
+
+    build.assert_called_once_with(force_sweeps=True, force_exact=True)
+    assert result == [str(path) for path in artifacts]
 
 
 def test_all_passes_cli_run_identity_to_metadata_writer():
@@ -188,6 +190,7 @@ def test_all_passes_cli_run_identity_to_metadata_writer():
         "market",
         "mechanism",
         "installer",
+        "policy_matrix",
         "counties",
         "publication_scope",
         "statewide",
@@ -209,6 +212,7 @@ def test_all_passes_cli_run_identity_to_metadata_writer():
         patches[6],
         patches[7],
         patches[8],
+        patches[9],
         patch("figure_builder.__main__._write_metadata") as write_metadata,
     ):
         artifacts = _cmd_all(args)

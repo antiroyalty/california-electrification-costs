@@ -50,7 +50,8 @@ python3 -m figure_builder all \
 python3 -m figure_builder sweeps                    # weighted 12x24 sensitivity sweeps
 python3 -m figure_builder sweeps --counties alameda --force
 python3 -m figure_builder sweeps --counties alameda --fine  # deliberate 8760 run
-python3 -m figure_builder market                    # declared exact 8760 policy cases
+python3 -m figure_builder market                    # exact 8760 current-law NBT checks
+python3 -m figure_builder policy-matrix             # 2x2 NBT/NEM 2 x ITC comparison
 python3 -m figure_builder mechanism                 # Claim-1 Figures A/B/C + objective box
 python3 -m figure_builder counties                  # Claim-1 four-county grid
 python3 -m figure_builder statewide                 # Claims 2/3 from complete paired EAC results
@@ -62,13 +63,13 @@ Sweeps are cached in `figure_builder/sweeps/` as
 `sweep_288_<county>_<export-regime>_<capital-regime>.csv` by default, or
 `sweep_8760_...` with `--fine`. The two explicit axes prevent NBT and NEM 2
 results from sharing a cache. Pass `--force` to recompute. Weighted 12x24 is
-the declared sensitivity-grid resolution. The market command writes separate
-`market_8760_...` caches for NBT/post-ITC and both NEM 2 capital-policy cases.
-NBT with 2025 ITC capital prices remains explicitly labeled as a weighted
-12x24 sensitivity. The corrected Southern California full-year MILPs do not
-complete within a bounded publication workflow, so the builder does not
-misrepresent that case as an exact 8,760-hour optimum. Use full chronology for
-targeted checks, not large low-cost grids. The
+the declared sensitivity-grid resolution. The four-cell NBT/NEM 2 policy
+comparison uses this same resolution in every cell. The market command retains
+the separate exact current-law NBT checks used by Claim 1. Corrected full-year
+Southern California MILPs do not complete within a bounded publication
+workflow, so the builder does not misrepresent the policy matrix as exact
+8,760-hour optima. Use full chronology for targeted checks, not large low-cost
+grids. The
 cache records the explicit battery-capacity bound and solver diagnostics; a
 cache generated under a different sizing domain or the former unbounded model
 is rejected automatically. The default domain is 0&ndash;40 kWh for a
