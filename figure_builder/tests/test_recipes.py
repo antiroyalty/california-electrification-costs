@@ -15,9 +15,11 @@ from figure_builder.recipes import (
     _claim2_fragment,
     _claim3_fragment,
     _installer_rule_fragment,
+    _limitations_fragment,
     _mechanism_fragment,
     _tariff_status_fragment,
     build_installer_rule_figure,
+    build_publication_scope,
     build_statewide_claims,
     build_tariff_status_block,
 )
@@ -174,6 +176,51 @@ def test_installer_rule_caption_uses_county_export_schedule_mean():
 
     assert "PV-generation-weighted export credit is ~$0.057/kWh" in html
     assert "~$0.05/kWh" not in html
+
+
+def test_publication_scope_removes_inherited_draft_claims(tmp_path):
+    doc = tmp_path / "claims.html"
+    doc.write_text(
+        '<div class="buildinfo"><span>commit <b>c459506</b></span>'
+        '<span>branch <b>main</b></span><span><b>260</b> tests passing</span></div>'
+        '<section class="claim" id="claim-1">\n'
+        '<!-- INSTALLER-RULE-END -->\n'
+        '<figure>stale discount-rate result</figure>\n'
+        '<div class="fig-pending">Figure TBD</div>\n'
+        '</section>\n<!-- ============ CLAIM 2 ============ -->\n'
+        '<section class="claim" id="limitations">old NBC limitation</section>\n'
+        '<footer>Generated from commit c459506 &middot; x</footer>'
+    )
+    prices_now = SimpleNamespace(pv_net_per_kw=3_300.0, batt_net_per_kwh=1_460.64)
+    prices_2025 = SimpleNamespace(pv_net_per_kw=2_310.0, batt_net_per_kwh=1_022.448)
+
+    with (
+        patch("figure_builder.recipes.live_prices", side_effect=[prices_now, prices_2025]),
+        patch("figure_builder.recipes.tariff_metadata", return_value=_tariff_metadata_fixture()),
+        patch("figure_builder.recipes.expected_claim_counties", return_value={"a", "b"}),
+        patch("figure_builder.recipes.git_short_sha", return_value="74e2f33"),
+    ):
+        build_publication_scope(doc=doc)
+
+    html = doc.read_text()
+    assert "stale discount-rate result" not in html
+    assert "Figure TBD" not in html
+    assert "old NBC limitation" not in html
+    assert "$1,460.64/kWh" in html
+    assert "weighted 12&times;24 sensitivity model" in html
+    assert "unweighted across 2 modeled counties" in html
+    assert "branch" not in html
+    assert "tests passing" not in html
+    assert "Generated from commit 74e2f33" in html
+
+    with (
+        patch("figure_builder.recipes.live_prices", side_effect=[prices_now, prices_2025]),
+        patch("figure_builder.recipes.tariff_metadata", return_value=_tariff_metadata_fixture()),
+        patch("figure_builder.recipes.expected_claim_counties", return_value={"a", "b"}),
+        patch("figure_builder.recipes.git_short_sha", return_value="74e2f33"),
+    ):
+        build_publication_scope(doc=doc)
+    assert doc.read_text() == html
 
 
 def test_installer_rule_builder_passes_county_schedule_mean_to_caption(tmp_path):

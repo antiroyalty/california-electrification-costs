@@ -85,14 +85,24 @@ def test_slice_between():
 
 
 def test_set_commit_label_rewrites_masthead_and_footer():
-    html = ('<div class="buildinfo"><span>commit <b>c459506</b></span></div>'
+    html = ('<div class="buildinfo"><span>commit <b>c459506</b></span>'
+            '<span>branch <b>main</b></span><span><b>260</b> tests passing</span></div>'
             '<footer>Generated from commit c459506 &middot; x</footer>')
     out = docio.set_commit_label(html, "74e2f33")
     assert "c459506" not in out
     assert "commit <b>74e2f33</b>" in out
     assert "Generated from commit 74e2f33" in out
+    assert "branch" not in out
+    assert "tests passing" not in out
+    assert "source-locked 2026" in out
+    assert "47 of 58" in out
     # idempotent when the sha already matches
     assert docio.set_commit_label(out, "74e2f33") == out
+
+
+def test_set_commit_label_requires_one_buildinfo_block():
+    with pytest.raises(ValueError, match="exactly one buildinfo"):
+        docio.set_commit_label("<footer>Generated from commit c459506</footer>", "74e2f33")
 
 
 def test_figure_html_shape():

@@ -9,7 +9,7 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
-from figure_builder import FIG_DIR, current_claims_doc
+from figure_builder import FIG_DIR, current_claims_doc, git_short_sha
 from figure_builder import docio
 from figure_builder.charts import (
     plot_battery_value_waterfall,
@@ -27,6 +27,7 @@ from figure_builder.datasets import (
     collect_claims_eac_results,
     collect_market_price_observation,
     claims_eac_source_path,
+    expected_claim_counties,
     select_market_observation,
     summarize_claims_eac,
 )
@@ -530,6 +531,85 @@ def build_tariff_status_block(doc=None) -> Path:
             _LEGACY_TARIFF_STATUS_PATTERN,
             docio.wrap_markers("TARIFF-STATUS", fragment),
         )
+    _write(doc, html)
+    return doc
+
+
+def _claim1_support_fragment(prices_now, prices_2025) -> str:
+    """Current evidence and capital-cost scope for the Claim 1 section."""
+
+    return f'''<div class="sources">
+    <h3>Checks tied to this claim</h3>
+    <ul>
+      <li><code>tests/lp_cooptimize_test.py</code> checks that sizing uses the configured capital costs and the repository&rsquo;s annualization primitives.</li>
+      <li><code>tests/solar_storage_dispatch_test.py</code> checks hourly energy balance, state of charge, and physical meter direction.</li>
+      <li><code>tests/tariffs_source_test.py</code> checks the source-locked import, NBT export, ACC Plus, and NBC tariff primitives.</li>
+      <li><code>figure_builder/tests/test_datasets.py</code> checks exact market-point selection and complete source coverage; <code>figure_builder/tests/test_recipes.py</code> checks that captions are derived from current modeled values.</li>
+    </ul>
+  </div>
+
+  <div class="sources">
+    <h3>Capital-cost inputs, not market findings</h3>
+    <ul>
+      <li><strong>Current law:</strong> PV is ${prices_now.pv_net_per_kw:,.0f}/kW and battery storage is ${prices_now.batt_net_per_kwh:,.2f}/kWh net of modeled federal incentives.</li>
+      <li><strong>2025 ITC sensitivity:</strong> PV is ${prices_2025.pv_net_per_kw:,.0f}/kW and battery storage is ${prices_2025.batt_net_per_kwh:,.3f}/kWh net of the 30% federal ITC.</li>
+      <li>These are declared model inputs. The figures test economics at those costs; a separate capital-cost benchmark review is needed before treating them as estimates of today&rsquo;s market price.</li>
+    </ul>
+  </div>'''
+
+
+def _limitations_fragment(metadata: dict, county_count: int) -> str:
+    """Publication scope and limitations that match the rebuilt claims."""
+
+    tariff_status = _tariff_status_fragment(metadata)
+    return f'''<section class="claim" id="limitations">
+  <p class="subhead">Known limitations &amp; interpretation boundaries</p>
+  <ol class="limitations">
+    <li>Claim 1 is a four-county case-study result, not a statewide storage-adoption estimate.
+      <p>The capex sensitivities cover Alameda, Fresno, Los Angeles, and San Diego. The current-law market observations use the full 8,760-hour chronology; the 2025 ITC observations use the weighted 12&times;24 sensitivity model. That resolution difference is disclosed in every Claim 1 comparison and limits causal interpretation of the before/after contrast.</p>
+    </li>
+{tariff_status}
+    <li>The Claim 1 sizing objective does not reproduce every monthly NBT settlement rule.
+      <p>It values hourly imports and exports using the source-locked schedules. The annual-bill path used by Claims 2 and 3 separately applies the generation/delivery split, utility-specific NBCs, ACC Plus credits, and annual NSC settlement when required. Monthly credit ordering and annual NSC true-up are not part of the Claim 1 sizing objective.</p>
+    </li>
+    <li>Claims 2 and 3 are annualized modeled counterfactuals for one representative household per county.
+      <p>They combine standardized 8,760-hour household profiles with one source-locked 2026 tariff snapshot. They are not a longitudinal pre/post study, an adoption forecast, or evidence about household heterogeneity within a county.</p>
+    </li>
+    <li>The statewide distributions are unweighted across {county_count} modeled counties.
+      <p>Eleven California counties are outside the repository&rsquo;s current input domain. The summaries do not population-weight counties, and SDG&amp;E is represented by San Diego County alone, so utility-level differences should be treated as descriptive rather than utility-wide estimates.</p>
+    </li>
+    <li>The gas-appliance + ICE reference is not a no-solar household.
+      <p><code>baseline_ice_car</code> retains the fixed PV/storage convention used by the non-co-optimized scenario family. Claim 2 therefore isolates the complete modeled scenario difference; Claim 3 separately isolates the fixed-sizing versus co-optimization choice for the all-electric household.</p>
+    </li>
+  </ol>
+</section>'''
+
+
+def build_publication_scope(doc=None) -> Path:
+    """Remove inherited draft claims and install current report boundaries."""
+
+    from appliances.incentive_policy import PolicyRegime
+
+    doc = Path(doc) if doc is not None else current_claims_doc()
+    prices_now = live_prices()
+    prices_2025 = live_prices(PolicyRegime.ITC_2025)
+    support = docio.wrap_markers(
+        "CLAIM1-SUPPORT",
+        _claim1_support_fragment(prices_now, prices_2025),
+    )
+    html = _read(doc)
+    html = docio.replace_first(
+        html,
+        r'<!-- INSTALLER-RULE-END -->.*?'
+        r'(?=\n</section>\s*<!-- =+\s*CLAIM 2\s*=+ -->)',
+        '<!-- INSTALLER-RULE-END -->\n\n' + support,
+    )
+    html = docio.replace_first(
+        html,
+        r'<section class="claim" id="limitations">.*?</section>',
+        _limitations_fragment(tariff_metadata(), len(expected_claim_counties())),
+    )
+    html = docio.set_commit_label(html, git_short_sha())
     _write(doc, html)
     return doc
 

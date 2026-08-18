@@ -119,7 +119,7 @@ def test_all_passes_cli_run_identity_to_metadata_writer():
         "mechanism",
         "installer",
         "counties",
-        "tariff_status",
+        "publication_scope",
         "statewide",
         "bridge",
         "split",

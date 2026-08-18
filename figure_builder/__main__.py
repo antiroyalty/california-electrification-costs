@@ -118,6 +118,12 @@ def _cmd_tariff_status(_args):
     return [str(build_tariff_status_block())]
 
 
+def _cmd_publication_scope(_args):
+    from figure_builder.recipes import build_publication_scope
+
+    return [str(build_publication_scope())]
+
+
 def _parse_scenario_runs(entries) -> dict[str, str]:
     if not entries:
         raise ValueError("claims-source requires one --scenario-run per claims case")
@@ -181,7 +187,7 @@ def _cmd_all(args):
     artifacts += _cmd_mechanism(args)
     artifacts += _cmd_installer(args)
     artifacts += _cmd_counties(args)
-    artifacts += _cmd_tariff_status(args)
+    artifacts += _cmd_publication_scope(args)
     artifacts += _cmd_statewide(args)
     artifacts += _cmd_bridge(args)
     artifacts += _cmd_split(args)
@@ -221,7 +227,8 @@ _COMMANDS = {
     "snapshot": _cmd_snapshot, "sweeps": _cmd_sweeps, "market": _cmd_market,
     "claims-source": _cmd_claims_source,
     "mechanism": _cmd_mechanism,
-    "counties": _cmd_counties, "statewide": _cmd_statewide,
+    "counties": _cmd_counties, "publication-scope": _cmd_publication_scope,
+    "statewide": _cmd_statewide,
     "bridge": _cmd_bridge, "split": _cmd_split,
     "all": _cmd_all,
 }
