@@ -35,6 +35,21 @@
       "sha256": "1b9d13fdb3b3f5b6356e45a88c75fe2c4276ebeba82a79aad0d38f04dc0e795f"
     },
     {
+      "source_id": "pge_nem2_billing_guide_2026-08-17",
+      "source_group": "nem2_rules",
+      "source_type": "billing_guide",
+      "utility": "PG&E",
+      "document_title": "March 2026-March 2027 NEM True-Up Energy Statement with Base Services Charge",
+      "url": "https://www.pge.com/assets/pge/docs/account/billing-and-assistance/nem-2-bundled-true-up-base-services-charge.pdf",
+      "archive_path": "sources/nem2_rules/pge/2026-08-17/NEM2_TRUE_UP_BILLING_GUIDE.pdf",
+      "archive_status": "archived",
+      "retrieved_on": "2026-08-17",
+      "format": "pdf",
+      "page_count": 4,
+      "sha256": "7e21c21cd3554e761174f782fcde6cc3bf47f20d45c7ad83d009c8e6448761db",
+      "notes": "Current residential NEM 2 true-up example. It identifies the Base Services Charge as a monthly charge that generation credits cannot offset."
+    },
+    {
       "source_id": "sce_nem2_rules_2026-08-17",
       "source_group": "nem2_rules",
       "source_type": "tariff_schedule",
@@ -49,6 +64,21 @@
       "page_count": 39,
       "sha256": "20a1e2cc75e20573fa75905dc1e1606e447b7aa4ac695341519d179ae241f1dc",
       "notes": "The official endpoint returned a multipart response. This archive is the exact embedded PDF payload with the HTTP multipart wrapper removed."
+    },
+    {
+      "source_id": "sce_nem2_billing_guide_2026-08-17",
+      "source_group": "nem2_rules",
+      "source_type": "billing_guide",
+      "utility": "SCE",
+      "document_title": "Understanding Your Net Energy Metering (NEM) 2.0 Monthly Billing Statement",
+      "url": "https://www.sce.com/sites/default/files/custom-files/PDF_Files/NEM-2.0-Bill-Guide-20260625.pdf",
+      "archive_path": "sources/nem2_rules/sce/2026-08-17/NEM2_MONTHLY_BILLING_GUIDE.pdf",
+      "archive_status": "archived",
+      "retrieved_on": "2026-08-17",
+      "format": "pdf",
+      "page_count": 7,
+      "sha256": "20795f89efc53121fff87c6847f1790829823eb5be5543a71b93d217a604151b",
+      "notes": "Current NEM 2 billing guide. The worked TOU-D-PRIME bill separates interval NBCs, a fixed recovery charge on monthly net kWh, and the daily Base Services Charge."
     },
     {
       "source_id": "sdge_nem2_rules_2026-08-17",

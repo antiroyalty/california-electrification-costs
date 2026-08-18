@@ -14,8 +14,14 @@ EXPECTED_SOURCE_HASHES = {
     "pge_nem2_rules_2026-08-17": (
         "1b9d13fdb3b3f5b6356e45a88c75fe2c4276ebeba82a79aad0d38f04dc0e795f"
     ),
+    "pge_nem2_billing_guide_2026-08-17": (
+        "7e21c21cd3554e761174f782fcde6cc3bf47f20d45c7ad83d009c8e6448761db"
+    ),
     "sce_nem2_rules_2026-08-17": (
         "20a1e2cc75e20573fa75905dc1e1606e447b7aa4ac695341519d179ae241f1dc"
+    ),
+    "sce_nem2_billing_guide_2026-08-17": (
+        "20795f89efc53121fff87c6847f1790829823eb5be5543a71b93d217a604151b"
     ),
     "sdge_nem2_rules_2026-08-17": (
         "2cd0b84467a8d82df0d8e3c995d204f1ddea78d4cf9ec91b339c081f77040edf"
@@ -41,6 +47,17 @@ EXPECTED_SOURCE_DETAILS = {
         ),
         "page_count": 50,
     },
+    "pge_nem2_billing_guide_2026-08-17": {
+        "url": (
+            "https://www.pge.com/assets/pge/docs/account/billing-and-assistance/"
+            "nem-2-bundled-true-up-base-services-charge.pdf"
+        ),
+        "archive_path": (
+            "sources/nem2_rules/pge/2026-08-17/"
+            "NEM2_TRUE_UP_BILLING_GUIDE.pdf"
+        ),
+        "page_count": 4,
+    },
     "sce_nem2_rules_2026-08-17": {
         "url": (
             "https://www.sce.com/sites/default/files/custom-files/PDF_Files/"
@@ -50,6 +67,17 @@ EXPECTED_SOURCE_DETAILS = {
             "sources/nem2_rules/sce/2026-08-17/ELECTRIC_SCHEDULES_NEM-ST.pdf"
         ),
         "page_count": 39,
+    },
+    "sce_nem2_billing_guide_2026-08-17": {
+        "url": (
+            "https://www.sce.com/sites/default/files/custom-files/PDF_Files/"
+            "NEM-2.0-Bill-Guide-20260625.pdf"
+        ),
+        "archive_path": (
+            "sources/nem2_rules/sce/2026-08-17/"
+            "NEM2_MONTHLY_BILLING_GUIDE.pdf"
+        ),
+        "page_count": 7,
     },
     "sdge_nem2_rules_2026-08-17": {
         "url": (
