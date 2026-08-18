@@ -15,9 +15,11 @@ from tariffs import (
     NEM2Scenario,
     NEM2TariffBundle,
     NetSurplusCompensationRate,
+    TariffCatalog,
     Utility,
     calculate_nem2_bill,
 )
+from tariffs.calendar import full_year_hourly_index
 
 
 def _day_rates() -> dict:
@@ -349,3 +351,35 @@ def test_real_bundle_inputs_preserve_source_ids_and_reconcile_exclusion_rates():
             treatment.retail_credit_exclusion_rate_usd_per_kwh,
             abs=1e-12,
         )
+
+
+def test_catalog_builds_source_complete_nem2_optimizer_terms():
+    scenario = NEM2Scenario()
+    bundle = TariffCatalog().nem2_bundle(Utility.SCE, scenario)
+    terms = bundle.optimization_terms_for(
+        full_year_hourly_index(scenario.billing_year)
+    )
+
+    assert bundle.import_schedule.source_id == "sce_tou_d_prime_2026-06-01"
+    assert len(terms.offsettable_rates_usd_per_kwh) == 8760
+    assert terms.billing_months.count(1) == 31 * 24
+    assert terms.billing_months.count(2) == 28 * 24
+    assert terms.interval_nbc_rate_usd_per_kwh == pytest.approx(0.00779)
+    assert terms.monthly_net_consumption_rate_usd_per_kwh == pytest.approx(
+        0.00619
+    )
+    assert terms.nsc_rate_usd_per_kwh == pytest.approx(0.01697)
+    assert terms.nsc_rate_source_id == "sce_monthly_nsc_rates_2026-08-10"
+    retail_rates = bundle.import_schedule.rates_for(
+        full_year_hourly_index(scenario.billing_year)
+    )
+    assert terms.offsettable_rates_usd_per_kwh[0] == pytest.approx(
+        retail_rates[0] - 0.01398
+    )
+
+
+def test_nem2_optimizer_terms_reject_the_wrong_billing_year():
+    bundle = TariffCatalog().nem2_bundle(Utility.PGE, NEM2Scenario())
+
+    with pytest.raises(ValueError, match="billing year 2026"):
+        bundle.optimization_terms_for(full_year_hourly_index(2018))

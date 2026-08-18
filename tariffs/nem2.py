@@ -408,6 +408,83 @@ class NEM2TariffBundle:
             if self.nsc_rate.true_up_month != self.scenario.true_up_month:
                 raise ValueError("NEM 2 NSC rate month does not match scenario")
 
+    def optimization_terms_for(
+        self,
+        timestamps: pd.DatetimeIndex,
+    ) -> "NEM2OptimizationTerms":
+        """Return exact variable-rate terms for co-optimization.
+
+        Fixed daily charges do not affect sizing or dispatch, so the optimizer
+        omits them. The final bill evaluator adds those charges back.
+        """
+
+        index = pd.DatetimeIndex(pd.to_datetime(timestamps))
+        if len(index) == 0:
+            raise ValueError("NEM 2 optimization timestamps cannot be empty")
+        if set(index.year) != {self.scenario.billing_year}:
+            raise ValueError(
+                "NEM 2 optimization timestamps must use billing year "
+                f"{self.scenario.billing_year}"
+            )
+        if self.nsc_rate is None:
+            raise ValueError("NEM 2 optimization requires a source-selected NSC rate")
+        retail_rates = self.import_schedule.rates_for(index)
+        exclusion = self.rate_treatment.retail_credit_exclusion_rate_usd_per_kwh
+        offsettable_rates = tuple(float(rate) - exclusion for rate in retail_rates)
+        if any(rate < -1e-12 for rate in offsettable_rates):
+            raise ValueError(
+                "NEM 2 retail-credit exclusion exceeds an optimization retail rate"
+            )
+        return NEM2OptimizationTerms(
+            offsettable_rates_usd_per_kwh=offsettable_rates,
+            billing_months=tuple(int(month) for month in index.month),
+            interval_nbc_rate_usd_per_kwh=(
+                self.rate_treatment.interval_nbc_rate_usd_per_kwh
+            ),
+            monthly_net_consumption_rate_usd_per_kwh=(
+                self.rate_treatment.monthly_net_consumption_rate_usd_per_kwh
+            ),
+            nsc_rate_usd_per_kwh=self.nsc_rate.rate_usd_per_kwh,
+            nsc_rate_source_id=self.nsc_rate.source_id,
+        )
+
+
+@dataclass(frozen=True)
+class NEM2OptimizationTerms:
+    """Variable bill terms required by the NEM 2 sizing objective."""
+
+    offsettable_rates_usd_per_kwh: tuple[float, ...]
+    billing_months: tuple[int, ...]
+    interval_nbc_rate_usd_per_kwh: float
+    monthly_net_consumption_rate_usd_per_kwh: float
+    nsc_rate_usd_per_kwh: float
+    nsc_rate_source_id: str
+
+    def __post_init__(self) -> None:
+        if not self.offsettable_rates_usd_per_kwh:
+            raise ValueError("NEM 2 optimization rates cannot be empty")
+        if len(self.offsettable_rates_usd_per_kwh) != len(self.billing_months):
+            raise ValueError("NEM 2 optimization rates and months must align")
+        if not set(self.billing_months) <= set(range(1, 13)):
+            raise ValueError("NEM 2 optimization months must be in 1 through 12")
+        for field_name in (
+            "interval_nbc_rate_usd_per_kwh",
+            "monthly_net_consumption_rate_usd_per_kwh",
+            "nsc_rate_usd_per_kwh",
+        ):
+            object.__setattr__(
+                self,
+                field_name,
+                _finite_rate(getattr(self, field_name), field_name),
+            )
+        rates = tuple(
+            _finite_rate(rate, "offsettable_rates_usd_per_kwh")
+            for rate in self.offsettable_rates_usd_per_kwh
+        )
+        object.__setattr__(self, "offsettable_rates_usd_per_kwh", rates)
+        if not self.nsc_rate_source_id:
+            raise ValueError("nsc_rate_source_id must be non-empty")
+
 
 @dataclass(frozen=True)
 class NEM2MonthlyBill:
