@@ -116,6 +116,12 @@ def _claim1_summary_fragment(
   </div>'''
 
 
+def _claim1_cost_scope_fragment(prices_now, prices_2025) -> str:
+    """Describe the two policy-regime inputs used by the county panels."""
+
+    return f'''<div class="callout"><strong>Cost scope used above:</strong> PV is held fixed within each policy panel&mdash;${prices_2025.pv_net_per_kw:,.0f}/kW with the 2025 ITC and ${prices_now.pv_net_per_kw:,.0f}/kW under current law. The displayed battery-capex sensitivity spans $25&ndash;$1,500/kWh and includes solved grid observations at both modeled market prices (${prices_2025.batt_net_per_kwh:,.3f}/kWh and ${prices_now.batt_net_per_kwh:,.2f}/kWh). The current-law diamond additionally reports the dedicated 8,760-hour solve.</div>'''
+
+
 def _read(doc) -> str:
     return Path(doc).read_text()
 
@@ -300,6 +306,20 @@ def build_county_grid(doc=None, *, fine: bool = False) -> Path:
         html = docio.replace_first(
             html, r'<div class="fig-grid">.*?San Diego County.*?</div>',
             docio.wrap_markers("COUNTY-GRID", grid_inner))
+    cost_scope = _claim1_cost_scope_fragment(prices_now, prices_2025)
+    if docio.has_markers(html, "CLAIM1-COST-SCOPE"):
+        html = docio.replace_between_markers(
+            html,
+            "CLAIM1-COST-SCOPE",
+            cost_scope,
+        )
+    else:
+        html = docio.replace_first(
+            html,
+            r'<!-- COUNTY-GRID-END -->\s*<div class="callout">.*?</div>',
+            '<!-- COUNTY-GRID-END -->\n\n'
+            + docio.wrap_markers("CLAIM1-COST-SCOPE", cost_scope),
+        )
     _write(doc, html)
     return Path(doc)
 

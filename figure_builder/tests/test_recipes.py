@@ -12,6 +12,7 @@ from figure_builder.charts import (
 )
 from figure_builder.recipes import (
     _claim1_summary_fragment,
+    _claim1_cost_scope_fragment,
     _claim2_fragment,
     _claim3_fragment,
     _installer_rule_fragment,
@@ -158,6 +159,26 @@ def test_claim1_summary_is_derived_from_exact_market_observations():
     assert '<span class="num">2 of 4</span>' in html
     assert '<span class="num">$500&ndash;$1,200</span>' in html
     assert "0&ndash;0.2 kWh" not in html
+
+
+def test_claim1_cost_scope_uses_both_policy_regime_prices():
+    prices_now = SimpleNamespace(
+        batt_net_per_kwh=1_460.64,
+        pv_net_per_kw=3_300.0,
+    )
+    prices_2025 = SimpleNamespace(
+        batt_net_per_kwh=1_022.448,
+        pv_net_per_kw=2_310.0,
+    )
+
+    html = _claim1_cost_scope_fragment(prices_now, prices_2025)
+
+    assert "$2,310/kW with the 2025 ITC" in html
+    assert "$3,300/kW under current law" in html
+    assert "$25&ndash;$1,500/kWh" in html
+    assert "$1,022.448/kWh and $1,460.64/kWh" in html
+    assert "dedicated 8,760-hour solve" in html
+    assert "across the whole sweep" not in html
 
 
 def test_installer_rule_caption_uses_county_export_schedule_mean():
