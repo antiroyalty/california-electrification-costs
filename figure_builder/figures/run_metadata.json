@@ -41,9 +41,29 @@
       "size_bytes": 1683
     },
     {
-      "path": "claims-de1f921.html",
-      "sha256": "9e6b57d23412e05f7d7c75be73650f07936a0898c3f0c59c102526b68f7b9f0a",
-      "size_bytes": 2073060
+      "path": "figure_builder/sweeps/market_8760_alameda_post_itc_2026.csv",
+      "sha256": "a3768b8b59fd9b634aeff3a938799fa0d71c8f65654d59aae75614b65b83cf0a",
+      "size_bytes": 259
+    },
+    {
+      "path": "figure_builder/sweeps/market_8760_fresno_post_itc_2026.csv",
+      "sha256": "d5c93239edfbef81268fb8fc76852cfd7a326ae12a3f09b9b5bd3ceb72dcbdfd",
+      "size_bytes": 260
+    },
+    {
+      "path": "figure_builder/sweeps/market_8760_los-angeles_post_itc_2026.csv",
+      "sha256": "91f530d89764e0eb680213d4b1d6b9e82ec20b5d10171ee3f7f5fdf1ecceabb7",
+      "size_bytes": 260
+    },
+    {
+      "path": "figure_builder/sweeps/market_8760_san-diego_post_itc_2026.csv",
+      "sha256": "30264322c6c38dbf128b4d215b3ce4fc2e6ece10c800b4e4cd7e4ce012c29017",
+      "size_bytes": 262
+    },
+    {
+      "path": "claims-3e5deac.html",
+      "sha256": "5a9da53db6808bfc010930679e295e1ea919fe2460ac6be48e661f3a66a264ef",
+      "size_bytes": 1795371
     },
     {
       "path": "figure_builder/sweeps/sweep_288_alameda_fixedpv_post_itc_2026.csv",
@@ -57,18 +77,18 @@
     },
     {
       "path": "claim1.html",
-      "sha256": "16e0257834431781c53dff467b7b31bf54d6ac47d12113a3ea7729baf77f8c96",
-      "size_bytes": 1429034
+      "sha256": "1775a34108d151dc87e010752e11a8873f6c2823fe09f8c9fb3ec5b351f689ea",
+      "size_bytes": 1271081
     },
     {
       "path": "claim2.html",
-      "sha256": "84992022838110c95adb425475c3e68607de55bf39f9971ea4038f1f1e4834bb",
-      "size_bytes": 651098
+      "sha256": "a8faefc598f64e330d4c80ddf12c64dca5263675f689da6d067533cd571a9031",
+      "size_bytes": 369996
     },
     {
       "path": "claim3.html",
-      "sha256": "f021056476510432670bc114ca23040be660ac9d2e09a1187df7fde0e4b84980",
-      "size_bytes": 15094
+      "sha256": "3f1062423f8883654aa57c2bde9cc19ddc42f70d4bcd164ccb5c164fd0a41ebf",
+      "size_bytes": 175866
     }
   ],
   "capital_costs": {
@@ -209,6 +229,18 @@
       "role": "combined_load_profile",
       "sha256": "f28fc3e67393cb03924cefc82f4aed74303d919956eb65d186e566bbad3bbf59",
       "size_bytes": 392676
+    },
+    {
+      "path": "analysis_results/claims_eac_by_county_nem3_g1146e05.csv",
+      "role": "statewide_claims_eac_source",
+      "sha256": "44c5d83c263595ef9b8fe641699635af807c35bdf502f0b56c903a45de3c8558",
+      "size_bytes": 16971
+    },
+    {
+      "path": "analysis_results/claims_eac_by_county_nem3_g1146e05.manifest.json",
+      "role": "statewide_claims_eac_manifest",
+      "sha256": "86e8f7aee6fe63d304f77aae08fd223bfaafb07c27085a033888bdbaa5acb13e",
+      "size_bytes": 1614
     }
   ],
   "optimization": {
@@ -228,6 +260,16 @@
       "discount_rate": 0.07,
       "pv_lifetime_years": 25
     },
+    "market_price_observations": {
+      "interval_count": 8760,
+      "name": "full_8760_hour",
+      "points_per_county_and_regime": 1,
+      "policy_regimes": [
+        "post_itc_2026"
+      ],
+      "purpose": "Exact current-law solved observations for publication market-price annotations; the 2025 ITC comparison remains an explicitly labeled 12x24 sensitivity.",
+      "soc_cycle": "annual"
+    },
     "sizing_domain": {
       "battery_power_limit_c_rate": 1.0,
       "max_battery_kwh": 40.0,
@@ -245,7 +287,14 @@
     }
   },
   "run": {
-    "command": "python3 -m figure_builder all",
+    "command_argv": [
+      "python3",
+      "-m",
+      "figure_builder",
+      "all",
+      "--claims-source",
+      "analysis_results/claims_eac_by_county_nem3_g1146e05.csv"
+    ],
     "counties": [
       {
         "county_name": "Alameda County",
@@ -274,13 +323,13 @@
     ],
     "fine": false,
     "force": false,
-    "generated_at_utc": "2026-08-17T20:09:38.081149+00:00",
-    "git_sha": "de1f921",
+    "generated_at_utc": "2026-08-18T01:52:31.974182+00:00",
+    "git_sha": "3e5deac",
     "housing_type": "single-family-detached",
     "requested_counties": null,
     "scenario": "full_electric_ev_coopt"
   },
-  "schema_version": 1,
+  "schema_version": 3,
   "software": {
     "matplotlib": "3.8.2",
     "numpy": "1.26.4",
@@ -288,6 +337,23 @@
     "pulp": "3.3.0",
     "python": "3.11.13",
     "scipy": "1.11.4"
+  },
+  "statewide_claims": {
+    "electricity_variant": "nem3",
+    "expected_county_count": 47,
+    "model_run_git_sha": "1146e05",
+    "scenario_cases": {
+      "baseline_ice_car": "gas_ice_reference",
+      "full_electric_ev": "fixed_pv_electric",
+      "full_electric_ev_coopt": "cooptimized_electric"
+    },
+    "scenario_run_timestamps": {
+      "baseline_ice_car": "20260817_17",
+      "full_electric_ev": "20260817_17",
+      "full_electric_ev_coopt": "20260817_18"
+    },
+    "source_manifest_path": "analysis_results/claims_eac_by_county_nem3_g1146e05.manifest.json",
+    "source_path": "analysis_results/claims_eac_by_county_nem3_g1146e05.csv"
   },
   "tariffs": {
     "annual_true_up": {
