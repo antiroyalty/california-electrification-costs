@@ -11,6 +11,7 @@ from figure_builder.charts import (
     solar_generation_weighted_export_rate,
 )
 from figure_builder.recipes import (
+    _claim1_summary_fragment,
     _installer_rule_fragment,
     _mechanism_fragment,
     _tariff_status_fragment,
@@ -78,8 +79,16 @@ def test_mechanism_caption_uses_metrics_instead_of_stale_rate_literals():
         prices_now,
         prices_2025,
         {
-            "before": {"pv_flat": 2.0, "pv_max": 4.0},
-            "after": {"pv_flat": 1.5, "pv_max": 3.0},
+            "before": {
+                "pv_flat": 2.0,
+                "pv_max": 4.0,
+                "market_batt_kwh": 5.53,
+            },
+            "after": {
+                "pv_flat": 1.5,
+                "pv_max": 3.0,
+                "market_batt_kwh": 0.0,
+            },
         },
         {
             "v_export": 0.057469,
@@ -111,10 +120,39 @@ def test_mechanism_caption_uses_metrics_instead_of_stale_rate_literals():
     assert "not profit" in html
     assert "not a solar-plus-storage LCOE" in html
     assert "today&rsquo;s modeled <strong>$1,461/kWh net</strong>" in html
+    assert "12&times;24 sensitivity chooses 5.53&nbsp;kWh" in html
+    assert "full 8,760-hour current-law solve chooses 0.00&nbsp;kWh" in html
+    assert "2025 market diamond is a weighted 12&times;24" in html
+    assert "current-law market diamond is a separate full 8,760-hour" in html
     assert "2-3" not in html
     assert "2&ndash;3" not in html
     assert "~$0.40/kWh" not in html
     assert "~$0.05/kWh" not in html
+
+
+def test_claim1_summary_is_derived_from_exact_market_observations():
+    before = [
+        {"market_batt_kwh": 0.0},
+        {"market_batt_kwh": 0.0},
+        {"market_batt_kwh": 5.5329},
+        {"market_batt_kwh": 7.4963},
+    ]
+    after = [
+        {"market_batt_kwh": 0.0},
+        {"market_batt_kwh": 0.0},
+        {"market_batt_kwh": 0.0},
+        {"market_batt_kwh": 0.0001515},
+    ]
+
+    html = _claim1_summary_fragment(before, after, [500.0, 500.0, 800.0, 1_200.0])
+
+    assert "0 of 4 above 0.1&nbsp;kWh" in html
+    assert "5.53&ndash;7.50&nbsp;kWh" in html
+    assert "weighted 12&times;24 sensitivity" in html
+    assert '<span class="num">0 of 4</span>' in html
+    assert '<span class="num">2 of 4</span>' in html
+    assert '<span class="num">$500&ndash;$1,200</span>' in html
+    assert "0&ndash;0.2 kWh" not in html
 
 
 def test_installer_rule_caption_uses_county_export_schedule_mean():

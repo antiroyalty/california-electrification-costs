@@ -20,7 +20,7 @@ redefined here.
 | `docio.py` | Pure string primitives: embed PNGs, patch/splice HTML documents idempotently. |
 | `recipes.py` | Compose the above into specific document figures (mechanism block, county grid, bridge, split). |
 | `__main__.py` | CLI driver; `all` emits `figures/run_metadata.json`. |
-| `tests/` | Unit tests for the pure primitives (`docio`, `pricing`). |
+| `tests/` | Unit tests for collectors, charts, document IO, pricing, and metadata. |
 
 ## Usage
 
@@ -41,6 +41,7 @@ python3 -m figure_builder all
 python3 -m figure_builder sweeps                    # weighted 12x24 sensitivity sweeps
 python3 -m figure_builder sweeps --counties alameda --force
 python3 -m figure_builder sweeps --counties alameda --fine  # deliberate 8760 run
+python3 -m figure_builder market                    # exact 8760 current-law market points
 python3 -m figure_builder mechanism                 # Claim-1 Figures A/B/C + objective box
 python3 -m figure_builder counties                  # Claim-1 four-county grid
 python3 -m figure_builder bridge                    # assumption-bridge waterfall PNG
@@ -51,8 +52,13 @@ Sweeps are cached in `figure_builder/sweeps/` as
 `sweep_288_<county>_<regime>.csv` by default, or `sweep_8760_...` with
 `--fine` (keyed by regime, since solar's fixed price differs between regimes),
 and reused; pass `--force` to recompute. Weighted 12x24 is the declared
-sensitivity-grid resolution; use full chronology for headline cases and
-targeted checks, not large low-cost grids. The
+sensitivity-grid resolution. Claim 1 uses a separate
+`market_8760_<county>_post_itc_2026.csv` cache for each current-law market-price
+observation. The 2025 ITC panel remains explicitly labeled as a weighted
+12x24 sensitivity: the corrected Southern California full-year MILPs do not
+complete within a bounded publication workflow, so the builder does not
+misrepresent those capacities as exact 8,760-hour optima. Use full chronology
+for targeted checks, not large low-cost grids. The
 cache records the explicit battery-capacity bound and solver diagnostics; a
 cache generated under a different sizing domain or the former unbounded model
 is rejected automatically. The default domain is 0&ndash;40 kWh for a
@@ -79,25 +85,20 @@ sizing result.
 The headline Claim-1 figure is a **before/after** comparison
 (`plot_pv_batt_vs_capex_compare`): a 2025 panel (with the 30% federal ITC,
 battery `$1,022/kWh` net) beside a current-law panel (ITC expired,
-`$1,460.64/kWh` net), on shared axes. `build_mechanism_block` computes both
-regime sweeps for the county automatically; the mechanism and ceiling panels are
-drawn at current law. The four-county grid (`build_county_grid`) is also
-before/after: each county is a 2025-vs-current-law comparison, stacked
-full-width.
+`$1,460.64/kWh` net), on shared axes. The market markers state their resolution:
+12x24 for the 2025 sensitivity and 8,760 hours for the current-law exact solve.
+`build_mechanism_block` computes both regime sweeps for the county automatically;
+the mechanism and ceiling panels are drawn at current law. The four-county grid
+(`build_county_grid`) is also before/after: each county is a
+2025-vs-current-law comparison, stacked full-width.
 
 ## Prices track the policy regime automatically
 
 `live_prices()` reads the current default regime (`POST_ITC_2026`, no federal
 ITC → PV `$3,300/kW`, battery `$1,460.64/kWh` net). Figures regenerated today
 therefore reflect current law, not the expired `ITC_2025` prices
-(`$2,310` / `$1,022`) the original figures were drawn at. To render the
-before/after comparison, pass a regime through the recipes:
-
-```python
-from appliances.incentive_policy import PolicyRegime
-from figure_builder.recipes import build_mechanism_block
-build_mechanism_block(regime=PolicyRegime.ITC_2025)
-```
+(`$2,310` / `$1,022`) the original figures were drawn at. The before/after
+recipes load both regimes deliberately; callers do not select one implicitly.
 
 ## Testing
 

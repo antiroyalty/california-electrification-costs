@@ -43,6 +43,15 @@ def sweep_csv_path(
     return SWEEP_DIR / f"sweep_{resolution}_{slug}_{regime}.csv"
 
 
+def market_observation_csv_path(
+    slug: str,
+    regime: str = "post_itc_2026",
+) -> Path:
+    """Cache path for the exact-price, full-chronology publication solve."""
+
+    return SWEEP_DIR / f"market_8760_{slug}_{regime}.csv"
+
+
 # --- one claims snapshot per commit -----------------------------------------
 # The review doc follows a one-page-per-commit convention: claims-<sha>.html.
 # Recipes always target the CURRENT commit's file so an archived snapshot from a

@@ -1,10 +1,10 @@
 """Collectors: run the model, return tidy DataFrames.
 
 Follows the repo's established `collect_*` convention (see
-`helpers/plot_scenario_comparison_helper.py`). The one collector here,
-`collect_battery_capex_sweep`, is the properly-named replacement for the old
-one-off `run_sweeps.py`: it sweeps battery capex for a county through the real
-Step-9b co-optimization model, holding solar's price fixed.
+`helpers/plot_scenario_comparison_helper.py`). The collectors replace the old
+one-off `run_sweeps.py`: one builds the declared capex sensitivity and the other
+builds the exact current-law 8,760-hour market observation used in publication
+annotations.
 """
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from typing import List, Optional, Sequence
 
 import pandas as pd
 
-from figure_builder import SWEEP_DIR, sweep_csv_path
+from figure_builder import SWEEP_DIR, market_observation_csv_path, sweep_csv_path
 from figure_builder.dispatch import (
     DEFAULT_SCENARIO,
     SWEEP_POINTS,
@@ -52,6 +52,13 @@ SWEEP_COLUMNS = [
     "max_battery_kwh",
     "meter_binary_count",
     "solver_rounds",
+]
+
+MARKET_OBSERVATION_COLUMNS = [
+    *SWEEP_COLUMNS,
+    "scenario",
+    "policy_regime",
+    "interval_count",
 ]
 
 
@@ -98,6 +105,111 @@ def canonical_battery_capex_points(regime=None) -> List[float]:
     return normalize_battery_capex_points(
         [*SWEEP_POINTS, live_prices(regime).batt_net_per_kwh]
     )
+
+
+def select_market_observation(
+    frame: pd.DataFrame,
+    market_price: float,
+) -> pd.Series:
+    """Return the one solved row at ``market_price``, failing on ambiguity.
+
+    Publication annotations use this primitive instead of interpolation or the
+    nearest capex grid point. The strict checks prevent an old or incomplete
+    cache from silently supplying a different modeled price.
+    """
+
+    missing = [column for column in SWEEP_COLUMNS if column not in frame.columns]
+    if missing:
+        raise ValueError(f"Market observation is missing columns: {missing}")
+    numeric = frame[SWEEP_COLUMNS].apply(pd.to_numeric, errors="coerce")
+    if numeric.isna().any().any():
+        raise ValueError("Market observation contains non-numeric or missing values")
+    if not pd.notna(numeric).all().all() or not all(
+        math.isfinite(value) for value in numeric.to_numpy().ravel()
+    ):
+        raise ValueError("Market observation contains non-finite values")
+    matches = numeric[
+        numeric["battery_capex_kwh"].map(
+            lambda value: math.isclose(
+                value,
+                float(market_price),
+                rel_tol=0.0,
+                abs_tol=1e-9,
+            )
+        )
+    ]
+    if len(matches) != 1:
+        raise ValueError(
+            "Expected exactly one solved observation at battery capex "
+            f"${market_price:.6f}/kWh; found {len(matches)}"
+        )
+    row = matches.iloc[0]
+    if row["pv_kw"] < 0.0 or row["batt_kwh"] < 0.0:
+        raise ValueError("Market observation cannot contain negative capacity")
+    if int(row["solver_rounds"]) < 1:
+        raise ValueError("Market observation must record at least one solver round")
+    return row
+
+
+def collect_market_price_observation(
+    slug: str,
+    *,
+    regime=None,
+    scenario: str = DEFAULT_SCENARIO,
+    max_battery_kwh: float = SWEEP_MODEL_SETTINGS.max_battery_kwh,
+    cache: bool = True,
+    force: bool = False,
+    verbose: bool = True,
+) -> pd.DataFrame:
+    """Solve one exact market-price point using the full 8,760-hour chronology.
+
+    The capex sensitivity curves remain the declared 12x24 approximation. This
+    separate observation is the publication-grade check used for each market
+    price annotation and Claim 1 headline statistic.
+    """
+
+    prices = live_prices(regime)
+    market_price = prices.batt_net_per_kwh
+    path = market_observation_csv_path(slug, prices.regime)
+    if cache and not force and path.exists():
+        cached = pd.read_csv(path)
+        try:
+            select_market_observation(cached, market_price)
+        except ValueError:
+            pass
+        else:
+            if (
+                list(cached.columns) == MARKET_OBSERVATION_COLUMNS
+                and len(cached) == 1
+                and set(cached["max_battery_kwh"].astype(float))
+                == {float(max_battery_kwh)}
+                and set(cached["scenario"]) == {scenario}
+                and set(cached["policy_regime"]) == {prices.regime}
+                and set(cached["interval_count"].astype(int)) == {8760}
+            ):
+                return cached.reset_index(drop=True)
+
+    frame = collect_battery_capex_sweep(
+        slug,
+        regime=regime,
+        scenario=scenario,
+        points=[market_price],
+        max_battery_kwh=max_battery_kwh,
+        fine=True,
+        cache=False,
+        force=True,
+        verbose=verbose,
+    )
+    select_market_observation(frame, market_price)
+    frame = frame.assign(
+        scenario=scenario,
+        policy_regime=prices.regime,
+        interval_count=8760,
+    )[MARKET_OBSERVATION_COLUMNS]
+    if cache:
+        SWEEP_DIR.mkdir(parents=True, exist_ok=True)
+        frame.to_csv(path, index=False)
+    return frame.reset_index(drop=True)
 
 
 def resolve_pv_capex(pv_capex_per_kw=None, regime=None) -> float:

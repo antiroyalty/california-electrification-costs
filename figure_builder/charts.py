@@ -42,7 +42,7 @@ def apply_style(serif_first: str = "Georgia") -> None:
     })
 
 
-Meta = Dict[str, float]
+Meta = Dict[str, float | str]
 
 
 def solar_generation_weighted_export_rate(dispatch) -> float:
@@ -76,6 +76,8 @@ def plot_pv_batt_vs_capex(
     sweep: pd.DataFrame,
     *,
     batt_price_net: float,
+    market_observation: pd.Series,
+    market_resolution_label: str,
     title: str,
     compact: bool = False,
     min_capex: float = 25.0,
@@ -97,6 +99,8 @@ def plot_pv_batt_vs_capex(
     fig, axL = plt.subplots(figsize=figsize)
     axR = axL.twinx()
     meta, (lP, lB) = _draw_pv_batt(axL, axR, df, batt_price_net,
+                                   market_observation=market_observation,
+                                   market_resolution_label=market_resolution_label,
                                    compact=compact, rich=not compact)
     axL.set_title(title, fontsize=11 if compact else 11.5, color=INK, pad=8, loc="left")
     axL.legend(handles=[lP, lB], loc="upper center", fontsize=8.5 if compact else 9.5,
@@ -104,7 +108,9 @@ def plot_pv_batt_vs_capex(
     return fig, meta
 
 
-def _draw_pv_batt(axL, axR, df, batt_price_net, *, compact, rich,
+def _draw_pv_batt(axL, axR, df, batt_price_net, *, market_observation,
+                  market_resolution_label,
+                  compact, rich,
                   pv_ymax=None, bt_ymax=None, x_right=None,
                   price_marker_label="today's price"):
     """Draw the dual-axis PV/battery-vs-capex chart onto a given axis pair.
@@ -133,9 +139,31 @@ def _draw_pv_batt(axL, axR, df, batt_price_net, *, compact, rich,
     axL.text(x_right * 0.98, pv_flat + 0.04 * pv.max(), solar_lbl, ha="right",
              va="bottom", color=ACCENT_INK, fontsize=8.5 if compact else 9)
 
+    market_price = float(market_observation["battery_capex_kwh"])
+    market_pv = float(market_observation["pv_kw"])
+    market_batt = float(market_observation["batt_kwh"])
+    if not np.isclose(market_price, batt_price_net, rtol=0.0, atol=1e-9):
+        raise ValueError(
+            f"Market observation capex {market_price} does not match marker "
+            f"price {batt_price_net}"
+        )
+    if not np.isfinite([market_pv, market_batt]).all():
+        raise ValueError("Market observation capacities must be finite")
+    if market_pv < 0.0 or market_batt < 0.0:
+        raise ValueError("Market observation capacities cannot be negative")
+
     axL.axvline(batt_price_net, color=INK_FAINT, ls=(0, (2, 2)), lw=1.1, zorder=2)
+    axL.scatter([market_price], [market_pv], marker="D", s=30, color=ACCENT,
+                edgecolor="white", linewidth=0.7, zorder=6)
+    axR.scatter([market_price], [market_batt], marker="D", s=30, color=CAUT,
+                edgecolor="white", linewidth=0.7, zorder=6)
+    if market_batt < 0.01 and market_batt > 1e-6:
+        batt_label = "<0.01 kWh"
+    else:
+        batt_label = f"{market_batt:.2f} kWh"
     axL.text(batt_price_net - x_right * 0.014, pv.max() * 0.97,
-             f"{price_marker_label}\n${batt_price_net:,.0f}/kWh\n" + r"$\rightarrow$ battery = 0",
+             f"{price_marker_label}\n${batt_price_net:,.0f}/kWh\n"
+             f"{market_resolution_label}: battery = {batt_label}",
              ha="right", va="top", color=INK_SOFT, fontsize=8 if compact else 9,
              linespacing=1.25)
 
@@ -158,12 +186,21 @@ def _draw_pv_batt(axL, axR, df, batt_price_net, *, compact, rich,
     axR.tick_params(labelsize=8.5 if compact else 9.5, colors=CAUT)
     axL.spines["top"].set_visible(False)
     axR.spines["top"].set_visible(False)
-    return {"pv_flat": pv_flat, "pv_max": float(pv.max())}, (lP, lB)
+    return {
+        "pv_flat": pv_flat,
+        "pv_max": float(pv.max()),
+        "market_price": market_price,
+        "market_pv_kw": market_pv,
+        "market_batt_kwh": market_batt,
+        "market_resolution": market_resolution_label,
+    }, (lP, lB)
 
 
 def plot_pv_batt_vs_capex_compare(
     before: pd.DataFrame, after: pd.DataFrame, *,
     batt_before: float, batt_after: float, title: str,
+    market_before: pd.Series, market_after: pd.Series,
+    market_before_resolution: str, market_after_resolution: str,
     panel_labels: Tuple[str, str], min_capex: float = 25.0,
 ) -> Tuple["object", Dict[str, Meta]]:
     """Two side-by-side dual-axis panels on shared scales: a before/after
@@ -183,10 +220,18 @@ def plot_pv_batt_vs_capex_compare(
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12.6, 4.9))
     ax1R, ax2R = ax1.twinx(), ax2.twinx()
-    mB, (lP, lB) = _draw_pv_batt(ax1, ax1R, b, batt_before, compact=True, rich=False,
+    mB, (lP, lB) = _draw_pv_batt(
+                                 ax1, ax1R, b, batt_before,
+                                 market_observation=market_before,
+                                 market_resolution_label=market_before_resolution,
+                                 compact=True, rich=False,
                                  pv_ymax=pv_ymax, bt_ymax=bt_ymax, x_right=x_right,
                                  price_marker_label="2025 price")
-    mA, _ = _draw_pv_batt(ax2, ax2R, a, batt_after, compact=True, rich=False,
+    mA, _ = _draw_pv_batt(
+                          ax2, ax2R, a, batt_after,
+                          market_observation=market_after,
+                          market_resolution_label=market_after_resolution,
+                          compact=True, rich=False,
                           pv_ymax=pv_ymax, bt_ymax=bt_ymax, x_right=x_right,
                           price_marker_label="today's price")
     # De-clutter shared inner labels: PV axis on the left panel, battery axis on the right.

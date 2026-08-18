@@ -74,6 +74,18 @@ def test_optimization_metadata_matches_declared_coarse_sweep_settings():
         "interval_count": 288,
         "soc_cycle": "monthly",
     }
+    assert metadata["market_price_observations"] == {
+        "name": "full_8760_hour",
+        "interval_count": 8760,
+        "soc_cycle": "annual",
+        "points_per_county_and_regime": 1,
+        "policy_regimes": ["post_itc_2026"],
+        "purpose": (
+            "Exact current-law solved observations for publication "
+            "market-price annotations; the 2025 ITC comparison remains "
+            "an explicitly labeled 12x24 sensitivity."
+        ),
+    }
     assert metadata["solver"]["backend"] == "highs"
     assert metadata["solver"]["mip_relative_gap"] == 1e-6
     assert metadata["sizing_domain"]["max_battery_kwh"] == 40.0

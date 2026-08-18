@@ -11,16 +11,20 @@ import pytest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from figure_builder import sweep_csv_path
+from figure_builder import market_observation_csv_path, sweep_csv_path
 from figure_builder.datasets import (
+    MARKET_OBSERVATION_COLUMNS,
     SWEEP_COLUMNS,
     canonical_battery_capex_points,
     collect_battery_capex_sweep,
+    collect_market_price_observation,
     normalize_battery_capex_points,
     resolve_pv_capex,
+    select_market_observation,
     sweep_cache_is_compatible,
 )
 from figure_builder.pricing import live_prices
+from figure_builder.dispatch import CLAIM1_COUNTIES
 
 
 def test_default_pv_capex_is_the_model_net_price():
@@ -137,6 +141,96 @@ def test_sweep_cache_path_separates_coarse_and_full_resolution():
     )
     with pytest.raises(ValueError, match="resolution"):
         sweep_csv_path("alameda", resolution="hourly-ish")
+
+
+def test_market_observation_path_is_separate_from_sensitivity_sweeps():
+    assert market_observation_csv_path("alameda").name == (
+        "market_8760_alameda_post_itc_2026.csv"
+    )
+
+
+def test_select_market_observation_requires_one_exact_finite_solved_row():
+    frame = pd.DataFrame(
+        [
+            [500.0, 3.0, 10.0, 2_000.0, 0.8, 40.0, 2, 2],
+            [1460.64, 2.0, 0.0, 2_500.0, 0.5, 40.0, 0, 1],
+        ],
+        columns=SWEEP_COLUMNS,
+    )
+
+    row = select_market_observation(frame, 1460.64)
+    assert row["pv_kw"] == 2.0
+    assert row["batt_kwh"] == 0.0
+
+    with pytest.raises(ValueError, match="found 0"):
+        select_market_observation(frame, 1_000.0)
+    with pytest.raises(ValueError, match="found 2"):
+        select_market_observation(pd.concat([frame, frame.iloc[[1]]]), 1460.64)
+    malformed = frame.copy()
+    malformed.loc[1, "batt_kwh"] = float("nan")
+    with pytest.raises(ValueError, match="missing values"):
+        select_market_observation(malformed, 1460.64)
+
+
+def test_market_collector_runs_only_exact_price_at_full_resolution(tmp_path):
+    solved = pd.DataFrame(
+        [[1460.64, 2.0, 0.0, 2_500.0, 0.5, 40.0, 0, 1]],
+        columns=SWEEP_COLUMNS,
+    )
+    prices = SimpleNamespace(
+        regime="post_itc_2026",
+        batt_net_per_kwh=1460.64,
+    )
+
+    with (
+        patch("figure_builder.datasets.live_prices", return_value=prices),
+        patch(
+            "figure_builder.datasets.market_observation_csv_path",
+            return_value=tmp_path / "market.csv",
+        ),
+        patch(
+            "figure_builder.datasets.collect_battery_capex_sweep",
+            return_value=solved,
+        ) as collect,
+    ):
+        result = collect_market_price_observation("alameda", verbose=False)
+
+    assert list(result.columns) == MARKET_OBSERVATION_COLUMNS
+    assert result.loc[0, "scenario"] == "full_electric_ev_coopt"
+    assert result.loc[0, "policy_regime"] == "post_itc_2026"
+    assert result.loc[0, "interval_count"] == 8760
+    collect.assert_called_once_with(
+        "alameda",
+        regime=None,
+        scenario="full_electric_ev_coopt",
+        points=[1460.64],
+        max_battery_kwh=40.0,
+        fine=True,
+        cache=False,
+        force=True,
+        verbose=False,
+    )
+
+
+def test_committed_current_law_market_observations_are_complete_and_plausible():
+    """Publication guardrail: all four exact solved points exist and retain the
+    headline no-material-storage result without pinning float serialization."""
+
+    price = live_prices().batt_net_per_kwh
+    for slug, _, _ in CLAIM1_COUNTIES:
+        path = market_observation_csv_path(slug, live_prices().regime)
+        frame = pd.read_csv(path)
+        row = select_market_observation(frame, price)
+
+        assert list(frame.columns) == MARKET_OBSERVATION_COLUMNS
+        assert len(frame) == 1
+        assert frame.loc[0, "scenario"] == "full_electric_ev_coopt"
+        assert frame.loc[0, "policy_regime"] == "post_itc_2026"
+        assert frame.loc[0, "interval_count"] == 8760
+        assert 1.0 < row["pv_kw"] < 3.0
+        assert 0.0 <= row["batt_kwh"] <= 0.1
+        assert 1_000.0 < row["total_cost"] < 5_000.0
+        assert 1 <= row["solver_rounds"] <= 10
 
 
 @pytest.mark.parametrize(

@@ -3,6 +3,7 @@
 
     python3 -m figure_builder sweeps                 # (re)compute all county sweeps
     python3 -m figure_builder sweeps --counties alameda --force
+    python3 -m figure_builder market                 # exact current-law market points
     python3 -m figure_builder mechanism              # patch Claim-1 mechanism block
     python3 -m figure_builder counties               # patch Claim-1 county grid
     python3 -m figure_builder bridge                 # render bridge waterfall PNG
@@ -17,8 +18,16 @@ from __future__ import annotations
 import argparse
 
 from appliances.incentive_policy import PolicyRegime
-from figure_builder import FIG_DIR, current_claims_doc, sweep_csv_path
-from figure_builder.datasets import collect_battery_capex_sweep
+from figure_builder import (
+    FIG_DIR,
+    current_claims_doc,
+    market_observation_csv_path,
+    sweep_csv_path,
+)
+from figure_builder.datasets import (
+    collect_battery_capex_sweep,
+    collect_market_price_observation,
+)
 from figure_builder.dispatch import CLAIM1_COUNTIES
 from figure_builder.pricing import live_prices
 
@@ -27,6 +36,7 @@ SWEEP_REGIMES = (
     PolicyRegime.POST_ITC_2026,
     PolicyRegime.ITC_2025,
 )
+MARKET_OBSERVATION_REGIMES = (PolicyRegime.POST_ITC_2026,)
 
 
 def _cmd_sweeps(args) -> list:
@@ -49,6 +59,32 @@ def _cmd_sweeps(args) -> list:
                 fine=args.fine,
             )
             out.append(str(sweep_csv_path(slug, prices.regime, resolution)))
+    return out
+
+
+def _cmd_market(args) -> list:
+    """Build current-law exact-price, full-chronology Claim 1 observations.
+
+    The 2025 ITC side is explicitly a 12x24 sensitivity: corrected full-year
+    Southern California MILPs do not complete within the publication workflow's
+    bounded runtime, so the builder must not mislabel them as exact results.
+    """
+
+    slugs = args.counties or [slug for slug, _, _ in CLAIM1_COUNTIES]
+    out = []
+    for regime in MARKET_OBSERVATION_REGIMES:
+        prices = live_prices(regime)
+        for slug in slugs:
+            print(
+                f"\nExact 8,760-hour market observation: {slug}, "
+                f"{prices.regime}, ${prices.batt_net_per_kwh:,.3f}/kWh"
+            )
+            collect_market_price_observation(
+                slug,
+                regime=regime,
+                force=args.force,
+            )
+            out.append(str(market_observation_csv_path(slug, prices.regime)))
     return out
 
 
@@ -101,6 +137,7 @@ def _cmd_snapshot(_args):
 def _cmd_all(args):
     artifacts = []
     artifacts += _cmd_sweeps(args)
+    artifacts += _cmd_market(args)
     artifacts += _cmd_mechanism(args)
     artifacts += _cmd_installer(args)
     artifacts += _cmd_counties(args)
@@ -137,7 +174,8 @@ def _write_metadata(
 
 
 _COMMANDS = {
-    "snapshot": _cmd_snapshot, "sweeps": _cmd_sweeps, "mechanism": _cmd_mechanism,
+    "snapshot": _cmd_snapshot, "sweeps": _cmd_sweeps, "market": _cmd_market,
+    "mechanism": _cmd_mechanism,
     "counties": _cmd_counties, "bridge": _cmd_bridge, "split": _cmd_split,
     "all": _cmd_all,
 }

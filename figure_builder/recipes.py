@@ -6,6 +6,7 @@ not reusable plumbing.
 """
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 from figure_builder import FIG_DIR, current_claims_doc
@@ -15,7 +16,11 @@ from figure_builder.charts import (
     plot_pv_batt_vs_capex, plot_pv_batt_vs_capex_compare, plot_pv_ceiling,
     solar_generation_weighted_export_rate,
 )
-from figure_builder.datasets import collect_battery_capex_sweep
+from figure_builder.datasets import (
+    collect_battery_capex_sweep,
+    collect_market_price_observation,
+    select_market_observation,
+)
 from figure_builder.dispatch import CLAIM1_COUNTIES, county_dispatch_inputs
 from figure_builder.metadata import tariff_metadata
 from figure_builder.pricing import live_prices
@@ -38,15 +43,67 @@ _MECH_CSS = """.obj-box{ border:1px solid var(--rule); border-radius:10px; backg
 .obj-gloss .chip-exp{ color:var(--caution); background:var(--caution-soft); }
 .obj-punch{ font-size:14.5px; color:var(--ink); line-height:1.6; margin:6px 0 0; border-top:1px solid var(--rule); padding-top:12px; }"""
 
-# Per-county captions for the four-panel grid.
-_COUNTY_CAPTIONS = {
-    "alameda": ("Left, 2025 with the 30% federal ITC; right, current law. The "
-                "battery is zero at market prices in both regimes, and solar and "
-                "storage rise together only as storage cheapens."),
-    "fresno": "Same pattern in a hotter inland Central Valley climate zone.",
-    "los-angeles": "Holds in SCE territory, so the finding is not PG&amp;E-specific.",
-    "san-diego": "Holds in all three California investor-owned utility territories.",
+# Per-county context; modeled results are always generated from solved rows.
+_COUNTY_CONTEXT = {
+    "alameda": "Coastal PG&amp;E case study.",
+    "fresno": "Hot inland PG&amp;E case study.",
+    "los-angeles": "SCE case study.",
+    "san-diego": "SDG&amp;E case study.",
 }
+
+
+def _format_battery_capacity(value: float) -> str:
+    if value < 0.01 and value > 1e-6:
+        return "&lt;0.01&nbsp;kWh"
+    return f"{value:.2f}&nbsp;kWh"
+
+
+def _market_result_sentence(before_meta: dict, after_meta: dict) -> str:
+    return (
+        "At the exact market prices, the 12&times;24 sensitivity chooses "
+        f"{_format_battery_capacity(before_meta['market_batt_kwh'])} in the "
+        "2025 ITC regime; the full 8,760-hour current-law solve chooses "
+        f"{_format_battery_capacity(after_meta['market_batt_kwh'])} under "
+        "current law."
+    )
+
+
+def _claim1_summary_fragment(
+    before_meta: list[dict],
+    after_meta: list[dict],
+    current_thresholds: list[float],
+) -> str:
+    """Claim 1 headline derived from declared-resolution solved observations."""
+
+    if len(before_meta) != 4 or len(after_meta) != 4 or len(current_thresholds) != 4:
+        raise ValueError("Claim 1 summary requires all four case-study counties")
+    before_batt = [row["market_batt_kwh"] for row in before_meta]
+    after_batt = [row["market_batt_kwh"] for row in after_meta]
+    positive_before = [value for value in before_batt if value > 0.1]
+    before_nontrivial = sum(value > 0.1 for value in before_batt)
+    after_nontrivial = sum(value > 0.1 for value in after_batt)
+    if not positive_before:
+        raise ValueError(
+            "Claim 1 summary cannot describe the 2025 storage range because "
+            "no case-study solve exceeds 0.1 kWh"
+        )
+    if any(not math.isfinite(value) for value in current_thresholds):
+        raise ValueError(
+            "Claim 1 summary requires a finite current-law entry-grid point "
+            "for every case-study county"
+        )
+    threshold_low = min(current_thresholds)
+    threshold_high = max(current_thresholds)
+    current_max = max(after_batt)
+
+    return f'''  <h2 class="claim-title">At current 2026 costs, batteries do not pencil out in the four NEM&nbsp;3.0 case studies. The 2025 ITC changed that result in {before_nontrivial} cases</h2>
+  <p class="claim-sub">The full 8,760-hour co-optimization chooses <strong>no material battery capacity</strong> under current law in all four case-study counties ({after_nontrivial} of 4 above 0.1&nbsp;kWh). In the weighted 12&times;24 sensitivity, the lower 2025 ITC-adjusted capital cost produces more than 0.1&nbsp;kWh in {before_nontrivial} of 4 cases, reaching {min(positive_before):.2f}&ndash;{max(positive_before):.2f}&nbsp;kWh. The sensitivity curves show the mechanism: as storage becomes cheaper, optimal storage and PV rise together.</p>
+
+  <div class="stat-row">
+    <div class="stat"><span class="num">{after_nontrivial} of 4</span><span class="lbl">current-law exact 8,760-hour solves with more than 0.1&nbsp;kWh of storage; maximum modeled capacity is {_format_battery_capacity(current_max)}</span></div>
+    <div class="stat"><span class="num">{before_nontrivial} of 4</span><span class="lbl">2025 ITC weighted 12&times;24 observations with more than 0.1&nbsp;kWh of storage</span></div>
+    <div class="stat"><span class="num">${threshold_low:,.0f}&ndash;${threshold_high:,.0f}</span><span class="lbl">per kWh, the highest tested current-law 12&times;24 sensitivity-grid price still producing more than 0.1&nbsp;kWh of storage</span></div>
+  </div>'''
 
 
 def _read(doc) -> str:
@@ -87,10 +144,10 @@ def _mechanism_fragment(
     <p class="obj-punch">A battery earns only the <strong>difference</strong> between those two prices, net of ~{(1.0 - mB['round_trip_eff']) * 100:.0f}% round-trip loss and a mid-life replacement. So the battery only enters when it is cheap. When it does, it can let surplus midday solar reach higher-valued hours instead of being exported immediately. Cheaper storage <strong>raises</strong> the optimal amount of solar in the modeled sweeps. It never replaces it.</p>
   </div>
 
-  <figure class="fig"><img src="data:image/png;base64,{b64A}" alt="Optimal solar and battery vs battery cost, 2025 with ITC versus current law, Alameda" /><figcaption><strong>2025 vs. now: removing the federal ITC.</strong> Left, 2025, with the 30% ITC (battery {b_2025}): the solar-only optimum sat at {mA['before']['pv_flat']:.2f}&nbsp;kW, rising toward {mA['before']['pv_max']:.2f}&nbsp;kW as cheaper storage enters. Right, current law, the ITC expired (battery {b_now}): pricier storage pushes the battery firmly to zero at market prices and the solar-only optimum settles at {mA['after']['pv_flat']:.2f}&nbsp;kW. Removing the credit makes storage pencil out <em>less</em>, so Claim&nbsp;1 strengthens. Both panels share axes. Only battery capex is swept; <strong>solar&rsquo;s price is fixed at its net installed cost within each panel: {s_2025} in 2025 (gross $3,300/kW less the 30% ITC), {s_now} under current law (ITC repealed, net = gross)</strong>. Step&nbsp;9b {resolution_label}, Alameda / PG&amp;E, full-electrification load.</figcaption></figure>
+  <figure class="fig"><img src="data:image/png;base64,{b64A}" alt="Optimal solar and battery vs battery cost, 2025 with ITC versus current law, Alameda" /><figcaption><strong>2025 vs. now: removing the federal ITC.</strong> {_market_result_sentence(mA['before'], mA['after'])} The lines show the declared capex sensitivity: the solar-only optimum is {mA['before']['pv_flat']:.2f}&nbsp;kW in the 2025 panel and {mA['after']['pv_flat']:.2f}&nbsp;kW under current law, rising as cheaper storage enters. Both panels share axes. Only battery capex is swept; <strong>solar&rsquo;s price is fixed at its net installed cost within each panel: {s_2025} in 2025 (gross $3,300/kW less the 30% ITC), {s_now} under current law (ITC repealed, net = gross)</strong>. The 2025 market diamond is a weighted 12&times;24 sensitivity observation; the current-law market diamond is a separate full 8,760-hour chronological solve. The sensitivity lines use the Step&nbsp;9b {resolution_label}. Alameda / PG&amp;E, full-electrification load.</figcaption></figure>
 
   <div class="fig-grid">
-    <figure class="fig"><img src="data:image/png;base64,{b64B}" alt="Illustrative values for solar-coincident export and storage-mediated peak shifting" /><figcaption><strong>The value spread behind the mechanism.</strong> Weighting the hourly ACC schedule by Alameda&rsquo;s modeled PV generation gives a solar-coincident export value of <strong>${mB['v_export']:.3f}/kWh</strong>, below solar&rsquo;s ${mB['pv_lcoe']:.3f}/kWh break-even. For comparison, an illustrative surplus kWh shifted to the top {mB['peak_share_pct']:.0f}% of import-price hours would have an effective avoided-import value of <strong>${mB['v_peak']:.3f}/kWh</strong> after {(1.0 - mB['round_trip_eff']) * 100:.0f}% round-trip loss. The difference between that value and solar LCOE&mdash;<strong>${mB['storage_margin_after_solar']:.3f}/kWh</strong>&mdash;is merely the illustrative margin left to cover storage, not profit. This is not a solar-plus-storage LCOE: storage cost per delivered kWh depends on realized cycling. The full optimization applies annualized battery capex and hourly physical constraints directly; at today&rsquo;s modeled <strong>{b_now}</strong>, it chooses zero storage. Alameda / PG&amp;E, current law.</figcaption></figure>
+    <figure class="fig"><img src="data:image/png;base64,{b64B}" alt="Illustrative values for solar-coincident export and storage-mediated peak shifting" /><figcaption><strong>The value spread behind the mechanism.</strong> Weighting the hourly ACC schedule by Alameda&rsquo;s modeled PV generation gives a solar-coincident export value of <strong>${mB['v_export']:.3f}/kWh</strong>, below solar&rsquo;s ${mB['pv_lcoe']:.3f}/kWh break-even. For comparison, an illustrative surplus kWh shifted to the top {mB['peak_share_pct']:.0f}% of import-price hours would have an effective avoided-import value of <strong>${mB['v_peak']:.3f}/kWh</strong> after {(1.0 - mB['round_trip_eff']) * 100:.0f}% round-trip loss. The difference between that value and solar LCOE&mdash;<strong>${mB['storage_margin_after_solar']:.3f}/kWh</strong>&mdash;is merely the illustrative margin left to cover storage, not profit. This is not a solar-plus-storage LCOE: storage cost per delivered kWh depends on realized cycling. The full optimization applies annualized battery capex and hourly physical constraints directly; at today&rsquo;s modeled <strong>{b_now}</strong>, the exact solve chooses {_format_battery_capacity(mA['after']['market_batt_kwh'])}. Alameda / PG&amp;E, current law.</figcaption></figure>
     <figure class="fig"><img src="data:image/png;base64,{b64C}" alt="Even a near-free household battery caps optimal solar near annual load coverage" /><figcaption><strong>The ceiling.</strong> Drive battery cost toward zero within the model&rsquo;s explicit 40&nbsp;kWh representative-household sizing domain: optimal solar rises, then flattens near total annual consumption ({mC['pv_100']:.1f}&ndash;{mC['pv_100_rte']:.1f}&nbsp;kW). At $1/kWh the solution reaches a {mC['batt_min']:,.0f}&nbsp;kWh battery, while solar is {mC['pv_min']:.1f}&nbsp;kW ({mC['cover_min'] * 100:.0f}% of load), because additional generation primarily earns the much lower export rate. Near-free household storage raises the solar ceiling; it does not remove it.</figcaption></figure>
   </div>
 
@@ -111,11 +168,22 @@ def build_mechanism_block(doc=None, *, county="alameda", fine: bool = False) -> 
     sweep_2025 = collect_battery_capex_sweep(
         county, regime=PolicyRegime.ITC_2025, fine=fine
     )
+    market_now = select_market_observation(
+        collect_market_price_observation(county),
+        prices_now.batt_net_per_kwh,
+    )
+    market_2025 = select_market_observation(
+        sweep_2025,
+        prices_2025.batt_net_per_kwh,
+    )
     di = county_dispatch_inputs(county)
 
     figA, mA = plot_pv_batt_vs_capex_compare(
         sweep_2025, sweep_now,
         batt_before=prices_2025.batt_net_per_kwh, batt_after=prices_now.batt_net_per_kwh,
+        market_before=market_2025, market_after=market_now,
+        market_before_resolution="12×24",
+        market_after_resolution="8,760 h",
         title="Alameda (PG&E): storage economics before and after the federal ITC expired",
         panel_labels=(f"2025 — 30% ITC · solar ${prices_2025.pv_net_per_kw:,.0f}/kW",
                       f"Now — ITC expired · solar ${prices_now.pv_net_per_kw:,.0f}/kW"))
@@ -155,28 +223,67 @@ def build_county_grid(doc=None, *, fine: bool = False) -> Path:
     prices_now = live_prices()
     prices_2025 = live_prices(PolicyRegime.ITC_2025)
     cells = []
+    before_meta = []
+    after_meta = []
+    current_thresholds = []
     for slug, label, util in CLAIM1_COUNTIES:
         sweep_now = collect_battery_capex_sweep(slug, fine=fine)
         sweep_2025 = collect_battery_capex_sweep(
             slug, regime=PolicyRegime.ITC_2025, fine=fine
         )
-        fig, _ = plot_pv_batt_vs_capex_compare(
+        market_now = select_market_observation(
+            collect_market_price_observation(slug),
+            prices_now.batt_net_per_kwh,
+        )
+        market_2025 = select_market_observation(
+            sweep_2025,
+            prices_2025.batt_net_per_kwh,
+        )
+        fig, meta = plot_pv_batt_vs_capex_compare(
             sweep_2025, sweep_now,
             batt_before=prices_2025.batt_net_per_kwh, batt_after=prices_now.batt_net_per_kwh,
+            market_before=market_2025, market_after=market_now,
+            market_before_resolution="12×24",
+            market_after_resolution="8,760 h",
             title=f"{label} ({util})",
             panel_labels=(f"2025 · ITC · PV ${prices_2025.pv_net_per_kw:,.0f}/kW",
                           f"now · no ITC · PV ${prices_now.pv_net_per_kw:,.0f}/kW"))
         resolution = "8,760-hour" if fine else "weighted 12×24 monthly-hour"
         caption = (
-            f"<strong>{label} ({util}).</strong> {_COUNTY_CAPTIONS[slug]} "
+            f"<strong>{label} ({util}).</strong> {_COUNTY_CONTEXT[slug]} "
+            f"{_market_result_sentence(meta['before'], meta['after'])} "
+            "The lines are the capex sensitivity, not interpolated market results. "
             f"Sensitivity resolution: {resolution}."
         )
         cells.append(docio.figure_html(
             docio.embed_png(fig), caption,
             f"Before/after battery-capex sweep, {label}"))
+        before_meta.append(meta["before"])
+        after_meta.append(meta["after"])
+        current_thresholds.append(
+            _entry_threshold(
+                sweep_now["battery_capex_kwh"],
+                sweep_now["batt_kwh"],
+            )
+        )
     grid_inner = "\n  ".join(cells)
 
     html = _read(doc)
+    summary = _claim1_summary_fragment(
+        before_meta,
+        after_meta,
+        current_thresholds,
+    )
+    if docio.has_markers(html, "CLAIM1-SUMMARY"):
+        html = docio.replace_between_markers(html, "CLAIM1-SUMMARY", summary)
+    else:
+        html = docio.replace_first(
+            html,
+            r'  <h2 class="claim-title">.*?</h2>\n'
+            r'  <p class="claim-sub">.*?</p>\n\n'
+            r'  <div class="stat-row">.*?\n  </div>',
+            docio.wrap_markers("CLAIM1-SUMMARY", summary),
+        )
     if docio.has_markers(html, "COUNTY-GRID"):
         html = docio.replace_between_markers(html, "COUNTY-GRID", grid_inner)
     else:

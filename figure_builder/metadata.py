@@ -183,6 +183,18 @@ def optimization_metadata(*, fine: bool) -> dict:
             "interval_count": 8760 if fine else 288,
             "soc_cycle": "annual" if fine else "monthly",
         },
+        "market_price_observations": {
+            "name": "full_8760_hour",
+            "interval_count": 8760,
+            "soc_cycle": "annual",
+            "points_per_county_and_regime": 1,
+            "policy_regimes": [PolicyRegime.POST_ITC_2026.value],
+            "purpose": (
+                "Exact current-law solved observations for publication "
+                "market-price annotations; the 2025 ITC comparison remains "
+                "an explicitly labeled 12x24 sensitivity."
+            ),
+        },
         "solver": {
             "backend": settings.solver_backend,
             "mip_relative_gap": HIGHS_MIP_RELATIVE_GAP,
