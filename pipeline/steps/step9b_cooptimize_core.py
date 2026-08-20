@@ -12,6 +12,7 @@ from evaluations.constants import DEFAULT_DISCOUNT_RATE
 from appliances.solar_system import SolarSystemAppliance
 from appliances.battery_storage import BatteryStorageAppliance
 from appliances.electric_base import IncentiveScenario
+from tariffs.nem2 import NEM2OptimizationTerms
 
 # See step9b_cooptimize_pv_battery.py for the full note on why these must
 # match the appliance classes step14 uses for reporting, not a standalone
@@ -66,6 +67,8 @@ class CooptInputs:
     pv_gen_per_kw: List[float]
     import_rates: List[float]
     export_rates: List[float]
+    nem2_terms: Optional[NEM2OptimizationTerms] = None
+    max_pv_to_annual_load_ratio: float = 1.5
 
 
 @dataclass(frozen=True)
@@ -102,9 +105,28 @@ class CooptResult:
     import_cost: float
     export_credit: float
     degradation_cost: float
+    nem2_settlement: Optional["NEM2CooptSettlement"]
     flows: FlowSeries
     meter_binary_count: int
     solver_rounds: int
+
+
+@dataclass(frozen=True)
+class NEM2CooptSettlement:
+    """Variable NEM 2 bill components represented in the optimizer."""
+
+    annual_import_kwh: float
+    annual_export_kwh: float
+    offsettable_import_charge_usd: float
+    retail_export_credit_earned_usd: float
+    retail_export_credit_applied_usd: float
+    expired_retail_export_credit_usd: float
+    energy_charge_due_at_true_up_usd: float
+    interval_nbc_charge_usd: float
+    monthly_net_consumption_charge_usd: float
+    net_surplus_kwh: float
+    nsc_credit_usd: float
+    nsc_rate_source_id: str
 
 
 def _normalize_nonnegative_solver_value(
@@ -231,6 +253,28 @@ def _verify_invariants(
         f"total={result.total_cost:.4f}, "
         f"capex + imports - exports + degradation={expected_total:.4f}"
     )
+    if result.nem2_settlement is not None:
+        settlement = result.nem2_settlement
+        assert abs(
+            result.import_cost
+            - (
+                settlement.offsettable_import_charge_usd
+                + settlement.interval_nbc_charge_usd
+                + settlement.monthly_net_consumption_charge_usd
+            )
+        ) <= tol
+        assert abs(
+            result.export_credit
+            - (
+                settlement.retail_export_credit_applied_usd
+                + settlement.nsc_credit_usd
+            )
+        ) <= tol
+        assert abs(
+            settlement.retail_export_credit_earned_usd
+            - settlement.retail_export_credit_applied_usd
+            - settlement.expired_retail_export_credit_usd
+        ) <= tol
 
 
 def _timestamp_index_8760(year: int = 2018) -> List[pd.Timestamp]:
@@ -436,7 +480,7 @@ def _solve_lp(
     discount_rate: float = DEFAULT_DISCOUNT_RATE,
     c_deg_per_kwh: float = 0.0,        # degradation cost per kWh throughput
     max_battery_kwh: float = DEFAULT_MAX_BATTERY_KWH,
-    max_pv_to_annual_load_ratio: float = 1.5,
+    max_pv_to_annual_load_ratio: float | None = None,
     solver_backend: str = "highs",
 ) -> CooptResult:
     """Build and solve the sparse MILP. Return sizing, costs, and flows.
@@ -469,8 +513,32 @@ def _solve_lp(
         raise ValueError(f"All CooptInputs series must have the same nonzero length: {lengths}")
     if any(float(value) < 0 for series in (L, G, p_imp, p_exp) for value in series):
         raise ValueError("Loads, PV availability, and tariff rates must be non-negative")
+    nem2_terms = inputs.nem2_terms
+    if nem2_terms is not None:
+        if len(nem2_terms.offsettable_rates_usd_per_kwh) != H:
+            raise ValueError("NEM 2 optimization terms must match the interval count")
+        if any(
+            abs(float(import_rate) - float(export_rate)) > 1e-9
+            for import_rate, export_rate in zip(p_imp, p_exp)
+        ):
+            raise ValueError(
+                "NEM 2 import and export price series must use the same "
+                "offsettable retail rates"
+            )
+        if any(
+            abs(float(rate) - float(expected)) > 1e-9
+            for rate, expected in zip(
+                p_imp,
+                nem2_terms.offsettable_rates_usd_per_kwh,
+            )
+        ):
+            raise ValueError(
+                "CooptInputs rates do not match the NEM 2 optimization terms"
+            )
     if max_battery_kwh < 0:
         raise ValueError("max_battery_kwh cannot be negative")
+    if max_pv_to_annual_load_ratio is None:
+        max_pv_to_annual_load_ratio = inputs.max_pv_to_annual_load_ratio
     if max_pv_to_annual_load_ratio <= 0:
         raise ValueError("max_pv_to_annual_load_ratio must be positive")
     if solver_backend not in {"highs", "cbc"}:
@@ -483,9 +551,10 @@ def _solve_lp(
     # Problem
     prob = pulp.LpProblem("CoOptimize_PV_Battery_Dispatch", pulp.LpMinimize)
 
-    # Sizing. California NBT permits systems sized up to 150% of recent or
-    # projected annual usage; deriving the cap from this profile prevents the
-    # model from turning a representative household into a merchant generator.
+    # Sizing. The caller supplies the policy-specific annual generation ratio:
+    # 1.5 for NBT and 1.0 for the NEM 2 sized-to-load requirement. Deriving the
+    # cap from this profile prevents a representative household from becoming
+    # a merchant generator.
     weighted_load = sum(float(weights[h]) * float(L[h]) for h in range(H))
     weighted_pv_yield = sum(float(weights[h]) * float(G[h]) for h in range(H))
     pv_kw_cap = (
@@ -501,7 +570,8 @@ def _solve_lp(
             raise ValueError("fixed_pv_kw cannot be negative")
         if fixed_pv > pv_kw_cap + 1e-9:
             raise ValueError(
-                f"fixed_pv_kw={fixed_pv:.3f} exceeds the NBT 150% sizing cap "
+                f"fixed_pv_kw={fixed_pv:.3f} exceeds the configured annual "
+                "generation sizing cap "
                 f"of {pv_kw_cap:.3f} kW for this profile"
             )
         PV_kw = pulp.LpVariable("PV_kw", lowBound=fixed_pv, upBound=fixed_pv, cat=pulp.LpContinuous)
@@ -654,16 +724,134 @@ def _solve_lp(
     alpha_batt = _alpha_batt_npv(discount_rate, batt_life_yrs, N)
     capex_annual = PV_kw * c_pv_kw * alpha_pv + B_E * c_batt_kwh * alpha_batt + B_P * c_batt_kw * alpha_batt
 
-    # Operating bill (imports - exports) + degradation
-    energy_cost = pulp.lpSum([
-        float(weights[h])
-        * (
-            (grid2load[h] + grid2batt[h]) * float(p_imp[h])
-            - pv2grid[h] * float(p_exp[h])
-            - batt2grid[h] * float(p_exp[h])
+    # Operating bill. NBT uses linear interval import and export values. NEM 2
+    # uses annual retail-dollar netting, interval NBCs, positive monthly net
+    # recovery charges, and NSC for annual surplus kWh.
+    if nem2_terms is None:
+        energy_cost = pulp.lpSum([
+            float(weights[h])
+            * (
+                (grid2load[h] + grid2batt[h]) * float(p_imp[h])
+                - pv2grid[h] * float(p_exp[h])
+                - batt2grid[h] * float(p_exp[h])
+            )
+            for h in range(H)
+        ])
+    else:
+        offsettable_import_charge = pulp.lpSum([
+            float(weights[h])
+            * (grid2load[h] + grid2batt[h])
+            * float(p_imp[h])
+            for h in range(H)
+        ])
+        retail_export_credit_earned = pulp.lpSum([
+            float(weights[h])
+            * (pv2grid[h] + batt2grid[h])
+            * float(p_exp[h])
+            for h in range(H)
+        ])
+        energy_charge_due_at_true_up = pulp.LpVariable(
+            "nem2_energy_charge_due_at_true_up_usd",
+            lowBound=0,
         )
-        for h in range(H)
-    ])
+        prob += (
+            energy_charge_due_at_true_up
+            >= offsettable_import_charge - retail_export_credit_earned
+        )
+
+        interval_nbc_charge = pulp.lpSum([
+            float(weights[h])
+            * (grid2load[h] + grid2batt[h])
+            * nem2_terms.interval_nbc_rate_usd_per_kwh
+            for h in range(H)
+        ])
+        monthly_net_consumption_charge_terms = []
+        for month in sorted(set(nem2_terms.billing_months)):
+            hours = [
+                h
+                for h, interval_month in enumerate(nem2_terms.billing_months)
+                if interval_month == month
+            ]
+            month_import_bound = sum(
+                float(weights[h]) * import_bounds[h] for h in hours
+            )
+            monthly_net_import_kwh = pulp.LpVariable(
+                f"nem2_month_{month}_net_import_kwh",
+                lowBound=0,
+                upBound=month_import_bound,
+            )
+            prob += monthly_net_import_kwh >= pulp.lpSum([
+                float(weights[h])
+                * (
+                    grid2load[h]
+                    + grid2batt[h]
+                    - pv2grid[h]
+                    - batt2grid[h]
+                )
+                for h in hours
+            ])
+            monthly_net_consumption_charge_terms.append(
+                monthly_net_import_kwh
+                * nem2_terms.monthly_net_consumption_rate_usd_per_kwh
+            )
+        monthly_net_consumption_charge = pulp.lpSum(
+            monthly_net_consumption_charge_terms
+        )
+
+        annual_import_bound = sum(
+            float(weights[h]) * import_bounds[h] for h in range(H)
+        )
+        annual_export_bound = sum(
+            float(weights[h]) * export_bounds[h] for h in range(H)
+        )
+        annual_grid_import_kwh = pulp.lpSum([
+            float(weights[h]) * (grid2load[h] + grid2batt[h])
+            for h in range(H)
+        ])
+        annual_grid_export_kwh = pulp.lpSum([
+            float(weights[h]) * (pv2grid[h] + batt2grid[h])
+            for h in range(H)
+        ])
+        annual_net_import_kwh = pulp.LpVariable(
+            "nem2_annual_net_import_kwh",
+            lowBound=0,
+            upBound=annual_import_bound,
+        )
+        annual_net_surplus_kwh = pulp.LpVariable(
+            "nem2_annual_net_surplus_kwh",
+            lowBound=0,
+            upBound=annual_export_bound,
+        )
+        prob += (
+            annual_net_import_kwh - annual_net_surplus_kwh
+            == annual_grid_import_kwh - annual_grid_export_kwh
+        )
+        if annual_import_bound > 0 and annual_export_bound > 0:
+            annual_net_import_mode = pulp.LpVariable(
+                "nem2_annual_net_import_mode",
+                cat=pulp.LpBinary,
+            )
+            prob += (
+                annual_net_import_kwh
+                <= annual_import_bound * annual_net_import_mode
+            )
+            prob += (
+                annual_net_surplus_kwh
+                <= annual_export_bound * (1 - annual_net_import_mode)
+            )
+        elif annual_import_bound <= 0:
+            prob += annual_net_import_kwh == 0
+        else:
+            prob += annual_net_surplus_kwh == 0
+        nsc_credit = (
+            annual_net_surplus_kwh * nem2_terms.nsc_rate_usd_per_kwh
+        )
+        energy_cost = (
+            energy_charge_due_at_true_up
+            + interval_nbc_charge
+            + monthly_net_consumption_charge
+            - nsc_credit
+        )
     degrade_cost = pulp.lpSum([
         float(weights[h]) * c_deg_per_kwh * (batt2load[h] + batt2grid[h]) for h in range(H)
     ])
@@ -787,18 +975,114 @@ def _solve_lp(
         + b_e_val * c_batt_kwh * alpha_batt
         + b_p_val * c_batt_kw * alpha_batt
     )
-    import_cost_val = sum(
-        float(weights[h])
-        * (flows.grid_to_load[h] + flows.grid_to_batt[h])
-        * float(p_imp[h])
-        for h in range(H)
-    )
-    export_credit_val = sum(
-        float(weights[h])
-        * (flows.pv_to_grid[h] + flows.batt_to_grid[h])
-        * float(p_exp[h])
-        for h in range(H)
-    )
+    nem2_settlement = None
+    if nem2_terms is None:
+        import_cost_val = sum(
+            float(weights[h])
+            * (flows.grid_to_load[h] + flows.grid_to_batt[h])
+            * float(p_imp[h])
+            for h in range(H)
+        )
+        export_credit_val = sum(
+            float(weights[h])
+            * (flows.pv_to_grid[h] + flows.batt_to_grid[h])
+            * float(p_exp[h])
+            for h in range(H)
+        )
+    else:
+        annual_import_kwh_val = sum(
+            float(weights[h])
+            * (flows.grid_to_load[h] + flows.grid_to_batt[h])
+            for h in range(H)
+        )
+        annual_export_kwh_val = sum(
+            float(weights[h])
+            * (flows.pv_to_grid[h] + flows.batt_to_grid[h])
+            for h in range(H)
+        )
+        offsettable_import_charge_val = sum(
+            float(weights[h])
+            * (flows.grid_to_load[h] + flows.grid_to_batt[h])
+            * float(p_imp[h])
+            for h in range(H)
+        )
+        retail_export_credit_earned_val = sum(
+            float(weights[h])
+            * (flows.pv_to_grid[h] + flows.batt_to_grid[h])
+            * float(p_exp[h])
+            for h in range(H)
+        )
+        energy_charge_due_val = max(
+            offsettable_import_charge_val - retail_export_credit_earned_val,
+            0.0,
+        )
+        expired_retail_credit_val = max(
+            retail_export_credit_earned_val - offsettable_import_charge_val,
+            0.0,
+        )
+        retail_export_credit_applied_val = (
+            retail_export_credit_earned_val - expired_retail_credit_val
+        )
+        interval_nbc_charge_val = (
+            annual_import_kwh_val
+            * nem2_terms.interval_nbc_rate_usd_per_kwh
+        )
+        monthly_net_consumption_charge_val = 0.0
+        for month in sorted(set(nem2_terms.billing_months)):
+            hours = [
+                h
+                for h, interval_month in enumerate(nem2_terms.billing_months)
+                if interval_month == month
+            ]
+            month_import_kwh = sum(
+                float(weights[h])
+                * (flows.grid_to_load[h] + flows.grid_to_batt[h])
+                for h in hours
+            )
+            month_export_kwh = sum(
+                float(weights[h])
+                * (flows.pv_to_grid[h] + flows.batt_to_grid[h])
+                for h in hours
+            )
+            monthly_net_consumption_charge_val += (
+                max(month_import_kwh - month_export_kwh, 0.0)
+                * nem2_terms.monthly_net_consumption_rate_usd_per_kwh
+            )
+        net_surplus_kwh_val = max(
+            annual_export_kwh_val - annual_import_kwh_val,
+            0.0,
+        )
+        nsc_credit_val = (
+            net_surplus_kwh_val * nem2_terms.nsc_rate_usd_per_kwh
+        )
+        import_cost_val = (
+            offsettable_import_charge_val
+            + interval_nbc_charge_val
+            + monthly_net_consumption_charge_val
+        )
+        export_credit_val = (
+            retail_export_credit_applied_val + nsc_credit_val
+        )
+        nem2_settlement = NEM2CooptSettlement(
+            annual_import_kwh=annual_import_kwh_val,
+            annual_export_kwh=annual_export_kwh_val,
+            offsettable_import_charge_usd=offsettable_import_charge_val,
+            retail_export_credit_earned_usd=(
+                retail_export_credit_earned_val
+            ),
+            retail_export_credit_applied_usd=(
+                retail_export_credit_applied_val
+            ),
+            expired_retail_export_credit_usd=expired_retail_credit_val,
+            energy_charge_due_at_true_up_usd=energy_charge_due_val,
+            interval_nbc_charge_usd=interval_nbc_charge_val,
+            monthly_net_consumption_charge_usd=(
+                monthly_net_consumption_charge_val
+            ),
+            net_surplus_kwh=net_surplus_kwh_val,
+            nsc_credit_usd=nsc_credit_val,
+            nsc_rate_source_id=nem2_terms.nsc_rate_source_id,
+        )
     degradation_cost_val = sum(
         float(weights[h])
         * c_deg_per_kwh
@@ -820,6 +1104,7 @@ def _solve_lp(
         import_cost=import_cost_val,
         export_credit=export_credit_val,
         degradation_cost=degradation_cost_val,
+        nem2_settlement=nem2_settlement,
         flows=flows,
         meter_binary_count=len(grid_import_mode),
         solver_rounds=solver_rounds,
@@ -876,4 +1161,32 @@ def build_monthly_hourly_inputs(
                 imp.append(float(row.iloc[0]["imp"]))
                 exp.append(float(row.iloc[0]["exp"]))
             weights.append(float(days_in_month))
-    return CooptInputs(load, pv, imp, exp), weights
+    aggregated_nem2_terms = None
+    if inputs.nem2_terms is not None:
+        aggregated_nem2_terms = NEM2OptimizationTerms(
+            offsettable_rates_usd_per_kwh=tuple(imp),
+            billing_months=tuple(
+                month for month in months for _hour in hours
+            ),
+            interval_nbc_rate_usd_per_kwh=(
+                inputs.nem2_terms.interval_nbc_rate_usd_per_kwh
+            ),
+            monthly_net_consumption_rate_usd_per_kwh=(
+                inputs.nem2_terms.monthly_net_consumption_rate_usd_per_kwh
+            ),
+            nsc_rate_usd_per_kwh=inputs.nem2_terms.nsc_rate_usd_per_kwh,
+            nsc_rate_source_id=inputs.nem2_terms.nsc_rate_source_id,
+        )
+    return (
+        CooptInputs(
+            load,
+            pv,
+            imp,
+            exp,
+            nem2_terms=aggregated_nem2_terms,
+            max_pv_to_annual_load_ratio=(
+                inputs.max_pv_to_annual_load_ratio
+            ),
+        ),
+        weights,
+    )

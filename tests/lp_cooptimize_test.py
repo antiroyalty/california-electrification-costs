@@ -31,11 +31,12 @@ if REPO_ROOT not in sys.path:
 from pipeline.steps.step9b_cooptimize_core import (
     CooptInputs,
     SOLVER_OUTPUT_ABSOLUTE_TOLERANCE,
+    build_monthly_hourly_inputs,
     _meter_direction_hours,
     _normalize_nonnegative_solver_value,
     _solve_lp,
 )
-from tariffs import NBTScenario, TariffCatalog
+from tariffs import NBTScenario, NEM2OptimizationTerms, TariffCatalog
 from tariffs.calendar import full_year_hourly_index
 from evaluations.eac import crf, alpha_batt_npv
 
@@ -52,6 +53,36 @@ P_EXP_RETAIL  = [0.40] * 24   # retail parity: same as import rate
 def _zero_capex_kwargs():
     """Return LP keyword args with zero capex so total_cost = operating cost only."""
     return dict(c_pv_kw=0.0, c_batt_kwh=0.0, c_batt_kw=0.0)
+
+
+def _nem2_terms(
+    interval_count: int,
+    *,
+    months: tuple[int, ...] | None = None,
+) -> NEM2OptimizationTerms:
+    """Return transparent NEM 2 terms for analytical optimizer tests."""
+
+    return NEM2OptimizationTerms(
+        offsettable_rates_usd_per_kwh=(0.38,) * interval_count,
+        billing_months=months or (1,) * interval_count,
+        interval_nbc_rate_usd_per_kwh=0.01,
+        monthly_net_consumption_rate_usd_per_kwh=0.01,
+        nsc_rate_usd_per_kwh=0.03,
+        nsc_rate_source_id="fixture_nsc_source",
+    )
+
+
+def _nem2_inputs(*, max_generation_ratio: float = 1.5) -> CooptInputs:
+    terms = _nem2_terms(24)
+    rates = list(terms.offsettable_rates_usd_per_kwh)
+    return CooptInputs(
+        load_kwh=H24_LOAD,
+        pv_gen_per_kw=H24_PV_PER_KW,
+        import_rates=rates,
+        export_rates=rates,
+        nem2_terms=terms,
+        max_pv_to_annual_load_ratio=max_generation_ratio,
+    )
 
 
 @pytest.mark.parametrize(
@@ -566,3 +597,100 @@ class TestLPSizingPriceMatchesReportingPrice:
             f"BatteryStorageAppliance.per_kwh_cost_net(FULL_INCENTIVES) still reflects real "
             f"market pricing."
         )
+
+
+# ---------------------------------------------------------------------------
+# H8 — Exact NEM 2 settlement in the sizing objective
+# ---------------------------------------------------------------------------
+
+class TestNEM2CooptimizationSettlement:
+    def test_fixed_system_reconciles_each_variable_bill_component(self):
+        result = _solve_lp(
+            _nem2_inputs(),
+            fixed_pv_kw=2.0,
+            fixed_batt_kwh=0.0,
+            **_zero_capex_kwargs(),
+        )
+        settlement = result.nem2_settlement
+
+        assert settlement is not None
+        assert settlement.annual_import_kwh == pytest.approx(16.0)
+        assert settlement.annual_export_kwh == pytest.approx(8.0)
+        assert settlement.offsettable_import_charge_usd == pytest.approx(6.08)
+        assert settlement.retail_export_credit_earned_usd == pytest.approx(3.04)
+        assert settlement.retail_export_credit_applied_usd == pytest.approx(3.04)
+        assert settlement.expired_retail_export_credit_usd == pytest.approx(0.0)
+        assert settlement.energy_charge_due_at_true_up_usd == pytest.approx(3.04)
+        assert settlement.interval_nbc_charge_usd == pytest.approx(0.16)
+        assert settlement.monthly_net_consumption_charge_usd == pytest.approx(0.08)
+        assert settlement.net_surplus_kwh == pytest.approx(0.0)
+        assert settlement.nsc_credit_usd == pytest.approx(0.0)
+        assert result.total_cost == pytest.approx(3.28)
+
+    def test_retail_credit_expires_and_only_energy_surplus_receives_nsc(self):
+        result = _solve_lp(
+            _nem2_inputs(),
+            fixed_pv_kw=4.0,
+            fixed_batt_kwh=0.0,
+            **_zero_capex_kwargs(),
+        )
+        settlement = result.nem2_settlement
+
+        assert settlement is not None
+        assert settlement.annual_import_kwh == pytest.approx(16.0)
+        assert settlement.annual_export_kwh == pytest.approx(24.0)
+        assert settlement.retail_export_credit_earned_usd == pytest.approx(9.12)
+        assert settlement.retail_export_credit_applied_usd == pytest.approx(6.08)
+        assert settlement.expired_retail_export_credit_usd == pytest.approx(3.04)
+        assert settlement.net_surplus_kwh == pytest.approx(8.0)
+        assert settlement.nsc_credit_usd == pytest.approx(0.24)
+        assert settlement.nsc_rate_source_id == "fixture_nsc_source"
+        assert result.total_cost == pytest.approx(-0.08)
+
+    def test_zero_exports_match_the_complete_variable_retail_rate(self):
+        result = _solve_lp(
+            _nem2_inputs(),
+            fixed_pv_kw=0.0,
+            fixed_batt_kwh=0.0,
+            **_zero_capex_kwargs(),
+        )
+
+        assert result.export_credit == pytest.approx(0.0)
+        assert result.total_cost == pytest.approx(24.0 * 0.40)
+
+    def test_nem2_sized_to_load_ratio_rejects_oversized_pv(self):
+        with pytest.raises(ValueError, match="generation sizing cap"):
+            _solve_lp(
+                _nem2_inputs(max_generation_ratio=1.0),
+                fixed_pv_kw=3.01,
+                fixed_batt_kwh=0.0,
+                **_zero_capex_kwargs(),
+            )
+
+    def test_monthly_hourly_aggregation_preserves_nem2_terms(self):
+        terms = _nem2_terms(
+            8760,
+            months=tuple(
+                timestamp.month
+                for timestamp in full_year_hourly_index(2018)
+            ),
+        )
+        inputs = CooptInputs(
+            load_kwh=[1.0] * 8760,
+            pv_gen_per_kw=[0.2] * 8760,
+            import_rates=list(terms.offsettable_rates_usd_per_kwh),
+            export_rates=list(terms.offsettable_rates_usd_per_kwh),
+            nem2_terms=terms,
+            max_pv_to_annual_load_ratio=1.0,
+        )
+
+        aggregated, weights = build_monthly_hourly_inputs(inputs)
+
+        assert len(aggregated.load_kwh) == 288
+        assert sum(weights) == pytest.approx(8760.0)
+        assert aggregated.nem2_terms is not None
+        assert aggregated.nem2_terms.billing_months == tuple(
+            month for month in range(1, 13) for _hour in range(24)
+        )
+        assert aggregated.nem2_terms.nsc_rate_usd_per_kwh == pytest.approx(0.03)
+        assert aggregated.max_pv_to_annual_load_ratio == pytest.approx(1.0)

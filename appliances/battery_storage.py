@@ -14,11 +14,20 @@ from appliances.incentive_policy import (
 class BatteryStorageAppliance(ElectricAppliance):
     """Battery storage system (Tesla Powerwall 3)."""
 
+    BASE_UNIT_COST_USD = 18_258.0
+    UNIT_CAPACITY_KWH = 12.5
+    COST_BASIS_YEAR = 2023
+    COST_SOURCE_ID = "nrel_atb_2024_via_cec_200_2024_011"
+    COST_SOURCE_URLS = (
+        "https://atb.nrel.gov/electricity/2024/data",
+        "https://www.energy.ca.gov/sites/default/files/2024-07/"
+        "CEC-200-2024-011.pdf",
+    )
+
     def __init__(self, num_units: int = 1, lifetime_years: int = 15,
                  policy_regime: PolicyRegime = DEFAULT_POLICY_REGIME):
-        # https://atb.nrel.gov/electricity/2024/data ATB data used by CEC report https://www.energy.ca.gov/sites/default/files/2024-07/CEC-200-2024-011.pdf
-        base_unit_cost = 18258  # $18,258 per unit (2023 value)
-        capacity_per_unit = 12.5  # 12.5 kWh per unit
+        base_unit_cost = self.BASE_UNIT_COST_USD
+        capacity_per_unit = self.UNIT_CAPACITY_KWH
 
         total_cost = base_unit_cost * num_units
         total_capacity = capacity_per_unit * num_units

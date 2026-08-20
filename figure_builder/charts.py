@@ -42,13 +42,62 @@ def apply_style(serif_first: str = "Georgia") -> None:
     })
 
 
-Meta = Dict[str, float]
+Meta = Dict[str, float | str | int]
+
+EAC_CASE_ORDER = [
+    "gas_ice_reference",
+    "fixed_pv_electric",
+    "cooptimized_electric",
+]
+EAC_CASE_LABELS = {
+    "gas_ice_reference": "Gas appliances + ICE\n(fixed PV/storage)",
+    "fixed_pv_electric": "Full electric + fixed PV",
+    "cooptimized_electric": "Full electric + co-optimized PV/storage",
+}
+EAC_COMPONENT_STYLE = [
+    ("capex_pv", "Solar capex", "#2B6E63"),
+    ("capex_storage", "Storage capex", "#8A5A12"),
+    ("capex_electric", "Electric equipment capex", "#5B7FA3"),
+    ("capex_gas", "Gas equipment capex", "#9B7355"),
+    ("annual_bill_electric", "Electricity bill", "#84B7A8"),
+    ("annual_bill_gas", "Gas bill", "#D7A86E"),
+    ("vehicle_om", "Vehicle O&M", "#8A968F"),
+]
+
+
+def solar_generation_weighted_export_rate(dispatch) -> float:
+    """Average hourly export credit weighted by modeled PV production.
+
+    An unweighted 8,760-hour mean gives nighttime prices weight even though
+    rooftop solar cannot export at night. This metric describes the export
+    value faced by an incremental PV production profile before accounting for
+    household load, storage dispatch, or export-credit saturation.
+    """
+    pv_generation = np.asarray(dispatch.pv_gen_per_kw, dtype=float)
+    export_rates = np.asarray(dispatch.p_exp, dtype=float)
+    if pv_generation.ndim != 1 or export_rates.ndim != 1:
+        raise ValueError("PV generation and export rates must be one-dimensional")
+    if len(pv_generation) == 0 or len(pv_generation) != len(export_rates):
+        raise ValueError(
+            "PV generation and export rates must have identical non-zero lengths"
+        )
+    if not np.isfinite(pv_generation).all() or not np.isfinite(export_rates).all():
+        raise ValueError("PV generation and export rates must contain only finite values")
+    if (pv_generation < 0).any():
+        raise ValueError("PV generation cannot be negative")
+    if (export_rates < 0).any():
+        raise ValueError("Export rates cannot be negative")
+    if float(pv_generation.sum()) <= 0.0:
+        raise ValueError("PV generation must have a positive annual total")
+    return float(np.average(export_rates, weights=pv_generation))
 
 
 def plot_pv_batt_vs_capex(
     sweep: pd.DataFrame,
     *,
     batt_price_net: float,
+    market_observation: pd.Series,
+    market_resolution_label: str,
     title: str,
     compact: bool = False,
     min_capex: float = 25.0,
@@ -70,6 +119,8 @@ def plot_pv_batt_vs_capex(
     fig, axL = plt.subplots(figsize=figsize)
     axR = axL.twinx()
     meta, (lP, lB) = _draw_pv_batt(axL, axR, df, batt_price_net,
+                                   market_observation=market_observation,
+                                   market_resolution_label=market_resolution_label,
                                    compact=compact, rich=not compact)
     axL.set_title(title, fontsize=11 if compact else 11.5, color=INK, pad=8, loc="left")
     axL.legend(handles=[lP, lB], loc="upper center", fontsize=8.5 if compact else 9.5,
@@ -77,7 +128,9 @@ def plot_pv_batt_vs_capex(
     return fig, meta
 
 
-def _draw_pv_batt(axL, axR, df, batt_price_net, *, compact, rich,
+def _draw_pv_batt(axL, axR, df, batt_price_net, *, market_observation,
+                  market_resolution_label,
+                  compact, rich,
                   pv_ymax=None, bt_ymax=None, x_right=None,
                   price_marker_label="today's price"):
     """Draw the dual-axis PV/battery-vs-capex chart onto a given axis pair.
@@ -106,9 +159,31 @@ def _draw_pv_batt(axL, axR, df, batt_price_net, *, compact, rich,
     axL.text(x_right * 0.98, pv_flat + 0.04 * pv.max(), solar_lbl, ha="right",
              va="bottom", color=ACCENT_INK, fontsize=8.5 if compact else 9)
 
+    market_price = float(market_observation["battery_capex_kwh"])
+    market_pv = float(market_observation["pv_kw"])
+    market_batt = float(market_observation["batt_kwh"])
+    if not np.isclose(market_price, batt_price_net, rtol=0.0, atol=1e-9):
+        raise ValueError(
+            f"Market observation capex {market_price} does not match marker "
+            f"price {batt_price_net}"
+        )
+    if not np.isfinite([market_pv, market_batt]).all():
+        raise ValueError("Market observation capacities must be finite")
+    if market_pv < 0.0 or market_batt < 0.0:
+        raise ValueError("Market observation capacities cannot be negative")
+
     axL.axvline(batt_price_net, color=INK_FAINT, ls=(0, (2, 2)), lw=1.1, zorder=2)
+    axL.scatter([market_price], [market_pv], marker="D", s=30, color=ACCENT,
+                edgecolor="white", linewidth=0.7, zorder=6)
+    axR.scatter([market_price], [market_batt], marker="D", s=30, color=CAUT,
+                edgecolor="white", linewidth=0.7, zorder=6)
+    if market_batt < 0.01 and market_batt > 1e-6:
+        batt_label = "<0.01 kWh"
+    else:
+        batt_label = f"{market_batt:.2f} kWh"
     axL.text(batt_price_net - x_right * 0.014, pv.max() * 0.97,
-             f"{price_marker_label}\n${batt_price_net:,.0f}/kWh\n" + r"$\rightarrow$ battery = 0",
+             f"{price_marker_label}\n${batt_price_net:,.0f}/kWh\n"
+             f"{market_resolution_label}: battery = {batt_label}",
              ha="right", va="top", color=INK_SOFT, fontsize=8 if compact else 9,
              linespacing=1.25)
 
@@ -131,12 +206,21 @@ def _draw_pv_batt(axL, axR, df, batt_price_net, *, compact, rich,
     axR.tick_params(labelsize=8.5 if compact else 9.5, colors=CAUT)
     axL.spines["top"].set_visible(False)
     axR.spines["top"].set_visible(False)
-    return {"pv_flat": pv_flat, "pv_max": float(pv.max())}, (lP, lB)
+    return {
+        "pv_flat": pv_flat,
+        "pv_max": float(pv.max()),
+        "market_price": market_price,
+        "market_pv_kw": market_pv,
+        "market_batt_kwh": market_batt,
+        "market_resolution": market_resolution_label,
+    }, (lP, lB)
 
 
 def plot_pv_batt_vs_capex_compare(
     before: pd.DataFrame, after: pd.DataFrame, *,
     batt_before: float, batt_after: float, title: str,
+    market_before: pd.Series, market_after: pd.Series,
+    market_before_resolution: str, market_after_resolution: str,
     panel_labels: Tuple[str, str], min_capex: float = 25.0,
 ) -> Tuple["object", Dict[str, Meta]]:
     """Two side-by-side dual-axis panels on shared scales: a before/after
@@ -156,10 +240,18 @@ def plot_pv_batt_vs_capex_compare(
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12.6, 4.9))
     ax1R, ax2R = ax1.twinx(), ax2.twinx()
-    mB, (lP, lB) = _draw_pv_batt(ax1, ax1R, b, batt_before, compact=True, rich=False,
+    mB, (lP, lB) = _draw_pv_batt(
+                                 ax1, ax1R, b, batt_before,
+                                 market_observation=market_before,
+                                 market_resolution_label=market_before_resolution,
+                                 compact=True, rich=False,
                                  pv_ymax=pv_ymax, bt_ymax=bt_ymax, x_right=x_right,
                                  price_marker_label="2025 price")
-    mA, _ = _draw_pv_batt(ax2, ax2R, a, batt_after, compact=True, rich=False,
+    mA, _ = _draw_pv_batt(
+                          ax2, ax2R, a, batt_after,
+                          market_observation=market_after,
+                          market_resolution_label=market_after_resolution,
+                          compact=True, rich=False,
                           pv_ymax=pv_ymax, bt_ymax=bt_ymax, x_right=x_right,
                           price_marker_label="today's price")
     # De-clutter shared inner labels: PV axis on the left panel, battery axis on the right.
@@ -185,44 +277,68 @@ def plot_marginal_solar_value_ladder(
 
     pv_lcoe = prices.pv_lcoe(dispatch.yield_per_kw, discount_rate, 25)
     p_imp = np.asarray(dispatch.p_imp)
-    p_exp = np.asarray(dispatch.p_exp)
-    v_export = float(p_exp.mean())
+    v_export = solar_generation_weighted_export_rate(dispatch)
     peak_import_rate = float(
         np.mean(p_imp[p_imp >= np.quantile(p_imp, peak_quantile)])
     )
     v_peak = peak_import_rate * round_trip_eff
+    storage_margin_after_solar = v_peak - pv_lcoe
+    peak_share_pct = (1.0 - peak_quantile) * 100.0
+    round_trip_loss_pct = (1.0 - round_trip_eff) * 100.0
 
     fig, ax = plt.subplots(figsize=(7.4, 4.5))
-    cats = ["No battery:\nsurplus solar exported",
-            "With battery:\nsurplus solar " + r"$\rightarrow$ evening peak"]
+    cats = ["Solar-coincident export:\nPV-generation-weighted credit",
+            "Illustrative storage case:\nshift to top-price hours"]
     vals = [v_export, v_peak]
     xb = [0, 1]
     ax.bar(xb, vals, width=0.5, color=[NEG, POS], zorder=3, edgecolor="white", lw=1)
     ax.axhline(pv_lcoe, ls=(0, (5, 3)), color=INK, lw=1.4, zorder=4)
-    ax.text(1.46, pv_lcoe + 0.004, f"solar's break-even (LCOE)  ${pv_lcoe:.3f}/kWh",
-            ha="right", va="bottom", color=INK, fontsize=9.5, **MONO)
+    ax.text(-0.50, pv_lcoe + 0.004, f"solar LCOE  ${pv_lcoe:.3f}/kWh",
+            ha="left", va="bottom", color=INK, fontsize=9.5, **MONO)
     for xi, v in zip(xb, vals):
         ax.text(xi, v + 0.008, f"${v:.3f}", ha="center", va="bottom", fontsize=13,
                 color=INK, **MONO)
-    ax.text(0, v_export + 0.045, "below the line\n" + r"$\rightarrow$ NOT worth building",
+    ax.text(0, v_export + 0.045, "below solar break-even",
             ha="center", va="bottom", color=NEG, fontsize=9, fontweight="bold", linespacing=1.25)
-    ax.text(1, v_peak + 0.028, "above the line\n" + r"$\rightarrow$ build 2-3$\times$ more solar",
-            ha="center", va="bottom", color=POS, fontsize=9, fontweight="bold", linespacing=1.25)
+    ax.text(1, v_peak + 0.085,
+            f"illustrative peak-shift value\nafter {round_trip_loss_pct:.0f}% battery loss",
+            ha="center", va="top", color=POS, fontsize=9, fontweight="bold", linespacing=1.25)
+    if storage_margin_after_solar > 0.0:
+        ax.annotate(
+            "",
+            xy=(1.36, v_peak),
+            xytext=(1.36, pv_lcoe),
+            arrowprops=dict(arrowstyle="<->", color=CAUT, lw=1.5),
+        )
+        ax.text(
+            1.41,
+            (v_peak + pv_lcoe) / 2.0,
+            f"${storage_margin_after_solar:.3f}/kWh\nleft to cover\nstorage cost",
+            ha="left",
+            va="center",
+            color=CAUT,
+            fontsize=8.7,
+            fontweight="bold",
+            linespacing=1.2,
+        )
     ax.set_xticks(xb)
     ax.set_xticklabels(cats, fontsize=9.8, color=INK_SOFT, linespacing=1.3)
-    ax.set_ylabel("Value of the last kWh of rooftop solar  ($/kWh)", fontsize=10.3)
-    ax.set_ylim(0, max(0.44, v_peak * 1.15))
-    ax.set_xlim(-0.55, 1.55)
+    ax.set_ylabel("Illustrative value of surplus rooftop solar  ($/kWh)", fontsize=10.3)
+    ax.set_ylim(0, max(0.54, v_peak * 1.25))
+    ax.set_xlim(-0.55, 1.82)
     for s in ["top", "right"]:
         ax.spines[s].set_visible(False)
     ax.tick_params(labelsize=9.5)
-    ax.set_title("Why: a battery flips the marginal kWh of solar from a loss to a profit",
+    ax.set_title("Energy-value illustration only — battery capital cost is excluded",
                  fontsize=11.5, color=INK, pad=10, loc="left")
     return fig, {
         "v_export": v_export,
         "peak_import_rate": peak_import_rate,
         "v_peak": v_peak,
         "pv_lcoe": pv_lcoe,
+        "storage_margin_after_solar": storage_margin_after_solar,
+        "peak_share_pct": peak_share_pct,
+        "round_trip_eff": round_trip_eff,
     }
 
 
@@ -274,6 +390,384 @@ def plot_pv_ceiling(sweep: pd.DataFrame, dispatch, *, batt_price_net: float
     return fig, {"pv_100": pv_100, "pv_100_rte": pv_100_rte,
                  "batt_min": float(btc[imin]), "pv_min": float(pvc[imin]),
                  "cover_min": float(pvc[imin] * yield_kw / annual_load)}
+
+
+def plot_case_study_eac(
+    eac: pd.DataFrame,
+    *,
+    counties: tuple[str, ...] = (
+        "alameda",
+        "fresno",
+        "los-angeles",
+        "san-diego",
+    ),
+) -> Tuple["object", Meta]:
+    """Four-panel stacked EAC comparison with one unobstructed shared legend."""
+
+    apply_style()
+    import matplotlib.pyplot as plt
+
+    missing = set(counties) - set(eac["county_slug"])
+    if missing:
+        raise ValueError(f"Case-study EAC data missing counties: {sorted(missing)}")
+    fig, axes = plt.subplots(2, 2, figsize=(12.8, 9.2))
+    maximum = 0.0
+    totals: dict[tuple[str, str], float] = {}
+    for axis, county in zip(axes.ravel(), counties):
+        rows = eac[eac["county_slug"] == county].set_index("case")
+        if set(rows.index) != set(EAC_CASE_ORDER):
+            raise ValueError(f"{county} does not contain all three EAC cases")
+        rows = rows.loc[EAC_CASE_ORDER]
+        bottom = np.zeros(len(rows))
+        x = np.arange(len(rows))
+        for column, label, color in EAC_COMPONENT_STYLE:
+            values = rows[column].to_numpy(dtype=float)
+            axis.bar(
+                x,
+                values,
+                bottom=bottom,
+                width=0.68,
+                color=color,
+                label=label,
+                edgecolor="white",
+                linewidth=0.4,
+            )
+            bottom += values
+        maximum = max(maximum, float(bottom.max()))
+        for xi, total in zip(x, bottom):
+            axis.text(
+                xi,
+                total + 120.0,
+                f"${total:,.0f}",
+                ha="center",
+                va="bottom",
+                fontsize=8.5,
+                color=INK,
+                **MONO,
+            )
+        totals.update(
+            {(county, case): float(total) for case, total in zip(EAC_CASE_ORDER, bottom)}
+        )
+        axis.set_xticks(x)
+        axis.set_xticklabels(
+            [EAC_CASE_LABELS[case] for case in EAC_CASE_ORDER],
+            fontsize=8.4,
+            linespacing=1.15,
+        )
+        axis.set_title(
+            county.replace("-", " ").title() + " County",
+            fontsize=11,
+            loc="left",
+            color=INK,
+        )
+        axis.spines["top"].set_visible(False)
+        axis.spines["right"].set_visible(False)
+        axis.grid(axis="y", color=RULE, linewidth=0.6, alpha=0.55)
+        axis.set_axisbelow(True)
+    for axis in axes.ravel():
+        axis.set_ylim(0.0, maximum * 1.14)
+        axis.set_ylabel("Equivalent annual cost ($/year)", fontsize=9.5)
+    handles, labels = axes.ravel()[0].get_legend_handles_labels()
+    fig.legend(
+        handles,
+        labels,
+        loc="lower center",
+        ncol=4,
+        frameon=False,
+        bbox_to_anchor=(0.5, 0.005),
+        fontsize=8.7,
+    )
+    fig.suptitle(
+        "Household energy and vehicle cost under three modeled choices",
+        x=0.04,
+        y=0.99,
+        ha="left",
+        fontsize=13,
+        color=INK,
+    )
+    fig.tight_layout(rect=(0.0, 0.08, 1.0, 0.96))
+    return fig, {
+        "case_study_count": len(counties),
+        "maximum_total_eac": max(totals.values()),
+    }
+
+
+def _plot_statewide_sorted_savings(
+    summary: pd.DataFrame,
+    *,
+    column: str,
+    title: str,
+    xlabel: str,
+    value_format,
+) -> Tuple["object", Meta]:
+    apply_style()
+    import matplotlib.pyplot as plt
+
+    if summary.empty or column not in summary:
+        raise ValueError(f"Statewide savings data missing {column}")
+    rows = summary.sort_values(column, ascending=True).reset_index(drop=True)
+    values = rows[column].to_numpy(dtype=float)
+    if not np.isfinite(values).all():
+        raise ValueError(f"Statewide savings {column} contains non-finite values")
+    labels = rows["county_slug"].str.replace("-", " ").str.title()
+    colors = [POS if value > 0 else NEG if value < 0 else INK_FAINT for value in values]
+    fig, axis = plt.subplots(figsize=(8.2, 11.2))
+    y = np.arange(len(rows))
+    axis.barh(y, values, color=colors, height=0.72, edgecolor="white", linewidth=0.3)
+    axis.axvline(0.0, color=INK, linewidth=1.0)
+    axis.set_yticks(y)
+    axis.set_yticklabels(labels, fontsize=7.8)
+    axis.set_xlabel(xlabel, fontsize=10)
+    axis.set_title(title, fontsize=12, loc="left", color=INK, pad=10)
+    axis.spines["top"].set_visible(False)
+    axis.spines["right"].set_visible(False)
+    axis.spines["left"].set_visible(False)
+    axis.grid(axis="x", color=RULE, linewidth=0.6, alpha=0.7)
+    axis.set_axisbelow(True)
+    for index in {0, len(rows) - 1}:
+        axis.text(
+            values[index],
+            index,
+            "  " + value_format(values[index]),
+            va="center",
+            ha="left" if values[index] >= 0 else "right",
+            fontsize=8.2,
+            color=INK,
+            **MONO,
+        )
+    fig.tight_layout()
+    return fig, {
+        "county_count": len(rows),
+        "positive_count": int((values > 0.0).sum()),
+        "zero_count": int((values == 0.0).sum()),
+        "negative_count": int((values < 0.0).sum()),
+        "mean": float(np.mean(values)),
+        "median": float(np.median(values)),
+        "minimum": float(np.min(values)),
+        "maximum": float(np.max(values)),
+        "minimum_county": str(rows.iloc[0]["county_slug"]),
+        "maximum_county": str(rows.iloc[-1]["county_slug"]),
+    }
+
+
+def plot_statewide_electrification_savings(
+    summary: pd.DataFrame,
+) -> Tuple["object", Meta]:
+    return _plot_statewide_sorted_savings(
+        summary,
+        column="gas_to_coopt_pct",
+        title="Full electrification vs. gas-appliance + ICE reference",
+        xlabel="Reduction in equivalent annual cost (%); positive = lower cost",
+        value_format=lambda value: f"{value:.1f}%",
+    )
+
+
+def plot_statewide_cooptimization_savings(
+    summary: pd.DataFrame,
+) -> Tuple["object", Meta]:
+    return _plot_statewide_sorted_savings(
+        summary,
+        column="fixed_to_coopt_savings",
+        title="Value of co-optimizing PV/storage instead of using fixed sizing",
+        xlabel="Annual EAC savings from co-optimization ($/year); positive = lower cost",
+        value_format=lambda value: f"${value:,.0f}",
+    )
+
+
+def plot_policy_matrix_optimal_sizes(
+    results: pd.DataFrame,
+) -> Tuple["object", dict]:
+    """Plot optimal PV and battery capacity for the four policy cases."""
+
+    from appliances.incentive_policy import PolicyRegime
+    from tariffs import ExportCompensationRegime
+
+    required = {
+        "county_slug",
+        "county_name",
+        "case_id",
+        "export_compensation_regime",
+        "capital_policy_regime",
+        "pv_kw",
+        "battery_kwh",
+        "at_pv_sizing_limit",
+        "temporal_resolution",
+    }
+    missing = required - set(results.columns)
+    if missing:
+        raise ValueError(f"Policy matrix chart is missing columns: {sorted(missing)}")
+    if results.empty:
+        raise ValueError("Policy matrix chart input cannot be empty")
+    numeric = results[["pv_kw", "battery_kwh"]].apply(
+        pd.to_numeric,
+        errors="coerce",
+    )
+    if numeric.isna().any().any() or not np.isfinite(numeric.to_numpy()).all():
+        raise ValueError("Policy matrix chart capacities must be finite numbers")
+    if (numeric < 0.0).any().any():
+        raise ValueError("Policy matrix chart capacities cannot be negative")
+    if set(results["temporal_resolution"]) != {
+        "weighted_12x24_monthly_hour"
+    }:
+        raise ValueError("Policy matrix chart requires one common resolution")
+
+    export_order = (
+        ExportCompensationRegime.NEM2_AT_2026_RETAIL_RATES,
+        ExportCompensationRegime.NBT_2026,
+    )
+    capital_order = (
+        PolicyRegime.ITC_2025,
+        PolicyRegime.POST_ITC_2026,
+    )
+    counties = list(dict.fromkeys(results["county_slug"]))
+    labels = []
+    for county in counties:
+        names = results.loc[results["county_slug"] == county, "county_name"].unique()
+        if len(names) != 1:
+            raise ValueError(f"Policy matrix county label is ambiguous for {county}")
+        labels.append(str(names[0]).replace(" County", ""))
+
+    expected_rows = len(counties) * len(export_order) * len(capital_order)
+    if len(results) != expected_rows or results.duplicated(
+        ["county_slug", "export_compensation_regime", "capital_policy_regime"]
+    ).any():
+        raise ValueError("Policy matrix chart requires one row per county and case")
+
+    apply_style()
+    import matplotlib.pyplot as plt
+
+    pv_ymax = max(float(numeric["pv_kw"].max()) * 1.20, 1.0)
+    battery_ymax = max(float(numeric["battery_kwh"].max()) * 1.20, 1.0)
+    fig, axes = plt.subplots(2, 2, figsize=(12.4, 8.0), sharex=True)
+    summaries = {}
+    legend_handles = None
+    for row_index, capital_regime in enumerate(capital_order):
+        for column_index, export_regime in enumerate(export_order):
+            axis = axes[row_index, column_index]
+            battery_axis = axis.twinx()
+            panel = results[
+                (results["capital_policy_regime"] == capital_regime.value)
+                & (
+                    results["export_compensation_regime"]
+                    == export_regime.value
+                )
+            ].set_index("county_slug").loc[counties]
+            x = np.arange(len(counties))
+            pv_values = panel["pv_kw"].to_numpy(dtype=float)
+            battery_values = panel["battery_kwh"].to_numpy(dtype=float)
+            bars = axis.bar(
+                x,
+                pv_values,
+                width=0.58,
+                color=ACCENT,
+                alpha=0.86,
+                label="Optimal solar (kW)",
+                zorder=2,
+            )
+            battery_points = battery_axis.scatter(
+                x,
+                battery_values,
+                marker="D",
+                s=42,
+                color=CAUT,
+                edgecolor="white",
+                linewidth=0.7,
+                label="Optimal battery (kWh)",
+                zorder=4,
+            )
+            if legend_handles is None:
+                legend_handles = (bars[0], battery_points)
+            for bar, at_limit in zip(bars, panel["at_pv_sizing_limit"]):
+                if bool(at_limit):
+                    axis.text(
+                        bar.get_x() + bar.get_width() / 2,
+                        bar.get_height() + pv_ymax * 0.018,
+                        "at cap",
+                        ha="center",
+                        va="bottom",
+                        fontsize=7.7,
+                        color=ACCENT_INK,
+                    )
+            axis.set_ylim(0.0, pv_ymax)
+            battery_axis.set_ylim(0.0, battery_ymax)
+            axis.set_xticks(x)
+            axis.set_xticklabels(labels, fontsize=8.5)
+            axis.grid(axis="y", color=RULE, linewidth=0.6, alpha=0.65)
+            axis.set_axisbelow(True)
+            axis.spines["top"].set_visible(False)
+            battery_axis.spines["top"].set_visible(False)
+            if column_index == 0:
+                axis.set_ylabel("Optimal solar (kW)", color=ACCENT_INK)
+                battery_axis.set_yticklabels([])
+                battery_axis.set_ylabel("")
+            else:
+                axis.set_yticklabels([])
+                axis.set_ylabel("")
+                battery_axis.set_ylabel(
+                    "Optimal battery (kWh)",
+                    color=CAUT,
+                )
+            export_label = (
+                "NEM 2 at 2026 retail rates"
+                if export_regime
+                is ExportCompensationRegime.NEM2_AT_2026_RETAIL_RATES
+                else "NBT 2026"
+            )
+            capital_label = (
+                "2025 ITC capital costs"
+                if capital_regime is PolicyRegime.ITC_2025
+                else "Post-ITC 2026 capital costs"
+            )
+            axis.set_title(
+                f"{export_label}\n{capital_label}",
+                fontsize=10.5,
+                loc="left",
+                color=INK,
+                pad=8,
+            )
+            case_id = str(panel["case_id"].iloc[0])
+            summaries[case_id] = {
+                "median_pv_kw": float(np.median(pv_values)),
+                "median_battery_kwh": float(np.median(battery_values)),
+                "nontrivial_battery_count": int((battery_values > 0.1).sum()),
+                "pv_sizing_limit_count": int(
+                    panel["at_pv_sizing_limit"].astype(bool).sum()
+                ),
+            }
+
+    if legend_handles is None:
+        raise ValueError("Policy matrix chart did not create panel artists")
+    fig.legend(
+        list(legend_handles),
+        ["Optimal solar (kW)", "Optimal battery (kWh)"],
+        loc="lower center",
+        ncol=2,
+        frameon=False,
+        bbox_to_anchor=(0.5, 0.01),
+    )
+    fig.suptitle(
+        "Optimal household solar and storage under export and capital policy",
+        x=0.04,
+        y=0.995,
+        ha="left",
+        fontsize=13,
+        color=INK,
+    )
+    fig.text(
+        0.04,
+        0.955,
+        "Four case-study counties · weighted 12×24 resolution in every panel",
+        ha="left",
+        va="top",
+        fontsize=9,
+        color=INK_SOFT,
+    )
+    fig.tight_layout(rect=(0.0, 0.06, 1.0, 0.93))
+    return fig, {
+        "county_count": len(counties),
+        "case_summaries": summaries,
+        "temporal_resolution": "weighted_12x24_monthly_hour",
+    }
 
 
 @dataclass

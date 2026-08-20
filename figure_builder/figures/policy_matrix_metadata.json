@@ -1,0 +1,492 @@
+{
+  "capital_costs": {
+    "gross_cost_basis": {
+      "battery": {
+        "basis_year": 2023,
+        "source_id": "nrel_atb_2024_via_cec_200_2024_011",
+        "source_urls": [
+          "https://atb.nrel.gov/electricity/2024/data",
+          "https://www.energy.ca.gov/sites/default/files/2024-07/CEC-200-2024-011.pdf"
+        ],
+        "unit_capacity_kwh": 12.5,
+        "unit_cost_usd": 18258.0,
+        "value_usd_per_kwh": 1460.64
+      },
+      "pv": {
+        "basis_year": 2023,
+        "source_id": "cpuc_2023_residential_pv_cost",
+        "source_urls": [
+          "https://docs.cpuc.ca.gov/PublishedDocs/Published/G000/M499/K921/499921246.PDF"
+        ],
+        "value_usd_per_kw": 3300.0
+      }
+    },
+    "incentive_scenario": "full_incentives",
+    "policy_regimes": [
+      {
+        "battery_net_usd_per_kwh": 1460.64,
+        "battery_sweep_points_usd_per_kwh": [
+          1.0,
+          5.0,
+          10.0,
+          25.0,
+          50.0,
+          100.0,
+          150.0,
+          200.0,
+          300.0,
+          400.0,
+          500.0,
+          600.0,
+          700.0,
+          800.0,
+          1000.0,
+          1200.0,
+          1400.0,
+          1460.64,
+          1500.0
+        ],
+        "exact_battery_sweep_observation_usd_per_kwh": 1460.64,
+        "federal_itc_fraction": 0.0,
+        "pv_net_usd_per_kw": 3300.0,
+        "regime": "post_itc_2026"
+      },
+      {
+        "battery_net_usd_per_kwh": 1022.448,
+        "battery_sweep_points_usd_per_kwh": [
+          1.0,
+          5.0,
+          10.0,
+          25.0,
+          50.0,
+          100.0,
+          150.0,
+          200.0,
+          300.0,
+          400.0,
+          500.0,
+          600.0,
+          700.0,
+          800.0,
+          1000.0,
+          1022.448,
+          1200.0,
+          1400.0,
+          1500.0
+        ],
+        "exact_battery_sweep_observation_usd_per_kwh": 1022.448,
+        "federal_itc_fraction": 0.3,
+        "pv_net_usd_per_kw": 2310.0,
+        "regime": "itc_2025"
+      }
+    ]
+  },
+  "command_argv": [
+    "python3",
+    "-m",
+    "figure_builder",
+    "policy-matrix"
+  ],
+  "common_temporal_resolution": {
+    "interval_count": 288,
+    "name": "weighted_12x24_monthly_hour",
+    "soc_cycle": "monthly"
+  },
+  "exact_validation": {
+    "battery_difference_kwh": 0.0,
+    "case_id": "nem2_at_2026_retail_rates__post_itc_2026",
+    "coarse_battery_kwh": 0.0,
+    "coarse_coverage": 1.0000000000000004,
+    "coarse_pv_kw": 7.317343507488548,
+    "county_slug": "alameda",
+    "coverage_difference": -2.4424906541753444e-15,
+    "exact_battery_kwh": 0.0,
+    "exact_coverage": 0.999999999999998,
+    "exact_interval_count": 8760,
+    "exact_pv_kw": 7.317343507488532,
+    "pv_difference_kw": -1.5987211554602254e-14
+  },
+  "exact_validation_input": {
+    "path": "figure_builder/sweeps/market_8760_alameda_nem2_at_2026_retail_rates_post_itc_2026.csv",
+    "sha256": "2cc3499b25f6bac410030668c946ac5b8fceb8d3ce09a93f99b0c966270e4ba5",
+    "size_bytes": 259
+  },
+  "force_exact_validation": false,
+  "force_sweeps": false,
+  "generated_at_utc": "2026-08-18T07:45:21.081815+00:00",
+  "input_sweep_caches": [
+    {
+      "path": "figure_builder/sweeps/sweep_288_alameda_nbt_2026_post_itc_2026.csv",
+      "sha256": "277bc71408ea2857773532f84d553bbedec238bf2d170273bfb88a39a3211cbd",
+      "size_bytes": 1579
+    },
+    {
+      "path": "figure_builder/sweeps/sweep_288_fresno_nbt_2026_post_itc_2026.csv",
+      "sha256": "9f30be9fa38ef8d642c48d05ceb7116a1a3e72a20f32fb23e2a1ff3159aa7918",
+      "size_bytes": 1593
+    },
+    {
+      "path": "figure_builder/sweeps/sweep_288_los-angeles_nbt_2026_post_itc_2026.csv",
+      "sha256": "f30078eb6fb8df4e15e1449c146024059d13e6494688767d33a7dfc5a404c845",
+      "size_bytes": 1615
+    },
+    {
+      "path": "figure_builder/sweeps/sweep_288_san-diego_nbt_2026_post_itc_2026.csv",
+      "sha256": "21ed2ad31099f13efe93317056d29279532cc791f053c9269a46391e4cf9af21",
+      "size_bytes": 1730
+    },
+    {
+      "path": "figure_builder/sweeps/sweep_288_alameda_nbt_2026_itc_2025.csv",
+      "sha256": "81a89b073a80ad08ad15fa31de032f41b8ab552a484563b8d751e0562180472a",
+      "size_bytes": 1537
+    },
+    {
+      "path": "figure_builder/sweeps/sweep_288_fresno_nbt_2026_itc_2025.csv",
+      "sha256": "c1ed9ff77ad1ce0a3a41672ea31cc63f266f4a3130ef9bcb1ff56175f228c955",
+      "size_bytes": 1573
+    },
+    {
+      "path": "figure_builder/sweeps/sweep_288_los-angeles_nbt_2026_itc_2025.csv",
+      "sha256": "dc7d3aed8fd8db4192b98c131da77c90725720c1b0d9fc077ec93c20f9b7412b",
+      "size_bytes": 1644
+    },
+    {
+      "path": "figure_builder/sweeps/sweep_288_san-diego_nbt_2026_itc_2025.csv",
+      "sha256": "39976efa1077a8db6bc8f9fd4fadd159e60387d2c1c6a5fea4959df146decdea",
+      "size_bytes": 1683
+    },
+    {
+      "path": "figure_builder/sweeps/sweep_288_alameda_nem2_at_2026_retail_rates_post_itc_2026.csv",
+      "sha256": "b5fa79ae77a7018c699aa70b3e52138279ad0efe24e20d60293bc2c7b63ef4c6",
+      "size_bytes": 1585
+    },
+    {
+      "path": "figure_builder/sweeps/sweep_288_fresno_nem2_at_2026_retail_rates_post_itc_2026.csv",
+      "sha256": "6677a9397cc34bb84f8c6967c57ea5d288f41cc9570813d1535670632fe9a436",
+      "size_bytes": 1376
+    },
+    {
+      "path": "figure_builder/sweeps/sweep_288_los-angeles_nem2_at_2026_retail_rates_post_itc_2026.csv",
+      "sha256": "a76cae97347ecd11e08a9fa02e1b67cb9add553482210e9303bed9752be17efa",
+      "size_bytes": 1707
+    },
+    {
+      "path": "figure_builder/sweeps/sweep_288_san-diego_nem2_at_2026_retail_rates_post_itc_2026.csv",
+      "sha256": "37872679d18d8f6b32d93cdfd334439c990e375e0ee29d03222a37ae34068d8b",
+      "size_bytes": 1750
+    },
+    {
+      "path": "figure_builder/sweeps/sweep_288_alameda_nem2_at_2026_retail_rates_itc_2025.csv",
+      "sha256": "3efb65b2fce3d06d3546e85b7bc0298500389674908d7c32b186564b7b1a404f",
+      "size_bytes": 1597
+    },
+    {
+      "path": "figure_builder/sweeps/sweep_288_fresno_nem2_at_2026_retail_rates_itc_2025.csv",
+      "sha256": "618ee5166435abb06826753683c5373e33fd2303ead9c1d872c83dc41f12d307",
+      "size_bytes": 1391
+    },
+    {
+      "path": "figure_builder/sweeps/sweep_288_los-angeles_nem2_at_2026_retail_rates_itc_2025.csv",
+      "sha256": "f9cfc15d7dc3a8934d34f00a63b0cfc5caf834bd30d557cf693ef1e5a13b40ee",
+      "size_bytes": 1700
+    },
+    {
+      "path": "figure_builder/sweeps/sweep_288_san-diego_nem2_at_2026_retail_rates_itc_2025.csv",
+      "sha256": "1db507a5a295fb5b965dc70af9e7e6785ac517cdee007ce41d5c2615e8093c61",
+      "size_bytes": 1770
+    }
+  ],
+  "model_git_sha": "0eb70b2",
+  "optimization": {
+    "battery_physics": {
+      "allow_battery_export": true,
+      "allow_grid_charging": false,
+      "maximum_soc_fraction": 0.9,
+      "minimum_soc_fraction": 0.2,
+      "round_trip_efficiency": 0.96
+    },
+    "billing_year": 2026,
+    "financial_assumptions": {
+      "battery_degradation_cost_usd_per_kwh": 0.0,
+      "battery_lifetime_years": 15,
+      "battery_power_cost_usd_per_kw": 0.0,
+      "battery_replacement_within_pv_horizon": true,
+      "discount_rate": 0.07,
+      "pv_lifetime_years": 25
+    },
+    "market_price_observations": {
+      "excluded_policy_cases": [
+        "nbt_2026__itc_2025",
+        "nem2_at_2026_retail_rates__post_itc_2026",
+        "nem2_at_2026_retail_rates__itc_2025"
+      ],
+      "interval_count": 8760,
+      "name": "full_8760_hour",
+      "points_per_county_and_case": 1,
+      "policy_cases": [
+        "nbt_2026__post_itc_2026"
+      ],
+      "purpose": "Exact current-law NBT observations for Claim 1 market-price annotations. The four-cell NBT/NEM 2 comparison uses one common weighted 12x24 resolution.",
+      "soc_cycle": "annual"
+    },
+    "sizing_domain": {
+      "battery_power_limit_c_rate": 1.0,
+      "max_battery_kwh": 40.0,
+      "max_pv_to_annual_load_ratio": 1.5,
+      "max_pv_to_annual_load_ratio_by_export_compensation_regime": {
+        "nbt_2026": 1.5,
+        "nem2_at_2026_retail_rates": 1.0
+      }
+    },
+    "solver": {
+      "backend": "highs",
+      "mip_relative_gap": 1e-06,
+      "output_absolute_tolerance": 1e-06
+    },
+    "temporal_resolution": {
+      "interval_count": 288,
+      "name": "weighted_12x24_monthly_hour",
+      "soc_cycle": "monthly"
+    }
+  },
+  "outputs": [
+    {
+      "path": "figure_builder/figures/policy_matrix_optimal_sizes.csv",
+      "sha256": "b063d114cc3b5ea51b27e2f2fcad85a75d848ca4780c1d32cc960489ea13ecff",
+      "size_bytes": 3795
+    },
+    {
+      "path": "figure_builder/figures/policy_matrix_optimal_sizes.png",
+      "sha256": "a7238199ad35787d8a5a9744f467b623a7afd416cccf39ab72b90cbb71cf37a4",
+      "size_bytes": 160128
+    }
+  ],
+  "policy_cases": [
+    "nbt_2026__post_itc_2026",
+    "nbt_2026__itc_2025",
+    "nem2_at_2026_retail_rates__post_itc_2026",
+    "nem2_at_2026_retail_rates__itc_2025"
+  ],
+  "research_design": "Controlled current-rate counterfactual. Both export-compensation regimes use the source-locked 2026 retail tariff snapshot.",
+  "result_summary": {
+    "case_summaries": {
+      "nbt_2026__itc_2025": {
+        "median_battery_kwh": 2.7664648792675095,
+        "median_pv_kw": 3.230432268015478,
+        "nontrivial_battery_count": 2,
+        "pv_sizing_limit_count": 0
+      },
+      "nbt_2026__post_itc_2026": {
+        "median_battery_kwh": 0.0,
+        "median_pv_kw": 1.9328793937502478,
+        "nontrivial_battery_count": 0,
+        "pv_sizing_limit_count": 0
+      },
+      "nem2_at_2026_retail_rates__itc_2025": {
+        "median_battery_kwh": 0.0,
+        "median_pv_kw": 6.7873997585808485,
+        "nontrivial_battery_count": 1,
+        "pv_sizing_limit_count": 4
+      },
+      "nem2_at_2026_retail_rates__post_itc_2026": {
+        "median_battery_kwh": 0.0,
+        "median_pv_kw": 6.7873997585808485,
+        "nontrivial_battery_count": 0,
+        "pv_sizing_limit_count": 4
+      }
+    },
+    "county_count": 4,
+    "temporal_resolution": "weighted_12x24_monthly_hour"
+  },
+  "scenario": "full_electric_ev_coopt",
+  "schema_version": 1,
+  "tariffs": {
+    "annual_true_up": {
+      "nbt_2026": {
+        "reason": "The NBT sizing objective uses interval import and export prices. Annual NSC settlement is not part of that objective.",
+        "used_by_sizing_objective": false
+      },
+      "nem2_at_2026_retail_rates": {
+        "reason": "The NEM 2 sizing objective applies annual retail-dollar netting, credit expiration at true-up, and source-selected net-surplus compensation.",
+        "used_by_sizing_objective": true
+      }
+    },
+    "comparison": {
+      "nem2_scenario": {
+        "annual_net_surplus_compensation": "monthly_nsc_rate",
+        "billing_year": 2026,
+        "research_label": "nem2_at_2026_retail_rates",
+        "retail_credit_true_up": "annual_dollar_balance",
+        "service_type": "bundled",
+        "tariff_snapshot_date": "2026-08-09",
+        "true_up_month": "2026-08",
+        "utilities": [
+          {
+            "import": {
+              "effective_date": "2026-06-01",
+              "plan_name": "E-ELEC",
+              "rate_unit": "USD/kWh",
+              "source_id": "pge_e_elec_2026-06-01"
+            },
+            "settlement": {
+              "billing_method_source_id": "pge_nem2_billing_guide_2026-08-17",
+              "interval_nbc_rate_usd_per_kwh": 0.0123,
+              "monthly_net_consumption_rate_usd_per_kwh": 0.00391,
+              "nsc_rate_source_id": "pge_monthly_nsc_rates_2026-08-10",
+              "nsc_rate_usd_per_kwh": 0.02684,
+              "regulatory_decision_source_id": "cpuc_nem2_decision_d16-01-044_2026-08-17",
+              "retail_credit_exclusion_rate_usd_per_kwh": 0.01621,
+              "utility_rules_source_id": "pge_nem2_rules_2026-08-17"
+            },
+            "utility": "PG&E"
+          },
+          {
+            "import": {
+              "effective_date": "2026-06-01",
+              "plan_name": "TOU-D-PRIME",
+              "rate_unit": "USD/kWh",
+              "source_id": "sce_tou_d_prime_2026-06-01"
+            },
+            "settlement": {
+              "billing_method_source_id": "sce_nem2_billing_guide_2026-08-17",
+              "interval_nbc_rate_usd_per_kwh": 0.00779,
+              "monthly_net_consumption_rate_usd_per_kwh": 0.00619,
+              "nsc_rate_source_id": "sce_monthly_nsc_rates_2026-08-10",
+              "nsc_rate_usd_per_kwh": 0.01697,
+              "regulatory_decision_source_id": "cpuc_nem2_decision_d16-01-044_2026-08-17",
+              "retail_credit_exclusion_rate_usd_per_kwh": 0.01398,
+              "utility_rules_source_id": "sce_nem2_rules_2026-08-17"
+            },
+            "utility": "SCE"
+          },
+          {
+            "import": {
+              "effective_date": "2026-08-01",
+              "plan_name": "EV-TOU-5",
+              "rate_unit": "USD/kWh",
+              "source_id": "sdge_ev_tou_5_2026-08-01"
+            },
+            "settlement": {
+              "billing_method_source_id": "sdge_nem2_rules_2026-08-17",
+              "interval_nbc_rate_usd_per_kwh": 0.02099,
+              "monthly_net_consumption_rate_usd_per_kwh": 0.0,
+              "nsc_rate_source_id": "sdge_monthly_nsc_rates_2026-08-10",
+              "nsc_rate_usd_per_kwh": 0.01306,
+              "regulatory_decision_source_id": "cpuc_nem2_decision_d16-01-044_2026-08-17",
+              "retail_credit_exclusion_rate_usd_per_kwh": 0.02099,
+              "utility_rules_source_id": "sdge_nem2_rules_2026-08-17"
+            },
+            "utility": "SDG&E"
+          }
+        ]
+      },
+      "policy_cases": [
+        {
+          "capital_policy_regime": "post_itc_2026",
+          "case_id": "nbt_2026__post_itc_2026",
+          "export_compensation_regime": "nbt_2026"
+        },
+        {
+          "capital_policy_regime": "itc_2025",
+          "case_id": "nbt_2026__itc_2025",
+          "export_compensation_regime": "nbt_2026"
+        },
+        {
+          "capital_policy_regime": "post_itc_2026",
+          "case_id": "nem2_at_2026_retail_rates__post_itc_2026",
+          "export_compensation_regime": "nem2_at_2026_retail_rates"
+        },
+        {
+          "capital_policy_regime": "itc_2025",
+          "case_id": "nem2_at_2026_retail_rates__itc_2025",
+          "export_compensation_regime": "nem2_at_2026_retail_rates"
+        }
+      ],
+      "research_design": "Controlled policy counterfactual, not a historical bill replay. Both export-compensation regimes use the source-locked 2026 retail tariff snapshot."
+    },
+    "scenario": {
+      "billing_year": 2026,
+      "customer_segment": "standard_non_equity",
+      "nbt_vintage": 2026,
+      "service_type": "bundled",
+      "tariff_snapshot_date": "2026-08-09"
+    },
+    "source_manifests": [
+      "data/tariffs/import_source_manifest.json",
+      "data/tariffs/source_manifest.json",
+      "data/tariffs/acc_plus_rates.csv",
+      "data/tariffs/nem2_source_manifest.json",
+      "data/tariffs/nem2_rate_treatment.json",
+      "data/tariffs/true_up_source_manifest.json",
+      "data/tariffs/nsc_rates.csv"
+    ],
+    "utilities": [
+      {
+        "acc_plus": {
+          "included": true,
+          "rate_unit": "USD/kWh",
+          "rate_usd_per_kwh": 0.0088,
+          "source_id": "pge_advice_7174_e"
+        },
+        "export": {
+          "rate_unit": "USD/kWh",
+          "source_ids": [
+            "pge_nbt2026"
+          ]
+        },
+        "import": {
+          "effective_date": "2026-06-01",
+          "fixed_charge_unit": "USD/meter/day",
+          "plan_name": "E-ELEC",
+          "rate_unit": "USD/kWh",
+          "source_id": "pge_e_elec_2026-06-01"
+        },
+        "utility": "PG&E"
+      },
+      {
+        "acc_plus": {
+          "included": true,
+          "rate_unit": "USD/kWh",
+          "rate_usd_per_kwh": 0.016,
+          "source_id": "sce_schedule_nbt"
+        },
+        "export": {
+          "rate_unit": "USD/kWh",
+          "source_ids": [
+            "sce_nbt2026"
+          ]
+        },
+        "import": {
+          "effective_date": "2026-06-01",
+          "fixed_charge_unit": "USD/meter/day",
+          "plan_name": "TOU-D-PRIME",
+          "rate_unit": "USD/kWh",
+          "source_id": "sce_tou_d_prime_2026-06-01"
+        },
+        "utility": "SCE"
+      },
+      {
+        "acc_plus": {
+          "included": true,
+          "rate_unit": "USD/kWh",
+          "rate_usd_per_kwh": 0.0,
+          "source_id": "cpuc_nbt_policy"
+        },
+        "export": {
+          "rate_unit": "USD/kWh",
+          "source_ids": [
+            "sdge_nbt2026"
+          ]
+        },
+        "import": {
+          "effective_date": "2026-08-01",
+          "fixed_charge_unit": "USD/meter/day",
+          "plan_name": "EV-TOU-5",
+          "rate_unit": "USD/kWh",
+          "source_id": "sdge_ev_tou_5_2026-08-01"
+        },
+        "utility": "SDG&E"
+      }
+    ]
+  }
+}

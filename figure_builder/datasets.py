@@ -1,21 +1,63 @@
 """Collectors: run the model, return tidy DataFrames.
 
 Follows the repo's established `collect_*` convention (see
-`helpers/plot_scenario_comparison_helper.py`). The one collector here,
-`collect_battery_capex_sweep`, is the properly-named replacement for the old
-one-off `run_sweeps.py`: it sweeps battery capex for a county through the real
-Step-9b co-optimization model, holding solar's price fixed.
+`helpers/plot_scenario_comparison_helper.py`). The collectors replace the old
+one-off `run_sweeps.py`: one builds the declared capex sensitivity and the other
+builds the exact current-law 8,760-hour market observation used in publication
+annotations.
 """
 from __future__ import annotations
 
+import hashlib
+import json
+import math
+import re
 import time
-from typing import List, Optional
+from dataclasses import dataclass
+from pathlib import Path
+from typing import List, Mapping, Optional, Sequence
 
 import pandas as pd
 
-from figure_builder import SWEEP_DIR, sweep_csv_path
-from figure_builder.dispatch import SWEEP_POINTS, county_dispatch_inputs
+from tariffs import ExportCompensationRegime
+
+from figure_builder import (
+    REPO,
+    SWEEP_DIR,
+    git_short_sha,
+    market_observation_csv_path,
+    sweep_csv_path,
+)
+from figure_builder.dispatch import (
+    BASE_INPUT_DIR,
+    CLAIM1_COUNTIES,
+    DEFAULT_SCENARIO,
+    HOUSING_TYPE,
+    SWEEP_POINTS,
+    county_dispatch_inputs,
+)
+from figure_builder.policy_cases import POLICY_CASES
 from figure_builder.pricing import live_prices
+
+
+@dataclass(frozen=True)
+class SweepModelSettings:
+    """Fixed modeling choices shared by the sweep solver and run metadata."""
+
+    billing_year: int = 2026
+    max_battery_kwh: float = 40.0
+    max_pv_to_annual_load_ratio: float = 1.5
+    allow_grid_charging: bool = False
+    allow_battery_export: bool = True
+    battery_power_cost_usd_per_kw: float = 0.0
+    battery_degradation_cost_usd_per_kwh: float = 0.0
+    pv_lifetime_years: int = 25
+    battery_lifetime_years: int = 15
+    discount_rate: float = 0.07
+    solver_backend: str = "highs"
+
+
+SWEEP_MODEL_SETTINGS = SweepModelSettings()
 
 SWEEP_COLUMNS = [
     "battery_capex_kwh",
@@ -28,20 +70,523 @@ SWEEP_COLUMNS = [
     "solver_rounds",
 ]
 
+MARKET_OBSERVATION_COLUMNS = [
+    *SWEEP_COLUMNS,
+    "scenario",
+    "policy_regime",
+    "interval_count",
+]
+
+POLICY_MATRIX_COLUMNS = [
+    "county_slug",
+    "county_name",
+    "utility",
+    "case_id",
+    "export_compensation_regime",
+    "capital_policy_regime",
+    "temporal_resolution",
+    "interval_count",
+    "pv_capex_usd_per_kw",
+    "battery_capex_usd_per_kwh",
+    "pv_kw",
+    "battery_kwh",
+    "annual_generation_coverage",
+    "pv_sizing_limit_ratio",
+    "at_pv_sizing_limit",
+    "total_cost_usd_per_year",
+    "max_battery_kwh",
+    "meter_binary_count",
+    "solver_rounds",
+]
+
+CLAIMS_EAC_SCENARIOS = {
+    "baseline_ice_car": "gas_ice_reference",
+    "full_electric_ev": "fixed_pv_electric",
+    "full_electric_ev_coopt": "cooptimized_electric",
+}
+EAC_COMPONENT_COLUMNS = [
+    "capex_pv",
+    "capex_storage",
+    "capex_electric",
+    "capex_gas",
+    "annual_bill_electric",
+    "annual_bill_gas",
+    "vehicle_om",
+]
+CLAIMS_ELECTRICITY_PLAN_PREFERENCE = (
+    "E-TOU-D",
+    "TOU-D-4-9PM",
+    "TOU-DR1",
+)
+CLAIMS_SOURCE_MANIFEST_SCHEMA_VERSION = 1
+
+
+def claims_eac_source_path(run_sha: str | None = None) -> Path:
+    """Claims-only EAC source assembled from a clean model run SHA."""
+
+    sha = run_sha or git_short_sha()
+    return REPO / "analysis_results" / f"claims_eac_by_county_nem3_g{sha}.csv"
+
+
+def claims_eac_manifest_path(source: str | Path) -> Path:
+    """Sidecar receipt for one normalized statewide claims source."""
+
+    return Path(source).with_suffix(".manifest.json")
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _manifest_display_path(path: str | Path) -> str:
+    """Use a portable path for repository-owned source artifacts."""
+
+    resolved = Path(path).resolve()
+    try:
+        return str(resolved.relative_to(REPO.resolve()))
+    except ValueError:
+        return str(resolved)
+
+
+def load_claims_eac_manifest(source: str | Path) -> dict:
+    """Load and verify the source receipt, including the CSV fingerprint."""
+
+    source_path = Path(source)
+    manifest_path = claims_eac_manifest_path(source_path)
+    if not manifest_path.is_file():
+        raise FileNotFoundError(f"Claims 2/3 source manifest not found: {manifest_path}")
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if payload.get("schema_version") != CLAIMS_SOURCE_MANIFEST_SCHEMA_VERSION:
+        raise ValueError(
+            f"Unsupported Claims 2/3 source manifest schema: "
+            f"{payload.get('schema_version')}"
+        )
+    if payload.get("scenario_cases") != CLAIMS_EAC_SCENARIOS:
+        raise ValueError("Claims 2/3 source manifest scenario mapping does not match")
+    model_run_sha = payload.get("model_git_sha")
+    if not isinstance(model_run_sha, str) or not re.fullmatch(
+        r"[0-9a-f]{7,40}", model_run_sha
+    ):
+        raise ValueError("Claims 2/3 source manifest has an invalid model_git_sha")
+    run_timestamps = payload.get("scenario_run_timestamps")
+    if not isinstance(run_timestamps, dict) or set(run_timestamps) != set(
+        CLAIMS_EAC_SCENARIOS
+    ):
+        raise ValueError(
+            "Claims 2/3 source manifest must identify all scenario run timestamps"
+        )
+    if any(
+        not isinstance(value, str) or not re.fullmatch(r"\d{8}_\d{2}", value)
+        for value in run_timestamps.values()
+    ):
+        raise ValueError(
+            "Claims 2/3 source manifest timestamps must use YYYYMMDD_HH"
+        )
+    source_identity = payload.get("source_csv")
+    if not isinstance(source_identity, dict):
+        raise ValueError("Claims 2/3 source manifest is missing source_csv identity")
+    actual_sha256 = _file_sha256(source_path)
+    if source_identity.get("sha256") != actual_sha256:
+        raise ValueError(
+            "Claims 2/3 source CSV fingerprint does not match its manifest"
+        )
+    return payload
+
+
+def expected_claim_counties() -> set[str]:
+    """The repository's explicit 47-county research domain."""
+
+    from helpers.main_helpers import (
+        central_counties,
+        norcal_counties,
+        socal_counties,
+        slugify_county_name,
+    )
+
+    return {
+        slugify_county_name(county)
+        for county in norcal_counties + central_counties + socal_counties
+    }
+
+
+def _validate_claims_eac_frame(
+    frame: pd.DataFrame,
+    *,
+    expected_counties: set[str],
+) -> pd.DataFrame:
+    """Validate and normalize the exact case/county EAC table."""
+
+    required = ["scenario", "county_slug", *EAC_COMPONENT_COLUMNS]
+    missing = [column for column in required if column not in frame.columns]
+    if missing:
+        raise ValueError(f"Claims 2/3 EAC source is missing columns: {missing}")
+    selected = frame[frame["scenario"].isin(CLAIMS_EAC_SCENARIOS)].copy()
+    selected["case"] = selected["scenario"].map(CLAIMS_EAC_SCENARIOS)
+    if not expected_counties:
+        raise ValueError("Claims 2/3 expected county set cannot be empty")
+    if selected[["scenario", "county_slug"]].isna().any().any():
+        raise ValueError("Claims 2/3 EAC source has missing scenario/county identity")
+    duplicates = selected.duplicated(["scenario", "county_slug"], keep=False)
+    if duplicates.any():
+        keys = selected.loc[duplicates, ["scenario", "county_slug"]].to_dict("records")
+        raise ValueError(f"Claims 2/3 EAC source has duplicate keys: {keys[:5]}")
+    for scenario in CLAIMS_EAC_SCENARIOS:
+        actual = set(selected.loc[selected["scenario"] == scenario, "county_slug"])
+        if actual != expected_counties:
+            missing_counties = sorted(expected_counties - actual)
+            extra_counties = sorted(actual - expected_counties)
+            raise ValueError(
+                f"{scenario} county coverage mismatch: missing={missing_counties}, "
+                f"extra={extra_counties}"
+            )
+    numeric = selected[EAC_COMPONENT_COLUMNS].apply(pd.to_numeric, errors="coerce")
+    if numeric.isna().any().any():
+        bad = numeric.isna().any(axis=1)
+        keys = selected.loc[bad, ["scenario", "county_slug"]].to_dict("records")
+        raise ValueError(f"Claims 2/3 EAC source has missing/non-numeric costs: {keys[:5]}")
+    if not all(math.isfinite(value) for value in numeric.to_numpy().ravel()):
+        raise ValueError("Claims 2/3 EAC source has non-finite costs")
+    if (numeric < 0.0).any().any():
+        bad = (numeric < 0.0).any(axis=1)
+        keys = selected.loc[bad, ["scenario", "county_slug"]].to_dict("records")
+        raise ValueError(f"Claims 2/3 EAC source has negative costs: {keys[:5]}")
+    selected[EAC_COMPONENT_COLUMNS] = numeric
+    selected["total_eac"] = numeric.sum(axis=1)
+    if (selected["total_eac"] <= 0.0).any():
+        raise ValueError("Claims 2/3 EAC totals must be positive")
+    return selected[
+        ["scenario", "case", "county_slug", *EAC_COMPONENT_COLUMNS, "total_eac"]
+    ].sort_values(["county_slug", "scenario"]).reset_index(drop=True)
+
+
+def collect_claims_eac_results(
+    source: str | Path | None = None,
+    *,
+    expected_counties: set[str] | None = None,
+    require_manifest: bool = True,
+) -> pd.DataFrame:
+    """Load and strictly validate the three statewide EAC cases for Claims 2/3."""
+
+    path = Path(source) if source is not None else claims_eac_source_path()
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"Claims 2/3 EAC source not found: {path}. Run baseline_ice_car, "
+            "full_electric_ev, and full_electric_ev_coopt at the current clean SHA."
+        )
+    if require_manifest:
+        load_claims_eac_manifest(path)
+    frame = pd.read_csv(path)
+    expected = (
+        expected_counties
+        if expected_counties is not None
+        else expected_claim_counties()
+    )
+    selected = _validate_claims_eac_frame(frame, expected_counties=expected)
+    selected.attrs["source_path"] = str(path)
+    return selected
+
+
+def build_claims_eac_source(
+    *,
+    model_run_sha: str,
+    run_timestamps: Mapping[str, str],
+    source: str | Path | None = None,
+    base_input_dir: str | Path = BASE_INPUT_DIR,
+    completion_dir: str | Path = REPO / "analysis_results" / "county_diagnostics",
+    expected_counties: set[str] | None = None,
+) -> Path:
+    """Normalize the three explicit completed scenario runs for Claims 2/3."""
+
+    if not re.fullmatch(r"[0-9a-f]{7,40}", model_run_sha):
+        raise ValueError("model_run_sha must be a 7-40 character lowercase Git SHA")
+    timestamps = dict(run_timestamps)
+    expected_scenarios = set(CLAIMS_EAC_SCENARIOS)
+    if set(timestamps) != expected_scenarios:
+        raise ValueError(
+            "Claims 2/3 run timestamps must identify exactly "
+            f"{sorted(expected_scenarios)}"
+        )
+    invalid_timestamps = {
+        scenario: timestamp
+        for scenario, timestamp in timestamps.items()
+        if not re.fullmatch(r"\d{8}_\d{2}", str(timestamp))
+    }
+    if invalid_timestamps:
+        raise ValueError(
+            f"Claims 2/3 run timestamps must use YYYYMMDD_HH: {invalid_timestamps}"
+        )
+    counties = (
+        expected_claim_counties()
+        if expected_counties is None
+        else expected_counties
+    )
+    if not counties:
+        raise ValueError("Claims 2/3 expected county set cannot be empty")
+    markers = [
+        Path(completion_dir)
+        / scenario
+        / f"{county}_diagnostics_g{model_run_sha}.html"
+        for scenario in CLAIMS_EAC_SCENARIOS
+        for county in sorted(counties)
+    ]
+    missing_markers = [path for path in markers if not path.is_file()]
+    if missing_markers:
+        raise FileNotFoundError(
+            f"Claims 2/3 model run is incomplete for {model_run_sha}: "
+            f"{len(missing_markers)} completion markers missing; "
+            f"first={missing_markers[0]}"
+        )
+
+    from helpers.plot_scenario_comparison_helper import (
+        collect_eac_components_by_county,
+    )
+
+    frames = []
+    for scenario in CLAIMS_EAC_SCENARIOS:
+        frames.append(
+            collect_eac_components_by_county(
+                str(base_input_dir),
+                HOUSING_TYPE,
+                [scenario],
+                sorted(counties),
+                incentive="full_incentives",
+                discount_rate=0.07,
+                timestamp=timestamps[scenario],
+                electricity_plan_preference=CLAIMS_ELECTRICITY_PLAN_PREFERENCE,
+                electricity_variant="nem3",
+            )
+        )
+    raw = pd.concat(frames, ignore_index=True)
+    normalized = _validate_claims_eac_frame(raw, expected_counties=counties)
+    destination = Path(source) if source is not None else claims_eac_source_path(model_run_sha)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    normalized[["scenario", "county_slug", *EAC_COMPONENT_COLUMNS]].to_csv(
+        destination,
+        index=False,
+    )
+    manifest = {
+        "schema_version": CLAIMS_SOURCE_MANIFEST_SCHEMA_VERSION,
+        "model_git_sha": model_run_sha,
+        "scenario_run_timestamps": timestamps,
+        "scenario_cases": CLAIMS_EAC_SCENARIOS,
+        "expected_counties": sorted(counties),
+        "completion_marker_count": len(markers),
+        "housing_type": HOUSING_TYPE,
+        "incentive_scenario": "full_incentives",
+        "discount_rate": 0.07,
+        "electricity_variant": "nem3",
+        "electricity_plan_preference": list(CLAIMS_ELECTRICITY_PLAN_PREFERENCE),
+        "source_csv": {
+            "path": _manifest_display_path(destination),
+            "sha256": _file_sha256(destination),
+            "row_count": len(normalized),
+        },
+    }
+    claims_eac_manifest_path(destination).write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    collect_claims_eac_results(
+        destination,
+        expected_counties=counties,
+        require_manifest=True,
+    )
+    return destination
+
+
+def summarize_claims_eac(eac: pd.DataFrame) -> pd.DataFrame:
+    """One county per row with the exact comparisons used by Claims 2 and 3."""
+
+    required_cases = set(CLAIMS_EAC_SCENARIOS.values())
+    if set(eac["case"]) != required_cases:
+        raise ValueError(
+            f"Claims EAC cases must be {sorted(required_cases)}; "
+            f"found {sorted(set(eac['case']))}"
+        )
+    if eac.duplicated(["case", "county_slug"]).any():
+        raise ValueError("Claims EAC input has duplicate case/county rows")
+    wide = eac.pivot(index="county_slug", columns="case", values="total_eac")
+    if wide.isna().any().any():
+        raise ValueError("Claims EAC cases do not cover identical counties")
+    wide = wide.reset_index()
+    wide["gas_to_coopt_savings"] = (
+        wide["gas_ice_reference"] - wide["cooptimized_electric"]
+    )
+    wide["gas_to_coopt_pct"] = (
+        100.0 * wide["gas_to_coopt_savings"] / wide["gas_ice_reference"]
+    )
+    wide["fixed_to_coopt_savings"] = (
+        wide["fixed_pv_electric"] - wide["cooptimized_electric"]
+    )
+    wide["fixed_to_coopt_pct"] = (
+        100.0 * wide["fixed_to_coopt_savings"] / wide["fixed_pv_electric"]
+    )
+    return wide.sort_values("county_slug").reset_index(drop=True)
+
 
 def sweep_cache_is_compatible(
     df: pd.DataFrame,
     max_battery_kwh: float,
     *,
+    expected_points: Sequence[float],
     expected_columns: Optional[List[str]] = None,
 ) -> bool:
-    """Whether cached results fully describe the requested sizing domain."""
+    """Whether cached results fully describe the requested sweep."""
+
+    expected = normalize_battery_capex_points(expected_points)
+    if "battery_capex_kwh" not in df.columns:
+        return False
+    actual = pd.to_numeric(df["battery_capex_kwh"], errors="coerce")
 
     return (
         list(df.columns) == (SWEEP_COLUMNS if expected_columns is None else expected_columns)
         and not df.empty
         and set(df["max_battery_kwh"].astype(float)) == {float(max_battery_kwh)}
+        and not actual.isna().any()
+        and not actual.duplicated().any()
+        and sorted(actual.astype(float).tolist()) == expected
     )
+
+
+def normalize_battery_capex_points(points: Sequence[float]) -> List[float]:
+    """Validate, sort, and deduplicate an explicitly requested capex grid."""
+
+    normalized = [float(point) for point in points]
+    if not normalized:
+        raise ValueError("Battery capex sweep points cannot be empty")
+    if not all(math.isfinite(point) for point in normalized):
+        raise ValueError("Battery capex sweep points must be finite")
+    if any(point <= 0.0 for point in normalized):
+        raise ValueError("Battery capex sweep points must be positive")
+    return sorted(set(normalized))
+
+
+def canonical_battery_capex_points(regime=None) -> List[float]:
+    """Publication grid including the regime's exact modeled battery price."""
+
+    return normalize_battery_capex_points(
+        [*SWEEP_POINTS, live_prices(regime).batt_net_per_kwh]
+    )
+
+
+def select_market_observation(
+    frame: pd.DataFrame,
+    market_price: float,
+) -> pd.Series:
+    """Return the one solved row at ``market_price``, failing on ambiguity.
+
+    Publication annotations use this primitive instead of interpolation or the
+    nearest capex grid point. The strict checks prevent an old or incomplete
+    cache from silently supplying a different modeled price.
+    """
+
+    missing = [column for column in SWEEP_COLUMNS if column not in frame.columns]
+    if missing:
+        raise ValueError(f"Market observation is missing columns: {missing}")
+    numeric = frame[SWEEP_COLUMNS].apply(pd.to_numeric, errors="coerce")
+    if numeric.isna().any().any():
+        raise ValueError("Market observation contains non-numeric or missing values")
+    if not pd.notna(numeric).all().all() or not all(
+        math.isfinite(value) for value in numeric.to_numpy().ravel()
+    ):
+        raise ValueError("Market observation contains non-finite values")
+    matches = numeric[
+        numeric["battery_capex_kwh"].map(
+            lambda value: math.isclose(
+                value,
+                float(market_price),
+                rel_tol=0.0,
+                abs_tol=1e-9,
+            )
+        )
+    ]
+    if len(matches) != 1:
+        raise ValueError(
+            "Expected exactly one solved observation at battery capex "
+            f"${market_price:.6f}/kWh; found {len(matches)}"
+        )
+    row = matches.iloc[0]
+    if row["pv_kw"] < 0.0 or row["batt_kwh"] < 0.0:
+        raise ValueError("Market observation cannot contain negative capacity")
+    if int(row["solver_rounds"]) < 1:
+        raise ValueError("Market observation must record at least one solver round")
+    return row
+
+
+def collect_market_price_observation(
+    slug: str,
+    *,
+    regime=None,
+    export_compensation_regime: (
+        str | ExportCompensationRegime
+    ) = ExportCompensationRegime.NBT_2026,
+    scenario: str = DEFAULT_SCENARIO,
+    max_battery_kwh: float = SWEEP_MODEL_SETTINGS.max_battery_kwh,
+    cache: bool = True,
+    force: bool = False,
+    verbose: bool = True,
+) -> pd.DataFrame:
+    """Solve one exact market-price point using the full 8,760-hour chronology.
+
+    The capex sensitivity curves remain the declared 12x24 approximation. This
+    separate observation is the publication-grade check used for each market
+    price annotation and Claim 1 headline statistic.
+    """
+
+    prices = live_prices(regime)
+    export_regime = ExportCompensationRegime.parse(
+        export_compensation_regime
+    )
+    market_price = prices.batt_net_per_kwh
+    path = market_observation_csv_path(
+        slug,
+        prices.regime,
+        export_regime,
+    )
+    if cache and not force and path.exists():
+        cached = pd.read_csv(path)
+        try:
+            select_market_observation(cached, market_price)
+        except ValueError:
+            pass
+        else:
+            if (
+                list(cached.columns) == MARKET_OBSERVATION_COLUMNS
+                and len(cached) == 1
+                and set(cached["max_battery_kwh"].astype(float))
+                == {float(max_battery_kwh)}
+                and set(cached["scenario"]) == {scenario}
+                and set(cached["policy_regime"]) == {prices.regime}
+                and set(cached["interval_count"].astype(int)) == {8760}
+            ):
+                return cached.reset_index(drop=True)
+
+    frame = collect_battery_capex_sweep(
+        slug,
+        regime=regime,
+        export_compensation_regime=export_regime,
+        scenario=scenario,
+        points=[market_price],
+        max_battery_kwh=max_battery_kwh,
+        fine=True,
+        cache=False,
+        force=True,
+        verbose=verbose,
+    )
+    select_market_observation(frame, market_price)
+    frame = frame.assign(
+        scenario=scenario,
+        policy_regime=prices.regime,
+        interval_count=8760,
+    )[MARKET_OBSERVATION_COLUMNS]
+    if cache:
+        SWEEP_DIR.mkdir(parents=True, exist_ok=True)
+        frame.to_csv(path, index=False)
+    return frame.reset_index(drop=True)
 
 
 def resolve_pv_capex(pv_capex_per_kw=None, regime=None) -> float:
@@ -64,10 +609,13 @@ def collect_battery_capex_sweep(
     slug: str,
     *,
     regime=None,
-    scenario: str = "full_electric_ev_coopt",
-    points: List[int] = SWEEP_POINTS,
+    export_compensation_regime: (
+        str | ExportCompensationRegime
+    ) = ExportCompensationRegime.NBT_2026,
+    scenario: str = DEFAULT_SCENARIO,
+    points: Optional[Sequence[float]] = None,
     pv_capex_per_kw: Optional[float] = None,
-    max_battery_kwh: float = 40.0,
+    max_battery_kwh: float = SWEEP_MODEL_SETTINGS.max_battery_kwh,
     fine: bool = False,
     cache: bool = True,
     force: bool = False,
@@ -80,45 +628,81 @@ def collect_battery_capex_sweep(
     solver diagnostics.
 
     Solar capex is fixed at the live net price for `regime` (default: current
-    law), or `pv_capex_per_kw` if given. Results cache per (county, regime) to
-    figure_builder/sweeps/; pass `force=True` to recompute. Sensitivity grids
-    use weighted 12x24 monthly-hour intervals by default; `fine=True` requests
-    the substantially slower full 8,760-hour chronology.
+    law), or `pv_capex_per_kw` if given. The default publication grid includes
+    the regime's exact modeled net battery price. An explicit ``points``
+    argument is treated as a deliberate custom grid and is only validated,
+    sorted, and deduplicated. Results cache per county, export-compensation
+    regime, and capital-policy regime. Sensitivity grids use weighted 12x24
+    monthly-hour intervals by default. ``fine=True`` requests the full
+    8,760-hour chronology.
     """
     prices = live_prices(regime)
+    export_regime = ExportCompensationRegime.parse(
+        export_compensation_regime
+    )
+    requested_points = (
+        canonical_battery_capex_points(regime)
+        if points is None
+        else normalize_battery_capex_points(points)
+    )
     resolution = "8760" if fine else "288"
-    path = sweep_csv_path(slug, prices.regime, resolution)
+    path = sweep_csv_path(
+        slug,
+        prices.regime,
+        resolution,
+        export_regime,
+    )
     if cache and not force and path.exists():
         df = pd.read_csv(path)
-        if sweep_cache_is_compatible(df, max_battery_kwh):
+        if sweep_cache_is_compatible(
+            df,
+            max_battery_kwh,
+            expected_points=requested_points,
+        ):
             return df.sort_values("battery_capex_kwh").reset_index(drop=True)
 
     from pipeline.steps.step9b_cooptimize_core import (
-        CooptInputs,
         _solve_lp,
         build_monthly_hourly_inputs,
     )
 
     c_pv = resolve_pv_capex(pv_capex_per_kw, regime)
-    di = county_dispatch_inputs(slug, scenario)
-    inp = CooptInputs(load_kwh=di.load, pv_gen_per_kw=di.pv_gen_per_kw,
-                      import_rates=di.p_imp, export_rates=di.p_exp)
+    di = county_dispatch_inputs(
+        slug,
+        scenario,
+        export_compensation_regime=export_regime,
+    )
+    inp = di.coopt_inputs()
     load, ypk = di.annual_load, di.yield_per_kw
     weights = None
     cycle_monthly = False
     if not fine:
-        inp, weights = build_monthly_hourly_inputs(inp, year=2026)
+        inp, weights = build_monthly_hourly_inputs(
+            inp,
+            year=SWEEP_MODEL_SETTINGS.billing_year,
+        )
         cycle_monthly = True
 
     rows = []
-    for cb in points:
+    for cb in requested_points:
         t0 = time.time()
         r = _solve_lp(
-            inp, allow_grid_charging=False, allow_batt_export=True,
-            c_pv_kw=c_pv, c_batt_kwh=float(cb), c_batt_kw=0.0,
-            pv_life_yrs=25, batt_life_yrs=15, discount_rate=0.07,
-            c_deg_per_kwh=0.0, weights=weights, cycle_monthly=cycle_monthly,
+            inp,
+            allow_grid_charging=SWEEP_MODEL_SETTINGS.allow_grid_charging,
+            allow_batt_export=SWEEP_MODEL_SETTINGS.allow_battery_export,
+            c_pv_kw=c_pv,
+            c_batt_kwh=float(cb),
+            c_batt_kw=SWEEP_MODEL_SETTINGS.battery_power_cost_usd_per_kw,
+            pv_life_yrs=SWEEP_MODEL_SETTINGS.pv_lifetime_years,
+            batt_life_yrs=SWEEP_MODEL_SETTINGS.battery_lifetime_years,
+            discount_rate=SWEEP_MODEL_SETTINGS.discount_rate,
+            c_deg_per_kwh=(
+                SWEEP_MODEL_SETTINGS.battery_degradation_cost_usd_per_kwh
+            ),
+            weights=weights,
+            cycle_monthly=cycle_monthly,
             max_battery_kwh=max_battery_kwh,
+            solver_backend=SWEEP_MODEL_SETTINGS.solver_backend,
         )
         rows.append({
             "battery_capex_kwh": cb, "pv_kw": r.pv_kw, "batt_kwh": r.batt_kwh,
@@ -136,3 +720,257 @@ def collect_battery_capex_sweep(
         SWEEP_DIR.mkdir(parents=True, exist_ok=True)
         df.to_csv(path, index=False)
     return df
+
+
+def validate_policy_matrix_results(
+    frame: pd.DataFrame,
+    *,
+    expected_counties: Sequence[str],
+) -> pd.DataFrame:
+    """Validate the complete four-case, common-resolution result table."""
+
+    if list(frame.columns) != POLICY_MATRIX_COLUMNS:
+        raise ValueError(
+            "Policy matrix columns do not match the publication schema"
+        )
+    counties = list(dict.fromkeys(str(value) for value in expected_counties))
+    if not counties:
+        raise ValueError("Policy matrix expected counties cannot be empty")
+    expected_cases = [case.case_id for case in POLICY_CASES]
+    expected_keys = {
+        (county, case_id)
+        for county in counties
+        for case_id in expected_cases
+    }
+    if frame[["county_slug", "case_id"]].isna().any().any():
+        raise ValueError("Policy matrix contains missing county/case identity")
+    if frame.duplicated(["county_slug", "case_id"]).any():
+        raise ValueError("Policy matrix contains duplicate county/case rows")
+    actual_keys = set(
+        frame[["county_slug", "case_id"]].itertuples(index=False, name=None)
+    )
+    if actual_keys != expected_keys:
+        raise ValueError(
+            "Policy matrix county/case coverage mismatch: "
+            f"missing={sorted(expected_keys - actual_keys)}, "
+            f"extra={sorted(actual_keys - expected_keys)}"
+        )
+
+    numeric_columns = [
+        "interval_count",
+        "pv_capex_usd_per_kw",
+        "battery_capex_usd_per_kwh",
+        "pv_kw",
+        "battery_kwh",
+        "annual_generation_coverage",
+        "pv_sizing_limit_ratio",
+        "total_cost_usd_per_year",
+        "max_battery_kwh",
+        "meter_binary_count",
+        "solver_rounds",
+    ]
+    numeric = frame[numeric_columns].apply(pd.to_numeric, errors="coerce")
+    if numeric.isna().any().any():
+        raise ValueError("Policy matrix contains missing or non-numeric results")
+    if not all(math.isfinite(value) for value in numeric.to_numpy().ravel()):
+        raise ValueError("Policy matrix contains non-finite results")
+    if set(frame["temporal_resolution"]) != {
+        "weighted_12x24_monthly_hour"
+    } or set(numeric["interval_count"].astype(int)) != {288}:
+        raise ValueError("Policy matrix must use one common weighted 12x24 resolution")
+    if not pd.api.types.is_bool_dtype(frame["at_pv_sizing_limit"]):
+        raise ValueError("Policy matrix sizing-limit flag must be boolean")
+
+    case_lookup = {case.case_id: case for case in POLICY_CASES}
+    for row in frame.itertuples(index=False):
+        case = case_lookup[row.case_id]
+        if row.export_compensation_regime != (
+            case.export_compensation_regime.value
+        ) or row.capital_policy_regime != case.capital_policy_regime.value:
+            raise ValueError("Policy matrix case identity does not reconcile")
+        limit = case.export_compensation_regime.max_pv_to_annual_load_ratio
+        if not math.isclose(
+            float(row.pv_sizing_limit_ratio),
+            limit,
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        ):
+            raise ValueError("Policy matrix PV sizing limit does not reconcile")
+        at_limit = math.isclose(
+            float(row.annual_generation_coverage),
+            limit,
+            rel_tol=0.0,
+            abs_tol=1e-5,
+        )
+        if bool(row.at_pv_sizing_limit) is not at_limit:
+            raise ValueError("Policy matrix sizing-limit flag does not reconcile")
+
+    # Assumption-based research guardrails. These do not replace exact source
+    # tests. They catch unit errors, unbounded capacities, and broken annual
+    # aggregation before a publication artifact is written.
+    if not numeric["pv_kw"].between(0.0, 20.0).all():
+        raise ValueError("Policy matrix PV capacity is outside 0-20 kW")
+    if not (
+        (numeric["battery_kwh"] >= 0.0)
+        & (numeric["battery_kwh"] <= numeric["max_battery_kwh"] + 1e-6)
+    ).all():
+        raise ValueError("Policy matrix battery capacity violates its bound")
+    if not (
+        (numeric["annual_generation_coverage"] >= 0.0)
+        & (
+            numeric["annual_generation_coverage"]
+            <= numeric["pv_sizing_limit_ratio"] + 1e-5
+        )
+    ).all():
+        raise ValueError("Policy matrix annual generation exceeds its sizing limit")
+    if not numeric["total_cost_usd_per_year"].between(500.0, 10_000.0).all():
+        raise ValueError("Policy matrix annual objective is outside $500-$10,000")
+    if not (numeric["solver_rounds"] >= 1).all():
+        raise ValueError("Policy matrix solver rounds must be positive")
+
+    case_order = {case.case_id: index for index, case in enumerate(POLICY_CASES)}
+    county_order = {county: index for index, county in enumerate(counties)}
+    result = frame.copy()
+    result["_case_order"] = result["case_id"].map(case_order)
+    result["_county_order"] = result["county_slug"].map(county_order)
+    return result.sort_values(
+        ["_case_order", "_county_order"]
+    ).drop(columns=["_case_order", "_county_order"]).reset_index(drop=True)
+
+
+def collect_policy_matrix_results(
+    *,
+    counties: Sequence[tuple[str, str, str]] = CLAIM1_COUNTIES,
+    scenario: str = DEFAULT_SCENARIO,
+    force: bool = False,
+    verbose: bool = True,
+) -> pd.DataFrame:
+    """Collect optimal market-cost sizing for all four policy cases."""
+
+    rows = []
+    for case in POLICY_CASES:
+        prices = live_prices(case.capital_policy_regime)
+        for slug, county_name, utility in counties:
+            sweep = collect_battery_capex_sweep(
+                slug,
+                regime=case.capital_policy_regime,
+                export_compensation_regime=(
+                    case.export_compensation_regime
+                ),
+                scenario=scenario,
+                fine=False,
+                cache=True,
+                force=force,
+                verbose=verbose,
+            )
+            solved = select_market_observation(
+                sweep,
+                prices.batt_net_per_kwh,
+            )
+            coverage = float(solved["coverage"])
+            limit = (
+                case.export_compensation_regime.max_pv_to_annual_load_ratio
+            )
+            rows.append(
+                {
+                    "county_slug": slug,
+                    "county_name": county_name,
+                    "utility": utility,
+                    "case_id": case.case_id,
+                    "export_compensation_regime": (
+                        case.export_compensation_regime.value
+                    ),
+                    "capital_policy_regime": case.capital_policy_regime.value,
+                    "temporal_resolution": "weighted_12x24_monthly_hour",
+                    "interval_count": 288,
+                    "pv_capex_usd_per_kw": prices.pv_net_per_kw,
+                    "battery_capex_usd_per_kwh": prices.batt_net_per_kwh,
+                    "pv_kw": float(solved["pv_kw"]),
+                    "battery_kwh": float(solved["batt_kwh"]),
+                    "annual_generation_coverage": coverage,
+                    "pv_sizing_limit_ratio": limit,
+                    "at_pv_sizing_limit": math.isclose(
+                        coverage,
+                        limit,
+                        rel_tol=0.0,
+                        abs_tol=1e-5,
+                    ),
+                    "total_cost_usd_per_year": float(solved["total_cost"]),
+                    "max_battery_kwh": float(solved["max_battery_kwh"]),
+                    "meter_binary_count": int(solved["meter_binary_count"]),
+                    "solver_rounds": int(solved["solver_rounds"]),
+                }
+            )
+    return validate_policy_matrix_results(
+        pd.DataFrame(rows, columns=POLICY_MATRIX_COLUMNS),
+        expected_counties=[slug for slug, _name, _utility in counties],
+    )
+
+
+def validate_policy_matrix_exact_check(
+    policy_results: pd.DataFrame,
+    exact_observation: pd.DataFrame,
+    *,
+    county_slug: str = "alameda",
+) -> dict:
+    """Reconcile one NEM 2 coarse result to a full-year solved check."""
+
+    from appliances.incentive_policy import PolicyRegime
+    from figure_builder.policy_cases import policy_case
+
+    case = policy_case(
+        ExportCompensationRegime.NEM2_AT_2026_RETAIL_RATES,
+        PolicyRegime.POST_ITC_2026,
+    )
+    coarse = policy_results[
+        (policy_results["county_slug"] == county_slug)
+        & (policy_results["case_id"] == case.case_id)
+    ]
+    if len(coarse) != 1:
+        raise ValueError(
+            "Exact policy check requires one coarse NEM 2/post-ITC county row"
+        )
+    coarse_row = coarse.iloc[0]
+    exact_row = select_market_observation(
+        exact_observation,
+        float(coarse_row["battery_capex_usd_per_kwh"]),
+    )
+    if set(exact_observation["interval_count"].astype(int)) != {8760}:
+        raise ValueError("Exact policy check must use 8,760 intervals")
+    if set(exact_observation["policy_regime"]) != {
+        PolicyRegime.POST_ITC_2026.value
+    }:
+        raise ValueError("Exact policy check uses the wrong capital-policy regime")
+    pv_difference = float(exact_row["pv_kw"]) - float(coarse_row["pv_kw"])
+    battery_difference = float(exact_row["batt_kwh"]) - float(
+        coarse_row["battery_kwh"]
+    )
+    coverage_difference = float(exact_row["coverage"]) - float(
+        coarse_row["annual_generation_coverage"]
+    )
+    if abs(pv_difference) > 0.05:
+        raise ValueError("Exact policy check PV capacity differs by more than 0.05 kW")
+    if abs(battery_difference) > 0.05:
+        raise ValueError(
+            "Exact policy check battery capacity differs by more than 0.05 kWh"
+        )
+    if abs(coverage_difference) > 0.005:
+        raise ValueError(
+            "Exact policy check annual coverage differs by more than 0.5 percentage points"
+        )
+    return {
+        "county_slug": county_slug,
+        "case_id": case.case_id,
+        "coarse_pv_kw": float(coarse_row["pv_kw"]),
+        "exact_pv_kw": float(exact_row["pv_kw"]),
+        "pv_difference_kw": pv_difference,
+        "coarse_battery_kwh": float(coarse_row["battery_kwh"]),
+        "exact_battery_kwh": float(exact_row["batt_kwh"]),
+        "battery_difference_kwh": battery_difference,
+        "coarse_coverage": float(
+            coarse_row["annual_generation_coverage"]
+        ),
+        "exact_coverage": float(exact_row["coverage"]),
+        "coverage_difference": coverage_difference,
+        "exact_interval_count": 8760,
+    }

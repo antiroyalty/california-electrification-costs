@@ -3,11 +3,15 @@
 
     python3 -m figure_builder sweeps                 # (re)compute all county sweeps
     python3 -m figure_builder sweeps --counties alameda --force
+    python3 -m figure_builder market                 # exact current-law market points
+    python3 -m figure_builder policy-matrix          # NBT/NEM 2 x ITC comparison
+    python3 -m figure_builder claims-source          # normalize three explicit model runs
     python3 -m figure_builder mechanism              # patch Claim-1 mechanism block
     python3 -m figure_builder counties               # patch Claim-1 county grid
+    python3 -m figure_builder statewide              # rebuild Claims 2 and 3
     python3 -m figure_builder bridge                 # render bridge waterfall PNG
     python3 -m figure_builder split                  # split combined -> claim1/2/3.html
-    python3 -m figure_builder all                    # sweeps + mechanism + counties + bridge + split
+    python3 -m figure_builder all                    # rebuild all report inputs and sections
 
 `all` writes a run_metadata.json (regime, git sha, prices, artifacts) so any
 figure run is reproducible.
@@ -15,25 +19,93 @@ figure run is reproducible.
 from __future__ import annotations
 
 import argparse
-import json
 
-from figure_builder import FIG_DIR, current_claims_doc, sweep_csv_path
-from figure_builder.datasets import collect_battery_capex_sweep
+from figure_builder import (
+    FIG_DIR,
+    current_claims_doc,
+    market_observation_csv_path,
+    sweep_csv_path,
+)
+from figure_builder.datasets import (
+    collect_battery_capex_sweep,
+    collect_market_price_observation,
+)
 from figure_builder.dispatch import CLAIM1_COUNTIES
+from figure_builder.policy_cases import (
+    FULL_HOURLY_POLICY_CASES,
+    POLICY_CASES,
+)
 from figure_builder.pricing import live_prices
 
 
 def _cmd_sweeps(args) -> list:
     slugs = args.counties or [s for s, _, _ in CLAIM1_COUNTIES]
-    prices = live_prices()
-    print(f"Regime {prices.regime}: solar fixed ${prices.pv_net_per_kw:,.0f}/kW, "
-          f"battery ${prices.batt_net_per_kwh:,.0f}/kWh net")
     out = []
-    for slug in slugs:
-        print(f"\n{slug}:")
-        collect_battery_capex_sweep(slug, force=args.force, fine=args.fine)
-        resolution = "8760" if args.fine else "288"
-        out.append(str(sweep_csv_path(slug, prices.regime, resolution)))
+    resolution = "8760" if args.fine else "288"
+    for case in POLICY_CASES:
+        prices = live_prices(case.capital_policy_regime)
+        print(
+            f"Case {case.case_id}: solar fixed "
+            f"${prices.pv_net_per_kw:,.0f}/kW, battery "
+            f"${prices.batt_net_per_kwh:,.0f}/kWh net"
+        )
+        for slug in slugs:
+            print(f"\n{slug}:")
+            collect_battery_capex_sweep(
+                slug,
+                regime=case.capital_policy_regime,
+                export_compensation_regime=(
+                    case.export_compensation_regime
+                ),
+                force=args.force,
+                fine=args.fine,
+            )
+            out.append(
+                str(
+                    sweep_csv_path(
+                        slug,
+                        prices.regime,
+                        resolution,
+                        case.export_compensation_regime,
+                    )
+                )
+            )
+    return out
+
+
+def _cmd_market(args) -> list:
+    """Build declared exact-price, full-chronology observations.
+
+    The four-cell NBT/NEM 2 comparison uses one common 12x24 resolution. This
+    command retains the separate exact current-law NBT check used by Claim 1.
+    """
+
+    slugs = args.counties or [slug for slug, _, _ in CLAIM1_COUNTIES]
+    out = []
+    for case in FULL_HOURLY_POLICY_CASES:
+        prices = live_prices(case.capital_policy_regime)
+        for slug in slugs:
+            print(
+                f"\nExact 8,760-hour market observation: {slug}, "
+                f"{case.case_id}, ${prices.batt_net_per_kwh:,.3f}/kWh"
+            )
+            collect_market_price_observation(
+                slug,
+                regime=case.capital_policy_regime,
+                export_compensation_regime=(
+                    case.export_compensation_regime
+                ),
+                force=args.force,
+            )
+            out.append(
+                str(
+                    market_observation_csv_path(
+                        slug,
+                        prices.regime,
+                        case.export_compensation_regime,
+                    )
+                )
+            )
     return out
 
 
@@ -45,6 +117,79 @@ def _cmd_mechanism(args):
 def _cmd_counties(args):
     from figure_builder.recipes import build_county_grid
     return [str(build_county_grid(fine=args.fine))]
+
+
+def _cmd_installer(_args):
+    from figure_builder.recipes import (
+        build_installer_rule_figure,
+        installer_rule_sweep_path,
+    )
+
+    doc = build_installer_rule_figure()
+    cache = installer_rule_sweep_path("alameda", live_prices().regime)
+    if not cache.exists():
+        raise FileNotFoundError(f"Installer-rule sweep cache was not written: {cache}")
+    return [str(doc), str(cache)]
+
+
+def _cmd_policy_matrix(args):
+    from figure_builder.recipes import build_policy_matrix_figure
+
+    force_sweeps = getattr(args, "force_sweeps", args.force)
+    force_exact = getattr(args, "force_exact", args.force)
+    return [
+        str(path)
+        for path in build_policy_matrix_figure(
+            force_sweeps=force_sweeps,
+            force_exact=force_exact,
+        )
+    ]
+
+
+def _cmd_tariff_status(_args):
+    from figure_builder.recipes import build_tariff_status_block
+    return [str(build_tariff_status_block())]
+
+
+def _cmd_publication_scope(_args):
+    from figure_builder.recipes import build_publication_scope
+
+    return [str(build_publication_scope())]
+
+
+def _parse_scenario_runs(entries) -> dict[str, str]:
+    if not entries:
+        raise ValueError("claims-source requires one --scenario-run per claims case")
+    parsed = {}
+    for entry in entries:
+        if "=" not in entry:
+            raise ValueError(
+                f"Invalid --scenario-run {entry!r}; expected SCENARIO=YYYYMMDD_HH"
+            )
+        scenario, timestamp = entry.split("=", 1)
+        if scenario in parsed:
+            raise ValueError(f"Duplicate --scenario-run for {scenario}")
+        parsed[scenario] = timestamp
+    return parsed
+
+
+def _cmd_claims_source(args):
+    from figure_builder.datasets import build_claims_eac_source
+
+    if not args.model_run_sha:
+        raise ValueError("claims-source requires --model-run-sha")
+    source = build_claims_eac_source(
+        model_run_sha=args.model_run_sha,
+        run_timestamps=_parse_scenario_runs(args.scenario_run),
+        source=args.claims_source,
+    )
+    return [str(source), str(source.with_suffix(".manifest.json"))]
+
+
+def _cmd_statewide(args):
+    from figure_builder.recipes import build_statewide_claims
+
+    return [str(build_statewide_claims(source=getattr(args, "claims_source", None)))]
 
 
 def _cmd_bridge(_args):
@@ -66,37 +211,69 @@ def _cmd_snapshot(_args):
 
 
 def _cmd_all(args):
+    from figure_builder.datasets import claims_eac_source_path
+
+    claims_source = getattr(args, "claims_source", None) or claims_eac_source_path()
     artifacts = []
     artifacts += _cmd_sweeps(args)
+    artifacts += _cmd_market(args)
     artifacts += _cmd_mechanism(args)
+    artifacts += _cmd_installer(args)
+    # _cmd_sweeps already honored --force for all four policy cases. The
+    # matrix builder must reuse those fresh caches instead of solving them a
+    # second time in the same command.
+    artifacts += _cmd_policy_matrix(
+        argparse.Namespace(
+            force=False,
+            force_sweeps=False,
+            force_exact=args.force,
+        )
+    )
     artifacts += _cmd_counties(args)
+    artifacts += _cmd_publication_scope(args)
+    artifacts += _cmd_statewide(args)
     artifacts += _cmd_bridge(args)
     artifacts += _cmd_split(args)
-    _write_metadata(artifacts, fine=args.fine)
+    _write_metadata(
+        artifacts,
+        fine=args.fine,
+        force=args.force,
+        requested_counties=args.counties,
+        statewide_claims_source=claims_source,
+    )
     return artifacts
 
 
-def _write_metadata(artifacts, *, fine: bool) -> None:
-    from figure_builder import git_short_sha
-    prices = live_prices()
-    meta = {
-        "regime": prices.regime,
-        "git_sha": git_short_sha(),
-        "pv_net_per_kw": prices.pv_net_per_kw,
-        "batt_net_per_kwh": prices.batt_net_per_kwh,
-        "sweep_resolution": "8760" if fine else "288_weighted_monthly_hour",
-        "combined_doc": str(current_claims_doc(seed=False)),
-        "artifacts": artifacts,
-    }
+def _write_metadata(
+    artifacts,
+    *,
+    fine: bool,
+    force: bool,
+    requested_counties,
+    statewide_claims_source,
+) -> None:
+    from figure_builder.metadata import build_run_metadata, write_run_metadata
+
+    metadata = build_run_metadata(
+        artifacts,
+        fine=fine,
+        force=force,
+        requested_counties=requested_counties,
+        statewide_claims_source=statewide_claims_source,
+    )
     path = FIG_DIR / "run_metadata.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(meta, indent=2, sort_keys=True))
+    write_run_metadata(path, metadata)
     print(f"\nWrote {path}")
 
 
 _COMMANDS = {
-    "snapshot": _cmd_snapshot, "sweeps": _cmd_sweeps, "mechanism": _cmd_mechanism,
-    "counties": _cmd_counties, "bridge": _cmd_bridge, "split": _cmd_split,
+    "snapshot": _cmd_snapshot, "sweeps": _cmd_sweeps, "market": _cmd_market,
+    "claims-source": _cmd_claims_source,
+    "mechanism": _cmd_mechanism,
+    "policy-matrix": _cmd_policy_matrix,
+    "counties": _cmd_counties, "publication-scope": _cmd_publication_scope,
+    "statewide": _cmd_statewide,
+    "bridge": _cmd_bridge, "split": _cmd_split,
     "all": _cmd_all,
 }
 
@@ -109,6 +286,23 @@ def main() -> None:
                     help="County slugs (default: all four Claim-1 counties).")
     ap.add_argument("--force", action="store_true",
                     help="Recompute sweeps even if cached.")
+    ap.add_argument(
+        "--claims-source",
+        default=None,
+        help="Exact normalized Claims 2/3 EAC CSV (default: current-SHA source).",
+    )
+    ap.add_argument(
+        "--model-run-sha",
+        default=None,
+        help="Git SHA of the completed model runs used by claims-source.",
+    )
+    ap.add_argument(
+        "--scenario-run",
+        action="append",
+        default=None,
+        metavar="SCENARIO=YYYYMMDD_HH",
+        help="Exact scenario billing-output timestamp; repeat for all three cases.",
+    )
     ap.add_argument(
         "--fine",
         action="store_true",

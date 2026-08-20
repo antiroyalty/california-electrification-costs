@@ -147,3 +147,26 @@ require no NSC or adjustment-rate lookup because both quantities are exactly
 zero. Annual net exporters for SCE and SDG&E resolve the source-locked monthly
 inputs. PG&E annual net exporters fail explicitly until PG&E's corresponding
 current adjustment-rate source is acquired.
+
+## Deferred NEM 2 billing counterfactual
+
+`nem2_source_manifest.json` indexes the official sources acquired on
+2026-08-17 for the planned NEM 2 billing implementation. The bundle contains
+CPUC Decision D.16-01-044 and the current NEM 2 tariff schedule for PG&E, SCE,
+and SDG&E. The source PDFs are stored under `sources/nem2_rules/`.
+
+The utility schedules use different tariff identifiers. PG&E uses `NEM2`.
+SCE and SDG&E use `NEM-ST`. The manifest preserves these identifiers instead
+of assigning one synthetic name to all three schedules.
+
+The archived SDG&E source comes from the current tariff API, electric tariff
+key 871. The older static SDG&E PDF endpoint still served a 2017 schedule on
+2026-08-17 and is not part of this bundle. The SCE endpoint returned a
+multipart response. The archive contains the exact embedded PDF payload with
+the HTTP wrapper removed.
+
+This commit archives governing evidence only. Runtime code does not yet read
+this manifest, and no output is labeled as NEM 2. The next implementation step
+must define and test NEM 2 retail crediting, gross-import nonbypassable charges,
+annual true-up, and net-surplus compensation before the optimizer can use this
+regime.
