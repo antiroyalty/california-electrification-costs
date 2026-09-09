@@ -5,6 +5,7 @@
     python3 -m figure_builder sweeps --counties alameda --force
     python3 -m figure_builder market                 # exact current-law market points
     python3 -m figure_builder policy-matrix          # NBT/NEM 2 x ITC comparison
+    python3 -m figure_builder claim4                 # standalone NBT/NEM 2 claim draft
     python3 -m figure_builder claims-source          # normalize three explicit model runs
     python3 -m figure_builder mechanism              # patch Claim-1 mechanism block
     python3 -m figure_builder counties               # patch Claim-1 county grid
@@ -146,6 +147,12 @@ def _cmd_policy_matrix(args):
     ]
 
 
+def _cmd_claim4(_args):
+    from figure_builder.recipes import build_claim4_artifact
+
+    return [str(path) for path in build_claim4_artifact()]
+
+
 def _cmd_tariff_status(_args):
     from figure_builder.recipes import build_tariff_status_block
     return [str(build_tariff_status_block())]
@@ -271,6 +278,7 @@ _COMMANDS = {
     "claims-source": _cmd_claims_source,
     "mechanism": _cmd_mechanism,
     "policy-matrix": _cmd_policy_matrix,
+    "claim4": _cmd_claim4,
     "counties": _cmd_counties, "publication-scope": _cmd_publication_scope,
     "statewide": _cmd_statewide,
     "bridge": _cmd_bridge, "split": _cmd_split,

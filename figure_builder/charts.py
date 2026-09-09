@@ -574,6 +574,196 @@ def plot_statewide_cooptimization_savings(
     )
 
 
+def plot_claim4_current_cost_coverage(
+    results: pd.DataFrame,
+) -> Tuple["object", dict]:
+    """Compare current-cost NBT and NEM 2 solar sizing on one common axis."""
+
+    from appliances.incentive_policy import PolicyRegime
+    from tariffs import ExportCompensationRegime
+
+    required = {
+        "county_slug",
+        "county_name",
+        "export_compensation_regime",
+        "capital_policy_regime",
+        "pv_kw",
+        "battery_kwh",
+        "annual_generation_coverage",
+        "at_pv_sizing_limit",
+        "temporal_resolution",
+    }
+    missing = required - set(results.columns)
+    if missing:
+        raise ValueError(
+            f"Claim 4 coverage chart is missing columns: {sorted(missing)}"
+        )
+
+    current = results[
+        results["capital_policy_regime"] == PolicyRegime.POST_ITC_2026.value
+    ].copy()
+    regimes = {
+        ExportCompensationRegime.NBT_2026.value,
+        ExportCompensationRegime.NEM2_AT_2026_RETAIL_RATES.value,
+    }
+    current = current[current["export_compensation_regime"].isin(regimes)]
+    if current.empty:
+        raise ValueError("Claim 4 coverage chart has no current-cost results")
+    if set(current["export_compensation_regime"]) != regimes:
+        raise ValueError("Claim 4 coverage chart requires both export regimes")
+    if set(current["temporal_resolution"]) != {
+        "weighted_12x24_monthly_hour"
+    }:
+        raise ValueError("Claim 4 coverage chart requires one common resolution")
+    if current.duplicated(["county_slug", "export_compensation_regime"]).any():
+        raise ValueError("Claim 4 coverage chart contains duplicate county results")
+
+    numeric_columns = [
+        "pv_kw",
+        "battery_kwh",
+        "annual_generation_coverage",
+    ]
+    numeric = current[numeric_columns].apply(pd.to_numeric, errors="coerce")
+    if numeric.isna().any().any() or not np.isfinite(numeric.to_numpy()).all():
+        raise ValueError("Claim 4 coverage chart values must be finite numbers")
+    if (numeric < 0.0).any().any():
+        raise ValueError("Claim 4 coverage chart values cannot be negative")
+
+    counties = list(dict.fromkeys(current["county_slug"]))
+    expected_rows = len(counties) * len(regimes)
+    if len(current) != expected_rows:
+        raise ValueError("Claim 4 coverage chart requires two rows per county")
+    names = current.groupby("county_slug")["county_name"].nunique()
+    if not (names == 1).all():
+        raise ValueError("Claim 4 coverage chart county labels are ambiguous")
+
+    indexed = current.set_index(["county_slug", "export_compensation_regime"])
+    nbt = indexed.xs(
+        ExportCompensationRegime.NBT_2026.value,
+        level="export_compensation_regime",
+    ).loc[counties]
+    nem2 = indexed.xs(
+        ExportCompensationRegime.NEM2_AT_2026_RETAIL_RATES.value,
+        level="export_compensation_regime",
+    ).loc[counties]
+    if (nem2["pv_kw"] <= 0.0).any():
+        raise ValueError("Claim 4 PV reduction requires positive NEM 2 capacity")
+
+    nbt_coverage = nbt["annual_generation_coverage"].to_numpy(dtype=float) * 100
+    nem2_coverage = nem2["annual_generation_coverage"].to_numpy(dtype=float) * 100
+    pv_reduction = (
+        1.0
+        - nbt["pv_kw"].to_numpy(dtype=float)
+        / nem2["pv_kw"].to_numpy(dtype=float)
+    ) * 100
+    labels = [
+        str(nbt.loc[county, "county_name"]).replace(" County", "")
+        for county in counties
+    ]
+
+    apply_style()
+    import matplotlib.pyplot as plt
+
+    y = np.arange(len(counties))
+    fig, axis = plt.subplots(figsize=(8.2, 4.8))
+    for row, left, right in zip(y, nbt_coverage, nem2_coverage):
+        axis.plot([left, right], [row, row], color=RULE, linewidth=3, zorder=1)
+    axis.scatter(
+        nbt_coverage,
+        y,
+        color=ACCENT,
+        s=70,
+        zorder=3,
+        label="NBT 2026",
+    )
+    axis.scatter(
+        nem2_coverage,
+        y,
+        color=CAUT,
+        marker="D",
+        s=58,
+        zorder=3,
+        label="NEM 2 at 2026 retail rates",
+    )
+    for row, nbt_value, nem2_value in zip(y, nbt_coverage, nem2_coverage):
+        axis.text(
+            nbt_value - 2.0,
+            row,
+            f"{nbt_value:.0f}%",
+            ha="right",
+            va="center",
+            color=ACCENT_INK,
+            fontsize=9,
+            fontweight="bold",
+        )
+        cap_label = (
+            "100% · tariff cap"
+            if np.isclose(nem2_value, 100.0)
+            else f"{nem2_value:.0f}%"
+        )
+        axis.text(
+            nem2_value + 1.8,
+            row,
+            cap_label,
+            ha="left",
+            va="center",
+            color=CAUT,
+            fontsize=8.5,
+        )
+
+    axis.set_yticks(y)
+    axis.set_yticklabels(labels)
+    axis.invert_yaxis()
+    axis.set_xlim(0.0, max(110.0, float(nem2_coverage.max()) + 10.0))
+    axis.set_xlabel("Modeled annual solar generation as a share of household load (%)")
+    axis.grid(axis="x", color=RULE, linewidth=0.7, alpha=0.7)
+    axis.set_axisbelow(True)
+    axis.spines["top"].set_visible(False)
+    axis.spines["right"].set_visible(False)
+    axis.set_title(
+        "NBT changes the modeled response from full-load solar to a smaller system",
+        fontsize=12,
+        loc="left",
+        color=INK,
+        pad=22,
+    )
+    axis.text(
+        0.0,
+        1.02,
+        "Current post-ITC costs · no material battery under either export regime",
+        transform=axis.transAxes,
+        ha="left",
+        va="bottom",
+        color=INK_SOFT,
+        fontsize=9,
+    )
+    axis.legend(
+        loc="lower center",
+        bbox_to_anchor=(0.5, -0.27),
+        frameon=False,
+        ncol=2,
+        fontsize=9,
+    )
+    fig.tight_layout(rect=(0.0, 0.08, 1.0, 1.0))
+
+    all_battery = current["battery_kwh"].to_numpy(dtype=float)
+    return fig, {
+        "county_count": len(counties),
+        "current_observation_count": len(current),
+        "current_nontrivial_battery_count": int((all_battery > 0.1).sum()),
+        "nbt_coverage_min_pct": float(nbt_coverage.min()),
+        "nbt_coverage_max_pct": float(nbt_coverage.max()),
+        "nem2_coverage_min_pct": float(nem2_coverage.min()),
+        "nem2_coverage_max_pct": float(nem2_coverage.max()),
+        "pv_reduction_min_pct": float(pv_reduction.min()),
+        "pv_reduction_max_pct": float(pv_reduction.max()),
+        "nbt_median_pv_kw": float(np.median(nbt["pv_kw"])),
+        "nem2_median_pv_kw": float(np.median(nem2["pv_kw"])),
+        "nem2_at_cap_count": int(nem2["at_pv_sizing_limit"].astype(bool).sum()),
+        "temporal_resolution": "weighted_12x24_monthly_hour",
+    }
+
+
 def plot_policy_matrix_optimal_sizes(
     results: pd.DataFrame,
 ) -> Tuple["object", dict]:

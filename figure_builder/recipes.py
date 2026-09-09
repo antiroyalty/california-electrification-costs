@@ -7,14 +7,17 @@ not reusable plumbing.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
 import math
 from pathlib import Path
 import re
 
 from figure_builder import (
     FIG_DIR,
+    REPO,
     current_claims_doc,
     git_short_sha,
+    latest_claims_snapshot,
     market_observation_csv_path,
     sweep_csv_path,
 )
@@ -22,6 +25,7 @@ from figure_builder import docio
 from figure_builder.charts import (
     plot_battery_value_waterfall,
     plot_case_study_eac,
+    plot_claim4_current_cost_coverage,
     plot_marginal_solar_value_ladder,
     plot_policy_matrix_optimal_sizes,
     plot_pv_batt_vs_capex,
@@ -40,6 +44,7 @@ from figure_builder.datasets import (
     expected_claim_counties,
     select_market_observation,
     summarize_claims_eac,
+    validate_policy_matrix_results,
     validate_policy_matrix_exact_check,
 )
 from figure_builder.dispatch import CLAIM1_COUNTIES, county_dispatch_inputs
@@ -58,6 +63,10 @@ MECH_ANCHOR = "Battery capex ($25-$1,200/kWh) is the swept variable itself.</div
 POLICY_MATRIX_CSV = FIG_DIR / "policy_matrix_optimal_sizes.csv"
 POLICY_MATRIX_PNG = FIG_DIR / "policy_matrix_optimal_sizes.png"
 POLICY_MATRIX_METADATA = FIG_DIR / "policy_matrix_metadata.json"
+CLAIM4_HTML = REPO / "claim4.html"
+CLAIM4_COVERAGE_PNG = FIG_DIR / "claim4_current_cost_coverage.png"
+CLAIM4_POLICY_MATRIX_PNG = FIG_DIR / "claim4_policy_matrix.png"
+CLAIM4_METADATA = FIG_DIR / "claim4_metadata.json"
 _POLICY_MATRIX_CSS = """.data-table{width:100%;border-collapse:collapse;margin:0 0 24px;font-size:13px}.data-table th,.data-table td{padding:9px 10px;border-bottom:1px solid var(--rule);text-align:left}.data-table th{color:var(--ink-soft);font-size:11px;text-transform:uppercase;letter-spacing:.04em}"""
 
 _MECH_CSS = """.obj-box{ border:1px solid var(--rule); border-radius:10px; background:var(--surface); padding:20px 22px; margin:0 0 24px; box-shadow:var(--shadow); }
@@ -656,6 +665,255 @@ def build_policy_matrix_figure(
     )
     _write(doc, html)
     return [doc, POLICY_MATRIX_CSV, POLICY_MATRIX_PNG, POLICY_MATRIX_METADATA]
+
+
+def _verified_policy_matrix_metadata(
+    metadata_path: Path,
+    results_path: Path,
+) -> dict:
+    """Load policy metadata and verify that it identifies the selected CSV."""
+
+    if not metadata_path.is_file():
+        raise FileNotFoundError(
+            f"Claim 4 policy metadata not found: {metadata_path}"
+        )
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    actual = file_identity(results_path)
+    matches = [
+        record
+        for record in metadata.get("outputs", [])
+        if Path(str(record.get("path", ""))).name == results_path.name
+    ]
+    if len(matches) != 1:
+        raise ValueError(
+            "Claim 4 policy metadata must identify exactly one result CSV"
+        )
+    if matches[0].get("sha256") != actual["sha256"]:
+        raise ValueError(
+            "Claim 4 policy result fingerprint does not match its metadata"
+        )
+    return metadata
+
+
+def _claim4_fragment(
+    coverage_meta: dict,
+    matrix_meta: dict,
+    exact_check: dict,
+    coverage_image: str,
+    matrix_image: str,
+) -> str:
+    """Build Claim 4 prose from chart-derived values."""
+
+    from appliances.incentive_policy import PolicyRegime
+
+    current_prices = live_prices()
+    itc_prices = live_prices(PolicyRegime.ITC_2025)
+    summaries = matrix_meta["case_summaries"]
+    nbt_itc = summaries["nbt_2026__itc_2025"]
+    nem2_itc = summaries["nem2_at_2026_retail_rates__itc_2025"]
+    all_nontrivial = sum(
+        int(summary["nontrivial_battery_count"])
+        for summary in summaries.values()
+    )
+    current_count = coverage_meta["current_observation_count"]
+    current_battery_count = coverage_meta["current_nontrivial_battery_count"]
+    county_count = coverage_meta["county_count"]
+
+    return f'''<section class="claim" id="claim-4">
+  <div class="claim-head"><span class="claim-num">CLAIM 4</span></div>
+  <h2 class="claim-title">In the controlled 2026-rate comparison, NBT reduces optimal solar by {coverage_meta['pv_reduction_min_pct']:.0f}&ndash;{coverage_meta['pv_reduction_max_pct']:.0f}% relative to NEM&nbsp;2 without inducing storage at current costs</h2>
+  <p class="claim-sub">The model holds household profiles, 2026 retail import tariffs, and capital costs fixed. It changes the export-compensation and settlement rules. This is a current-rate policy counterfactual, not a historical reconstruction of customer bills before 2023.</p>
+
+  <div class="stat-row">
+    <div class="stat"><span class="num">{coverage_meta['nbt_coverage_min_pct']:.0f}&ndash;{coverage_meta['nbt_coverage_max_pct']:.0f}%</span><span class="lbl">annual household load covered by optimal NBT solar at current costs</span></div>
+    <div class="stat"><span class="num">{coverage_meta['nem2_at_cap_count']} of {county_count}</span><span class="lbl">NEM&nbsp;2 cases that select the 100% annual-load tariff sizing ceiling</span></div>
+    <div class="stat"><span class="num">{current_battery_count} of {current_count}</span><span class="lbl">current-cost county/regime observations selecting more than 0.1&nbsp;kWh of storage</span></div>
+  </div>
+
+  <figure class="fig"><img src="data:image/png;base64,{coverage_image}" alt="Annual solar generation coverage under NBT and NEM 2 for four case-study counties" /><figcaption><strong>The current-cost response is smaller solar, not more storage.</strong> NBT selects {coverage_meta['nbt_coverage_min_pct']:.1f}&ndash;{coverage_meta['nbt_coverage_max_pct']:.1f}% annual generation coverage. NEM&nbsp;2 selects its 100% tariff ceiling in every county. Median optimal PV falls from {coverage_meta['nem2_median_pv_kw']:.2f}&nbsp;kW under NEM&nbsp;2 to {coverage_meta['nbt_median_pv_kw']:.2f}&nbsp;kW under NBT. Neither regime selects material storage at the modeled post-ITC costs.</figcaption></figure>
+
+  <div class="callout"><strong>Interpretation:</strong> NBT lowers the value of exported midday solar. At the modeled current costs, the optimizer responds mainly by building much less PV. It does not respond by adding a battery to preserve the larger NEM&nbsp;2-sized array.</div>
+
+  <figure class="fig"><img src="data:image/png;base64,{matrix_image}" alt="Optimal solar and battery capacity under NBT and NEM 2 with current and 2025 ITC capital costs" /><figcaption><strong>The ITC changes storage adoption in only part of the four-county sensitivity.</strong> Across all 16 export-policy, capital-policy, and county observations, {all_nontrivial} select more than 0.1&nbsp;kWh of storage. With the lower 2025 ITC-adjusted costs, storage enters {nbt_itc['nontrivial_battery_count']} of {county_count} NBT cases and {nem2_itc['nontrivial_battery_count']} of {county_count} NEM&nbsp;2 cases. Every panel uses the same weighted 12&times;24 resolution.</figcaption></figure>
+
+  <div class="method">
+    <h3>Controlled comparison</h3>
+    <p>Current post-ITC capital-cost inputs are ${current_prices.pv_net_per_kw:,.0f}/kW for PV and ${current_prices.batt_net_per_kwh:,.2f}/kWh for storage. The 2025 ITC sensitivity uses ${itc_prices.pv_net_per_kw:,.0f}/kW and ${itc_prices.batt_net_per_kwh:,.3f}/kWh.</p>
+    <p>The NEM&nbsp;2 model applies annual retail-dollar credit netting, interval non-bypassable charges, positive monthly net-consumption recovery charges, credit expiration, and net-surplus compensation. The NBT optimization uses the source-locked hourly Energy Export Credit, ACC&nbsp;Plus, and the complete retail import schedule.</p>
+    <p>The targeted Alameda 8,760-hour NEM&nbsp;2 check selects {exact_check['exact_pv_kw']:.3f}&nbsp;kW PV and {exact_check['exact_battery_kwh']:.3f}&nbsp;kWh storage. Its PV result differs from the common-resolution observation by {abs(exact_check['pv_difference_kw']):.4f}&nbsp;kW.</p>
+  </div>
+
+  <div class="sources">
+    <h3>Evidence and provenance</h3>
+    <ul>
+      <li><code>figure_builder/figures/policy_matrix_optimal_sizes.csv</code> contains the 16 normalized solved observations.</li>
+      <li><code>figure_builder/figures/policy_matrix_metadata.json</code> records tariff sources, capital costs, solver settings, temporal resolution, and exact input fingerprints.</li>
+      <li><code>tests/tariffs_source_test.py</code> checks the source-locked NBT export schedules, ACC&nbsp;Plus adders, retail import schedules, and non-bypassable charge splits.</li>
+      <li><code>figure_builder/tests/test_datasets.py</code> checks complete policy-case coverage, units, bounds, and the targeted full-year reconciliation.</li>
+    </ul>
+  </div>
+
+  <p class="subhead">Interpretation boundaries</p>
+  <ol class="limitations">
+    <li>This is a four-county case study.
+      <p>Alameda, Fresno, Los Angeles, and San Diego represent three investor-owned utilities. The result is not a statewide adoption estimate.</p>
+    </li>
+    <li>The comparison is not a historical NEM&nbsp;2 bill reconstruction.
+      <p>Both export regimes use the same source-locked 2026 retail import rates. This design isolates compensation rules from historical rate changes.</p>
+    </li>
+    <li>The common comparison uses a weighted 12&times;24 chronology.
+      <p>Only the Alameda NEM&nbsp;2 current-cost cell has a dedicated 8,760-hour validation. The other three NEM&nbsp;2 cells still require exact checks before publication.</p>
+    </li>
+    <li>NEM&nbsp;2 PV reaches the eligibility ceiling.
+      <p>The result establishes the optimum within the modeled tariff domain. It does not identify the unconstrained NEM&nbsp;2 PV optimum above 100% annual-load coverage.</p>
+    </li>
+    <li>The NBT sizing objective does not reproduce every monthly settlement rule.
+      <p>It values hourly imports and exports with the source-locked schedules. The separate annual-bill path applies the complete generation/delivery, non-bypassable charge, credit-bank, and true-up primitives.</p>
+    </li>
+  </ol>
+</section>'''
+
+
+def _claim4_document(
+    template_html: str,
+    claim_fragment: str,
+    *,
+    artifact_git_sha: str,
+    model_git_sha: str,
+) -> str:
+    """Wrap Claim 4 in the established claims-document style."""
+
+    body_index = template_html.find("<body>")
+    if body_index < 0:
+        raise ValueError("Claim 4 template does not contain a body element")
+    preamble = template_html[:body_index]
+    preamble = re.sub(
+        r"<title>.*?</title>",
+        "<title>Claim 4: NBT versus NEM 2 optimal sizing</title>",
+        preamble,
+        count=1,
+        flags=re.S,
+    )
+    if "Claim 4: NBT versus NEM 2 optimal sizing" not in preamble:
+        raise ValueError("Claim 4 template does not contain a title element")
+    return f'''{preamble}<body>
+<div class="wrap wide">
+<header class="masthead">
+  <p class="eyebrow">Working paper review &middot; draft for discussion with Duncan</p>
+  <h1 class="title">The Economics of Going Electric in California, Gas to Grid</h1>
+  <p class="thesis">A controlled policy comparison tests whether NBT shifts household investment from rooftop solar toward battery storage.</p>
+  <div class="buildinfo">
+    <span>artifact commit <b>{artifact_git_sha}</b></span>
+    <span>model results <b>{model_git_sha}</b></span>
+    <span><b>source-locked 2026</b> tariffs</span>
+    <span>working-paper artifact</span>
+  </div>
+  <nav class="toc">
+    <a href="claim1.html">Claim 1 &middot; Storage</a>
+    <a href="claim2.html">Claim 2 &middot; Electrification vs. gas</a>
+    <a href="claim3.html">Claim 3 &middot; Co-optimization value</a>
+    <a href="claim4.html" style="color:var(--accent-ink);border-color:var(--accent);">Claim 4 &middot; NBT vs. NEM 2</a>
+    <a href="claims-{model_git_sha}.html#limitations">Full doc &middot; Limitations</a>
+  </nav>
+</header>
+
+{claim_fragment}
+
+<footer class="end">Generated from commit {artifact_git_sha} &middot; california-electrification-costs &middot; draft for internal review, not for distribution</footer>
+</div>
+</body>
+</html>
+'''
+
+
+def build_claim4_artifact(
+    *,
+    results_path: Path = POLICY_MATRIX_CSV,
+    source_metadata_path: Path = POLICY_MATRIX_METADATA,
+    template_path: Path | None = None,
+    output_html: Path = CLAIM4_HTML,
+    coverage_png: Path = CLAIM4_COVERAGE_PNG,
+    matrix_png: Path = CLAIM4_POLICY_MATRIX_PNG,
+    output_metadata: Path = CLAIM4_METADATA,
+) -> list[Path]:
+    """Build the standalone Claim 4 HTML, figures, and provenance receipt."""
+
+    import pandas as pd
+
+    metadata = _verified_policy_matrix_metadata(
+        Path(source_metadata_path),
+        Path(results_path),
+    )
+    expected_counties = [slug for slug, _name, _utility in CLAIM1_COUNTIES]
+    results = validate_policy_matrix_results(
+        pd.read_csv(results_path),
+        expected_counties=expected_counties,
+    )
+    coverage_figure, coverage_meta = plot_claim4_current_cost_coverage(results)
+    matrix_figure, matrix_meta = plot_policy_matrix_optimal_sizes(results)
+
+    try:
+        Path(coverage_png).parent.mkdir(parents=True, exist_ok=True)
+        coverage_figure.savefig(coverage_png, dpi=180, bbox_inches="tight")
+        matrix_figure.savefig(matrix_png, dpi=180, bbox_inches="tight")
+        coverage_image = docio.embed_png(coverage_figure)
+        matrix_image = docio.embed_png(matrix_figure)
+    finally:
+        import matplotlib.pyplot as plt
+
+        plt.close(coverage_figure)
+        plt.close(matrix_figure)
+
+    template = (
+        Path(template_path)
+        if template_path is not None
+        else latest_claims_snapshot()
+    )
+    if template is None or not template.is_file():
+        raise FileNotFoundError("Claim 4 requires an existing claims HTML template")
+    artifact_sha = git_short_sha()
+    model_sha = str(metadata["model_git_sha"])
+    fragment = _claim4_fragment(
+        coverage_meta,
+        matrix_meta,
+        metadata["exact_validation"],
+        coverage_image,
+        matrix_image,
+    )
+    document = _claim4_document(
+        template.read_text(encoding="utf-8"),
+        fragment,
+        artifact_git_sha=artifact_sha,
+        model_git_sha=model_sha,
+    )
+    Path(output_html).write_text(document, encoding="utf-8")
+
+    claim_metadata = {
+        "schema_version": 1,
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "artifact_git_sha": artifact_sha,
+        "model_results_git_sha": model_sha,
+        "command_argv": ["python3", "-m", "figure_builder", "claim4"],
+        "research_design": metadata["research_design"],
+        "input_results": file_identity(results_path),
+        "input_policy_metadata": file_identity(source_metadata_path),
+        "result_summary": {
+            "current_cost_comparison": coverage_meta,
+            "policy_matrix": matrix_meta,
+        },
+        "outputs": [
+            file_identity(output_html),
+            file_identity(coverage_png),
+            file_identity(matrix_png),
+        ],
+    }
+    write_run_metadata(output_metadata, claim_metadata)
+    return [
+        Path(output_html),
+        Path(coverage_png),
+        Path(matrix_png),
+        Path(output_metadata),
+    ]
 
 
 _LEGACY_TARIFF_STATUS_PATTERN = (

@@ -6,6 +6,7 @@ import pytest
 from appliances.incentive_policy import PolicyRegime
 from figure_builder.__main__ import (
     _cmd_all,
+    _cmd_claim4,
     _cmd_claims_source,
     _cmd_installer,
     _cmd_market,
@@ -175,6 +176,24 @@ def test_policy_matrix_command_returns_document_data_figure_and_metadata(tmp_pat
         result = _cmd_policy_matrix(args)
 
     build.assert_called_once_with(force_sweeps=True, force_exact=True)
+    assert result == [str(path) for path in artifacts]
+
+
+def test_claim4_command_returns_html_figures_and_metadata(tmp_path):
+    artifacts = [
+        tmp_path / "claim4.html",
+        tmp_path / "coverage.png",
+        tmp_path / "matrix.png",
+        tmp_path / "claim4.json",
+    ]
+
+    with patch(
+        "figure_builder.recipes.build_claim4_artifact",
+        return_value=artifacts,
+    ) as build:
+        result = _cmd_claim4(SimpleNamespace())
+
+    build.assert_called_once_with()
     assert result == [str(path) for path in artifacts]
 
 

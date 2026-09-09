@@ -1,5 +1,6 @@
-"""Regression tests for source-derived values in Claim-1 figure captions."""
+"""Regression tests for source-derived values in claims artifacts."""
 
+import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -16,6 +17,9 @@ from figure_builder.recipes import (
     _claim1_cost_scope_fragment,
     _claim2_fragment,
     _claim3_fragment,
+    _claim4_document,
+    _claim4_fragment,
+    _verified_policy_matrix_metadata,
     _installer_rule_fragment,
     _limitations_fragment,
     _mechanism_fragment,
@@ -242,6 +246,105 @@ def test_policy_matrix_fragment_reports_dynamic_results_and_counterfactual_scope
     assert "7.317&nbsp;kW PV" in html
     assert "0.0001&nbsp;kW PV" in html
     assert "weighted 12&times;24 resolution" in html
+
+
+def test_claim4_fragment_reports_policy_effect_without_historical_overclaim():
+    coverage_meta = {
+        "county_count": 4,
+        "current_observation_count": 8,
+        "current_nontrivial_battery_count": 0,
+        "nbt_coverage_min_pct": 25.95,
+        "nbt_coverage_max_pct": 30.49,
+        "nem2_at_cap_count": 4,
+        "pv_reduction_min_pct": 69.51,
+        "pv_reduction_max_pct": 74.05,
+        "nbt_median_pv_kw": 1.93,
+        "nem2_median_pv_kw": 6.79,
+    }
+    matrix_meta = {
+        "case_summaries": {
+            "nbt_2026__post_itc_2026": {"nontrivial_battery_count": 0},
+            "nbt_2026__itc_2025": {"nontrivial_battery_count": 2},
+            "nem2_at_2026_retail_rates__post_itc_2026": {
+                "nontrivial_battery_count": 0
+            },
+            "nem2_at_2026_retail_rates__itc_2025": {
+                "nontrivial_battery_count": 1
+            },
+        }
+    }
+    exact = {
+        "exact_pv_kw": 7.317,
+        "exact_battery_kwh": 0.0,
+        "pv_difference_kw": 0.0001,
+    }
+    current = SimpleNamespace(
+        pv_net_per_kw=3_300.0,
+        batt_net_per_kwh=1_460.64,
+    )
+    itc = SimpleNamespace(
+        pv_net_per_kw=2_310.0,
+        batt_net_per_kwh=1_022.448,
+    )
+
+    with patch("figure_builder.recipes.live_prices", side_effect=[current, itc]):
+        html = _claim4_fragment(
+            coverage_meta,
+            matrix_meta,
+            exact,
+            "coverage-image",
+            "matrix-image",
+        )
+
+    assert "reduces optimal solar by 70&ndash;74%" in html
+    assert "0 of 8" in html
+    assert "not a historical reconstruction" in html
+    assert "storage enters 2 of 4 NBT cases and 1 of 4 NEM&nbsp;2 cases" in html
+    assert "other three NEM&nbsp;2 cells still require exact checks" in html
+    assert "does not reproduce every monthly settlement rule" in html
+
+
+def test_claim4_document_uses_existing_style_and_explicit_source_sha():
+    template = (
+        "<!doctype html><html><head><title>Old</title><style>.x{}</style></head>"
+        "<body>old body</body></html>"
+    )
+    html = _claim4_document(
+        template,
+        '<section id="claim-4">new body</section>',
+        artifact_git_sha="abc1234",
+        model_git_sha="def5678",
+    )
+
+    assert "<title>Claim 4: NBT versus NEM 2 optimal sizing</title>" in html
+    assert ".x{}" in html
+    assert "old body" not in html
+    assert "new body" in html
+    assert "artifact commit <b>abc1234</b>" in html
+    assert "model results <b>def5678</b>" in html
+    assert "claims-def5678.html#limitations" in html
+
+
+def test_claim4_source_receipt_rejects_a_changed_policy_matrix(tmp_path):
+    results = tmp_path / "policy_matrix_optimal_sizes.csv"
+    results.write_text("county_slug,pv_kw\nalameda,2.0\n", encoding="utf-8")
+    metadata = tmp_path / "policy_matrix_metadata.json"
+    metadata.write_text(
+        json.dumps(
+            {
+                "outputs": [
+                    {
+                        "path": str(results),
+                        "sha256": "not-the-current-fingerprint",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="fingerprint does not match"):
+        _verified_policy_matrix_metadata(metadata, results)
 
 
 def test_publication_scope_removes_inherited_draft_claims(tmp_path):

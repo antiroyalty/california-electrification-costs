@@ -3,6 +3,7 @@ import pytest
 
 from figure_builder.charts import (
     plot_case_study_eac,
+    plot_claim4_current_cost_coverage,
     plot_policy_matrix_optimal_sizes,
     plot_pv_batt_vs_capex_compare,
     plot_statewide_cooptimization_savings,
@@ -186,6 +187,59 @@ def test_policy_matrix_chart_uses_four_complete_common_resolution_panels():
         assert "NBT 2026" in text
         assert "2025 ITC capital costs" in text
         assert "Post-ITC 2026 capital costs" in text
+    finally:
+        import matplotlib.pyplot as plt
+
+        plt.close(fig)
+
+
+def test_claim4_coverage_chart_reports_current_cost_policy_difference():
+    rows = []
+    counties = (("alpha", "Alpha County"), ("beta", "Beta County"))
+    for case in POLICY_CASES:
+        for county_index, (slug, name) in enumerate(counties):
+            is_nem2 = case.export_compensation_regime.value.startswith("nem2")
+            is_current = case.capital_policy_regime.value == "post_itc_2026"
+            coverage = 1.0 if is_nem2 else 0.27 + county_index * 0.03
+            rows.append(
+                {
+                    "county_slug": slug,
+                    "county_name": name,
+                    "utility": "SCE",
+                    "case_id": case.case_id,
+                    "export_compensation_regime": (
+                        case.export_compensation_regime.value
+                    ),
+                    "capital_policy_regime": case.capital_policy_regime.value,
+                    "temporal_resolution": "weighted_12x24_monthly_hour",
+                    "interval_count": 288,
+                    "pv_capex_usd_per_kw": 3_300.0,
+                    "battery_capex_usd_per_kwh": 1_460.64,
+                    "pv_kw": 7.0 if is_nem2 else 2.0,
+                    "battery_kwh": 0.0 if is_current else 1.0,
+                    "annual_generation_coverage": coverage,
+                    "pv_sizing_limit_ratio": 1.0 if is_nem2 else 1.5,
+                    "at_pv_sizing_limit": is_nem2,
+                    "total_cost_usd_per_year": 2_500.0,
+                    "max_battery_kwh": 40.0,
+                    "meter_binary_count": 0,
+                    "solver_rounds": 1,
+                }
+            )
+    frame = pd.DataFrame(rows, columns=POLICY_MATRIX_COLUMNS)
+
+    fig, meta = plot_claim4_current_cost_coverage(frame)
+    try:
+        assert meta["county_count"] == 2
+        assert meta["current_observation_count"] == 4
+        assert meta["current_nontrivial_battery_count"] == 0
+        assert meta["nbt_coverage_min_pct"] == pytest.approx(27.0)
+        assert meta["nbt_coverage_max_pct"] == pytest.approx(30.0)
+        assert meta["nem2_at_cap_count"] == 2
+        assert meta["pv_reduction_min_pct"] == pytest.approx(100 * (1 - 2 / 7))
+        labels = "\n".join(text.get_text() for text in fig.axes[0].texts)
+        assert "27%" in labels
+        assert "100% · tariff cap" in labels
     finally:
         import matplotlib.pyplot as plt
 
