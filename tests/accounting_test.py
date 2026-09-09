@@ -140,7 +140,7 @@ def test_example_5_sce_bundled_credits_offset_combined_energy(
     utility, payment_usd, bank_usd
 ):
     # SCE Schedule NBT 3.a.i/ii and 4.b: bundled Energy Charges include both
-    # components. The current production calculator incorrectly returns $64.
+    # components. Before integration, the production calculator returned $64.
     month = _month(30, 5, utility=utility, bonus_usd=0)
     assert month.payment_usd == payment_usd
     assert month.closing.base.total_usd == bank_usd

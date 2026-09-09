@@ -4,6 +4,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from tariffs.accounting import ComponentAmounts, CreditBalances, PooledAmount
+
 from tariffs import (
     AverageRetailExportCompensationRate,
     NetSurplusCompensationRate,
@@ -181,11 +183,8 @@ def test_pge_settlement_recoups_surplus_then_refunds_prior_charges_and_carries()
         policy=TrueUpPolicy.for_utility(Utility.PGE),
         annual_import_kwh=4_000,
         annual_export_kwh=5_000,
-        ending_generation_credit_bank=70,
-        ending_delivery_credit_bank=12,
-        ending_acc_plus_credit_bank=9,
-        remaining_offsettable_generation_charges=15,
-        remaining_offsettable_delivery_charges=5,
+        opening=CreditBalances(ComponentAmounts(70, 12), 9),
+        prior_paid_eligible_energy=ComponentAmounts(15, 5),
         adjustment_rate=_adjustment_rate(Utility.PGE),
         nsc_rate=_nsc_rate(Utility.PGE),
     )
@@ -198,15 +197,15 @@ def test_pge_settlement_recoups_surplus_then_refunds_prior_charges_and_carries()
     assert settlement.nsc_rate_usd_per_kwh == pytest.approx(0.03)
     assert settlement.generation_eec_adjustment_charge == pytest.approx(50)
     assert settlement.delivery_eec_adjustment_charge == pytest.approx(10)
-    assert settlement.generation_eec_applied_to_adjustment == pytest.approx(50)
-    assert settlement.delivery_eec_applied_to_adjustment == pytest.approx(10)
-    assert settlement.generation_eec_applied_to_prior_charges == pytest.approx(15)
-    assert settlement.delivery_eec_applied_to_prior_charges == pytest.approx(2)
+    assert settlement.accounting.base_applied_to_adjustment.generation_usd == pytest.approx(50)
+    assert settlement.accounting.base_applied_to_adjustment.delivery_usd == pytest.approx(10)
+    assert settlement.accounting.base_applied_to_prior_payments.generation_usd == pytest.approx(15)
+    assert settlement.accounting.base_applied_to_prior_payments.delivery_usd == pytest.approx(2)
     assert settlement.nsc_credit == pytest.approx(30)
     assert settlement.net_bill_adjustment == pytest.approx(-47)
-    assert settlement.ending_generation_credit_bank == pytest.approx(5)
-    assert settlement.ending_delivery_credit_bank == pytest.approx(0)
-    assert settlement.ending_acc_plus_credit_bank == pytest.approx(9)
+    assert settlement.accounting.closing.base.generation_usd == pytest.approx(5)
+    assert settlement.accounting.closing.base.delivery_usd == pytest.approx(0)
+    assert settlement.accounting.closing.bonus_usd == pytest.approx(9)
     assert settlement.total_forfeited_credit == pytest.approx(0)
 
 
@@ -215,21 +214,21 @@ def test_sce_settlement_forfeits_only_credit_left_after_annual_offsets():
         policy=TrueUpPolicy.for_utility(Utility.SCE),
         annual_import_kwh=4_000,
         annual_export_kwh=5_000,
-        ending_generation_credit_bank=70,
-        ending_delivery_credit_bank=12,
-        ending_acc_plus_credit_bank=9,
-        remaining_offsettable_generation_charges=15,
-        remaining_offsettable_delivery_charges=5,
+        opening=CreditBalances(PooledAmount(70 + 12), 9),
+        prior_paid_eligible_energy=PooledAmount(15 + 5),
         adjustment_rate=_adjustment_rate(Utility.SCE),
         nsc_rate=_nsc_rate(Utility.SCE),
     )
 
-    assert settlement.net_bill_adjustment == pytest.approx(-47)
-    assert settlement.ending_generation_credit_bank == 0
-    assert settlement.ending_delivery_credit_bank == 0
-    assert settlement.forfeited_generation_credit == pytest.approx(5)
-    assert settlement.forfeited_delivery_credit == 0
-    assert settlement.ending_acc_plus_credit_bank == pytest.approx(9)
+    # SCE NBT 4.b/4.e use one pool: $82 - $60 adjustment - $20 prior payments
+    # leaves $2 to forfeit. The $20 offset plus $30 NSC gives a $50 credit.
+    # The old $47/$5 answers incorrectly restricted the delivery pool to $2.
+    assert settlement.accounting.base_applied_to_adjustment == PooledAmount(60)
+    assert settlement.accounting.base_applied_to_prior_payments == PooledAmount(20)
+    assert settlement.net_bill_adjustment == pytest.approx(-50)
+    assert settlement.accounting.closing.base == PooledAmount(0)
+    assert settlement.accounting.forfeited_base.total_usd == pytest.approx(2)
+    assert settlement.accounting.closing.bonus_usd == pytest.approx(9)
 
 
 def test_sdge_settlement_does_not_retroactively_apply_or_carry_excess_eec():
@@ -237,21 +236,18 @@ def test_sdge_settlement_does_not_retroactively_apply_or_carry_excess_eec():
         policy=TrueUpPolicy.for_utility(Utility.SDGE),
         annual_import_kwh=4_000,
         annual_export_kwh=5_000,
-        ending_generation_credit_bank=70,
-        ending_delivery_credit_bank=12,
-        ending_acc_plus_credit_bank=9,
-        remaining_offsettable_generation_charges=15,
-        remaining_offsettable_delivery_charges=5,
+        opening=CreditBalances(ComponentAmounts(70, 12), 9),
+        prior_paid_eligible_energy=ComponentAmounts(15, 5),
         adjustment_rate=_adjustment_rate(Utility.SDGE),
         nsc_rate=_nsc_rate(Utility.SDGE),
     )
 
-    assert settlement.generation_eec_applied_to_prior_charges == 0
-    assert settlement.delivery_eec_applied_to_prior_charges == 0
+    assert settlement.accounting.base_applied_to_prior_payments.generation_usd == 0
+    assert settlement.accounting.base_applied_to_prior_payments.delivery_usd == 0
     assert settlement.net_bill_adjustment == pytest.approx(-30)
-    assert settlement.forfeited_generation_credit == pytest.approx(20)
-    assert settlement.forfeited_delivery_credit == pytest.approx(2)
-    assert settlement.ending_acc_plus_credit_bank == pytest.approx(9)
+    assert settlement.accounting.forfeited_base.generation_usd == pytest.approx(20)
+    assert settlement.accounting.forfeited_base.delivery_usd == pytest.approx(2)
+    assert settlement.accounting.closing.bonus_usd == pytest.approx(9)
 
 
 def test_insufficient_banks_leave_a_true_up_charge_after_nsc_credit():
@@ -259,11 +255,8 @@ def test_insufficient_banks_leave_a_true_up_charge_after_nsc_credit():
         policy=TrueUpPolicy.for_utility(Utility.PGE),
         annual_import_kwh=4_000,
         annual_export_kwh=5_000,
-        ending_generation_credit_bank=10,
-        ending_delivery_credit_bank=2,
-        ending_acc_plus_credit_bank=0,
-        remaining_offsettable_generation_charges=0,
-        remaining_offsettable_delivery_charges=0,
+        opening=CreditBalances(ComponentAmounts(10, 2), 0),
+        prior_paid_eligible_energy=ComponentAmounts(0, 0),
         adjustment_rate=_adjustment_rate(Utility.PGE),
         nsc_rate=_nsc_rate(Utility.PGE),
     )
@@ -278,11 +271,8 @@ def test_non_net_exporter_has_no_recoupment_or_nsc_but_still_reconciles_bank():
         policy=TrueUpPolicy.for_utility(Utility.SCE),
         annual_import_kwh=5_000,
         annual_export_kwh=4_000,
-        ending_generation_credit_bank=10,
-        ending_delivery_credit_bank=4,
-        ending_acc_plus_credit_bank=2,
-        remaining_offsettable_generation_charges=8,
-        remaining_offsettable_delivery_charges=1,
+        opening=CreditBalances(PooledAmount(10 + 4), 2),
+        prior_paid_eligible_energy=PooledAmount(8 + 1),
         adjustment_rate=_adjustment_rate(Utility.SCE),
         nsc_rate=_nsc_rate(Utility.SCE),
     )
@@ -300,14 +290,14 @@ def test_non_net_exporter_has_no_recoupment_or_nsc_but_still_reconciles_bank():
         ("annual_import_kwh", -1, "annual_import_kwh must be non-negative"),
         ("annual_export_kwh", float("nan"), "annual_export_kwh must be finite"),
         (
-            "ending_generation_credit_bank",
-            float("inf"),
-            "ending_generation_credit_bank must be finite",
+            "opening",
+            lambda: CreditBalances(ComponentAmounts(float("inf"), 2), 0),
+            "generation_usd must be finite",
         ),
         (
-            "remaining_offsettable_delivery_charges",
-            -0.01,
-            "remaining_offsettable_delivery_charges must be non-negative",
+            "prior_paid_eligible_energy",
+            lambda: ComponentAmounts(0, -0.01),
+            "delivery_usd must be finite and non-negative",
         ),
     ],
 )
@@ -316,16 +306,14 @@ def test_settlement_rejects_invalid_energy_and_account_state(field, value, messa
         "policy": TrueUpPolicy.for_utility(Utility.PGE),
         "annual_import_kwh": 4_000,
         "annual_export_kwh": 5_000,
-        "ending_generation_credit_bank": 10,
-        "ending_delivery_credit_bank": 2,
-        "ending_acc_plus_credit_bank": 0,
-        "remaining_offsettable_generation_charges": 0,
-        "remaining_offsettable_delivery_charges": 0,
+        "opening": CreditBalances(ComponentAmounts(10, 2), 0),
+        "prior_paid_eligible_energy": ComponentAmounts(0, 0),
         "adjustment_rate": _adjustment_rate(Utility.PGE),
         "nsc_rate": _nsc_rate(Utility.PGE),
     }
-    kwargs[field] = value
     with pytest.raises(ValueError, match=message):
+        # Typed account inputs reject malformed dollars during construction.
+        kwargs[field] = value() if callable(value) else value
         calculate_true_up_settlement(**kwargs)
 
 
@@ -334,11 +322,8 @@ def test_settlement_requires_rate_identity_to_match_policy_and_month():
         "policy": TrueUpPolicy.for_utility(Utility.PGE),
         "annual_import_kwh": 4_000,
         "annual_export_kwh": 5_000,
-        "ending_generation_credit_bank": 0,
-        "ending_delivery_credit_bank": 0,
-        "ending_acc_plus_credit_bank": 0,
-        "remaining_offsettable_generation_charges": 0,
-        "remaining_offsettable_delivery_charges": 0,
+        "opening": CreditBalances(ComponentAmounts(0, 0), 0),
+        "prior_paid_eligible_energy": ComponentAmounts(0, 0),
         "adjustment_rate": _adjustment_rate(Utility.PGE),
         "nsc_rate": _nsc_rate(Utility.PGE),
     }
@@ -400,11 +385,8 @@ def test_net_importer_settlement_does_not_require_net_surplus_rate_inputs():
         policy=TrueUpPolicy.for_utility(Utility.SCE),
         annual_import_kwh=5_000,
         annual_export_kwh=4_000,
-        ending_generation_credit_bank=10,
-        ending_delivery_credit_bank=4,
-        ending_acc_plus_credit_bank=2,
-        remaining_offsettable_generation_charges=8,
-        remaining_offsettable_delivery_charges=1,
+        opening=CreditBalances(PooledAmount(10 + 4), 2),
+        prior_paid_eligible_energy=PooledAmount(8 + 1),
         true_up_month="2026-08",
     )
 
@@ -420,11 +402,8 @@ def test_net_exporter_settlement_requires_both_source_rate_inputs():
         "policy": TrueUpPolicy.for_utility(Utility.SCE),
         "annual_import_kwh": 4_000,
         "annual_export_kwh": 5_000,
-        "ending_generation_credit_bank": 10,
-        "ending_delivery_credit_bank": 4,
-        "ending_acc_plus_credit_bank": 2,
-        "remaining_offsettable_generation_charges": 8,
-        "remaining_offsettable_delivery_charges": 1,
+        "opening": CreditBalances(PooledAmount(10 + 4), 2),
+        "prior_paid_eligible_energy": PooledAmount(8 + 1),
         "true_up_month": "2026-08",
     }
     with pytest.raises(ValueError, match="Positive annual net exports require"):
@@ -434,3 +413,26 @@ def test_net_exporter_settlement_requires_both_source_rate_inputs():
             **kwargs,
             adjustment_rate=_adjustment_rate(Utility.SCE),
         )
+
+
+@pytest.mark.parametrize("utility", [Utility.PGE, Utility.SCE, Utility.SDGE])
+@pytest.mark.parametrize("field", ["opening", "prior_paid_eligible_energy"])
+def test_settlement_rejects_credit_pools_that_do_not_match_the_utility(utility, field):
+    policy = TrueUpPolicy.for_utility(utility)
+    wrong = ComponentAmounts(0, 0) if utility is Utility.SCE else PooledAmount(0)
+    kwargs = dict(
+        policy=policy,
+        annual_import_kwh=1,
+        annual_export_kwh=0,
+        opening=CreditBalances(policy.energy_amounts(0, 0), 0),
+        prior_paid_eligible_energy=policy.energy_amounts(0, 0),
+        true_up_month="2026-08",
+    )
+    kwargs[field] = CreditBalances(wrong, 0) if field == "opening" else wrong
+    with pytest.raises(ValueError, match="requires"):
+        calculate_true_up_settlement(**kwargs)
+
+
+def test_sce_pooling_validates_each_component_before_combining():
+    with pytest.raises(ValueError, match="generation_usd"):
+        TrueUpPolicy.for_utility(Utility.SCE).energy_amounts(-1, 2)

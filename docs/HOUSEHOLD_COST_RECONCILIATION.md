@@ -17,10 +17,9 @@ billing defects. Prefer a coherent, isolated accounting model when code changes
 are needed, with conceptual clarity guiding the design. A larger redesign is
 not a prerequisite for completing every accounting check.
 
-This is the current documentation review unit. Production code is unchanged.
-The existing billing calculator has not been independently certified by this
-note. Source conclusions, retained conventions, and arithmetic checks below
-have different evidentiary status.
+Source conclusions, retained conventions, and arithmetic checks below have
+different evidentiary status. This note does not independently certify every
+utility rule. The implementation status appears at the end.
 
 ## Disposition of the former seven prerequisites
 
@@ -56,8 +55,8 @@ service. The decomposition of export prices alone does not impose separate
 credit-use limits on bundled customers.
 
 This source-based adjudication replaces the earlier open interpretation.
-The current calculator applies separate component limits to every utility.
-That gives $64 and a $10 generation bank in this example. PG&E explicitly uses
+The pre-integration calculator applied separate component limits to every utility.
+That gave $64 and a $10 generation bank in this example. PG&E explicitly uses
 those component restrictions, so its $64 outcome remains appropriate here.
 Assess SCE monthly application and settlement consistently when checking the
 effect. The $10 monthly difference is not necessarily a $10 annual difference.
@@ -141,10 +140,10 @@ checking the affected outputs. No statewide sensitivity result is claimed here.
 
 Before implementation changes, run the existing test suite and record the
 commit, command, passes, failures, and skips. Investigate baseline failures so
-later failures can be distinguished from pre-existing problems. The initial
-limited baseline at `280a4c7` passed all 54 tests in
-`tests/tariffs_billing_test.py` and `tests/true_up_test.py`; the full suite has
-not yet been run for this refactor.
+later failures can be distinguished from pre-existing problems. The billing
+integration baseline at `557c589` passed 642 tests, with 3 skipped, using
+`python -m pytest -q tests/ figure_builder/tests/`. The test environment uses
+Python 3.11 and includes the declared `pdfplumber` dependency.
 
 Add new tests for corrected behavior using the independent worked examples and
 tariff conclusions. Where applicable, confirm that these tests expose the old
@@ -178,7 +177,36 @@ independent examples check the underlying accounting.
 
 This note does not require a new billing platform, actual-customer calibration,
 or a multi-year forecast before writing the paper. Continue thesis, figures,
-and prose alongside the bounded correction. After review and an explicitly
-authorized commit of this document, implementation follows the repository's
-small-commit review protocol. No production or test changes are part of this
-documentation unit.
+and prose alongside the bounded correction. Implementation follows the
+repository's review and commit protocol.
+
+## Billing integration review
+
+Monthly billing now calls `accounting.settle_month`. The true-up adapter keeps
+energy and source-rate validation, then calls `accounting.settle_year`. The
+old credit-application calculations have been removed from both adapters.
+Detailed ledger values now live in `.accounting`. SCE uses a combined balance;
+Step 12 logs total prior eligible energy payments. Annual cost access is unchanged.
+Billing accepts explicit opening balances and exposes closing balances for
+subsequent years. Unused-credit diagnostics include any supplied opening bank.
+
+One existing numeric expectation required correction: the SCE settlement test
+used a $47 credit and $5 forfeiture. Its $82 balance covers the $60 adjustment
+and all $20 of prior eligible payments, leaving $2 to forfeit. Including $30
+NSC gives a $50 credit. This follows the pooling adjudication above. Other
+existing numeric expectations were retained; account fields and input types
+were migrated. The new monthly SCE tests failed on the old calculator first.
+
+A new regression test exposed roundoff at zero eligible charges. Subtracting
+monthly totals could produce a tiny negative and trigger strict validation.
+Subtracting the non-offsettable rate before aggregation preserves exact zero.
+
+Saved profiles for Alameda, Orange, and San Diego were compared before and
+after integration, for `baseline_coopt` and full home electrification
+(`heat_pump_and_induction_stove_and_water_heating_coopt`). All six annual bills
+agree within $0.000000001. These profiles have no unused credits; this check
+does not establish the statewide effect or whether design rankings change.
+Step 12 also wrote and verified three county result files in a temporary directory.
+The final full suite passed 663 tests, with 3 skipped, using the baseline command.
+The focused accounting, billing, and true-up suites passed all 129 tests.
+Optimizer integration and any necessary result reruns remain a later review unit.

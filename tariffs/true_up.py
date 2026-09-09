@@ -10,6 +10,14 @@ from pathlib import Path
 
 import pandas as pd
 
+from .accounting import (
+    AnnualSettlement,
+    ComponentAmounts,
+    CreditBalances,
+    EnergyAmounts,
+    PooledAmount,
+    settle_year,
+)
 from .models import Utility
 
 
@@ -77,8 +85,8 @@ class AverageRetailExportCompensationRate:
     """Utility-wide EEC recoupment rate for one true-up month.
 
     This is distinct from both the customer's hourly ACC export schedule and
-    the monthly NSC rate. The two components preserve the utility tariff's
-    generation/delivery credit-bank separation.
+    the monthly NSC rate. Retain source generation/delivery rates for audit;
+    TrueUpPolicy determines whether the resulting dollars use a combined pool.
     """
 
     utility: Utility
@@ -282,7 +290,7 @@ class AverageRetailExportCompensationSchedule:
 
 @dataclass(frozen=True)
 class TrueUpPolicy:
-    """Source-linked utility rules for disposing of base EEC at true-up."""
+    """Source-linked bundled credit restrictions and annual disposition rules."""
 
     utility: Utility
     apply_remaining_eec_to_prior_charges: bool
@@ -297,6 +305,22 @@ class TrueUpPolicy:
             raise TypeError("carry_remaining_eec_forward must be boolean")
         if not self.source_id:
             raise ValueError("source_id must be non-empty")
+
+    def energy_amounts(self, generation_usd: float, delivery_usd: float) -> EnergyAmounts:
+        """Normalize component prices into the utility's eligible credit pools.
+
+        SCE Schedule NBT 3.a.i/ii and 4.b combine bundled energy charges.
+        Validate each input before pooling so a negative component cannot hide.
+        """
+        components = ComponentAmounts(generation_usd, delivery_usd)
+        if self.utility is Utility.SCE:
+            return PooledAmount(components.total_usd)
+        return components
+
+    def validate_energy_amounts(self, amounts: EnergyAmounts) -> None:
+        expected = type(self.energy_amounts(0, 0))
+        if type(amounts) is not expected:
+            raise ValueError(f"{self.utility.value} requires {expected.__name__}")
 
     @classmethod
     def for_utility(cls, utility: str | Utility) -> "TrueUpPolicy":
@@ -330,6 +354,7 @@ class TrueUpSettlement:
 
     ``net_bill_adjustment`` is positive for an added charge and negative for
     an added credit relative to the monthly amounts already paid.
+    Credit applications and balances are exposed through ``accounting``.
     """
 
     utility: Utility
@@ -340,35 +365,34 @@ class TrueUpSettlement:
     generation_adjustment_rate_usd_per_kwh: float
     delivery_adjustment_rate_usd_per_kwh: float
     nsc_rate_usd_per_kwh: float
-    generation_eec_adjustment_charge: float
-    delivery_eec_adjustment_charge: float
-    generation_eec_applied_to_adjustment: float
-    delivery_eec_applied_to_adjustment: float
-    remaining_offsettable_generation_charges: float
-    remaining_offsettable_delivery_charges: float
-    generation_eec_applied_to_prior_charges: float
-    delivery_eec_applied_to_prior_charges: float
-    nsc_credit: float
-    net_bill_adjustment: float
-    ending_generation_credit_bank: float
-    ending_delivery_credit_bank: float
-    ending_acc_plus_credit_bank: float
-    forfeited_generation_credit: float
-    forfeited_delivery_credit: float
+    accounting: AnnualSettlement
     policy_source_id: str
     adjustment_rate_source_id: str | None
     nsc_rate_source_id: str | None
 
     @property
     def total_eec_adjustment_charge(self) -> float:
-        return (
-            self.generation_eec_adjustment_charge
-            + self.delivery_eec_adjustment_charge
-        )
+        return self.accounting.surplus_adjustment.total_usd
+
+    @property
+    def generation_eec_adjustment_charge(self) -> float:
+        return self.net_surplus_kwh * self.generation_adjustment_rate_usd_per_kwh
+
+    @property
+    def delivery_eec_adjustment_charge(self) -> float:
+        return self.net_surplus_kwh * self.delivery_adjustment_rate_usd_per_kwh
+
+    @property
+    def nsc_credit(self) -> float:
+        return self.accounting.nsc_entitlement_usd
+
+    @property
+    def net_bill_adjustment(self) -> float:
+        return self.accounting.net_bill_adjustment_usd
 
     @property
     def total_forfeited_credit(self) -> float:
-        return self.forfeited_generation_credit + self.forfeited_delivery_credit
+        return self.accounting.forfeited_base.total_usd
 
 
 def calculate_true_up_settlement(
@@ -376,11 +400,8 @@ def calculate_true_up_settlement(
     policy: TrueUpPolicy,
     annual_import_kwh: float,
     annual_export_kwh: float,
-    ending_generation_credit_bank: float,
-    ending_delivery_credit_bank: float,
-    ending_acc_plus_credit_bank: float,
-    remaining_offsettable_generation_charges: float,
-    remaining_offsettable_delivery_charges: float,
+    opening: CreditBalances,
+    prior_paid_eligible_energy: EnergyAmounts,
     adjustment_rate: AverageRetailExportCompensationRate | None = None,
     nsc_rate: NetSurplusCompensationRate | None = None,
     true_up_month: str | None = None,
@@ -389,33 +410,19 @@ def calculate_true_up_settlement(
 
     The same annual net-surplus kWh are first recouped at the utility-wide
     average retail export compensation rate and then credited at NSC. Base EEC
-    banks offset the component-matched recoupment first. When the utility
-    policy permits it, any remaining bank next offsets eligible charges paid
-    earlier in the relevant period. ACC Plus is never part of the recoupment
-    and passes through unchanged.
+    and prior payments use the same credit pools as monthly billing. This
+    adapter validates energy and source-linked rates, then delegates all
+    credit application and disposition to the shared accounting core.
     """
 
     if not isinstance(policy, TrueUpPolicy):
         raise TypeError("policy must be a TrueUpPolicy")
     imports = _nonnegative_finite(annual_import_kwh, "annual_import_kwh")
     exports = _nonnegative_finite(annual_export_kwh, "annual_export_kwh")
-    generation_bank = _nonnegative_finite(
-        ending_generation_credit_bank, "ending_generation_credit_bank"
-    )
-    delivery_bank = _nonnegative_finite(
-        ending_delivery_credit_bank, "ending_delivery_credit_bank"
-    )
-    acc_plus_bank = _nonnegative_finite(
-        ending_acc_plus_credit_bank, "ending_acc_plus_credit_bank"
-    )
-    remaining_generation_charges = _nonnegative_finite(
-        remaining_offsettable_generation_charges,
-        "remaining_offsettable_generation_charges",
-    )
-    remaining_delivery_charges = _nonnegative_finite(
-        remaining_offsettable_delivery_charges,
-        "remaining_offsettable_delivery_charges",
-    )
+    if not isinstance(opening, CreditBalances):
+        raise TypeError("opening must be CreditBalances")
+    policy.validate_energy_amounts(opening.base)
+    policy.validate_energy_amounts(prior_paid_eligible_energy)
 
     net_surplus_kwh = max(exports - imports, 0.0)
     if (adjustment_rate is None) != (nsc_rate is None):
@@ -470,46 +477,17 @@ def calculate_true_up_settlement(
         adjustment_source_id = adjustment_rate.source_id
         nsc_source_id = nsc_rate.source_id
 
-    generation_adjustment = (
-        net_surplus_kwh * generation_adjustment_rate
+    accounting = settle_year(
+        opening=opening,
+        prior_paid_eligible_energy=prior_paid_eligible_energy,
+        surplus_adjustment=policy.energy_amounts(
+            net_surplus_kwh * generation_adjustment_rate,
+            net_surplus_kwh * delivery_adjustment_rate,
+        ),
+        nsc_entitlement_usd=net_surplus_kwh * resolved_nsc_rate,
+        offset_prior_payments=policy.apply_remaining_eec_to_prior_charges,
+        carry_base_credit=policy.carry_remaining_eec_forward,
     )
-    delivery_adjustment = (
-        net_surplus_kwh * delivery_adjustment_rate
-    )
-    generation_to_adjustment = min(generation_bank, generation_adjustment)
-    delivery_to_adjustment = min(delivery_bank, delivery_adjustment)
-    generation_bank -= generation_to_adjustment
-    delivery_bank -= delivery_to_adjustment
-
-    generation_to_prior_charges = 0.0
-    delivery_to_prior_charges = 0.0
-    if policy.apply_remaining_eec_to_prior_charges:
-        generation_to_prior_charges = min(
-            generation_bank, remaining_generation_charges
-        )
-        delivery_to_prior_charges = min(delivery_bank, remaining_delivery_charges)
-        generation_bank -= generation_to_prior_charges
-        delivery_bank -= delivery_to_prior_charges
-
-    forfeited_generation = 0.0
-    forfeited_delivery = 0.0
-    if not policy.carry_remaining_eec_forward:
-        forfeited_generation = generation_bank
-        forfeited_delivery = delivery_bank
-        generation_bank = 0.0
-        delivery_bank = 0.0
-
-    nsc_credit = net_surplus_kwh * resolved_nsc_rate
-    unoffset_adjustment = (
-        generation_adjustment
-        - generation_to_adjustment
-        + delivery_adjustment
-        - delivery_to_adjustment
-    )
-    prior_charge_credit = (
-        generation_to_prior_charges + delivery_to_prior_charges
-    )
-    net_bill_adjustment = unoffset_adjustment - prior_charge_credit - nsc_credit
 
     return TrueUpSettlement(
         utility=policy.utility,
@@ -524,21 +502,7 @@ def calculate_true_up_settlement(
             delivery_adjustment_rate
         ),
         nsc_rate_usd_per_kwh=resolved_nsc_rate,
-        generation_eec_adjustment_charge=generation_adjustment,
-        delivery_eec_adjustment_charge=delivery_adjustment,
-        generation_eec_applied_to_adjustment=generation_to_adjustment,
-        delivery_eec_applied_to_adjustment=delivery_to_adjustment,
-        remaining_offsettable_generation_charges=remaining_generation_charges,
-        remaining_offsettable_delivery_charges=remaining_delivery_charges,
-        generation_eec_applied_to_prior_charges=generation_to_prior_charges,
-        delivery_eec_applied_to_prior_charges=delivery_to_prior_charges,
-        nsc_credit=nsc_credit,
-        net_bill_adjustment=net_bill_adjustment,
-        ending_generation_credit_bank=generation_bank,
-        ending_delivery_credit_bank=delivery_bank,
-        ending_acc_plus_credit_bank=acc_plus_bank,
-        forfeited_generation_credit=forfeited_generation,
-        forfeited_delivery_credit=forfeited_delivery,
+        accounting=accounting,
         policy_source_id=policy.source_id,
         adjustment_rate_source_id=adjustment_source_id,
         nsc_rate_source_id=nsc_source_id,

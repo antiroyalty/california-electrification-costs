@@ -400,6 +400,7 @@ def process(
                     solar_nem3[rate_plan]
                 )
             if nbt_ledger is not None:
+                annual_accounting = nbt_ledger.true_up_settlement.accounting
                 # Realized-bill counterpart to Step 9b's marginal export signal.
                 # Unused credit is the wedge between the two; keep it visible.
                 log_kwargs.update({
@@ -418,11 +419,8 @@ def process(
                     f"nbt_true_up_eec_adjustment_charge_{rate_plan}": to_number(
                         nbt_ledger.true_up_settlement.total_eec_adjustment_charge
                     ),
-                    f"nbt_true_up_prior_eligible_generation_charge_{rate_plan}": to_number(
-                        nbt_ledger.true_up_settlement.remaining_offsettable_generation_charges
-                    ),
-                    f"nbt_true_up_prior_eligible_delivery_charge_{rate_plan}": to_number(
-                        nbt_ledger.true_up_settlement.remaining_offsettable_delivery_charges
+                    f"nbt_true_up_prior_eligible_energy_charge_{rate_plan}": to_number(
+                        annual_accounting.prior_paid_eligible_energy.total_usd
                     ),
                     f"nbt_true_up_nsc_credit_{rate_plan}": to_number(
                         nbt_ledger.true_up_settlement.nsc_credit
