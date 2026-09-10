@@ -5,7 +5,7 @@ from dataclasses import replace
 import pandas as pd
 import pytest
 
-from evaluations.eac import crf
+from evaluations.eac import compute_eac_from_inputs, crf
 from pipeline.steps.step9b_cooptimize_core import (
     CooptInputs, _solve_lp, build_monthly_hourly_inputs,
 )
@@ -108,6 +108,22 @@ def test_example_5_fixed_physical_system_uses_the_billing_rules(utility, payment
     case = _case(utility)
     result = _solve_lp(case[0], fixed_pv_kw=1, fixed_batt_kwh=0)
     assert _replay(case, result).annual_amount_due == pytest.approx(payment)
+
+
+@pytest.mark.parametrize("utility", ["PG&E", "SCE", "SDG&E"])
+def test_nbt_optimizer_and_reporting_share_battery_remaining_value(utility):
+    case = _case(utility)
+    result = _solve_lp(
+        case[0], fixed_pv_kw=1, fixed_batt_kwh=10, c_pv_kw=0, c_batt_kwh=1000,
+    )
+    bill = _replay(case, result).annual_amount_due
+    report = compute_eac_from_inputs(
+        None, {"storage_capex": 10000}, annual_bill_electric=bill,
+    )
+
+    assert result.capex_annual == pytest.approx(1116.42, abs=0.01)
+    assert report.capex_storage == pytest.approx(result.capex_annual)
+    assert report.total() == pytest.approx(result.total_cost)
 
 
 @pytest.mark.parametrize("utility,pv_kw,bill", [("PG&E", 2 / 3, 29 + 110 / 3), ("SCE", 12 / 7, 29)])

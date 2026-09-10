@@ -8,7 +8,7 @@ derive from this file, so the prose and equations have one maintained source.
 
 ## Implementation status
 
-Reviewed against commit `9212ed1` on September 10, 2026. The shared monthly and
+Updated for shared battery capital accounting on September 10, 2026. The monthly and
 annual NBT accounting introduced in `1634760` remains the implemented billing
 method for optimization and reporting. The research author has approved
 three simplifications: exclude ACC Plus, prohibit annual net exports, and
@@ -20,13 +20,14 @@ Update this status when integration and validation are complete. Older results
 remain results of their recorded model version until regenerated. Use the
 [accounting closure note](HOUSEHOLD_COST_RECONCILIATION.md) for worked tariff
 examples and the history of the detailed model.
-That integration has unit-test and representative-case validation. A full
-research rerun remains outstanding. Shared billing does not yet mean that every
-capital-cost annualization agrees; the remaining difference is described below.
-The approved capital-cost reconciliation retains a 25-year study period and
-15-year battery life. It adds a remaining-value credit at year 25 and uses
-the same calculation in optimization and reporting. This change is also
-**pending implementation and validation**.
+The implemented battery capital accounting uses a 25-year study period and
+15-year battery life. Optimization and EAC reporting share the calculation,
+including replacement and a remaining-value credit at year 25. A full research
+rerun remains outstanding; existing results do not yet reflect this change.
+Independent tests and 288-hour Alameda checks establish capital-accounting
+agreement, including a fixed 10 kWh battery. Full-year end-to-end validation
+remains incomplete: an isolated Alameda `CostService` run was stopped after
+ten minutes in the optimizer without a result. It did not pass that check.
 
 ## Research questions and comparison definitions
 
@@ -119,9 +120,10 @@ The principal cost measure is equivalent annual cost (EAC): an annual amount tha
 combines equipment purchases with recurring electricity, gas, and applicable
 vehicle operating costs. Solar and storage costs come from the same equipment
 cost definitions used in sizing. The standard real discount rate is 7%.
-The existing solar/storage objective uses a 25-year horizon and includes battery
-replacement after its modeled 15-year life. Appliance costs use their declared
-service lives. The [methods manifest](methods.yaml) gives the annualization
+The solar/storage objective and EAC reporting use a 25-year horizon. Battery costs
+include replacement after 15 years and a credit for remaining life at study end.
+Appliance costs use their declared service lives.
+The [methods manifest](methods.yaml) gives the annualization
 formulas and capital-cost sources.
 
 Equipment service life and the investment comparison period are different
@@ -130,34 +132,9 @@ life. This is within the Department of Energy's typical 20–30-year photovoltai
 performance period; it does not imply that all panels fail at year 25.
 See [DOE's performance-period guidance](https://www.energy.gov/cmei/femp/life-cycle-photovoltaic-systems-prepare-end-performance-period).
 
-**Remaining annualization difference:** the statewide EAC collector currently
-annualizes storage over its 15-year service life and solar over its 25-year
-service life. It does not impose a single 15-year study horizon. Both paths
-assume a 15-year battery life; only the optimizer includes two battery purchases
-within a 25-year comparison period. The implemented coefficients are:
-
-$$
-\alpha_{\mathrm{opt}}
-= \frac{1 + (1+r)^{-15}}{\sum_{t=1}^{25}(1+r)^{-t}}
-\approx 0.116912,
-\qquad
-\alpha_{\mathrm{report}}
-= \frac{r(1+r)^{15}}{(1+r)^{15}-1}
-\approx 0.109795,
-\quad r=0.07.
-$$
-
-Each coefficient converts one dollar of battery capital cost into dollars per
-year. At the same capacity and unit price, the optimizer's battery capital-cost
-term is about 6.5% higher. This is not a 6.5% difference in total household cost.
-The optimizer gives no credit for the replacement battery's remaining life at
-the end of year 25. The discrepancy is recorded here, not corrected in code.
-See [the annualization functions](../evaluations/eac.py) and
-[the reporting collectors](../helpers/plot_scenario_comparison_helper.py).
-
-**Approved reconciliation — pending implementation:** both paths will use
-a battery purchase at year 0, replacement at year 15, and a remaining-value
-credit at year 25. The replacement then has five of its 15 years remaining.
+Both paths count a battery purchase at year 0, replacement at year 15, and
+a remaining-value credit at year 25. The replacement then has five of its
+15 years remaining.
 Its credit is one-third of the modeled replacement cost. Discount that credit
 from year 25, subtract it from discounted purchases, and annualize the result:
 
@@ -178,9 +155,19 @@ These are expected accounting examples, not regenerated research results.
 This proportional credit estimates remaining service value, rather than a
 future resale price. NIST describes the same remaining-life approach in
 [its life-cycle costing manual, section 4.5.3](https://tsapps.nist.gov/publication/get_pdf.cfm?pub_id=934909).
-Implementation must test these cash flows independently, retain existing tests,
-and investigate failures before updating any expected results. It must also
-check that optimizer and reporting costs agree for the same equipment and inputs.
+The same coefficient is used in county EAC cost charts and the SAM comparison's
+capital-cost scoring. The shared function also handles other declared lifetimes:
+it counts purchases strictly before study end and credits the last battery's
+remaining fraction. It accepts finite, nonnegative discount rates and finite,
+positive lifetimes and study periods. A zero discount rate gives $1/n$ per year,
+where $n$ is battery life in years.
+See [the annualization functions](../evaluations/eac.py) and
+[the reporting collectors](../helpers/plot_scenario_comparison_helper.py).
+
+Independent cash-flow tests cover the numerical example, replacement boundaries,
+zero interest, multiple replacements, incentive cases, and optimizer/reporting
+agreement. Existing tests remain in place to detect regressions. See
+[the battery accounting tests](../tests/battery_annualization_test.py).
 
 The auxiliary net-present-value diagnostic uses upfront costs and repeated
 annual savings, without adding a battery replacement. Its result therefore
@@ -326,8 +313,8 @@ Prioritize a check when the limitation could change a stated conclusion.
 | Reduced 12 × 24 sensitivity chronology | Averaging can change cycling, usable credits, and optimal capacities. Mixed-resolution comparisons cannot isolate a policy effect by themselves. | Use full-year checks for findings near a threshold or sensitive to chronology. |
 | Declared equipment costs, lifetimes, and incentive cases | These are sourced modeling inputs, not a new survey of prices available to every household. | Refresh cost benchmarks or report a focused sensitivity when cost uncertainty affects a claim. |
 | County equipment costs include imputed values | The heat-pump cost inputs use the median of available counties where source data are absent: three counties for space heating and nine for water heating. These are not local price observations. | Identify these counties in cost interpretation and refresh their inputs when local data become available. |
-| Battery annualization differs between sizing and statewide EAC reporting | For the same battery, the current optimizer uses a capital-cost term about 6.5% higher. Shared electricity billing does not resolve this difference. | Implement the approved 25-year calculation with replacement and remaining value in both paths, then check affected battery-cost comparisons. |
-| Approved battery remaining-value and replacement-cost assumptions | The pending method values five remaining years at one-third of replacement cost. It assumes unchanged real purchase costs and incentive treatment. Future prices, incentives, and resale values can differ; the direction of error is uncertain. | State these assumptions with the results. Use a focused sensitivity if they could change an adoption conclusion. |
+| Battery remaining-value and replacement-cost assumptions | The method values five remaining years at one-third of replacement cost. It assumes unchanged real purchase costs and incentive treatment. Future prices, incentives, and resale values can differ; the direction of error is uncertain. | State these assumptions with the results. Use a focused sensitivity if they could change an adoption conclusion. |
+| Older results and auxiliary tools can use different capital accounting | Cached sizing and reports predate this correction. Standalone solar/battery/combined sweeps, the older Step 9 size optimizer, and auxiliary NPV diagnostics retain separate conventions. They cannot establish consistency with the current EAC model. | Regenerate central results with the current optimizer and EAC collectors. Align an auxiliary tool before using it for a comparison under these methods. |
 | The 2025 incentive sensitivity simplifies eligibility | Its continuous battery sizing uses an ITC-adjusted unit price without a separate 3 kWh eligibility constraint. The appliance policy registry also records separate caps for each appliance under the 25C heat-pump credit, in place of a combined household cap. Affected 2025 cases can overstate incentives. | Check sub-3-kWh battery conclusions and whole-household cases using both heating credits if these support a published claim. These issues do not change zero-credit post-ITC inputs. |
 | Battery augmentation costs and gradual capacity loss omitted centrally | Storage is treated more favorably than a model that charges for maintaining capacity. Round-trip efficiency losses and the declared replacement remain included. | Add an explicit degradation or augmentation-cost sensitivity if needed. |
 | Equipment-size bounds, specified charging/export rules, and fixed-design comparisons | An optimum applies within its declared feasible choices. A fixed-design result is not an unrestricted economic optimum. | Report binding constraints and test an expanded domain for an affected claim. |

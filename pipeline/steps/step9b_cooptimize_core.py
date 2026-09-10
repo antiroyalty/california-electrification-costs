@@ -730,21 +730,10 @@ def _solve_lp(
         prob += soc[h] >= B_E * _SOC_MIN_FR
         prob += soc[h] <= B_E * _SOC_MAX_FR
 
-    # Annualized capex (NPV framing, $/year equivalent over horizon N = pv_life_yrs).
-    #
-    # PV: paid once at t=0; lifetime = horizon, so K_pv = 1 and alpha_pv = 1/PVA = CRF(r, N).
-    # Battery: paid at t=0 AND replaced at t=n_batt within the horizon, so
-    #   K_batt = 1 + (1+r)^(-n_batt)   [PV of two purchases]
-    #   alpha_batt = K_batt / PVA(r, N)
-    # alpha_batt > CRF(r, n_batt) because CRF would amortize only one purchase over n_batt years
-    # and ignore the replacement cost. The difference is the discounted cost of the second battery.
-    #
-    # These coefficients are the same ones evaluations.eac uses for EAC reporting
-    # (crf, alpha_batt_npv) — computed here via the shared primitives so the LP
-    # and the reporting layer cannot silently drift apart.
-    N = int(pv_life_yrs)
-    alpha_pv = _crf(discount_rate, N)
-    alpha_batt = _alpha_batt_npv(discount_rate, batt_life_yrs, N)
+    # Use the same capital accounting as EAC reporting. The study period equals
+    # PV life; battery costs include replacements and remaining value at study end.
+    alpha_pv = _crf(discount_rate, pv_life_yrs)
+    alpha_batt = _alpha_batt_npv(discount_rate, batt_life_yrs, pv_life_yrs)
     capex_annual = PV_kw * c_pv_kw * alpha_pv + B_E * c_batt_kwh * alpha_batt + B_P * c_batt_kw * alpha_batt
 
     # NBT accounting is attached by the SCIP adapter. Rate-only teaching models

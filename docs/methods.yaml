@@ -109,38 +109,32 @@
     ]
   },
   "eac.alpha_batt_npv": {
-    "title": "Battery Capex Coefficient under NPV Framing",
-    "formula": "alpha_batt = (1 + (1+r)^(-n_batt)) / PVA(r, N)",
+    "title": "Shared Battery Capital Annualization with Remaining Value",
+    "formula": "alpha_batt = [sum(j=0..k-1, (1+r)^(-j*n)) - ((k*n-N)/n)*(1+r)^(-N)] * CRF(r,N), where k=ceil(N/n).",
     "assumptions": {
-      "derivation": "The current optimizer uses a 25-year horizon with purchases at year 0 and year 15, and no residual-value credit at year 25. K_batt = 1 + (1+r)^(-15) is the present value of both purchases. Dividing by PVA(r,25) = (1-(1+r)^(-25))/r converts to annual-equivalent cost.",
-      "horizon_origin": "Commit 063d028 (2026-03-03) replaced the optimizer's asset-by-asset CRFs with the replacement formula and tied the horizon to pv_life_yrs=25. The research author has now explicitly approved a 25-year study period matching the assumed solar life, while retaining a 15-year battery life.",
-      "horizon_boundary": "The statewide collector currently annualizes each asset over its own life; it is not a 15-year project projection. The current replacement helper always includes a second purchase and no remaining-value credit. See research.approved_battery_annualization for the approved correction, which is not yet implemented.",
-      "vs_crf": "At r=0.07, n_batt=15, N=25: alpha_batt=0.116912 per year versus CRF(r,15)=0.109795 per year, about 6.5% higher. This comparison is for the declared horizon and lifetimes, not a general inequality.",
-      "reporting_boundary": "Step 9b uses alpha_batt_npv. The statewide EAC collectors currently call compute_eac_from_inputs without npv_framing=True and therefore use the 15-year CRF. Billing is reconciled; this capital annualization difference remains follow-up work.",
-      "pv_unchanged": "For PV, n_pv = N = 25, so K_pv = 1 and alpha_pv = 1/PVA = CRF(r, N). No change to PV coefficient."
-    },
-    "code": [
-      "evaluations/eac.py:alpha_batt_npv",
-      "pipeline/steps/step9b_cooptimize_core.py:_solve_lp"
-    ]
-  },
-  "research.approved_battery_annualization": {
-    "title": "Approved Shared Battery Annualization - Not Yet Implemented",
-    "formula": "Annual battery capital cost = C * [1 + (1+r)^(-15) - (1/3)*(1+r)^(-25)] / sum(t=1..25, (1+r)^(-t)).",
-    "assumptions": {
-      "status": "Approved by the research author; pending implementation, independent cash-flow tests, and regenerated results. Current optimizer and reporting coefficients remain as documented in eac.alpha_batt_npv.",
-      "periods": "Study period 25 years, matching the assumed solar life. Battery service life 15 years; buy initially at year 0 and replace at year 15.",
-      "remaining_value": "At year 25 the replacement has five years remaining. Credit 5/15 of its modeled purchase cost at year 25 and discount this amount back to year 0. This is a proportional remaining-service-value estimate, not a resale-price forecast.",
-      "cost_basis": "C is the modeled battery purchase cost. Retain the same real cost and incentive treatment for the initial and replacement purchases. Apply the one-third credit to that same replacement-cost basis. Future changes in prices and incentives are not forecast.",
-      "worked_example": "For C=$10,000 and r=0.07: year-25 remaining value $3,333.33; present value of that credit $614.16; shared annual battery capital cost $1,116.42. The coefficient is 0.111642025 per year.",
-      "integration": "Optimization and EAC reporting must use one shared calculation. This changes capital annualization, not battery dispatch constraints or the pending tariff simplifications.",
-      "validation": "Run existing tests before implementation. Add independent purchase/replacement/remaining-value examples, zero-discount and replacement-boundary cases, and optimizer-to-reporting reconciliation. Investigate failed existing tests before changing their expectations."
+      "units": "Annual battery capital cost per dollar of modeled purchase cost; r is the real annual discount rate, n is battery service life in years, and N is the study period in years.",
+      "central_case": "N=25, matching the assumed solar life; n=15. Purchases occur at years 0 and 15. At year 25 credit one-third of replacement cost, then discount that credit to year 0.",
+      "cost_basis": "Initial and replacement purchases use the same real cost and incentive treatment. The remaining-value credit uses that same replacement-cost basis. Future price and incentive changes are not forecast.",
+      "remaining_value": "Value is proportional to unused service life. This estimates remaining service value, not a resale price.",
+      "worked_example": "At r=0.07 the coefficient is 0.111642025 per year. For a $10,000 purchase cost: year-25 remaining value $3,333.33, present credit $614.16, annual battery capital cost $1,116.42.",
+      "boundaries": "Count purchases strictly before study end; do not buy at the terminal date. Credit only the last battery. Multiple replacements are included when required. Zero interest gives 1/n. Reject negative or non-finite discount rates and nonpositive or non-finite lifetimes and study periods.",
+      "integration": "Step 9b, EAC collectors, county annual-cost charts, and SAM capital-cost scoring call this shared coefficient. EAC reporting has no alternative npv_framing switch. Dispatch constraints are unchanged.",
+      "pv": "Solar life equals the study period, so PV uses CRF(r,N) for one purchase with no remaining life at study end.",
+      "result_status": "Implemented and covered by independent cash-flow and integration tests. Alameda 288-hour checks reconcile at free sizing and a fixed 10 kWh battery. A full-year Alameda CostService run was interrupted after ten minutes without a result; end-to-end validation is incomplete. Previously generated results require regeneration."
     },
     "data_sources": {
       "remaining_value_method": "NIST Life-Cycle Costing Manual, section 4.5.3: https://tsapps.nist.gov/publication/get_pdf.cfm?pub_id=934909",
       "solar_period_context": "DOE typical photovoltaic performance period of 20-30 years: https://www.energy.gov/cmei/femp/life-cycle-photovoltaic-systems-prepare-end-performance-period"
     },
-    "notes": "The user-approved 25-year period and one-third remaining-value convention replace the earlier open annualization choice. Implementation is the next review unit after this methods audit."
+    "code": [
+      "evaluations/eac.py:alpha_batt_npv",
+      "pipeline/steps/step9b_cooptimize_core.py:_solve_lp",
+      "helpers/diagnostics_cost_plots.py:create_cost_waterfall_chart",
+      "helpers/diagnostics_cost_plots.py:create_storage_value_vs_cost_chart",
+      "experiments/sam_parallel.py:score",
+      "tests/battery_annualization_test.py"
+    ],
+    "notes": "Legacy standalone experiments/solar_size_sweep.py, battery_size_sweep.py, combined_sweep.py and pipeline/steps/step9_optimize_solar_storage.py retain service-life CRFs. Auxiliary NPV diagnostics omit replacement and remaining value. Align those tools before using them for comparisons under this method."
   },
   "eac.compute_eac_from_inputs": {
     "title": "Equivalent Annual Cost (EAC)",
@@ -150,7 +144,7 @@
       "lifetimes": "solar=25, storage=15, appliance rows use lifetime_years (default 15 if missing)",
       "incentives": "full/half/no incentives applied to PV/storage capex",
       "capital_recovery_factor": "CRF = r(1+r)^n / ((1+r)^n - 1)",
-      "npv_framing": "Defaults to False, including in the current statewide EAC collectors. True selects alpha_batt_npv, which Step 9b uses for battery sizing. See eac.alpha_batt_npv for the unresolved annualization difference."
+      "battery_annualization": "Always use alpha_batt_npv, shared with Step 9b. The study period equals the declared solar life; replacement and proportional remaining value are included."
     },
     "data_sources": {
       "capex_ledger": "capital_costs_<scenario>_<housing>.csv",
@@ -248,7 +242,7 @@
       "sizing_domain": "Default optimized battery ceiling 40 kWh, power at most 1C, and available annual PV generation at most 150% of load for NBT or 100% for NEM 2. The approved annual net-export cap is not implemented yet.",
       "chronology": "Full-year 8760-hour runs have cyclic annual battery charge. Weighted 12x24 sensitivities close each representative day's battery cycle and weight annual dollars and energy by days per month.",
       "solver": "NBT uses SCIP for the shared accounting, including nonlinear proportional bonus allocation. NEM 2 uses HiGHS by default. Meter-direction binary constraints are added when relaxed solutions violate physical direction.",
-      "bill_replay": "The NBT result is replayed through numeric shared accounting; a bill discrepancy above $0.001 is rejected. This check does not reconcile the separate capital annualization difference."
+      "bill_replay": "The NBT result is replayed through numeric shared accounting; a bill discrepancy above $0.001 is rejected. Independent integration tests also reconcile capital costs against EAC reporting."
     },
     "code": [
       "pipeline/steps/step9b_cooptimize_core.py:_solve_lp",
@@ -369,7 +363,7 @@
       "rate": "NREL ATB 2024 moderate scenario, residential 5kW/12.5kWh system, as used in CEC-200-2024-011 (energy.ca.gov/sites/default/files/2024-07/CEC-200-2024-011.pdf). ATB via atb.nrel.gov/electricity/2024/data."
     },
     "assumptions": {
-      "sizing_vs_reporting": "per_kwh_cost() defines gross unit cost; per_kwh_cost_net() supplies the policy-adjusted sizing price. Unit costs agree, but the statewide EAC collectors retain a different annualization coefficient; see eac.alpha_batt_npv."
+      "sizing_vs_reporting": "per_kwh_cost() defines gross unit cost; per_kwh_cost_net() supplies the policy-adjusted sizing price. Step 9b and the statewide EAC collectors also use the same battery annualization coefficient; see eac.alpha_batt_npv."
     },
     "code": [
       "appliances/battery_storage.py:BatteryStorageAppliance",

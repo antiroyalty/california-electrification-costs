@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import ceil, fsum, isfinite
 from typing import Mapping, Optional
 
 import pandas as pd
@@ -58,22 +59,36 @@ def _to_float(val, default: float = 0.0) -> float:
 
 
 def alpha_batt_npv(discount_rate: float, batt_life_yrs: float, horizon_yrs: float) -> float:
-    """Annual-equivalent battery capex coefficient under NPV framing ($/year per $1 of capex).
+    """Annual battery capital cost per dollar of modeled purchase cost.
 
-    Under NPV framing over a horizon N, a battery with lifetime n_batt requires two purchases:
-    one at t=0 and a replacement at t=n_batt. The present value of both purchases is:
-        K_batt = 1 + (1+r)^(-n_batt)
-    Dividing by PVA(r, N) converts the total present value into an annual-equivalent cost.
+    Buy initially and at each service-life boundary strictly before study end.
+    Each purchase has the same real cost and incentive treatment. At study end,
+    credit the last battery's unused fraction of service life at that cost basis.
+    Discount all purchases and the credit, then annualize their net present cost.
 
-    When n_batt == N this simplifies to CRF(r, N). When n_batt < N, alpha_batt > CRF(r, n_batt)
-    because the replacement cost is priced in.
+    A 25-year study with 15-year batteries buys at years 0 and 15 and credits
+    one-third of purchase cost at year 25. With zero interest the coefficient
+    is 1 / batt_life_yrs. Negative discount rates are outside the modeled domain.
+
+    Remaining-life method: NIST Handbook 135 (2022), section 4.5.3.
+    https://tsapps.nist.gov/publication/get_pdf.cfm?pub_id=934909
     """
     r = float(discount_rate)
     n = float(batt_life_yrs)
     N = float(horizon_yrs)
-    pva = ((1 - (1 + r) ** (-N)) / r) if r > 0 else N
-    k_batt = 1.0 + (1.0 + r) ** (-n)
-    return k_batt / pva
+    if not isfinite(r) or r < 0:
+        raise ValueError("discount_rate must be finite and nonnegative")
+    for name, value in (("batt_life_yrs", n), ("horizon_yrs", N)):
+        if not isfinite(value) or value <= 0:
+            raise ValueError(f"{name} must be finite and positive")
+
+    purchase_count = ceil(N / n)
+    discounted_purchases = fsum(
+        (1 + r) ** (-purchase * n) for purchase in range(purchase_count)
+    )
+    remaining_life_fraction = (purchase_count * n - N) / n
+    discounted_remaining_value = remaining_life_fraction * (1 + r) ** (-N)
+    return (discounted_purchases - discounted_remaining_value) * crf(r, N)
 
 
 def compute_eac_from_inputs(
@@ -86,7 +101,6 @@ def compute_eac_from_inputs(
     annual_bill_electric: float = 0.0,
     annual_bill_gas: float = 0.0,
     vehicle_om: float = 0.0,
-    npv_framing: bool = False,
 ) -> EACComponents:
     """Compute EAC components from in‑memory inputs.
 
@@ -108,6 +122,8 @@ def compute_eac_from_inputs(
     - incentive: 'full_incentives' | 'half_incentives' | 'no_incentives'
     - discount_rate: real discount rate used for annualization
     - lifetimes: mapping with keys 'solar' and 'storage' (defaults used if None)
+      The study period equals solar life. Storage includes replacements and
+      proportional remaining value through alpha_batt_npv, as in optimization.
     - annual_bill_electric, annual_bill_gas: already‑computed annual bills
     - vehicle_om: optional annual vehicle O&M adder (default 0)
 
@@ -161,13 +177,10 @@ def compute_eac_from_inputs(
             pv_net = pv_capex
             st_net = st_capex
 
-        solar_life = _to_float(lifetimes.get("solar", 25), 25)
-        storage_life = _to_float(lifetimes.get("storage", 15), 15)
+        solar_life = float(lifetimes.get("solar", 25))
+        storage_life = float(lifetimes.get("storage", 15))
         capex_pv = pv_net * crf(discount_rate, solar_life)
-        if npv_framing:
-            capex_storage = st_net * alpha_batt_npv(discount_rate, storage_life, solar_life)
-        else:
-            capex_storage = st_net * crf(discount_rate, storage_life)
+        capex_storage = st_net * alpha_batt_npv(discount_rate, storage_life, solar_life)
 
     return EACComponents(
         capex_pv=capex_pv,
