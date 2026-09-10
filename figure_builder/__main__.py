@@ -120,13 +120,13 @@ def _cmd_counties(args):
     return [str(build_county_grid(fine=args.fine))]
 
 
-def _cmd_installer(_args):
+def _cmd_installer(args):
     from figure_builder.recipes import (
         build_installer_rule_figure,
         installer_rule_sweep_path,
     )
 
-    doc = build_installer_rule_figure()
+    doc = build_installer_rule_figure(force=args.force)
     cache = installer_rule_sweep_path("alameda", live_prices().regime)
     if not cache.exists():
         raise FileNotFoundError(f"Installer-rule sweep cache was not written: {cache}")

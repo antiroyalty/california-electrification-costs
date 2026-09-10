@@ -42,8 +42,8 @@ python3 -m figure_builder claims-source \
   --scenario-run full_electric_ev=<timestamp> \
   --scenario-run full_electric_ev_coopt=<timestamp>
 
-# Regenerate everything from that exact normalized statewide source.
-python3 -m figure_builder all \
+# Regenerate everything after a model change, using that exact statewide source.
+python3 -m figure_builder all --force \
   --claims-source analysis_results/claims_eac_by_county_nem3_g<model-sha>.csv
 
 # Or step by step:
@@ -53,6 +53,7 @@ python3 -m figure_builder sweeps --counties alameda --fine  # deliberate 8760 ru
 python3 -m figure_builder market                    # exact 8760 current-law NBT checks
 python3 -m figure_builder policy-matrix             # 2x2 NBT/NEM 2 x ITC comparison
 python3 -m figure_builder mechanism                 # Claim-1 Figures A/B/C + objective box
+python3 -m figure_builder installer --force         # refresh both installer-rule comparison sweeps
 python3 -m figure_builder counties                  # Claim-1 four-county grid
 python3 -m figure_builder statewide                 # Claims 2/3 from complete paired EAC results
 python3 -m figure_builder bridge                    # assumption-bridge waterfall PNG
@@ -62,7 +63,12 @@ python3 -m figure_builder split                     # combined doc -> claim1/2/3
 Sweeps are cached in `figure_builder/sweeps/` as
 `sweep_288_<county>_<export-regime>_<capital-regime>.csv` by default, or
 `sweep_8760_...` with `--fine`. The two explicit axes prevent NBT and NEM 2
-results from sharing a cache. Pass `--force` to recompute. Weighted 12x24 is
+results from sharing a cache. Pass `--force` to recompute. Cache compatibility
+does not detect changes to model code. After an accounting or optimizer change,
+use `all --force` to refresh publication sweeps, including the fixed-PV installer
+comparison. `installer --force` refreshes both sweeps used by that figure.
+Neither command regenerates statewide scenario outputs; complete those runs and
+build their `claims-source` first. Weighted 12x24 is
 the declared sensitivity-grid resolution. The four-cell NBT/NEM 2 policy
 comparison uses this same resolution in every cell. The market command retains
 the separate exact current-law NBT checks used by Claim 1. Corrected full-year
@@ -98,10 +104,14 @@ each reported total as the exact sum of its seven cost components. It never
 fills a missing scenario/county from another run or from Step 18's broader
 sibling-scenario family.
 
-The sweep objective uses hourly import prices, NBT export prices, and ACC Plus.
-It does not apply annual net-surplus compensation; the manifest records that
-boundary explicitly instead of listing NSC source data as if it affected the
-sizing result.
+The NBT objective and reported bill use the same accounting equations. They
+apply monthly credit restrictions, fixed and non-bypassable charges, ACC Plus,
+and annual settlement to the modeled imports and exports. Earned export credits
+are not automatically bill savings. Opening credit balances are zero, and
+remaining banks have no extra value beyond the modeled year. If a required
+annual export-credit adjustment rate is missing, the optimizer can accept only
+a zero-surplus solution whose bill is independent of that rate. A positive-surplus
+candidate stops for a sourced rate. The manifest records this boundary.
 
 The headline Claim-1 figure is a **before/after** comparison
 (`plot_pv_batt_vs_capex_compare`): a 2025 panel (with the 30% federal ITC,

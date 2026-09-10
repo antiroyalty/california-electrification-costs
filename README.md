@@ -6,6 +6,18 @@ This project models the residential costs of increasing household electrificatio
 
 Costs of electrifying, and adopting solar and storage, are presented for each county for single-family detached homes, with utility tariffs from PG&E, SCE, and SDG&E. Electricity costs, gas costs, and capital costs are all considered. For instance, if a gas stove is replaced by an induction stove, the decrease in gas costs, along with the injection of capital cost, and the changes in the energy bill due to the increased electricity consumption are all considered.
 
+### Research methods and limitations
+
+[Research methods and approach](docs/RESEARCH_METHODS.md) is the maintained
+narrative for the paper. It explains the research questions, comparisons,
+accounting, assumptions, and known limitations, constraints, and potential
+future improvements. It distinguishes implemented methods from approved changes
+that still require integration and validation.
+
+[The methods manifest](docs/methods.yaml) contains technical formulas and source
+references used by the diagnostics. Every code change requires a methods review
+under the [repository guidelines](AGENTS.md#research-methods-documentation).
+
 ### Dependencies
 
 This project requires Python 3 with the following external dependencies:

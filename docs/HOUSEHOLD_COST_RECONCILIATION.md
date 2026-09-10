@@ -1,5 +1,18 @@
 # Household-cost accounting: publication closure note
 
+## Status and ongoing methods
+
+The maintained research narrative is [Research methods and approach](RESEARCH_METHODS.md),
+including its dedicated limitations, constraints, and future improvements section.
+This note preserves the detailed accounting checks and integration history.
+
+On September 10, 2026, the research author approved excluding ACC Plus,
+limiting annual exports to annual imports, and settling eligible base credits
+annually. These choices supersede this note's earlier direction to retain the
+detailed accounting centrally. They remain pending implementation and result
+validation; the current code at `1634760` uses the integrated monthly model.
+The worked examples below remain evidence about that detailed model.
+
 ## Decision and scope
 
 Finish the existing paper with defensible accounting and a clear methods section.

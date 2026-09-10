@@ -178,18 +178,20 @@ def _mechanism_fragment(
     s_2025 = f"${prices_2025.pv_net_per_kw:,.0f}/kW"
     s_now = f"${prices_now.pv_net_per_kw:,.0f}/kW"
     return f'''  <div class="callout" style="border-left-color:var(--accent-ink);">
-    <strong>Why this happens: the optimization model&rsquo;s own logic.</strong> The result looks paradoxical only if solar and storage are substitutes. In the objective function they are <strong>complements</strong>, and the reason is two terms:
+    <strong>How storage can increase solar&rsquo;s value.</strong> A battery can move surplus solar to hours when it reduces the household&rsquo;s bill. The optimizer weighs that bill reduction against equipment costs:
   </div>
 
   <div class="obj-box">
     <div class="obj-label">Objective: minimize annual cost ($/yr)</div>
-    <div class="obj-eq"><span class="ot-cap">PV&middot;c<sub>pv</sub>&middot;&alpha;<sub>pv</sub></span> <span class="op">+</span> <span class="ot-cap">B&middot;c<sub>batt</sub>&middot;&alpha;<sub>batt</sub></span> <span class="op">+</span> <span class="ot-imp">&sum;<sub>h</sub> w<sub>h</sub>&middot;(grid&rarr;load)<sub>h</sub>&middot;p<sub>imp,h</sub></span> <span class="op">&minus;</span> <span class="ot-exp">&sum;<sub>h</sub> w<sub>h</sub>&middot;(pv&rarr;grid)<sub>h</sub>&middot;p<sub>exp,h</sub></span> <span class="op">+</span> <span class="ot-plain">deg</span></div>
+    <div class="obj-eq"><span class="ot-cap">PV&middot;c<sub>pv</sub>&middot;&alpha;<sub>pv</sub></span> <span class="op">+</span> <span class="ot-cap">B&middot;c<sub>batt</sub>&middot;&alpha;<sub>batt</sub></span> <span class="op">+</span> <span class="ot-imp">Bill(imports, exports)</span> <span class="op">+</span> <span class="ot-plain">deg</span></div>
     <ul class="obj-gloss">
       <li><span class="chip chip-cap">capex</span> annualized cost of the solar and battery you build.</li>
-      <li><span class="chip chip-imp">p<sub>imp</sub></span> solar is paid the <strong>full retail price</strong> (averaging ~${mB['peak_import_rate']:.3f}/kWh across the top {mB['peak_share_pct']:.0f}% of modeled import-price hours) on every kWh it lets you <em>not</em> import.</li>
-      <li><span class="chip chip-exp">p<sub>exp</sub></span> but only the lower <strong>ACC export credit</strong> (~${mB['v_export']:.3f}/kWh when hourly prices are weighted by modeled PV generation) on what it sends to the grid.</li>
+      <li><span class="chip chip-imp">Bill</span> modeled annual electricity cost after monthly credit restrictions and annual settlement. It includes fixed and non-bypassable charges and deducts credits actually applied. Sizing and reporting use the same accounting equations.</li>
+      <li><span class="chip chip-imp">p<sub>imp</sub></span> illustrative import prices average ~${mB['peak_import_rate']:.3f}/kWh across the top {mB['peak_share_pct']:.0f}% of modeled import-price hours.</li>
+      <li><span class="chip chip-exp">p<sub>exp</sub></span> illustrative export prices average ~${mB['v_export']:.3f}/kWh when hourly prices are weighted by modeled PV generation. Earned credits reduce the bill only when settlement rules allow their use.</li>
+      <li><span class="chip chip-cap">deg</span> modeled battery-throughput cost, separate from annualized equipment cost.</li>
     </ul>
-    <p class="obj-punch">A battery earns only the <strong>difference</strong> between those two prices, net of ~{(1.0 - mB['round_trip_eff']) * 100:.0f}% round-trip loss and a mid-life replacement. So the battery only enters when it is cheap. When it does, it can let surplus midday solar reach higher-valued hours instead of being exported immediately. Cheaper storage <strong>raises</strong> the optimal amount of solar in the modeled sweeps. It never replaces it.</p>
+    <p class="obj-punch">The price spread illustrates why shifting solar can help. Actual storage value is the change in the modeled bill under feasible dispatch, including ~{(1.0 - mB['round_trip_eff']) * 100:.0f}% round-trip loss. Storage enters when that value covers its annualized cost. Whether cheaper storage raises optimal solar is a result of the solved cases, not a guarantee of the objective.</p>
   </div>
 
   <figure class="fig"><img src="data:image/png;base64,{b64A}" alt="Optimal solar and battery vs battery cost, 2025 with ITC versus current law, Alameda" /><figcaption><strong>2025 vs. now: removing the federal ITC.</strong> {_market_result_sentence(mA['before'], mA['after'])} The lines show the declared capex sensitivity: the solar-only optimum is {mA['before']['pv_flat']:.2f}&nbsp;kW in the 2025 panel and {mA['after']['pv_flat']:.2f}&nbsp;kW under current law, rising as cheaper storage enters. Both panels share axes. Only battery capex is swept; <strong>solar&rsquo;s price is fixed at its net installed cost within each panel: {s_2025} in 2025 (gross $3,300/kW less the 30% ITC), {s_now} under current law (ITC repealed, net = gross)</strong>. The 2025 market diamond is a weighted 12&times;24 sensitivity observation; the current-law market diamond is a separate full 8,760-hour chronological solve. The sensitivity lines use the Step&nbsp;9b {resolution_label}. Alameda / PG&amp;E, full-electrification load.</figcaption></figure>
@@ -199,7 +201,7 @@ def _mechanism_fragment(
     <figure class="fig"><img src="data:image/png;base64,{b64C}" alt="Even a near-free household battery caps optimal solar near annual load coverage" /><figcaption><strong>The ceiling.</strong> Drive battery cost toward zero within the model&rsquo;s explicit 40&nbsp;kWh representative-household sizing domain: optimal solar rises, then flattens near total annual consumption ({mC['pv_100']:.1f}&ndash;{mC['pv_100_rte']:.1f}&nbsp;kW). At $1/kWh the solution reaches a {mC['batt_min']:,.0f}&nbsp;kWh battery, while solar is {mC['pv_min']:.1f}&nbsp;kW ({mC['cover_min'] * 100:.0f}% of load), because additional generation primarily earns the much lower export rate. Near-free household storage raises the solar ceiling; it does not remove it.</figcaption></figure>
   </div>
 
-  <div class="callout"><strong>One sentence for the skeptic:</strong> the battery is not a substitute for solar. It is what lets the marginal kWh of solar reach the peak price instead of the export price, which is exactly why optimal solar goes <em>up</em>, not down, as storage gets cheaper.</div>'''
+  <div class="callout"><strong>The mechanism:</strong> storage can increase the bill savings from solar by shifting generation to useful hours. The size of that benefit depends on dispatch, usable credits, and equipment costs.</div>'''
 
 
 def build_mechanism_block(doc=None, *, county="alameda", fine: bool = False) -> Path:
@@ -384,7 +386,7 @@ def _entry_threshold(cap, batt) -> float:
     return float(np.asarray(cap)[m].max()) if m.any() else float("nan")
 
 
-def _installer_rule_fixed_pv_sweep(county, pv_offset, prices):
+def _installer_rule_fixed_pv_sweep(county, pv_offset, prices, *, force: bool = False):
     """Optimal battery vs battery cost with PV FIXED at the annual-offset size.
     Cached as a weighted 12x24 sensitivity sweep."""
     import pandas as pd
@@ -401,7 +403,7 @@ def _installer_rule_fixed_pv_sweep(county, pv_offset, prices):
     max_battery_kwh = 40.0
     requested_points = canonical_battery_capex_points(prices.regime)
     path = installer_rule_sweep_path(county, prices.regime)
-    if path.exists():
+    if not force and path.exists():
         cached = pd.read_csv(path)
         required_columns = [
             "battery_capex_kwh",
@@ -490,7 +492,9 @@ def _installer_rule_fragment(prices, pv_offset, solar_weighted_export_rate, m, b
   <!-- /INSTALLER-RULE body -->'''
 
 
-def build_installer_rule_figure(doc=None, county="alameda", label="Alameda (PG&E)") -> Path:
+def build_installer_rule_figure(
+    doc=None, county="alameda", label="Alameda (PG&E)", *, force: bool = False,
+) -> Path:
     """Add the installer-heuristic robustness figure to the Claim-1 block: optimal
     battery vs battery cost, PV economically optimized vs PV fixed at 100% annual
     offset. Answers Duncan's 2026-07 question. Idempotent; inserted after the
@@ -499,8 +503,8 @@ def build_installer_rule_figure(doc=None, county="alameda", label="Alameda (PG&E
     prices = live_prices()
     di = county_dispatch_inputs(county)
     pv_offset = di.annual_load / di.yield_per_kw
-    free = collect_battery_capex_sweep(county)
-    fixed = _installer_rule_fixed_pv_sweep(county, pv_offset, prices)
+    free = collect_battery_capex_sweep(county, force=force)
+    fixed = _installer_rule_fixed_pv_sweep(county, pv_offset, prices, force=force)
     fig, m = _plot_installer_rule(
         free, fixed, prices, pv_offset,
         f"{label}: oversizing solar to the installer rule raises the battery threshold, "
@@ -766,9 +770,7 @@ def _claim4_fragment(
     <li>NEM&nbsp;2 PV reaches the eligibility ceiling.
       <p>The result establishes the optimum within the modeled tariff domain. It does not identify the unconstrained NEM&nbsp;2 PV optimum above 100% annual-load coverage.</p>
     </li>
-    <li>The NBT sizing objective does not reproduce every monthly settlement rule.
-      <p>It values hourly imports and exports with the source-locked schedules. The separate annual-bill path applies the complete generation/delivery, non-bypassable charge, credit-bank, and true-up primitives.</p>
-    </li>
+{_nbt_accounting_scope_fragment()}
   </ol>
 </section>'''
 
@@ -921,6 +923,14 @@ _LEGACY_TARIFF_STATUS_PATTERN = (
 )
 
 
+def _nbt_accounting_scope_fragment() -> str:
+    """Shared description of the modeled NBT year for both claims documents."""
+    return '''    <li>The NBT results use one modeled billing year.
+      <p>Sizing and reporting use the same monthly credit rules and annual settlement. Opening credit balances are zero. Remaining banks receive no extra value beyond the modeled year. A positive-surplus case requires a sourced adjustment rate before it can be reported.</p>
+      <p>The study retains utility-specific credit pools and year-end treatment, including the SDG&amp;E convention that unused credits expire without offsetting earlier payments.</p>
+    </li>'''
+
+
 def _tariff_status_fragment(metadata: dict) -> str:
     scenario = metadata["scenario"]
     utilities = metadata["utilities"]
@@ -979,7 +989,7 @@ def _tariff_status_fragment(metadata: dict) -> str:
         <li>Import schedules: {import_line}.</li>
         <li>Export schedules: {export_line}.</li>
         <li>NEM 2 comparison: {nem2_scenario['research_label']}, tariff snapshot {nem2_scenario['tariff_snapshot_date']}; {nem2_line}.</li>
-        <li>Annual NSC settlement is not part of the NBT sizing-sweep objective. The NEM 2 objective applies annual credit expiration and source-selected NSC.</li>
+        <li>The NBT sizing objective includes monthly credit application and annual settlement, including net-surplus adjustments and compensation where applicable. The NEM 2 objective applies annual credit expiration and source-selected NSC.</li>
       </ul>
     </li>'''
 
@@ -1035,9 +1045,7 @@ def _limitations_fragment(metadata: dict, county_count: int) -> str:
       <p>The capex sensitivities cover Alameda, Fresno, Los Angeles, and San Diego. The current-law market observations use the full 8,760-hour chronology; the 2025 ITC observations use the weighted 12&times;24 sensitivity model. That resolution difference is disclosed in every Claim 1 comparison and limits causal interpretation of the before/after contrast.</p>
     </li>
 {tariff_status}
-    <li>The Claim 1 NBT sizing objective does not reproduce every monthly NBT settlement rule.
-      <p>Its NBT panels value hourly imports and exports using the source-locked schedules. The separate NEM 2 policy matrix applies annual retail-dollar netting, utility-specific non-bypassable and recovery charges, credit expiration, and annual net-surplus compensation. The annual-bill path used by Claims 2 and 3 separately applies the complete NBT generation/delivery and true-up primitives.</p>
-    </li>
+{_nbt_accounting_scope_fragment()}
     <li>Claims 2 and 3 are annualized modeled counterfactuals for one representative household per county.
       <p>They combine standardized 8,760-hour household profiles with one source-locked 2026 tariff snapshot. They are not a longitudinal pre/post study, an adoption forecast, or evidence about household heterogeneity within a county.</p>
     </li>

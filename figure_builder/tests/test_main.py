@@ -126,9 +126,20 @@ def test_installer_returns_document_and_sweep_cache_for_metadata(tmp_path):
             return_value=SimpleNamespace(regime="post_itc_2026"),
         ),
     ):
-        artifacts = _cmd_installer(SimpleNamespace())
+        artifacts = _cmd_installer(SimpleNamespace(force=False))
 
     assert artifacts == [str(doc), str(cache)]
+
+
+def test_installer_force_reaches_the_figure_builder(tmp_path):
+    cache = tmp_path / "fixed-pv.csv"
+    cache.touch()
+    with (
+        patch("figure_builder.recipes.build_installer_rule_figure") as build,
+        patch("figure_builder.recipes.installer_rule_sweep_path", return_value=cache),
+    ):
+        _cmd_installer(SimpleNamespace(force=True))
+    build.assert_called_once_with(force=True)
 
 
 def test_market_command_builds_only_declared_full_hourly_policy_cases():
@@ -225,7 +236,7 @@ def test_all_passes_cli_run_identity_to_metadata_writer():
         patches[0],
         patches[1],
         patches[2],
-        patches[3],
+        patches[3] as installer,
         patches[4],
         patches[5],
         patches[6],
@@ -237,6 +248,7 @@ def test_all_passes_cli_run_identity_to_metadata_writer():
         artifacts = _cmd_all(args)
 
     assert artifacts == list(command_names)
+    installer.assert_called_once_with(args)
     write_metadata.assert_called_once_with(
         list(command_names),
         fine=False,

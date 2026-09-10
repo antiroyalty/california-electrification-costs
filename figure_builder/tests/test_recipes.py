@@ -21,6 +21,7 @@ from figure_builder.recipes import (
     _claim4_fragment,
     _verified_policy_matrix_metadata,
     _installer_rule_fragment,
+    _installer_rule_fixed_pv_sweep,
     _limitations_fragment,
     _mechanism_fragment,
     _policy_matrix_fragment,
@@ -142,6 +143,11 @@ def test_mechanism_caption_uses_metrics_instead_of_stale_rate_literals():
     assert "2&ndash;3" not in html
     assert "~$0.40/kWh" not in html
     assert "~$0.05/kWh" not in html
+    assert "Bill(imports, exports)" in html
+    assert "credits actually applied" in html
+    assert "annual settlement" in html
+    assert "It never replaces it" not in html
+    assert "solar and storage are substitutes" not in html
 
 
 def test_claim1_summary_is_derived_from_exact_market_observations():
@@ -301,7 +307,8 @@ def test_claim4_fragment_reports_policy_effect_without_historical_overclaim():
     assert "not a historical reconstruction" in html
     assert "storage enters 2 of 4 NBT cases and 1 of 4 NEM&nbsp;2 cases" in html
     assert "other three NEM&nbsp;2 cells still require exact checks" in html
-    assert "does not reproduce every monthly settlement rule" in html
+    assert "same monthly credit rules and annual settlement" in html
+    assert "does not reproduce every monthly settlement rule" not in html
 
 
 def test_claim4_document_uses_existing_style_and_explicit_source_sha():
@@ -396,7 +403,8 @@ def test_publication_scope_removes_inherited_draft_claims(tmp_path):
     assert doc.read_text() == html
 
 
-def test_installer_rule_builder_passes_county_schedule_mean_to_caption(tmp_path):
+@pytest.mark.parametrize("force", [False, True])
+def test_installer_rule_builder_passes_county_schedule_mean_to_caption(tmp_path, force):
     doc = tmp_path / "claims.html"
     doc.write_text("before\n<!-- MECH-BLOCK-END -->\nafter")
     prices = SimpleNamespace(
@@ -417,8 +425,12 @@ def test_installer_rule_builder_passes_county_schedule_mean_to_caption(tmp_path)
             "figure_builder.recipes.county_dispatch_inputs",
             return_value=dispatch,
         ),
-        patch("figure_builder.recipes.collect_battery_capex_sweep", return_value="free"),
-        patch("figure_builder.recipes._installer_rule_fixed_pv_sweep", return_value="fixed"),
+        patch(
+            "figure_builder.recipes.collect_battery_capex_sweep", return_value="free",
+        ) as free,
+        patch(
+            "figure_builder.recipes._installer_rule_fixed_pv_sweep", return_value="fixed",
+        ) as fixed,
         patch(
             "figure_builder.recipes._plot_installer_rule",
             return_value=("figure", {"thr_fix": 800.0, "thr_free": 500.0}),
@@ -429,9 +441,60 @@ def test_installer_rule_builder_passes_county_schedule_mean_to_caption(tmp_path)
             return_value="fragment",
         ) as fragment,
     ):
-        build_installer_rule_figure(doc=doc)
+        build_installer_rule_figure(doc=doc, force=force)
 
+    free.assert_called_once_with("alameda", force=force)
+    fixed.assert_called_once_with("alameda", 5.0, prices, force=force)
     assert fragment.call_args.args[2] == pytest.approx(0.11)
+
+
+@pytest.mark.parametrize("force", [False, True])
+def test_installer_sweep_refreshes_a_compatible_cache_only_when_forced(tmp_path, force):
+    path = tmp_path / "fixed-pv.csv"
+    cached = pd.DataFrame({
+        "battery_capex_kwh": [500.0],
+        "batt_kwh": [9.0],
+        "max_battery_kwh": [40.0],
+        "meter_binary_count": [1],
+        "solver_rounds": [1],
+    })
+    cached.to_csv(path, index=False)
+    prices = SimpleNamespace(regime="post_itc_2026", pv_net_per_kw=3300)
+    dispatch = SimpleNamespace(coopt_inputs=lambda: "hourly-inputs")
+    with (
+        patch("figure_builder.recipes.installer_rule_sweep_path", return_value=path),
+        patch("figure_builder.datasets.canonical_battery_capex_points", return_value=[500.0]),
+        patch("figure_builder.recipes.county_dispatch_inputs", return_value=dispatch) as load,
+        patch(
+            "pipeline.steps.step9b_cooptimize_core.build_monthly_hourly_inputs",
+            return_value=("monthly-inputs", [31.0]),
+        ),
+        patch(
+            "pipeline.steps.step9b_cooptimize_core._solve_lp",
+            return_value=SimpleNamespace(batt_kwh=2.0, meter_binary_count=3, solver_rounds=2),
+        ) as solve,
+    ):
+        kwargs = {"force": True} if force else {}
+        result = _installer_rule_fixed_pv_sweep("alameda", 5.0, prices, **kwargs)
+    if force:
+        load.assert_called_once_with("alameda")
+        assert solve.call_args.kwargs["fixed_pv_kw"] == 5.0
+        assert result["batt_kwh"].tolist() == [2.0]
+    else:
+        load.assert_not_called()
+        solve.assert_not_called()
+        pd.testing.assert_frame_equal(result, cached)
+    pd.testing.assert_frame_equal(pd.read_csv(path), result)
+
+
+def test_shared_accounting_scope_replaces_old_split_between_sizing_and_reporting():
+    html = _limitations_fragment(_tariff_metadata_fixture(), 47)
+    assert "same monthly credit rules and annual settlement" in html
+    assert "Opening credit balances are zero" in html
+    assert "Remaining banks receive no extra value" in html
+    assert "positive-surplus case requires a sourced adjustment rate" in html
+    assert "does not reproduce every monthly" not in html
+    assert "Annual NSC settlement is not part" not in html
 
 
 def _tariff_metadata_fixture():
@@ -494,7 +557,8 @@ def test_tariff_status_fragment_uses_current_model_source_identity():
     assert "SCE TOU-D-PRIME (<code>sce-import</code>)" in html
     assert "SDG&amp;E EV-TOU-5 (<code>sdge-import</code>)" in html
     assert "<code>pge-export</code> plus ACC Plus <code>pge-adder</code>" in html
-    assert "Annual NSC settlement is not part of the NBT sizing-sweep objective" in html
+    assert "NBT sizing objective includes monthly credit application and annual settlement" in html
+    assert "Annual NSC settlement is not part" not in html
     assert "nem2_at_2026_retail_rates" in html
     assert "pge-rules" in html
 
