@@ -17,8 +17,8 @@ This project requires Python 3 with the following external dependencies:
 - **folium** - Interactive web maps creation
 - **numpy** - Numerical computing library
 - **PuLP** - Linear optimization model construction
-- **SciPy 1.9+** - HiGHS mixed-integer solver used by solar-storage co-optimization
-- **PySCIPOpt 6.2.1** - SCIP constraints for the shared credit accounting equations
+- **SciPy 1.9+** - HiGHS solver for NEM 2 and linear teaching models
+- **PySCIPOpt 6.2.1** - SCIP solver for NBT sizing and dispatch with shared credit accounting
 - **requests** - HTTP library for API calls
 - **boto3** - AWS SDK for Python (for accessing building data)
 - **botocore** - Low-level interface to AWS services
@@ -44,9 +44,9 @@ pip install PySAM pandas geopandas folium numpy pulp "scipy>=1.9" "pyscipopt==6.
 ```
 
 The shared accounting equations support numeric billing and SCIP optimization.
-SCIP enforces credit limits and proportional bonus allocation. Step 9b still
-uses HiGHS; connecting its dispatch decisions to this accounting is the next
-integration unit. Numeric billing does not import or run SCIP.
+Step 9b uses SCIP to minimize the NBT bill plus annualized equipment costs.
+The bill includes credit limits, proportional bonus allocation, and annual
+settlement. Numeric billing does not import or run SCIP. NEM 2 uses HiGHS.
 
 ### Getting Started
 1. Clone the Github repos locally.

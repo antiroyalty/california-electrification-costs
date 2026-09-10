@@ -59,6 +59,7 @@ def test_tariff_metadata_records_every_source_used_by_the_sweep():
         "service_type": "bundled",
         "customer_segment": "standard_non_equity",
         "tariff_snapshot_date": "2026-08-09",
+        "true_up_month": "2026-08",
     }
     assert utilities["PG&E"]["import"]["source_id"] == "pge_e_elec_2026-06-01"
     assert utilities["PG&E"]["export"]["source_ids"] == ["pge_nbt2026"]
@@ -70,7 +71,8 @@ def test_tariff_metadata_records_every_source_used_by_the_sweep():
     assert utilities["SDG&E"]["export"]["source_ids"] == ["sdge_nbt2026"]
     assert utilities["SDG&E"]["acc_plus"]["source_id"] == "cpuc_nbt_policy"
     annual_true_up = metadata["annual_true_up"]
-    assert annual_true_up["nbt_2026"]["used_by_sizing_objective"] is False
+    # Physical integration now includes the independently tested annual settlement.
+    assert annual_true_up["nbt_2026"]["used_by_sizing_objective"] is True
     assert (
         annual_true_up["nem2_at_2026_retail_rates"][
             "used_by_sizing_objective"
@@ -132,7 +134,10 @@ def test_optimization_metadata_matches_declared_coarse_sweep_settings():
             "common weighted 12x24 resolution."
         ),
     }
-    assert metadata["solver"]["backend"] == "highs"
+    assert metadata["solver"]["backend"] == "auto"
+    assert metadata["solver"]["backend_by_export_compensation_regime"] == {
+        "nbt_2026": "scip", "nem2_at_2026_retail_rates": "highs",
+    }
     assert metadata["solver"]["mip_relative_gap"] == 1e-6
     assert metadata["sizing_domain"]["max_battery_kwh"] == 40.0
     assert metadata["sizing_domain"]["max_pv_to_annual_load_ratio"] == 1.5

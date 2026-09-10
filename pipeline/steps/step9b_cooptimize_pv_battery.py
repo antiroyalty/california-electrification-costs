@@ -88,6 +88,7 @@ from helpers.main_helpers import (
     slugify_county_name,
 )
 from tariffs import NBTScenario, TariffCatalog, resolve_county_service_assignment
+from tariffs.optimization import NBTOptimizationTerms
 from tariffs.calendar import full_year_hourly_index
 
 from .step9_solar_storage_dispatch_core import (
@@ -1046,6 +1047,7 @@ def process(
             pv_gen_per_kw=G,
             import_rates=p_imp,
             export_rates=p_exp,
+            nbt_terms=NBTOptimizationTerms.from_tariff(tariff, ts_index),
         )
         result = _solve_lp(
             inputs,
@@ -1065,12 +1067,10 @@ def process(
         sweep_weights = None
         sweep_cycle = False
         if coarse_sweeps:
-            try:
-                sweep_inputs, sweep_weights = build_monthly_hourly_inputs(inputs, year=2018)
-                sweep_cycle = True
-            except Exception as e:
-                print(f"[step9b] Coarse sweep aggregation failed for {county_slug}: {e}")
-                sweep_inputs, sweep_weights, sweep_cycle = inputs, None, False
+            sweep_inputs, sweep_weights = build_monthly_hourly_inputs(
+                inputs, year=resolved_scenario.billing_year
+            )
+            sweep_cycle = True
 
         # Write outputs (Step 9 compatibility)
         _write_step9_outputs(out_dir, county_slug, ts_index, load_kwh, G, result.pv_kw, result.flows)
@@ -1290,6 +1290,11 @@ def process(
             "Coopt Capex Annual": round(result.capex_annual, 4),
             "Coopt Import Cost": round(result.import_cost, 4),
             "Coopt Export Credit": round(result.export_credit, 4),
+            "Coopt Electricity Bill": round(result.nbt_settlement.amount_due_usd, 4),
+            "Coopt Earned Export Credit": round(result.nbt_settlement.earned_credit_usd, 4),
+            "Coopt Ending Base Credit": round(sum(result.nbt_settlement.annual.closing_base), 4),
+            "Coopt Ending Bonus Credit": round(result.nbt_settlement.annual.closing_bonus, 4),
+            "Coopt Expired Base Credit": round(sum(result.nbt_settlement.annual.forfeited_base), 4),
             "Coopt Degradation Cost": round(result.degradation_cost, 4),
             "Allow Grid Charging": bool(allow_grid_charging),
             "Allow Battery Export": bool(allow_batt_export),

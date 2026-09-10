@@ -210,3 +210,51 @@ Step 12 also wrote and verified three county result files in a temporary directo
 The final full suite passed 663 tests, with 3 skipped, using the baseline command.
 The focused accounting, billing, and true-up suites passed all 129 tests.
 Optimizer integration and any necessary result reruns remain a later review unit.
+
+## Optimizer integration review
+
+The baseline at `a0fccbf` passed 698 tests, with 3 skipped. This includes the
+shared-equation tests committed after billing integration.
+
+Step 9b now minimizes annualized equipment cost plus the shared NBT bill and
+any specified degradation cost. Hourly imports and exports produce monthly
+charges and credits. The same accounting equations apply those credits in
+optimization and reporting. The physical constraints remain defined once in
+PuLP. A SCIP adapter adds the accounting objective, including the retained
+proportional bonus allocation. NEM 2 keeps its existing HiGHS formulation.
+
+The study starts with zero balances and assigns no terminal value to remaining
+banks. The result itemizes earned credits, payments, expiry, and carryover.
+`import_cost` now includes NBT fixed charges. `export_credit` is the net bill
+reduction after annual settlement; earned credit remains a separate diagnostic.
+The optimizer replays its normalized flows through numeric accounting and
+rejects a bill discrepancy above $0.001.
+
+A missing surplus-adjustment rate remains explicit. Omitting this nonnegative
+adjustment gives a lower bound: an adjustment can only increase payment or
+reduce the credit available for prior-payment offsets. A no-surplus solution
+has the same cost with any such rate. The optimizer can therefore certify that
+solution within its relative optimality tolerance of 0.000001. A competitive
+positive-surplus solution stops the run and requires the missing source rate.
+The bound is never reported as a numeric bill for a positive-surplus case.
+
+Integration tests show both smaller PV selection after credit saturation and
+battery dispatch changes when export credits cannot pay the remaining bill.
+They also check independent billing replay, true-up, weighted representative
+days, and missing-rate failure. One plotting fixture needed a complete tariff;
+its title assertion remains intact. Metadata expectations now identify SCIP
+for NBT and include annual settlement. Existing numeric billing expectations
+remain unchanged. Statewide result reruns remain outside this review unit.
+
+The full 8,760-hour Orange County `baseline_coopt` validation selected
+1.207884 kW PV and zero battery capacity. Its annual bill was $1,722.770855;
+independent reporting agreed within $0.001. The run took 407 seconds and two
+meter-constraint rounds. Representative-day runs also completed for Alameda
+and San Diego, in 71 and 5 seconds respectively. These validate integration;
+they do not establish statewide changes or a runtime bound for every scenario.
+The Step 9b writer also passed a no-equipment boundary run in a temporary
+directory, including the new payment and credit-balance columns.
+
+The final command `python -m pytest -q tests/ figure_builder/tests/` passed
+723 tests, with the same 3 skips. `git diff --check` passed. The complete
+`cost_service.py` pipeline and statewide reruns were not run in this unit.

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 import math
 from typing import List, Optional, Tuple
@@ -13,6 +13,8 @@ from appliances.solar_system import SolarSystemAppliance
 from appliances.battery_storage import BatteryStorageAppliance
 from appliances.electric_base import IncentiveScenario
 from tariffs.nem2 import NEM2OptimizationTerms
+from tariffs.optimization import NBTBillValues, NBTOptimizationTerms
+from tariffs.accounting_equations import NumericArithmetic
 
 # See step9b_cooptimize_pv_battery.py for the full note on why these must
 # match the appliance classes step14 uses for reporting, not a standalone
@@ -69,6 +71,7 @@ class CooptInputs:
     export_rates: List[float]
     nem2_terms: Optional[NEM2OptimizationTerms] = None
     max_pv_to_annual_load_ratio: float = 1.5
+    nbt_terms: Optional[NBTOptimizationTerms] = None
 
 
 @dataclass(frozen=True)
@@ -109,6 +112,7 @@ class CooptResult:
     flows: FlowSeries
     meter_binary_count: int
     solver_rounds: int
+    nbt_settlement: Optional[NBTBillValues[float]] = None
 
 
 @dataclass(frozen=True)
@@ -481,21 +485,24 @@ def _solve_lp(
     c_deg_per_kwh: float = 0.0,        # degradation cost per kWh throughput
     max_battery_kwh: float = DEFAULT_MAX_BATTERY_KWH,
     max_pv_to_annual_load_ratio: float | None = None,
-    solver_backend: str = "highs",
+    solver_backend: str = "auto",
 ) -> CooptResult:
-    """Build and solve the sparse MILP. Return sizing, costs, and flows.
+    """Minimize annualized equipment cost plus the tariff bill and degradation.
 
     FlowSeries order mirrors Step 9 conventions:
       pv_to_load, pv_to_batt, pv_to_grid, batt_to_load, batt_to_grid,
       grid_to_load, grid_to_batt, soc
 
     PV, battery, and flow decisions remain continuous. The model first solves
-    their LP relaxation, then creates binary meter-direction variables only at
+    a relaxation of the meter constraints, then creates binary variables only at
     intervals whose relaxed solution actually imports and exports at once.
     ``max_battery_kwh`` is the explicit household sizing ceiling and, with the
     1C constraint, supplies a tight battery-power bound for those disjunctions.
     A fixed-size sensitivity is itself an explicit override and therefore uses
     its fixed capacity as the bound.
+
+    NBT uses SCIP for shared credit accounting, including proportional bonus
+    allocation. NEM 2 and rate-only teaching models retain their linear models.
     """
     _ensure_pulp()
     L = inputs.load_kwh
@@ -511,9 +518,19 @@ def _solve_lp(
     }
     if len(set(lengths.values())) != 1 or H == 0:
         raise ValueError(f"All CooptInputs series must have the same nonzero length: {lengths}")
-    if any(float(value) < 0 for series in (L, G, p_imp, p_exp) for value in series):
-        raise ValueError("Loads, PV availability, and tariff rates must be non-negative")
+    if any(not math.isfinite(float(value)) or float(value) < 0
+           for series in (L, G, p_imp, p_exp) for value in series):
+        raise ValueError("Loads, PV availability, and tariff rates must be finite and non-negative")
     nem2_terms = inputs.nem2_terms
+    nbt_terms = inputs.nbt_terms
+    if nem2_terms is not None and nbt_terms is not None:
+        raise ValueError("A dispatch cannot use both NEM 2 and NBT accounting")
+    if nbt_terms is not None:
+        if len(nbt_terms.billing_months) != H:
+            raise ValueError("NBT optimization terms must match the interval count")
+        for supplied, expected in ((p_imp, nbt_terms.import_rates), (p_exp, nbt_terms.export_rates)):
+            if any(abs(float(a) - float(b)) > 1e-6 for a, b in zip(supplied, expected)):
+                raise ValueError("CooptInputs rates do not match the NBT optimization terms")
     if nem2_terms is not None:
         if len(nem2_terms.offsettable_rates_usd_per_kwh) != H:
             raise ValueError("NEM 2 optimization terms must match the interval count")
@@ -541,12 +558,18 @@ def _solve_lp(
         max_pv_to_annual_load_ratio = inputs.max_pv_to_annual_load_ratio
     if max_pv_to_annual_load_ratio <= 0:
         raise ValueError("max_pv_to_annual_load_ratio must be positive")
-    if solver_backend not in {"highs", "cbc"}:
-        raise ValueError("solver_backend must be 'highs' or 'cbc'")
+    if solver_backend == "auto":
+        solver_backend = "scip" if nbt_terms is not None else "highs"
+    if solver_backend not in {"highs", "cbc", "scip"}:
+        raise ValueError("solver_backend must be 'auto', 'highs', 'cbc', or 'scip'")
+    if (solver_backend == "scip") != (nbt_terms is not None):
+        raise ValueError("NBT accounting requires SCIP; other objectives use HiGHS or CBC")
     if weights is None:
         weights = [1.0] * H
     if len(weights) != H:
         raise ValueError("weights length must match number of hours")
+    if any(not math.isfinite(w) or w <= 0 for w in weights):
+        raise ValueError("weights must be finite and positive")
 
     # Problem
     prob = pulp.LpProblem("CoOptimize_PV_Battery_Dispatch", pulp.LpMinimize)
@@ -724,10 +747,11 @@ def _solve_lp(
     alpha_batt = _alpha_batt_npv(discount_rate, batt_life_yrs, N)
     capex_annual = PV_kw * c_pv_kw * alpha_pv + B_E * c_batt_kwh * alpha_batt + B_P * c_batt_kw * alpha_batt
 
-    # Operating bill. NBT uses linear interval import and export values. NEM 2
-    # uses annual retail-dollar netting, interval NBCs, positive monthly net
-    # recovery charges, and NSC for annual surplus kWh.
-    if nem2_terms is None:
+    # NBT accounting is attached by the SCIP adapter. Rate-only teaching models
+    # retain their linear objective; production NBT callers supply nbt_terms.
+    if nbt_terms is not None:
+        energy_cost = 0.0
+    elif nem2_terms is None:
         energy_cost = pulp.lpSum([
             float(weights[h])
             * (
@@ -873,7 +897,15 @@ def _solve_lp(
                 f"pinned over {H} intervals). The relaxation is not tightening, which "
                 f"indicates a defect in the disjunction bounds rather than a hard instance."
             )
-        if solver_backend == "highs":
+        if solver_backend == "scip":
+            from .coopt_scip import solve_nbt_with_scip
+
+            optimized_nbt_bill_usd = solve_nbt_with_scip(
+                prob, nbt_terms,
+                [grid2load[h] + grid2batt[h] for h in range(H)],
+                [pv2grid[h] + batt2grid[h] for h in range(H)], weights,
+            )
+        elif solver_backend == "highs":
             _solve_with_highs(prob)
         else:
             solver = pulp.PULP_CBC_CMD(msg=False)
@@ -976,7 +1008,23 @@ def _solve_lp(
         + b_p_val * c_batt_kw * alpha_batt
     )
     nem2_settlement = None
-    if nem2_terms is None:
+    nbt_settlement = None
+    if nbt_terms is not None:
+        nbt_settlement = nbt_terms.bill(
+            [flows.grid_to_load[h] + flows.grid_to_batt[h] for h in range(H)],
+            [flows.pv_to_grid[h] + flows.batt_to_grid[h] for h in range(H)],
+            weights, NumericArithmetic(),
+        )
+        if abs(nbt_settlement.amount_due_usd - optimized_nbt_bill_usd) > 1e-3:
+            raise RuntimeError(
+                "Optimized NBT bill does not reconcile with numeric accounting: "
+                f"solver={optimized_nbt_bill_usd}, replay={nbt_settlement.amount_due_usd}"
+            )
+        # Include fixed charges and the net effect of true-up in the same total
+        # used for sizing. Earned credits remain separately itemized in the bill.
+        import_cost_val = nbt_settlement.gross_charge_usd
+        export_credit_val = import_cost_val - nbt_settlement.amount_due_usd
+    elif nem2_terms is None:
         import_cost_val = sum(
             float(weights[h])
             * (flows.grid_to_load[h] + flows.grid_to_batt[h])
@@ -1108,6 +1156,7 @@ def _solve_lp(
         flows=flows,
         meter_binary_count=len(grid_import_mode),
         solver_rounds=solver_rounds,
+        nbt_settlement=nbt_settlement,
     )
     _verify_invariants(result, inputs)
     return result
@@ -1133,6 +1182,12 @@ def build_monthly_hourly_inputs(
     )
     df["month"] = df["ts"].dt.month
     df["hour"] = df["ts"].dt.hour
+    if inputs.nbt_terms is not None:
+        if tuple(df["month"]) != inputs.nbt_terms.billing_months:
+            raise ValueError("Aggregation calendar must match NBT billing months")
+        for i in range(len(inputs.nbt_terms.eligible_rates_usd_per_kwh[0])):
+            df[f"nbt_import_{i}"] = [row[i] for row in inputs.nbt_terms.eligible_rates_usd_per_kwh]
+            df[f"nbt_export_{i}"] = [row[i] for row in inputs.nbt_terms.base_export_rates_usd_per_kwh]
     grouped = (
         df.groupby(["month", "hour"])
         .mean(numeric_only=True)
@@ -1162,6 +1217,21 @@ def build_monthly_hourly_inputs(
                 exp.append(float(row.iloc[0]["exp"]))
             weights.append(float(days_in_month))
     aggregated_nem2_terms = None
+    aggregated_nbt_terms = None
+    if inputs.nbt_terms is not None:
+        pools = len(inputs.nbt_terms.eligible_rates_usd_per_kwh[0])
+        aggregated_nbt_terms = replace(
+            inputs.nbt_terms,
+            billing_months=tuple(int(m) for m in grouped["month"]),
+            eligible_rates_usd_per_kwh=tuple(
+                tuple(row[f"nbt_import_{i}"] for i in range(pools))
+                for _, row in grouped.iterrows()
+            ),
+            base_export_rates_usd_per_kwh=tuple(
+                tuple(row[f"nbt_export_{i}"] for i in range(pools))
+                for _, row in grouped.iterrows()
+            ),
+        )
     if inputs.nem2_terms is not None:
         aggregated_nem2_terms = NEM2OptimizationTerms(
             offsettable_rates_usd_per_kwh=tuple(imp),
@@ -1184,6 +1254,7 @@ def build_monthly_hourly_inputs(
             imp,
             exp,
             nem2_terms=aggregated_nem2_terms,
+            nbt_terms=aggregated_nbt_terms,
             max_pv_to_annual_load_ratio=(
                 inputs.max_pv_to_annual_load_ratio
             ),

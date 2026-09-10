@@ -14,6 +14,7 @@ from typing import List
 import numpy as np
 
 from tariffs import ExportCompensationRegime, NEM2OptimizationTerms
+from tariffs.optimization import NBTOptimizationTerms
 
 # --- domain constants -------------------------------------------------------
 DEFAULT_SCENARIO = "full_electric_ev_coopt"
@@ -46,6 +47,7 @@ class DispatchInputs:
     p_exp: np.ndarray          # 8760 hourly export value, $/kWh
     export_compensation_regime: ExportCompensationRegime
     nem2_terms: NEM2OptimizationTerms | None
+    nbt_terms: NBTOptimizationTerms | None = None
 
     @property
     def annual_load(self) -> float:
@@ -73,6 +75,7 @@ class DispatchInputs:
             import_rates=list(self.p_imp),
             export_rates=list(self.p_exp),
             nem2_terms=self.nem2_terms,
+            nbt_terms=self.nbt_terms,
             max_pv_to_annual_load_ratio=(
                 self.export_compensation_regime.max_pv_to_annual_load_ratio
             ),
@@ -112,8 +115,10 @@ def county_dispatch_inputs(
     catalog = TariffCatalog()
     ts = full_year_hourly_index(2026)
     nem2_terms = None
+    nbt_terms = None
     if regime is ExportCompensationRegime.NBT_2026:
         tariff = catalog.bundle(assignment.utility, NBTScenario())
+        nbt_terms = NBTOptimizationTerms.from_tariff(tariff, ts)
         p_imp = np.array(tariff.import_schedule.rates_for(ts))
         p_exp = (
             np.array(tariff.export_schedule.rates_for(ts))
@@ -133,6 +138,7 @@ def county_dispatch_inputs(
         p_exp=p_exp,
         export_compensation_regime=regime,
         nem2_terms=nem2_terms,
+        nbt_terms=nbt_terms,
     )
 
 

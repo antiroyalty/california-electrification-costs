@@ -199,6 +199,7 @@ def tariff_metadata() -> dict:
             "service_type": scenario.service_type.value,
             "customer_segment": scenario.customer_segment.value,
             "tariff_snapshot_date": scenario.tariff_snapshot_date,
+            "true_up_month": scenario.true_up_month,
         },
         "source_manifests": [
             "data/tariffs/import_source_manifest.json",
@@ -208,14 +209,17 @@ def tariff_metadata() -> dict:
             "data/tariffs/nem2_rate_treatment.json",
             "data/tariffs/true_up_source_manifest.json",
             "data/tariffs/nsc_rates.csv",
+            "data/tariffs/eec_adjustment_rates.csv",
         ],
         "utilities": utilities,
         "annual_true_up": {
             ExportCompensationRegime.NBT_2026.value: {
-                "used_by_sizing_objective": False,
+                "used_by_sizing_objective": True,
                 "reason": (
-                    "The NBT sizing objective uses interval import and export "
-                    "prices. Annual NSC settlement is not part of that objective."
+                    "The NBT sizing objective uses shared monthly and annual "
+                    "credit accounting, including surplus adjustment and NSC. "
+                    "A missing adjustment rate permits a result only when the "
+                    "optimistic lower-bound solution has no annual net surplus."
                 ),
             },
             ExportCompensationRegime.NEM2_AT_2026_RETAIL_RATES.value: {
@@ -297,6 +301,10 @@ def optimization_metadata(*, fine: bool) -> dict:
         },
         "solver": {
             "backend": settings.solver_backend,
+            "backend_by_export_compensation_regime": {
+                "nbt_2026": "scip",
+                "nem2_at_2026_retail_rates": "highs",
+            },
             "mip_relative_gap": HIGHS_MIP_RELATIVE_GAP,
             "output_absolute_tolerance": SOLVER_OUTPUT_ABSOLUTE_TOLERANCE,
         },
@@ -339,6 +347,7 @@ def software_metadata() -> dict:
     import pandas
     import pulp
     import scipy
+    import pyscipopt
 
     return {
         "python": platform.python_version(),
@@ -346,6 +355,7 @@ def software_metadata() -> dict:
         "pandas": pandas.__version__,
         "scipy": scipy.__version__,
         "pulp": pulp.__version__,
+        "pyscipopt": pyscipopt.__version__,
         "matplotlib": matplotlib.__version__,
     }
 

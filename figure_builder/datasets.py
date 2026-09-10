@@ -54,7 +54,7 @@ class SweepModelSettings:
     pv_lifetime_years: int = 25
     battery_lifetime_years: int = 15
     discount_rate: float = 0.07
-    solver_backend: str = "highs"
+    solver_backend: str = "auto"
 
 
 SWEEP_MODEL_SETTINGS = SweepModelSettings()

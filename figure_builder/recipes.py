@@ -418,8 +418,7 @@ def _installer_rule_fixed_pv_sweep(county, pv_offset, prices):
         ):
             return cached
     di = county_dispatch_inputs(county)
-    inp = CooptInputs(load_kwh=di.load, pv_gen_per_kw=di.pv_gen_per_kw,
-                      import_rates=di.p_imp, export_rates=di.p_exp)
+    inp = di.coopt_inputs()
     inp, weights = build_monthly_hourly_inputs(inp, year=2026)
     rows = []
     for cb in requested_points:

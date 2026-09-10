@@ -146,11 +146,14 @@ def run(
         for rate in tariff.export_schedule.rates_for(ts_index)
     ]
 
+    from tariffs.optimization import NBTOptimizationTerms
+
     inputs = CooptInputs(
         load_kwh=load_kwh,
         pv_gen_per_kw=pv_gen_per_kw,
         import_rates=p_imp,
         export_rates=p_exp,
+        nbt_terms=NBTOptimizationTerms.from_tariff(tariff, ts_index),
     )
 
     weights = None
