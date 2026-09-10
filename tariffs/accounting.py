@@ -15,8 +15,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 from numbers import Real
-from operator import add, sub
-from typing import Callable
+
+from .accounting_equations import (
+    NumericArithmetic,
+    annual_accounting,
+    annual_bill_adjustment,
+    monthly_accounting,
+    monthly_payment,
+    paid_eligible_energy,
+)
 
 
 def _usd(value: float, name: str) -> float:
@@ -70,22 +77,18 @@ def _require_energy(amounts: EnergyAmounts) -> None:
         raise TypeError("Energy amounts must be ComponentAmounts or PooledAmount")
 
 
-def _combine_energy(
-    left: EnergyAmounts,
-    right: EnergyAmounts,
-    operation: Callable[[float, float], float],
-) -> EnergyAmounts:
-    """Apply dollar arithmetic within matching credit restrictions."""
-    _require_energy(left)
-    _require_energy(right)
-    if type(left) is not type(right):
-        raise ValueError("Pooled and component energy amounts cannot be mixed")
-    if isinstance(left, ComponentAmounts):
-        return ComponentAmounts(
-            operation(left.generation_usd, right.generation_usd),
-            operation(left.delivery_usd, right.delivery_usd),
-        )
-    return PooledAmount(operation(left.energy_usd, right.energy_usd))
+def _values(amounts: EnergyAmounts) -> tuple[float, ...]:
+    _require_energy(amounts)
+    if isinstance(amounts, ComponentAmounts):
+        return (amounts.generation_usd, amounts.delivery_usd)
+    return (amounts.energy_usd,)
+
+
+def _from_values(template: EnergyAmounts, values: tuple[float, ...]) -> EnergyAmounts:
+    _require_energy(template)
+    if isinstance(template, ComponentAmounts):
+        return ComponentAmounts(*values)
+    return PooledAmount(*values)
 
 
 @dataclass(frozen=True)
@@ -113,17 +116,23 @@ class MonthlySettlement:
     @property
     def paid_eligible_energy(self) -> EnergyAmounts:
         """Energy charges paid after both credits; eligible for annual offsets."""
-        after_base = _combine_energy(self.eligible_energy, self.base_applied, sub)
-        return _combine_energy(after_base, self.bonus_applied_to_energy, sub)
+        return _from_values(
+            self.eligible_energy,
+            paid_eligible_energy(
+                _values(self.eligible_energy),
+                _values(self.base_applied),
+                _values(self.bonus_applied_to_energy),
+            ),
+        )
 
     @property
     def payment_usd(self) -> float:
-        after_base = _combine_energy(self.eligible_energy, self.base_applied, sub)
-        return (
-            after_base.total_usd
-            + self.non_bypassable_charge_usd
-            + self.fixed_charge_usd
-            - self.bonus_applied_usd
+        return monthly_payment(
+            _values(self.eligible_energy),
+            _values(self.base_applied),
+            self.non_bypassable_charge_usd,
+            self.fixed_charge_usd,
+            self.bonus_applied_usd,
         )
 
 
@@ -145,41 +154,31 @@ def settle_month(
         raise TypeError("opening and earned must be CreditBalances")
     nbc_usd = _usd(non_bypassable_charge_usd, "non_bypassable_charge_usd")
     fixed_usd = _usd(fixed_charge_usd, "fixed_charge_usd")
-    available_base = _combine_energy(opening.base, earned.base, add)
-    base_applied = _combine_energy(available_base, eligible_energy, min)
-    remaining_energy = _combine_energy(eligible_energy, base_applied, sub)
-    available_bonus_usd = _usd(opening.bonus_usd + earned.bonus_usd, "available_bonus_usd")
-    before_bonus_usd = _usd(
-        remaining_energy.total_usd + nbc_usd + fixed_usd, "before_bonus_usd"
+    _require_energy(eligible_energy)
+    if not (type(opening.base) is type(earned.base) is type(eligible_energy)):
+        raise ValueError("Pooled and component energy amounts cannot be mixed")
+    values = monthly_accounting(
+        eligible=_values(eligible_energy),
+        nbc=nbc_usd,
+        fixed=fixed_usd,
+        opening_base=_values(opening.base),
+        opening_bonus=opening.bonus_usd,
+        earned_base=_values(earned.base),
+        earned_bonus=earned.bonus_usd,
+        arithmetic=NumericArithmetic(),
     )
-    bonus_applied_usd = min(available_bonus_usd, before_bonus_usd)
-    bonus_to_energy_usd = min(bonus_applied_usd, remaining_energy.total_usd)
-
-    if isinstance(remaining_energy, ComponentAmounts):
-        fraction = (
-            bonus_to_energy_usd / remaining_energy.total_usd
-            if remaining_energy.total_usd > 0
-            else 0.0
-        )
-        bonus_to_energy = ComponentAmounts(
-            remaining_energy.generation_usd * fraction,
-            remaining_energy.delivery_usd * fraction,
-        )
-    else:
-        bonus_to_energy = PooledAmount(bonus_to_energy_usd)
-
+    _usd(values.payment, "payment_usd")
     return MonthlySettlement(
         eligible_energy=eligible_energy,
         non_bypassable_charge_usd=nbc_usd,
         fixed_charge_usd=fixed_usd,
         opening=opening,
         earned=earned,
-        base_applied=base_applied,
-        bonus_applied_usd=bonus_applied_usd,
-        bonus_applied_to_energy=bonus_to_energy,
+        base_applied=_from_values(eligible_energy, values.applied_base),
+        bonus_applied_usd=values.applied_bonus,
+        bonus_applied_to_energy=_from_values(eligible_energy, values.bonus_to_energy),
         closing=CreditBalances(
-            _combine_energy(available_base, base_applied, sub),
-            available_bonus_usd - bonus_applied_usd,
+            _from_values(eligible_energy, values.closing_base), values.closing_bonus
         ),
     )
 
@@ -200,13 +199,11 @@ class AnnualSettlement:
     @property
     def net_bill_adjustment_usd(self) -> float:
         """Added charge (positive) or credit (negative), not a cash refund."""
-        unpaid_adjustment = _combine_energy(
-            self.surplus_adjustment, self.base_applied_to_adjustment, sub
-        )
-        return (
-            unpaid_adjustment.total_usd
-            - self.base_applied_to_prior_payments.total_usd
-            - self.nsc_entitlement_usd
+        return annual_bill_adjustment(
+            _values(self.surplus_adjustment),
+            _values(self.base_applied_to_adjustment),
+            _values(self.base_applied_to_prior_payments),
+            self.nsc_entitlement_usd,
         )
 
 
@@ -241,17 +238,20 @@ def settle_year(
         if not isinstance(value, bool):
             raise TypeError(f"{name} must be boolean")
     nsc_usd = _usd(nsc_entitlement_usd, "nsc_entitlement_usd")
-    zero = _combine_energy(opening.base, opening.base, sub)
-    # Validate prior payment restrictions even when backward offsets are disabled.
-    _combine_energy(prior_paid_eligible_energy, zero, add)
-    to_adjustment = _combine_energy(opening.base, surplus_adjustment, min)
-    remaining = _combine_energy(opening.base, to_adjustment, sub)
-    to_prior = (
-        _combine_energy(remaining, prior_paid_eligible_energy, min)
-        if offset_prior_payments
-        else zero
+    _require_energy(prior_paid_eligible_energy)
+    _require_energy(surplus_adjustment)
+    if not (type(opening.base) is type(prior_paid_eligible_energy) is type(surplus_adjustment)):
+        raise ValueError("Pooled and component energy amounts cannot be mixed")
+    values = annual_accounting(
+        opening_base=_values(opening.base),
+        opening_bonus=opening.bonus_usd,
+        prior_paid=_values(prior_paid_eligible_energy),
+        adjustment=_values(surplus_adjustment),
+        nsc=nsc_usd,
+        offset_prior_payments=offset_prior_payments,
+        carry_base_credit=carry_base_credit,
+        arithmetic=NumericArithmetic(),
     )
-    remaining = _combine_energy(remaining, to_prior, sub)
     return AnnualSettlement(
         opening=opening,
         prior_paid_eligible_energy=prior_paid_eligible_energy,
@@ -259,8 +259,10 @@ def settle_year(
         nsc_entitlement_usd=nsc_usd,
         offset_prior_payments=offset_prior_payments,
         carry_base_credit=carry_base_credit,
-        base_applied_to_adjustment=to_adjustment,
-        base_applied_to_prior_payments=to_prior,
-        forfeited_base=zero if carry_base_credit else remaining,
-        closing=CreditBalances(remaining if carry_base_credit else zero, opening.bonus_usd),
+        base_applied_to_adjustment=_from_values(opening.base, values.applied_adjustment),
+        base_applied_to_prior_payments=_from_values(opening.base, values.applied_prior),
+        forfeited_base=_from_values(opening.base, values.forfeited_base),
+        closing=CreditBalances(
+            _from_values(opening.base, values.closing_base), values.closing_bonus
+        ),
     )

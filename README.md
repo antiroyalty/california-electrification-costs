@@ -18,6 +18,7 @@ This project requires Python 3 with the following external dependencies:
 - **numpy** - Numerical computing library
 - **PuLP** - Linear optimization model construction
 - **SciPy 1.9+** - HiGHS mixed-integer solver used by solar-storage co-optimization
+- **PySCIPOpt 6.2.1** - SCIP constraints for the shared credit accounting equations
 - **requests** - HTTP library for API calls
 - **boto3** - AWS SDK for Python (for accessing building data)
 - **botocore** - Low-level interface to AWS services
@@ -38,9 +39,14 @@ This project requires Python 3 with the following external dependencies:
 #### Installation
 Install all dependencies using pip:
 ```bash
-pip install PySAM pandas geopandas folium numpy pulp "scipy>=1.9" requests \
+pip install PySAM pandas geopandas folium numpy pulp "scipy>=1.9" "pyscipopt==6.2.1" requests \
   boto3 botocore geopy python-dotenv pytest matplotlib pdfplumber
 ```
+
+The shared accounting equations support numeric billing and SCIP optimization.
+SCIP enforces credit limits and proportional bonus allocation. Step 9b still
+uses HiGHS; connecting its dispatch decisions to this accounting is the next
+integration unit. Numeric billing does not import or run SCIP.
 
 ### Getting Started
 1. Clone the Github repos locally.
