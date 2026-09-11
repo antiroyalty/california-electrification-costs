@@ -1,6 +1,5 @@
 """Tariff-domain primitives used by optimization and bill evaluation."""
 
-from .billing import BillLedger, calculate_nbt_bill
 from .catalog import TariffCatalog
 from .geography import CountyServiceAssignment, resolve_county_service_assignment
 from .import_rates import ImportRateSchedule, required_nbt_import_plan
@@ -24,6 +23,13 @@ from .nem2 import (
     NEM2TariffBundle,
     calculate_nem2_bill,
 )
+from .nbt import (
+    AnnualCreditSettlement,
+    BillLedger,
+    NBTAnnualTerms,
+    calculate_nbt_bill,
+    settle_annual_credits,
+)
 from .preflight import (
     NBTPreflightResult,
     discover_nbt_profile_counties,
@@ -38,9 +44,10 @@ from .true_up import (
 )
 
 __all__ = [
-    "BillLedger",
+    "AnnualCreditSettlement",
     "AverageRetailExportCompensationRate",
     "AverageRetailExportCompensationSchedule",
+    "BillLedger",
     "CustomerSegment",
     "CountyServiceAssignment",
     "EnergyFlows",
@@ -49,6 +56,7 @@ __all__ = [
     "NEM2BillLedger",
     "NEM2MonthlyBill",
     "NEM2OptimizationTerms",
+    "NBTAnnualTerms",
     "NBTPreflightResult",
     "NBTScenario",
     "NEM2RateTreatment",
@@ -69,4 +77,5 @@ __all__ = [
     "preflight_nbt_run",
     "required_nbt_import_plan",
     "resolve_county_service_assignment",
+    "settle_annual_credits",
 ]

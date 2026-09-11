@@ -13,8 +13,7 @@ from typing import List
 
 import numpy as np
 
-from tariffs import ExportCompensationRegime, NEM2OptimizationTerms
-from tariffs.optimization import NBTOptimizationTerms
+from tariffs import ExportCompensationRegime, NBTAnnualTerms, NEM2OptimizationTerms
 
 # --- domain constants -------------------------------------------------------
 DEFAULT_SCENARIO = "full_electric_ev_coopt"
@@ -47,7 +46,7 @@ class DispatchInputs:
     p_exp: np.ndarray          # 8760 hourly export value, $/kWh
     export_compensation_regime: ExportCompensationRegime
     nem2_terms: NEM2OptimizationTerms | None
-    nbt_terms: NBTOptimizationTerms | None = None
+    nbt_terms: NBTAnnualTerms | None = None
 
     @property
     def annual_load(self) -> float:
@@ -118,7 +117,7 @@ def county_dispatch_inputs(
     nbt_terms = None
     if regime is ExportCompensationRegime.NBT_2026:
         tariff = catalog.bundle(assignment.utility, NBTScenario())
-        nbt_terms = NBTOptimizationTerms.from_tariff(tariff, ts)
+        nbt_terms = NBTAnnualTerms.from_tariff(tariff, ts)
         p_imp = np.array(tariff.import_schedule.rates_for(ts))
         p_exp = np.array(tariff.export_schedule.rates_for(ts))
     else:

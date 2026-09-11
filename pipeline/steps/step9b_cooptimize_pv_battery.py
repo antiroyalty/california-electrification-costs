@@ -88,7 +88,7 @@ from helpers.main_helpers import (
     slugify_county_name,
 )
 from tariffs import NBTScenario, TariffCatalog, resolve_county_service_assignment
-from tariffs.optimization import NBTOptimizationTerms
+from tariffs import NBTAnnualTerms
 from tariffs.calendar import full_year_hourly_index
 
 from .step9_solar_storage_dispatch_core import (
@@ -1046,7 +1046,7 @@ def process(
             pv_gen_per_kw=G,
             import_rates=p_imp,
             export_rates=p_exp,
-            nbt_terms=NBTOptimizationTerms.from_tariff(tariff, ts_index),
+            nbt_terms=NBTAnnualTerms.from_tariff(tariff, ts_index),
         )
         result = _solve_lp(
             inputs,

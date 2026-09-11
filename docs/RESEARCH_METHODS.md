@@ -211,6 +211,10 @@ SDG&E keep separate generation and delivery pools. Base credits cannot pay
 fixed charges or non-bypassable charges, which are charges protected from these
 credits. Credits apply only up to the annual amount owed in each pool.
 
+The `tariffs.nbt` module owns the annual tariff terms, credit settlement, and
+numeric bill ledger. The optimizer supplies solver expressions to this domain
+calculation. It does not define a separate billing formula.
+
 The research model makes three explicit simplifications:
 
 1. **Exclude ACC Plus.** Hourly base export credits remain included. The model

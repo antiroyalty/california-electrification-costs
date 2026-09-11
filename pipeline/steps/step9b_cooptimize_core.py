@@ -13,8 +13,7 @@ from appliances.solar_system import SolarSystemAppliance
 from appliances.battery_storage import BatteryStorageAppliance
 from appliances.electric_base import IncentiveScenario
 from tariffs.nem2 import NEM2OptimizationTerms
-from tariffs.optimization import NBTOptimizationTerms
-from tariffs.accounting import AnnualCreditSettlement
+from tariffs.nbt import AnnualCreditSettlement, NBTAnnualTerms
 from tariffs.models import require_annual_export_cap
 
 # See step9b_cooptimize_pv_battery.py for the full note on why these must
@@ -72,7 +71,7 @@ class CooptInputs:
     export_rates: List[float]
     nem2_terms: Optional[NEM2OptimizationTerms] = None
     max_pv_to_annual_load_ratio: float = 1.5
-    nbt_terms: Optional[NBTOptimizationTerms] = None
+    nbt_terms: Optional[NBTAnnualTerms] = None
 
 
 @dataclass(frozen=True)
@@ -528,10 +527,10 @@ def _solve_lp(
         raise ValueError("A dispatch cannot use both NEM 2 and NBT accounting")
     if nbt_terms is not None:
         if len(nbt_terms.billing_months) != H:
-            raise ValueError("NBT optimization terms must match the interval count")
+            raise ValueError("NBT annual terms must match the interval count")
         for supplied, expected in ((p_imp, nbt_terms.import_rates), (p_exp, nbt_terms.export_rates)):
             if any(abs(float(a) - float(b)) > 1e-6 for a, b in zip(supplied, expected)):
-                raise ValueError("CooptInputs rates do not match the NBT optimization terms")
+                raise ValueError("CooptInputs rates do not match the NBT annual terms")
     if nem2_terms is not None:
         if len(nem2_terms.offsettable_rates_usd_per_kwh) != H:
             raise ValueError("NEM 2 optimization terms must match the interval count")

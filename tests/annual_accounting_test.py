@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from tariffs.accounting import settle_annual_credits
+from tariffs import settle_annual_credits
 
 
 @pytest.mark.parametrize(

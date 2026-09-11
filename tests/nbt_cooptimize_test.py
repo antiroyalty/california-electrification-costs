@@ -9,9 +9,14 @@ from evaluations.eac import compute_eac_from_inputs, crf
 from pipeline.steps.step9b_cooptimize_core import (
     CooptInputs, _solve_lp, build_monthly_hourly_inputs,
 )
-from tariffs import EnergyFlows, NBTScenario, TariffCatalog, calculate_nbt_bill
+from tariffs import (
+    EnergyFlows,
+    NBTAnnualTerms,
+    NBTScenario,
+    TariffCatalog,
+    calculate_nbt_bill,
+)
 from tariffs.models import TariffBundle, Utility
-from tariffs.optimization import NBTOptimizationTerms
 
 
 class ImportPrices:
@@ -47,7 +52,7 @@ def _case(utility="PG&E", *, imports=None, exports=None):
         import_schedule=imports or ImportPrices(), export_schedule=exports or ExportPrices(),
     )
     timestamps = pd.date_range("2026-01-01", periods=2, freq="h")
-    terms = NBTOptimizationTerms.from_tariff(
+    terms = NBTAnnualTerms.from_tariff(
         tariff, timestamps,
     )
     inputs = CooptInputs(
@@ -176,7 +181,7 @@ def test_annual_export_cap_counts_battery_exports():
 
     case = _case("SCE", exports=EveningExports(0.30, 0.45))
     timestamps = pd.date_range("2026-01-01", periods=3, freq="h")
-    terms = NBTOptimizationTerms.from_tariff(
+    terms = NBTAnnualTerms.from_tariff(
         case[1], timestamps,
     )
     inputs = CooptInputs(
@@ -200,7 +205,7 @@ def test_annual_export_cap_preserves_the_zero_system():
 def test_real_tariff_and_weighted_monthly_inputs_preserve_accounting(utility):
     tariff = TariffCatalog().bundle(utility, NBTScenario())
     timestamps = pd.date_range("2026-01-01", periods=8760, freq="h")
-    terms = NBTOptimizationTerms.from_tariff(tariff, timestamps)
+    terms = NBTAnnualTerms.from_tariff(tariff, timestamps)
     inputs = CooptInputs([1] * 8760, [0.5] * 8760,
                          list(terms.import_rates), list(terms.export_rates), nbt_terms=terms)
     grouped, weights = build_monthly_hourly_inputs(inputs, year=2026)
@@ -235,7 +240,7 @@ def test_invalid_interval_weights_stop_before_optimization(weights):
                                          ["2026-02-01", "2026-01-01"]])
 def test_invalid_calendar_cannot_change_monthly_accounting(timestamps):
     with pytest.raises(ValueError, match="nonempty, unique, and ordered"):
-        NBTOptimizationTerms.from_tariff(_case()[1], timestamps)
+        NBTAnnualTerms.from_tariff(_case()[1], timestamps)
 
 
 def test_nonfinite_total_rate_is_rejected_even_when_components_are_finite():
@@ -257,7 +262,7 @@ def test_optimizer_applies_late_credits_to_earlier_annual_charges(utility, backe
         "2026-01-01 00:00", "2026-01-01 12:00",
         "2026-02-01 00:00", "2026-02-01 12:00",
     ])
-    terms = NBTOptimizationTerms.from_tariff(tariff, timestamps)
+    terms = NBTAnnualTerms.from_tariff(tariff, timestamps)
     inputs = CooptInputs([200, 0, 200, 0], [0, 0, 0, 100],
                          list(terms.import_rates), list(terms.export_rates), nbt_terms=terms)
     result = _solve_lp(inputs, fixed_pv_kw=1, fixed_batt_kwh=0, solver_backend=backend)

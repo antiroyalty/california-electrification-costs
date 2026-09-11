@@ -225,9 +225,9 @@
       "worked_examples": "tests/fixtures/nbt_monthly_reference.json; docs/HOUSEHOLD_COST_RECONCILIATION.md"
     },
     "code": [
-      "tariffs/accounting.py:settle_annual_credits",
-      "tariffs/billing.py:calculate_nbt_bill",
-      "tariffs/optimization.py:NBTOptimizationTerms"
+      "tariffs/nbt.py:NBTAnnualTerms",
+      "tariffs/nbt.py:settle_annual_credits",
+      "tariffs/nbt.py:calculate_nbt_bill"
     ],
     "notes": "Earned export credits are not automatically savings. Applied and unused annual credits are reported separately. The monthly reference engine and tests remain in Git at 860949e; frozen examples preserve old expected values."
   },
