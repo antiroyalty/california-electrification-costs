@@ -13,6 +13,7 @@ from tariffs import EnergyFlows, NBTScenario, TariffCatalog, calculate_nbt_bill
 from tariffs.models import TariffBundle, Utility
 from tariffs.optimization import NBTOptimizationTerms
 from tariffs.accounting_equations import NumericArithmetic
+from tariffs.accounting_scip import ScipArithmetic
 from tariffs.true_up import AverageRetailExportCompensationRate, NetSurplusCompensationRate
 
 
@@ -194,6 +195,40 @@ def test_real_tariff_and_weighted_monthly_inputs_preserve_accounting(utility):
                        fixed_pv_kw=0, fixed_batt_kwh=0)
     ledger = calculate_nbt_bill(EnergyFlows(timestamps, [1] * 8760, [0] * 8760), tariff)
     assert result.nbt_settlement.amount_due_usd == pytest.approx(ledger.annual_amount_due)
+
+
+@pytest.mark.parametrize("utility", ["PG&E", "SCE", "SDG&E"])
+def test_excluded_bonus_leaves_linear_accounting_with_exact_bill_replay(utility):
+    from pyscipopt import Model
+
+    tariff = TariffCatalog().bundle(utility, NBTScenario(include_acc_plus=False))
+    timestamps = pd.DatetimeIndex([
+        "2026-01-01 00:00", "2026-01-01 12:00",
+        "2026-02-01 00:00", "2026-02-01 12:00",
+    ])
+    imports, exports = [200, 0, 200, 0], [0, 100, 0, 100]
+    terms = NBTOptimizationTerms.from_tariff(tariff, timestamps)
+    assert terms.export_rates == pytest.approx(tariff.export_schedule.rates_for(timestamps))
+    model = Model()
+    model.hideOutput()
+    try:
+        bill = terms.bill(
+            [model.addVar(lb=v, ub=v) for v in imports],
+            [model.addVar(lb=v, ub=v) for v in exports],
+            [1] * len(timestamps), ScipArithmetic(model),
+            missing_rate_lower_bound=terms.adjustment_rate is None,
+        )
+        assert all(c.getConshdlrName() != "nonlinear" for c in model.getConss())
+        model.setObjective(bill.amount_due_usd)
+        model.optimize()
+        assert model.getStatus() == "optimal"
+        ledger = calculate_nbt_bill(EnergyFlows(timestamps, imports, exports), tariff)
+        assert ledger.true_up_settlement.net_surplus_kwh == 0
+        assert model.getObjVal() == pytest.approx(ledger.annual_amount_due)
+        assert ledger.annual_acc_plus_credit == 0
+        assert ledger.ending_acc_plus_credit_bank == 0
+    finally:
+        model.freeProb()
 
 
 @pytest.mark.parametrize("backend", ["highs", "cbc"])

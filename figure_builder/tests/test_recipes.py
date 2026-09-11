@@ -510,19 +510,19 @@ def _tariff_metadata_fixture():
                 "utility": "PG&E",
                 "import": {"plan_name": "E-ELEC", "source_id": "pge-import"},
                 "export": {"source_ids": ["pge-export"]},
-                "acc_plus": {"source_id": "pge-adder"},
+                "acc_plus": {"included": True, "source_id": "pge-adder"},
             },
             {
                 "utility": "SCE",
                 "import": {"plan_name": "TOU-D-PRIME", "source_id": "sce-import"},
                 "export": {"source_ids": ["sce-export"]},
-                "acc_plus": {"source_id": "sce-adder"},
+                "acc_plus": {"included": True, "source_id": "sce-adder"},
             },
             {
                 "utility": "SDG&E",
                 "import": {"plan_name": "EV-TOU-5", "source_id": "sdge-import"},
                 "export": {"source_ids": ["sdge-export"]},
-                "acc_plus": {"source_id": "sdge-adder"},
+                "acc_plus": {"included": True, "source_id": "sdge-adder"},
             },
         ],
         "comparison": {
@@ -561,6 +561,16 @@ def test_tariff_status_fragment_uses_current_model_source_identity():
     assert "Annual NSC settlement is not part" not in html
     assert "nem2_at_2026_retail_rates" in html
     assert "pge-rules" in html
+
+
+def test_tariff_status_discloses_excluded_bonus_without_a_false_source():
+    metadata = _tariff_metadata_fixture()
+    for record in metadata["utilities"]:
+        record["acc_plus"] = {"included": False, "source_id": None}
+    html = _tariff_status_fragment(metadata)
+    assert html.count("ACC Plus excluded") == 3
+    assert "plus ACC Plus" not in html
+    assert "<code>None</code>" not in html
 
 
 def test_tariff_status_builder_replaces_legacy_text_and_is_idempotent(tmp_path):

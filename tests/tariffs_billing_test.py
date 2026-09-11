@@ -194,7 +194,7 @@ def test_nbt_scenario_requires_canonical_true_up_month_in_billing_year(
 
 
 def test_acc_plus_is_separate_from_base_eec_and_can_offset_fixed_charges():
-    tariff = TariffCatalog().bundle("SCE", NBTScenario(nbt_vintage=2026))
+    tariff = TariffCatalog().bundle("SCE", NBTScenario(nbt_vintage=2026, include_acc_plus=True))
     flows = _single_month_flows([0.0], [100.0])
     ledger = calculate_nbt_bill(flows, tariff)
     month = ledger.months[0].accounting
@@ -206,7 +206,7 @@ def test_acc_plus_is_separate_from_base_eec_and_can_offset_fixed_charges():
 
 
 def test_true_up_only_recredits_energy_charges_paid_after_acc_plus():
-    tariff = TariffCatalog().bundle("SCE", NBTScenario(nbt_vintage=2026))
+    tariff = TariffCatalog().bundle("SCE", NBTScenario(nbt_vintage=2026, include_acc_plus=True))
     flows = EnergyFlows(
         pd.DatetimeIndex(
             ["2026-01-05 12:00", "2026-02-05 18:00", "2026-08-05 18:00"]
@@ -271,7 +271,7 @@ def test_representative_annual_bill_and_credit_intermediates_stay_in_ballpark():
             imports.append(0.0)
             exports.append(0.0)
 
-    tariff = TariffCatalog().bundle("SCE", NBTScenario(nbt_vintage=2026))
+    tariff = TariffCatalog().bundle("SCE", NBTScenario(nbt_vintage=2026, include_acc_plus=True))
     ledger = calculate_nbt_bill(EnergyFlows(timestamps, imports, exports), tariff)
 
     # Assumption-based research guardrails. These intentionally leave room for
@@ -281,6 +281,42 @@ def test_representative_annual_bill_and_credit_intermediates_stay_in_ballpark():
     assert 50 < ledger.annual_base_export_credit < 500
     assert 30 < ledger.annual_acc_plus_credit < 50
     assert 1_000 < ledger.annual_amount_due < 4_000
+
+
+@pytest.mark.parametrize("utility,bonus_rate", [("PG&E", 0.0088), ("SCE", 0.016), ("SDG&E", 0)])
+@pytest.mark.parametrize("export_kwh", [0, 100])
+def test_research_bill_omits_only_the_usable_bonus(utility, bonus_rate, export_kwh):
+    flows = _single_month_flows([1000, 0], [0, export_kwh])
+    catalog = TariffCatalog()
+    research = calculate_nbt_bill(flows, catalog.bundle(utility, NBTScenario()))
+    reference = calculate_nbt_bill(
+        flows, catalog.bundle(utility, NBTScenario(include_acc_plus=True)),
+    )
+    assert research.annual_base_export_credit == reference.annual_base_export_credit
+    assert research.annual_base_credit_applied == reference.annual_base_credit_applied
+    assert research.annual_acc_plus_credit == 0
+    assert research.annual_acc_plus_credit_applied == 0
+    assert research.ending_acc_plus_credit_bank == 0
+    # These imports leave enough eligible charges to use every earned bonus dollar.
+    assert research.annual_amount_due - reference.annual_amount_due == pytest.approx(
+        export_kwh * bonus_rate
+    )
+
+
+def test_excluding_bonus_keeps_fixed_charges_due_and_no_unused_bonus_bank():
+    flows = _single_month_flows([0], [100])
+    catalog = TariffCatalog()
+    research = calculate_nbt_bill(flows, catalog.bundle("SCE", NBTScenario()))
+    reference = calculate_nbt_bill(
+        flows, catalog.bundle("SCE", NBTScenario(include_acc_plus=True)),
+    )
+    assert reference.ending_acc_plus_credit_bank > 0
+    assert research.ending_acc_plus_credit_bank == 0
+    assert research.monthly_amount_due == research.months[0].accounting.fixed_charge_usd
+    assert research.annual_amount_due - reference.annual_amount_due == pytest.approx(
+        reference.annual_acc_plus_credit_applied
+    )
+    assert reference.annual_acc_plus_credit_applied < reference.annual_acc_plus_credit
 
 
 @pytest.mark.parametrize("utility", ["PG&E", "SCE", "SDG&E"])

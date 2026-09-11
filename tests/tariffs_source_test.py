@@ -186,12 +186,32 @@ def test_exact_2026_vintage_acc_plus_adders(utility, standard, equity):
     catalog = TariffCatalog()
     assert catalog.acc_plus_rate(
         utility,
-        NBTScenario(nbt_vintage=2026, customer_segment=CustomerSegment.STANDARD),
+        NBTScenario(nbt_vintage=2026, customer_segment=CustomerSegment.STANDARD,
+                    include_acc_plus=True),
     ) == pytest.approx(standard)
     assert catalog.acc_plus_rate(
         utility,
-        NBTScenario(nbt_vintage=2026, customer_segment=CustomerSegment.EQUITY),
+        NBTScenario(nbt_vintage=2026, customer_segment=CustomerSegment.EQUITY,
+                    include_acc_plus=True),
     ) == pytest.approx(equity)
+
+
+@pytest.mark.parametrize("utility", ["PG&E", "SCE", "SDG&E"])
+@pytest.mark.parametrize("segment", list(CustomerSegment))
+def test_research_tariff_excludes_bonus_without_loading_adder_data(tmp_path, utility, segment):
+    catalog = TariffCatalog(acc_plus_data_path=tmp_path / "unused-acc-plus.csv")
+    bundle = catalog.bundle(utility, NBTScenario(customer_segment=segment))
+    assert bundle.scenario.include_acc_plus is False
+    assert bundle.acc_plus_rate == 0.0
+    assert bundle.acc_plus_source_id is None
+
+
+def test_excluded_acc_plus_cannot_hide_a_positive_rate_in_a_bundle():
+    from dataclasses import replace
+
+    bundle = TariffCatalog().bundle("PG&E", NBTScenario(include_acc_plus=False))
+    with pytest.raises(ValueError, match="Excluded ACC Plus rate must be zero"):
+        replace(bundle, acc_plus_rate=0.0088, acc_plus_source_id="pge_advice_7174_e")
 
 
 def test_county_selects_utility_but_does_not_select_a_climate_zone_schedule():

@@ -205,7 +205,11 @@ class NBTOptimizationTerms:
                 for h in hours
             ) for i in range(len(zero)))
             nbc = sum(weights[h] * imports[h] for h in hours) * self.nbc_rate_usd_per_kwh
-            bonus = sum(weights[h] * exports[h] for h in hours) * self.bonus_rate_usd_per_kwh
+            # Keep an excluded bonus numeric. A symbolic zero would create unnecessary
+            # bonus-bank variables and nonlinear proportional allocation constraints.
+            bonus = 0.0
+            if self.bonus_rate_usd_per_kwh > 0:
+                bonus = sum(weights[h] * exports[h] for h in hours) * self.bonus_rate_usd_per_kwh
             row = monthly_accounting(
                 eligible=eligible, nbc=nbc, fixed=fixed,
                 opening_base=balance, opening_bonus=bonus_balance,

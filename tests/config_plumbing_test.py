@@ -28,6 +28,11 @@ from pipeline.config import Config
 from tariffs import CustomerSegment
 
 
+def test_research_config_excludes_acc_plus_by_default():
+    cfg = Config(scenario="baseline_coopt", housing_type="single-family-detached")
+    assert cfg.nbt_scenario().include_acc_plus is False
+
+
 def test_config_builds_an_explicit_nbt_policy_scenario():
     cfg = Config(
         scenario="baseline",

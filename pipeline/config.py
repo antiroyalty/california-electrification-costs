@@ -37,11 +37,12 @@ class Config:
 
     # Net Billing Tariff policy scenario. The default represents a system that
     # applies for interconnection and is billed in 2026. Vintage is explicit
-    # because it materially changes both EEC shapes and the ACC Plus adder.
+    # because it materially changes the base export-credit schedule.
     nbt_billing_year: int = 2026
     nbt_vintage: int = 2026
     nbt_customer_segment: str = CustomerSegment.STANDARD.value
-    nbt_include_acc_plus: bool = True
+    # The research model omits ACC Plus. Enable only for explicit reference comparisons.
+    nbt_include_acc_plus: bool = False
     # Current-snapshot method: apply tariffs in effect on this date to the
     # standardized 8,760-hour billing-year profile. A different date must have
     # its own source-locked snapshot; the catalog never falls back silently.

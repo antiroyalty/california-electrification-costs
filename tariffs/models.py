@@ -87,7 +87,8 @@ class NBTScenario:
     nbt_vintage: int = 2026
     service_type: ServiceType = ServiceType.BUNDLED
     customer_segment: CustomerSegment = CustomerSegment.STANDARD
-    include_acc_plus: bool = True
+    # Research runs omit the bonus; detailed tariff comparisons can enable it explicitly.
+    include_acc_plus: bool = False
     tariff_snapshot_date: str = "2026-08-09"
     true_up_month: str = "2026-08"
 
@@ -157,5 +158,7 @@ class TariffBundle:
     def __post_init__(self) -> None:
         if self.acc_plus_rate < 0:
             raise ValueError("ACC Plus rate cannot be negative")
+        if not self.scenario.include_acc_plus and self.acc_plus_rate != 0:
+            raise ValueError("Excluded ACC Plus rate must be zero")
         if self.scenario.include_acc_plus and not self.acc_plus_source_id:
             raise ValueError("Included ACC Plus rate must declare a source_id")

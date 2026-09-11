@@ -959,9 +959,13 @@ def _tariff_status_fragment(metadata: dict) -> str:
             f"{utility} {import_schedule['plan_name']} "
             f"(<code>{import_schedule['source_id']}</code>)"
         )
+        bonus_description = (
+            f"plus ACC Plus <code>{acc_plus['source_id']}</code>"
+            if acc_plus["included"] else "(ACC Plus excluded)"
+        )
         export_items.append(
             f"{utility} <code>{', '.join(export_schedule['source_ids'])}</code> "
-            f"plus ACC Plus <code>{acc_plus['source_id']}</code>"
+            f"{bonus_description}"
         )
 
     customer_segment = scenario["customer_segment"].replace("_", " ")

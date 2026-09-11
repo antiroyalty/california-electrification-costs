@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 import pytest
 
+from tariffs import NBTScenario
 from figure_builder.datasets import CLAIMS_EAC_SCENARIOS, claims_eac_manifest_path
 from figure_builder.dispatch import CLAIM1_COUNTIES
 from figure_builder.metadata import (
@@ -44,7 +45,11 @@ def test_capital_cost_metadata_records_both_exact_regime_prices_and_sources():
         assert row["battery_sweep_points_usd_per_kwh"].count(exact) == 1
 
 
-def test_tariff_metadata_records_every_source_used_by_the_sweep():
+def test_tariff_metadata_records_every_source_used_by_the_sweep(monkeypatch):
+    # Preserve the sourced-adder reference case when the research default excludes it.
+    monkeypatch.setattr(
+        "figure_builder.metadata.NBTScenario", lambda: NBTScenario(include_acc_plus=True),
+    )
     metadata = tariff_metadata()
     utilities = {row["utility"]: row for row in metadata["utilities"]}
     comparison = metadata["comparison"]
@@ -105,6 +110,14 @@ def test_tariff_metadata_records_every_source_used_by_the_sweep():
     assert "data/tariffs/true_up_source_manifest.json" in metadata[
         "source_manifests"
     ]
+
+
+def test_research_metadata_records_acc_plus_exclusion_for_every_utility():
+    for record in tariff_metadata()["utilities"]:
+        assert record["acc_plus"] == {
+            "included": False, "rate_usd_per_kwh": 0.0,
+            "rate_unit": "USD/kWh", "source_id": None,
+        }
 
 
 def test_optimization_metadata_matches_declared_coarse_sweep_settings():
