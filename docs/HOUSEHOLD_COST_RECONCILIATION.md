@@ -9,9 +9,73 @@ This note preserves the detailed accounting checks and integration history.
 On September 10, 2026, the research author approved excluding ACC Plus,
 limiting annual exports to annual imports, and settling eligible base credits
 annually. These choices supersede this note's earlier direction to retain the
-detailed accounting centrally. They remain pending implementation and result
-validation; the current code at `1634760` uses the integrated monthly model.
-The worked examples below remain evidence about that detailed model.
+detailed accounting centrally. All three choices are now implemented. Publication outputs still require
+regeneration. The worked examples below remain evidence about the former
+detailed model, preserved in Git through `860949e`. They are not descriptions
+of the current annual research calculation.
+
+## Annual-model validation and retired reference behavior
+
+The unchanged `860949e` baseline passed 829 tests, with 3 skipped. Before
+removing monthly accounting, its teaching results were frozen in
+[`tests/fixtures/nbt_monthly_reference.json`](../tests/fixtures/nbt_monthly_reference.json).
+The fixture records the revision, inputs, old bills, and unused credits.
+
+The new tests compare 18 matched cases across all three utilities. PG&E and
+SCE annual costs agree with the old model for these zero-opening, capped,
+base-only cases. SDG&E's late-credit case changes from $148 to $138: $10 now
+pays an earlier generation charge. That is the approved timing approximation.
+Example 5 still gives $54 for SCE and $64 for separate component pools.
+Example 4 still leaves $120 unused in the first year. The annual model gives
+that balance no future value; its independently modeled second year costs $468.
+The old PG&E second-year value of $348 remains in the fixture and table below.
+
+The retired tests are not numerical regressions accepted by replacing answers:
+
+- `tests/accounting_test.py` and `tests/accounting_scip_test.py` tested the
+  removed monthly banks, bonus allocation, annual disposition, and SCIP adapter.
+  Their full inputs and assertions remain at `860949e`.
+- Monthly/bonus/opening-bank tests in `tests/tariffs_billing_test.py` are replaced
+  by annual behavior tests and comparisons with frozen examples. Earlier
+  bonus and carryover answers remain reference evidence below.
+- NBT surplus-settlement tests in `tests/true_up_test.py` are retired. Source
+  rate validation remains, including NSC inputs used by NEM 2. Research bills
+  and preflight now reject positive annual surplus directly.
+- Optimizer tests retain fixed-system, sizing, dispatch, capital-cost, weighted
+  energy-cap, and bill-replay expectations. HiGHS and CBC now solve the shared
+  annual equation. Removed missing-rate branches have no place in the capped
+  annual model.
+
+Ordinary binary floating-point roundoff remains possible. The old exact SCE
+$54 and $648 assertions encountered errors below $10^{-12} after changing the
+summation order. Their expected dollar values are unchanged; comparisons now
+use an explicit $10^{-10} tolerance. No currency rounding is added to accounting.
+
+### Validation result for the annual integration
+
+The annual implementation passed 746 tests, with 3 skipped. A further 162
+focused integration tests passed after the final metadata and source-input edits.
+The 288-hour Alameda cases preserved the prior results: free sizing cost
+$1,921.437174/year; fixed 10 kWh storage cost $3,089.426350/year. Their numeric
+bills and capital calculations matched optimization within $0.001.
+
+A full 8,760-hour `CostService.run()` for Alameda `baseline_coopt` completed
+sizing, billing, EAC reporting, and county diagnostics in an isolated output
+directory. The run used the configured free-sizing domain and a non-interactive
+plotting backend (`MPLBACKEND=Agg`). An initial run aborted natively without a
+Python traceback; the diagnostic run completed with this backend. Payback and
+cross-scenario outputs were unavailable because comparison ledgers were not
+included in the isolated directory. No statewide publication results were replaced.
+
+The full-year optimizer's electricity bill was $1,582.1789; reporting gave
+$1,582.178907. One existing issue remains outside this credit-accounting change:
+Step 9b persists capacities rounded to two decimals, and downstream capital
+reporting uses them. Optimizer solar capital cost was $347.6452/year; reporting
+gave $348.304889/year, a $0.66 difference. Preserve full artifact precision in a
+separate correction. This finding does not change the reconciled electricity bill.
+The visualization module also prints a fixed-sizing assumption for this co-optimized
+run. That existing console description needs a separate correction; it is not
+the executed sizing method.
 
 ## Decision and scope
 

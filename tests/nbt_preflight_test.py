@@ -84,9 +84,6 @@ def test_pge_net_importer_needs_no_surplus_rate_source(tmp_path):
     assert result.row_count == 8760
     assert result.annual_import_kwh == pytest.approx(5_000)
     assert result.annual_export_kwh == pytest.approx(4_000)
-    assert result.net_surplus_kwh == 0.0
-    assert result.adjustment_source_id is None
-    assert result.nsc_source_id is None
     assert result.import_source_id
     assert result.export_source_ids
 
@@ -95,9 +92,6 @@ def test_pge_net_importer_needs_no_surplus_rate_source(tmp_path):
 def test_research_preflight_accepts_equal_annual_imports_and_exports(tmp_path, county):
     _write_profile(tmp_path, county, annual_import_kwh=4000, annual_export_kwh=4000)
     result = _preflight(tmp_path, county)
-    assert result.net_surplus_kwh == 0
-    assert result.adjustment_source_id is None
-    assert result.nsc_source_id is None
 
 
 def test_county_discovery_ignores_non_county_pipeline_directories(tmp_path):
@@ -150,20 +144,20 @@ def test_source_complete_reference_surplus_is_outside_the_research_domain(
         annual_export_kwh=5_000,
     )
 
-    # Sourced tariff arithmetic remains valid. The research constraint excludes
-    # this dispatch even when every surplus-payment source is available.
-    ledger = calculate_nbt_bill(
-        _validated_flows(path, NBTScenario()), TariffCatalog().bundle(utility, NBTScenario()),
-    )
-    assert ledger.utility is utility
-    assert ledger.true_up_settlement.net_surplus_kwh == pytest.approx(1_000)
-    assert ledger.true_up_settlement.adjustment_rate_source_id == adjustment_source
-    assert ledger.true_up_settlement.nsc_rate_source_id == nsc_source
+    from tariffs.true_up import AverageRetailExportCompensationSchedule, NetSurplusCompensationSchedule
+    assert AverageRetailExportCompensationSchedule.from_csv().resolve(
+        utility, "2026-08"
+    ).source_id == adjustment_source
+    assert NetSurplusCompensationSchedule.from_csv().resolve(utility, "2026-08").source_id == nsc_source
+    with pytest.raises(ValueError, match="annual exported kWh <= annual imported kWh"):
+        calculate_nbt_bill(
+            _validated_flows(path, NBTScenario()), TariffCatalog().bundle(utility, NBTScenario()),
+        )
     with pytest.raises(ValueError, match="annual exported kWh <= annual imported kWh"):
         _preflight(tmp_path, county)
 
 
-def test_pge_reference_surplus_still_needs_a_source_but_research_rejects_the_dispatch(tmp_path):
+def test_pge_net_exporter_is_rejected_before_any_surplus_rate_lookup(tmp_path):
     path = _write_profile(
         tmp_path,
         "alameda",
@@ -171,7 +165,7 @@ def test_pge_reference_surplus_still_needs_a_source_but_research_rejects_the_dis
         annual_export_kwh=5_000,
     )
 
-    with pytest.raises(KeyError, match=r"PG&E.*found 0.*Available: \[\]"):
+    with pytest.raises(ValueError, match="annual exported kWh <= annual imported kWh"):
         calculate_nbt_bill(
             _validated_flows(path, NBTScenario()), TariffCatalog().bundle("PG&E", NBTScenario()),
         )

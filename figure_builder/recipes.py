@@ -186,7 +186,7 @@ def _mechanism_fragment(
     <div class="obj-eq"><span class="ot-cap">PV&middot;c<sub>pv</sub>&middot;&alpha;<sub>pv</sub></span> <span class="op">+</span> <span class="ot-cap">B&middot;c<sub>batt</sub>&middot;&alpha;<sub>batt</sub></span> <span class="op">+</span> <span class="ot-imp">Bill(imports, exports)</span> <span class="op">+</span> <span class="ot-plain">deg</span></div>
     <ul class="obj-gloss">
       <li><span class="chip chip-cap">capex</span> annualized cost of the solar and battery you build.</li>
-      <li><span class="chip chip-imp">Bill</span> modeled annual electricity cost after monthly credit restrictions and annual settlement. It includes fixed and non-bypassable charges and deducts credits actually applied. Sizing and reporting use the same accounting equations.</li>
+      <li><span class="chip chip-imp">Bill</span> modeled annual electricity cost after annual settlement within eligible credit pools. It includes fixed and non-bypassable charges and deducts credits actually applied. Sizing and reporting use the same accounting equations.</li>
       <li><span class="chip chip-imp">p<sub>imp</sub></span> illustrative import prices average ~${mB['peak_import_rate']:.3f}/kWh across the top {mB['peak_share_pct']:.0f}% of modeled import-price hours.</li>
       <li><span class="chip chip-exp">p<sub>exp</sub></span> illustrative export prices average ~${mB['v_export']:.3f}/kWh when hourly prices are weighted by modeled PV generation. Earned credits reduce the bill only when settlement rules allow their use.</li>
       <li><span class="chip chip-cap">deg</span> modeled battery-throughput cost, separate from annualized equipment cost.</li>
@@ -562,7 +562,7 @@ def _policy_matrix_fragment(results, chart_meta, exact_check, image: str) -> str
   <table class="data-table"><thead><tr><th>Policy case</th><th>Median optimal PV</th><th>Median optimal battery</th><th>Count at PV sizing cap</th></tr></thead><tbody>{''.join(rows)}</tbody></table>
 
   <div class="method"><h3>Interpretation and full-year check</h3>
-    <p>The NEM&nbsp;2 model applies annual retail-dollar credit netting, interval non-bypassable charges, positive monthly net-consumption recovery charges, credit expiration at true-up, and monthly net-surplus compensation. NBT uses the source-locked hourly Energy Export Credit plus ACC&nbsp;Plus schedules.</p>
+    <p>The NEM&nbsp;2 model applies annual retail-dollar credit netting, interval non-bypassable charges, positive monthly net-consumption recovery charges, credit expiration at true-up, and monthly net-surplus compensation. NBT uses source-locked hourly base Energy Export Credits, settled annually within eligible pools. ACC&nbsp;Plus is excluded.</p>
     <p>A targeted Alameda NEM&nbsp;2/post-ITC 8,760-hour solve selected {exact_check['exact_pv_kw']:.3f}&nbsp;kW PV and {exact_check['exact_battery_kwh']:.3f}&nbsp;kWh storage. The common-resolution panel differs by {abs(exact_check['pv_difference_kw']):.4f}&nbsp;kW PV and {abs(exact_check['battery_difference_kwh']):.4f}&nbsp;kWh storage. This check supports the panel&rsquo;s sizing result without mixing resolutions across the four-cell comparison.</p>
     <p>Sources and exact input fingerprints are recorded in <code>figure_builder/figures/policy_matrix_metadata.json</code>. The normalized results are in <code>figure_builder/figures/policy_matrix_optimal_sizes.csv</code>.</p>
   </div>'''
@@ -742,7 +742,7 @@ def _claim4_fragment(
   <div class="method">
     <h3>Controlled comparison</h3>
     <p>Current post-ITC capital-cost inputs are ${current_prices.pv_net_per_kw:,.0f}/kW for PV and ${current_prices.batt_net_per_kwh:,.2f}/kWh for storage. The 2025 ITC sensitivity uses ${itc_prices.pv_net_per_kw:,.0f}/kW and ${itc_prices.batt_net_per_kwh:,.3f}/kWh.</p>
-    <p>The NEM&nbsp;2 model applies annual retail-dollar credit netting, interval non-bypassable charges, positive monthly net-consumption recovery charges, credit expiration, and net-surplus compensation. The NBT optimization uses the source-locked hourly Energy Export Credit, ACC&nbsp;Plus, and the complete retail import schedule.</p>
+    <p>The NEM&nbsp;2 model applies annual retail-dollar credit netting, interval non-bypassable charges, positive monthly net-consumption recovery charges, credit expiration, and net-surplus compensation. The NBT optimization uses source-locked hourly base Energy Export Credits and the complete retail import schedule. Credits settle annually within eligible pools; ACC&nbsp;Plus is excluded.</p>
     <p>The targeted Alameda 8,760-hour NEM&nbsp;2 check selects {exact_check['exact_pv_kw']:.3f}&nbsp;kW PV and {exact_check['exact_battery_kwh']:.3f}&nbsp;kWh storage. Its PV result differs from the common-resolution observation by {abs(exact_check['pv_difference_kw']):.4f}&nbsp;kW.</p>
   </div>
 
@@ -926,8 +926,8 @@ _LEGACY_TARIFF_STATUS_PATTERN = (
 def _nbt_accounting_scope_fragment() -> str:
     """Shared description of the modeled NBT year for both claims documents."""
     return '''    <li>The NBT results use one modeled billing year.
-      <p>Sizing and reporting use the same monthly credit rules and annual settlement. Opening credit balances are zero. Remaining banks receive no extra value beyond the modeled year. Annual exports cannot exceed annual imports in NBT research results. Hourly exports remain allowed. This research constraint can exclude profitable net-exporting designs and affect the electrification comparison.</p>
-      <p>The study retains utility-specific credit pools and year-end treatment, including the SDG&amp;E convention that unused credits expire without offsetting earlier payments.</p>
+      <p>Sizing and reporting settle base credits annually within the same eligible pools. ACC Plus is excluded. Unused annual credits have no future value. Annual exports cannot exceed annual imports in NBT research results. Hourly exports remain allowed. This research constraint can exclude profitable net-exporting designs and affect the electrification comparison.</p>
+      <p>SCE uses one energy-credit pool. PG&amp;E and SDG&amp;E use separate generation and delivery pools. Annual settlement ignores monthly credit timing and can overstate SDG&amp;E savings relative to the former no-backward-offset convention.</p>
     </li>'''
 
 
@@ -954,18 +954,13 @@ def _tariff_status_fragment(metadata: dict) -> str:
         utility = record["utility"].replace("&", "&amp;")
         import_schedule = record["import"]
         export_schedule = record["export"]
-        acc_plus = record["acc_plus"]
         import_items.append(
             f"{utility} {import_schedule['plan_name']} "
             f"(<code>{import_schedule['source_id']}</code>)"
         )
-        bonus_description = (
-            f"plus ACC Plus <code>{acc_plus['source_id']}</code>"
-            if acc_plus["included"] else "(ACC Plus excluded)"
-        )
         export_items.append(
             f"{utility} <code>{', '.join(export_schedule['source_ids'])}</code> "
-            f"{bonus_description}"
+            "(ACC Plus excluded)"
         )
 
     customer_segment = scenario["customer_segment"].replace("_", " ")
@@ -993,7 +988,7 @@ def _tariff_status_fragment(metadata: dict) -> str:
         <li>Import schedules: {import_line}.</li>
         <li>Export schedules: {export_line}.</li>
         <li>NEM 2 comparison: {nem2_scenario['research_label']}, tariff snapshot {nem2_scenario['tariff_snapshot_date']}; {nem2_line}.</li>
-        <li>The NBT sizing objective includes monthly credit application and annual settlement. The research export cap makes annual net-surplus adjustments and compensation zero. The NEM 2 objective applies annual credit expiration and source-selected NSC.</li>
+        <li>The NBT sizing objective settles base credits annually within eligible pools. The research export cap makes annual net-surplus adjustments and compensation zero. The NEM 2 objective applies annual credit expiration and source-selected NSC.</li>
       </ul>
     </li>'''
 
@@ -1023,7 +1018,7 @@ def _claim1_support_fragment(prices_now, prices_2025) -> str:
     <ul>
       <li><code>tests/lp_cooptimize_test.py</code> checks that sizing uses the configured capital costs and the repository&rsquo;s annualization primitives.</li>
       <li><code>tests/solar_storage_dispatch_test.py</code> checks hourly energy balance, state of charge, and physical meter direction.</li>
-      <li><code>tests/tariffs_source_test.py</code> checks the source-locked import, NBT export, ACC Plus, and NBC tariff primitives.</li>
+      <li><code>tests/tariffs_source_test.py</code> checks the source-locked import, NBT export and NBC tariff primitives; ACC Plus rates remain archived reference evidence.</li>
       <li><code>figure_builder/tests/test_datasets.py</code> checks exact market-point selection and complete source coverage; <code>figure_builder/tests/test_recipes.py</code> checks that captions are derived from current modeled values.</li>
     </ul>
   </div>
@@ -1133,7 +1128,7 @@ def _claim2_fragment(
   <div class="evidence"><h3>Checks tied to this claim</h3><ul>
     <li><code>tests/total_annual_costs_test.py</code> checks EAC reconciliation and NaN propagation.</li>
     <li><code>tests/capital_costs_test.py</code> checks annualized capital-cost inputs.</li>
-    <li><code>tests/tariffs_source_test.py</code> checks the source-locked import, export, ACC Plus, and NBC tariff primitives used in annual bills.</li>
+    <li><code>tests/tariffs_source_test.py</code> checks the source-locked import, base export, and NBC tariff primitives used in annual bills.</li>
     <li><code>figure_builder/tests/test_datasets.py</code> checks complete scenario/county coverage and exact comparison arithmetic.</li>
   </ul></div>
 </section>'''

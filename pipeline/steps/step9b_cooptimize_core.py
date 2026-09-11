@@ -13,8 +13,8 @@ from appliances.solar_system import SolarSystemAppliance
 from appliances.battery_storage import BatteryStorageAppliance
 from appliances.electric_base import IncentiveScenario
 from tariffs.nem2 import NEM2OptimizationTerms
-from tariffs.optimization import NBTBillValues, NBTOptimizationTerms
-from tariffs.accounting_equations import NumericArithmetic
+from tariffs.optimization import NBTOptimizationTerms
+from tariffs.accounting import AnnualCreditSettlement
 from tariffs.models import require_annual_export_cap
 
 # See step9b_cooptimize_pv_battery.py for the full note on why these must
@@ -113,7 +113,7 @@ class CooptResult:
     flows: FlowSeries
     meter_binary_count: int
     solver_rounds: int
-    nbt_settlement: Optional[NBTBillValues[float]] = None
+    nbt_settlement: Optional[AnnualCreditSettlement[float]] = None
 
 
 @dataclass(frozen=True)
@@ -502,8 +502,8 @@ def _solve_lp(
     A fixed-size sensitivity is itself an explicit override and therefore uses
     its fixed capacity as the bound.
 
-    NBT uses SCIP for shared credit accounting, including proportional bonus
-    allocation. NEM 2 and rate-only teaching models retain their linear models.
+    NBT uses annual credit pools with continuous remaining-charge variables.
+    Both NBT and NEM 2 use HiGHS by default, with CBC available explicitly.
     """
     _ensure_pulp()
     L = inputs.load_kwh
@@ -560,11 +560,9 @@ def _solve_lp(
     if max_pv_to_annual_load_ratio <= 0:
         raise ValueError("max_pv_to_annual_load_ratio must be positive")
     if solver_backend == "auto":
-        solver_backend = "scip" if nbt_terms is not None else "highs"
-    if solver_backend not in {"highs", "cbc", "scip"}:
-        raise ValueError("solver_backend must be 'auto', 'highs', 'cbc', or 'scip'")
-    if (solver_backend == "scip") != (nbt_terms is not None):
-        raise ValueError("NBT accounting requires SCIP; other objectives use HiGHS or CBC")
+        solver_backend = "highs"
+    if solver_backend not in {"highs", "cbc"}:
+        raise ValueError("solver_backend must be 'auto', 'highs', or 'cbc'")
     if weights is None:
         weights = [1.0] * H
     if len(weights) != H:
@@ -737,8 +735,7 @@ def _solve_lp(
     alpha_batt = _alpha_batt_npv(discount_rate, batt_life_yrs, pv_life_yrs)
     capex_annual = PV_kw * c_pv_kw * alpha_pv + B_E * c_batt_kwh * alpha_batt + B_P * c_batt_kw * alpha_batt
 
-    # NBT accounting is attached by the SCIP adapter. Rate-only teaching models
-    # retain their linear objective; production NBT callers supply nbt_terms.
+    # NBT uses the same annual credit equation as numeric reporting.
     if nbt_terms is not None:
         # Cap actual annual meter exports, including storage. Hourly exports and
         # available PV generation above annual load remain allowed through curtailment.
@@ -747,7 +744,23 @@ def _solve_lp(
             * (pv2grid[h] + batt2grid[h] - grid2load[h] - grid2batt[h])
             for h in range(H)
         ) <= 0, "nbt_annual_exports_not_above_imports"
-        energy_cost = 0.0
+        remaining_pool_charges = []
+
+        def positive_part(net_charge):
+            # One continuous variable per pool; minimizing the bill makes this
+            # equal max(net_charge, 0). No financial binary variables are needed.
+            due = pulp.LpVariable(
+                f"nbt_annual_remaining_charge_{len(remaining_pool_charges)}", lowBound=0,
+            )
+            prob.addConstraint(due >= net_charge)
+            remaining_pool_charges.append(due)
+            return due
+
+        energy_cost = nbt_terms.bill(
+            [grid2load[h] + grid2batt[h] for h in range(H)],
+            [pv2grid[h] + batt2grid[h] for h in range(H)], weights,
+            positive_part=positive_part, sum_amounts=pulp.lpSum,
+        ).amount_due_usd
     elif nem2_terms is None:
         energy_cost = pulp.lpSum([
             float(weights[h])
@@ -894,15 +907,7 @@ def _solve_lp(
                 f"pinned over {H} intervals). The relaxation is not tightening, which "
                 f"indicates a defect in the disjunction bounds rather than a hard instance."
             )
-        if solver_backend == "scip":
-            from .coopt_scip import solve_nbt_with_scip
-
-            optimized_nbt_bill_usd = solve_nbt_with_scip(
-                prob, nbt_terms,
-                [grid2load[h] + grid2batt[h] for h in range(H)],
-                [pv2grid[h] + batt2grid[h] for h in range(H)], weights,
-            )
-        elif solver_backend == "highs":
+        if solver_backend == "highs":
             _solve_with_highs(prob)
         else:
             solver = pulp.PULP_CBC_CMD(msg=False)
@@ -1016,14 +1021,15 @@ def _solve_lp(
         nbt_settlement = nbt_terms.bill(
             [flows.grid_to_load[h] + flows.grid_to_batt[h] for h in range(H)],
             [flows.pv_to_grid[h] + flows.batt_to_grid[h] for h in range(H)],
-            weights, NumericArithmetic(),
+            weights,
         )
+        optimized_nbt_bill_usd = float(pulp.value(energy_cost))
         if abs(nbt_settlement.amount_due_usd - optimized_nbt_bill_usd) > 1e-3:
             raise RuntimeError(
                 "Optimized NBT bill does not reconcile with numeric accounting: "
                 f"solver={optimized_nbt_bill_usd}, replay={nbt_settlement.amount_due_usd}"
             )
-        # Include fixed charges and the net effect of true-up in the same total
+        # Include fixed charges and applied annual credits in the same total
         # used for sizing. Earned credits remain separately itemized in the bill.
         import_cost_val = nbt_settlement.gross_charge_usd
         export_credit_val = import_cost_val - nbt_settlement.amount_due_usd

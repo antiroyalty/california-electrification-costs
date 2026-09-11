@@ -34,11 +34,8 @@ class NBTPreflightResult:
     row_count: int
     annual_import_kwh: float
     annual_export_kwh: float
-    net_surplus_kwh: float
     import_source_id: str
     export_source_ids: tuple[str, ...]
-    adjustment_source_id: str | None
-    nsc_source_id: str | None
 
 
 def _profile_path(
@@ -191,11 +188,8 @@ def preflight_nbt_county(
         row_count=len(validated),
         annual_import_kwh=annual_import_kwh,
         annual_export_kwh=annual_export_kwh,
-        net_surplus_kwh=0.0,
         import_source_id=import_source_id,
         export_source_ids=export_source_ids,
-        adjustment_source_id=None,
-        nsc_source_id=None,
     )
 
 

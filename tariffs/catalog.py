@@ -25,7 +25,6 @@ from .true_up import (
 
 
 DEFAULT_EXPORT_DATA = Path(__file__).resolve().parents[1] / "data" / "tariffs" / "nbt_export_rates.csv"
-DEFAULT_ACC_PLUS_DATA = Path(__file__).resolve().parents[1] / "data" / "tariffs" / "acc_plus_rates.csv"
 
 
 @dataclass(frozen=True)
@@ -82,7 +81,6 @@ class TariffCatalog:
     def __init__(
         self,
         export_data_path: str | Path = DEFAULT_EXPORT_DATA,
-        acc_plus_data_path: str | Path = DEFAULT_ACC_PLUS_DATA,
         import_snapshot_data_path: str | Path = DEFAULT_IMPORT_SNAPSHOT_DATA,
         import_source_manifest_path: str | Path = DEFAULT_IMPORT_SOURCE_MANIFEST,
         nem2_rate_treatment_data_path: str | Path = DEFAULT_NEM2_RATE_TREATMENT_DATA,
@@ -91,7 +89,6 @@ class TariffCatalog:
         true_up_source_manifest_path: str | Path = DEFAULT_TRUE_UP_SOURCE_MANIFEST,
     ):
         self.export_data_path = Path(export_data_path)
-        self.acc_plus_data_path = Path(acc_plus_data_path)
         self.import_snapshot_data_path = Path(import_snapshot_data_path)
         self.import_source_manifest_path = Path(import_source_manifest_path)
         self.nem2_rate_treatment_data_path = Path(nem2_rate_treatment_data_path)
@@ -151,42 +148,6 @@ class TariffCatalog:
             )
         return ExportCreditSchedule(parsed, scenario.billing_year, scenario.nbt_vintage, rows)
 
-    def acc_plus_record(
-        self,
-        utility: str | Utility,
-        scenario: NBTScenario,
-    ) -> tuple[float, str | None]:
-        if not scenario.include_acc_plus:
-            return 0.0, None
-        parsed = Utility.parse(utility)
-        if not self.acc_plus_data_path.exists():
-            raise FileNotFoundError(f"ACC Plus source data not found: {self.acc_plus_data_path}")
-        data = pd.read_csv(self.acc_plus_data_path)
-        required = {"utility", "nbt_vintage", "customer_segment", "rate_usd_per_kwh", "source_id"}
-        missing = required - set(data.columns)
-        if missing:
-            raise ValueError(f"ACC Plus data is missing columns: {sorted(missing)}")
-        rows = data[
-            (data["utility"] == parsed.value)
-            & (data["nbt_vintage"] == scenario.nbt_vintage)
-            & (data["customer_segment"] == scenario.customer_segment.value)
-        ]
-        if len(rows) != 1:
-            raise KeyError(
-                f"Expected exactly one ACC Plus rate for {parsed.value}, NBT{scenario.nbt_vintage}, "
-                f"segment={scenario.customer_segment.value}; found {len(rows)}"
-            )
-        rate = float(rows["rate_usd_per_kwh"].item())
-        if rate < 0:
-            raise ValueError("ACC Plus rate cannot be negative")
-        source_id = str(rows["source_id"].item()).strip()
-        if not source_id:
-            raise ValueError("ACC Plus rate is missing source_id")
-        return rate, source_id
-
-    def acc_plus_rate(self, utility: str | Utility, scenario: NBTScenario) -> float:
-        return self.acc_plus_record(utility, scenario)[0]
-
     def bundle(
         self,
         utility: str | Utility,
@@ -196,7 +157,6 @@ class TariffCatalog:
         non_bypassable_rate: float | None = None,
     ) -> TariffBundle:
         parsed = Utility.parse(utility)
-        acc_plus_rate, acc_plus_source_id = self.acc_plus_record(parsed, scenario)
         return TariffBundle(
             utility=parsed,
             scenario=scenario,
@@ -208,8 +168,6 @@ class TariffCatalog:
                 snapshot_data_path=self.import_snapshot_data_path,
             ),
             export_schedule=self.export_schedule(parsed, scenario),
-            acc_plus_rate=acc_plus_rate,
-            acc_plus_source_id=acc_plus_source_id,
         )
 
     def nem2_bundle(

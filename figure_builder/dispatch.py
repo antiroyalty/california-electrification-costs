@@ -120,10 +120,7 @@ def county_dispatch_inputs(
         tariff = catalog.bundle(assignment.utility, NBTScenario())
         nbt_terms = NBTOptimizationTerms.from_tariff(tariff, ts)
         p_imp = np.array(tariff.import_schedule.rates_for(ts))
-        p_exp = (
-            np.array(tariff.export_schedule.rates_for(ts))
-            + tariff.acc_plus_rate
-        )
+        p_exp = np.array(tariff.export_schedule.rates_for(ts))
     else:
         tariff = catalog.nem2_bundle(assignment.utility, NEM2Scenario())
         nem2_terms = tariff.optimization_terms_for(ts)

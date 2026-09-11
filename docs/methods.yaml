@@ -209,30 +209,27 @@
     "notes": "This selects an existing reported bill. Tariff calculation and credit settlement are separate methods below."
   },
   "tariffs.nbt_shared_accounting": {
-    "title": "Implemented NBT Monthly and Annual Accounting",
-    "formula": "Annual bill = sum(monthly payments) + annual settlement adjustment. Research monthly payment = eligible energy charges - applied base credits + non-bypassable charges + fixed charges; ACC Plus is excluded.",
+    "title": "Annual NBT Research Accounting",
+    "formula": "B = F + N + sum_p max(C_p - E_p, 0); C_p = sum_h w_h i_h r_imp[p,h]; E_p = sum_h w_h x_h r_exp[p,h].",
     "assumptions": {
       "scenario": "Bundled service, standard non-equity customer, 2026 NBT vintage and billing year; retail tariff snapshot 2026-08-09.",
       "credit_pools": "SCE combines eligible generation and delivery charges. PG&E and SDG&E retain separate component pools. Base credits cannot offset fixed or non-bypassable charges.",
-      "monthly_order": "Apply available base credits within each eligible pool. ACC Plus is excluded by default in the pipeline and standalone tariff scenario. Explicitly enabled reference cases retain bonus application after base credits and proportional allocation across remaining energy components.",
-      "annual_settlement": "The research export cap makes net-surplus adjustments and compensation zero. Remaining eligible base credits offset prior payments where modeled. PG&E carries remaining base credit; SCE expires it after prior-payment offsets. SDG&E retains the study's no-backward-offset and expiry convention. The detailed tariff engine retains surplus accounting for reference examples.",
-      "balances": "Central runs start with zero credit banks. Closing banks are reported separately and have no additional value beyond the modeled year. Numeric billing can accept explicitly supplied opening balances.",
-      "missing_adjustment_rate": "The cap forces zero annual net surplus, so PG&E's missing surplus-adjustment rate cannot affect valid research costs. The detailed reference calculator still requires sourced rates for positive surplus outside the research domain.",
+      "annual_settlement": "Aggregate eligible charges and base credits annually, then settle each pool once. ACC Plus, monthly banks, opening balances, surplus adjustments, and future carryover are outside this research calculation. Unused credits have zero future value.",
+      "energy_domain": "Weighted annual exports must not exceed weighted annual imports. Numeric reporting enforces the same domain as optimization; NBT does not load surplus-payment rates.",
       "numerical_equality": "Annual excess exports at or below 1e-6 kWh are treated as zero surplus. Research validation rejects larger excesses without changing meter flows. The solver imposes the exact annual energy inequality.",
-      "status": "Shared accounting implemented since 1634760. ACC Plus exclusion implemented September 10, 2026; annual export cap implemented September 11, 2026. Monthly credit timing remains active; annual base-credit netting is pending."
+      "scope": "Annual settlement is an explicit research approximation, not a reconstruction of monthly utility statements. It can reduce SDG&E costs relative to the former no-backward-offset convention.",
+      "status": "All three approved simplifications are implemented. Publication outputs require regeneration before interpretation under these assumptions."
     },
     "data_sources": {
-      "tariff_inputs": "data/tariffs/README.md and the import, export, and true-up source manifests",
-      "worked_examples": "docs/HOUSEHOLD_COST_RECONCILIATION.md"
+      "tariff_inputs": "data/tariffs/README.md and import/export source manifests; utility pool evidence in docs/HOUSEHOLD_COST_RECONCILIATION.md",
+      "worked_examples": "tests/fixtures/nbt_monthly_reference.json; docs/HOUSEHOLD_COST_RECONCILIATION.md"
     },
     "code": [
-      "tariffs/accounting_equations.py:monthly_accounting",
-      "tariffs/accounting_equations.py:annual_accounting",
+      "tariffs/accounting.py:settle_annual_credits",
       "tariffs/billing.py:calculate_nbt_bill",
-      "tariffs/optimization.py:NBTOptimizationTerms",
-      "tariffs/true_up.py:TrueUpPolicy"
+      "tariffs/optimization.py:NBTOptimizationTerms"
     ],
-    "notes": "Earned export credits are not automatically bill savings. Shared equations establish optimizer/reporting consistency; the independent examples and declared conventions establish the accounting basis."
+    "notes": "Earned export credits are not automatically savings. Applied and unused annual credits are reported separately. The monthly reference engine and tests remain in Git at 860949e; frozen examples preserve old expected values."
   },
   "optimization.solar_storage": {
     "title": "Implemented Solar and Storage Sizing Objective",
@@ -242,13 +239,12 @@
       "physical_constraints": "Conserve energy; enforce load balance, battery power and charge limits, and one meter direction per interval. Central runs prohibit grid charging and allow battery export.",
       "sizing_domain": "Default optimized battery ceiling 40 kWh, power at most 1C, and available annual PV generation at most 150% of load for NBT or 100% for NEM 2. NBT also requires weighted annual exports <= weighted annual imports. Exports include solar and battery flows; imports include household supply and any permitted grid charging. Fixed designs face the same cap and can curtail unused generation. County reporting and preflight reject profiles above the cap.",
       "chronology": "Full-year 8760-hour runs have cyclic annual battery charge. Weighted 12x24 sensitivities close each representative day's battery cycle and weight annual dollars and energy by days per month.",
-      "solver": "NBT still uses SCIP. With ACC Plus excluded, bonus amounts are literal zero and the accounting creates no nonlinear constraints. Monthly credit application still uses discrete choices. Explicit bonus reference cases retain proportional allocation. NEM 2 uses HiGHS by default. Meter-direction binary constraints are added when relaxed solutions violate physical direction.",
-      "bill_replay": "The NBT result is replayed through numeric shared accounting; a bill discrepancy above $0.001 is rejected. Independent integration tests also reconcile capital costs against EAC reporting."
+      "solver": "NBT and NEM 2 use HiGHS by default; CBC is also supported. NBT annual credit accounting adds one continuous remaining-charge variable per eligible pool, constrained to be nonnegative and at least annual charges minus annual credits. Minimizing the bill makes this equal the positive part. Financial credit accounting needs no binary variables. Physical meter-direction binaries remain.",
+      "bill_replay": "The NBT result is replayed through numeric shared accounting; a bill discrepancy above $0.001 is rejected. Tests reconcile capital formulas using full-precision capacities. Persisted capacity CSVs still round to two decimals, so downstream capital reporting can differ slightly; the full-year Alameda check differed by $0.66/year. Preserving artifact precision is a separate follow-up."
     },
     "code": [
       "pipeline/steps/step9b_cooptimize_core.py:_solve_lp",
       "pipeline/steps/step9b_cooptimize_core.py:build_monthly_hourly_inputs",
-      "pipeline/steps/coopt_scip.py:solve_nbt_with_scip",
       "tariffs/models.py:require_annual_export_cap"
     ]
   },
@@ -267,15 +263,15 @@
     ]
   },
   "research.approved_annual_accounting": {
-    "title": "Approved Annual NBT Simplifications - Annual Credit Netting Pending",
-    "formula": "Planned annual bill = fixed charges + non-bypassable charges + sum_p max(annual eligible charge_p - annual base credit_p, 0).",
+    "title": "Implemented Annual NBT Simplifications",
+    "formula": "B = F + N + sum_p max(C_p - E_p, 0); C_p = sum_h w_h i_h r_imp[p,h]; E_p = sum_h w_h x_h r_exp[p,h].",
     "assumptions": {
-      "status": "ACC Plus exclusion and the annual export cap are implemented. Annual base-credit netting remains pending. Publication results must be regenerated before interpreting them under the new assumptions.",
+      "status": "All three changes are implemented. Publication results must be regenerated before interpreting them under the new assumptions.",
       "changes": "Exclude ACC Plus; constrain annual exported kWh to be no greater than annual imported kWh; settle base credits annually within the existing utility credit pools.",
       "preserved": "Hourly prices and dispatch, non-bypassable and fixed charges, SCE's combined pool, PG&E/SDG&E component restrictions, and zero additional value for unused credits beyond the modeled year.",
-      "limitations": "Omitting the bonus can understate eligible-household savings. With fixed dispatch and zero opening banks, its current-year benefit is at most annual exported kWh times the bonus rate. Standard 2026 rates are PG&E $0.0088/kWh, SCE $0.016/kWh, SDG&E $0/kWh; this bound does not establish unchanged optimal sizing. The research export cap excludes annual net-exporting dispatches and can affect the electrification comparison when binding. Compare affected claims with pre-cap revision 9b61415 under matched assumptions. Planned annual timing can overstate SDG&E savings relative to its retained no-backward-offset convention."
+      "limitations": "Omitting the bonus can understate eligible-household savings. With fixed dispatch and zero opening banks, its current-year benefit is at most annual exported kWh times the bonus rate. Standard 2026 rates are PG&E $0.0088/kWh, SCE $0.016/kWh, SDG&E $0/kWh; this bound does not establish unchanged optimal sizing. The research export cap excludes annual net-exporting dispatches and can affect the electrification comparison when binding. Compare affected claims with pre-cap revision 9b61415 under matched assumptions. Annual timing can overstate SDG&E savings relative to the former no-backward-offset convention. At fixed flows, the difference is bounded by the sum across pools of min(unused annual-end credit, earlier eligible payments) in that prior model."
     },
-    "notes": "See docs/RESEARCH_METHODS.md for equations, symbol definitions, and validation boundaries. The annual formula remains a planned design. ACC Plus reference rates and tests are preserved in data/tariffs/acc_plus_rates.csv and tests/tariffs_source_test.py."
+    "notes": "See docs/RESEARCH_METHODS.md for equations and validation boundaries. ACC Plus source rates remain archived in data/tariffs/acc_plus_rates.csv. They are not optional inputs to the research model."
   },
   "vehicles.vehicle_annual_adders_from_ledger": {
     "title": "Vehicle O&M Adders from Ledger",

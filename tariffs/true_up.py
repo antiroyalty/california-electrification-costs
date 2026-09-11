@@ -1,4 +1,4 @@
-"""Source-linked primitives for annual NBT true-up inputs."""
+"""Source rate records for NEM 2 settlement and archived NBT surplus evidence."""
 
 from __future__ import annotations
 
@@ -10,15 +10,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .accounting import (
-    AnnualSettlement,
-    ComponentAmounts,
-    CreditBalances,
-    EnergyAmounts,
-    PooledAmount,
-    settle_year,
-)
-from .models import Utility, annual_net_surplus_kwh
+from .models import Utility
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -86,7 +78,7 @@ class AverageRetailExportCompensationRate:
 
     This is distinct from both the customer's hourly ACC export schedule and
     the monthly NSC rate. Retain source generation/delivery rates for audit;
-    TrueUpPolicy determines whether the resulting dollars use a combined pool.
+    The annual NBT research model does not use surplus adjustments.
     """
 
     utility: Utility
@@ -286,227 +278,6 @@ class AverageRetailExportCompensationSchedule:
             delivery_rate_usd_per_kwh=float(row["delivery_rate_usd_per_kwh"]),
             source_id=str(row["source_id"]),
         )
-
-
-@dataclass(frozen=True)
-class TrueUpPolicy:
-    """Source-linked bundled credit restrictions and annual disposition rules."""
-
-    utility: Utility
-    apply_remaining_eec_to_prior_charges: bool
-    carry_remaining_eec_forward: bool
-    source_id: str
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "utility", Utility.parse(self.utility))
-        if not isinstance(self.apply_remaining_eec_to_prior_charges, bool):
-            raise TypeError("apply_remaining_eec_to_prior_charges must be boolean")
-        if not isinstance(self.carry_remaining_eec_forward, bool):
-            raise TypeError("carry_remaining_eec_forward must be boolean")
-        if not self.source_id:
-            raise ValueError("source_id must be non-empty")
-
-    def energy_amounts(self, generation_usd: float, delivery_usd: float) -> EnergyAmounts:
-        """Normalize component prices into the utility's eligible credit pools.
-
-        SCE Schedule NBT 3.a.i/ii and 4.b combine bundled energy charges.
-        Validate each input before pooling so a negative component cannot hide.
-        """
-        components = ComponentAmounts(generation_usd, delivery_usd)
-        if self.utility is Utility.SCE:
-            return PooledAmount(components.total_usd)
-        return components
-
-    def validate_energy_amounts(self, amounts: EnergyAmounts) -> None:
-        expected = type(self.energy_amounts(0, 0))
-        if type(amounts) is not expected:
-            raise ValueError(f"{self.utility.value} requires {expected.__name__}")
-
-    @classmethod
-    def for_utility(cls, utility: str | Utility) -> "TrueUpPolicy":
-        parsed = Utility.parse(utility)
-        policies = {
-            Utility.PGE: cls(
-                utility=Utility.PGE,
-                apply_remaining_eec_to_prior_charges=True,
-                carry_remaining_eec_forward=True,
-                source_id="pge_nbt_rules_2026-08-10",
-            ),
-            Utility.SCE: cls(
-                utility=Utility.SCE,
-                apply_remaining_eec_to_prior_charges=True,
-                carry_remaining_eec_forward=False,
-                source_id="sce_nbt_rules_2026-08-10",
-            ),
-            Utility.SDGE: cls(
-                utility=Utility.SDGE,
-                apply_remaining_eec_to_prior_charges=False,
-                carry_remaining_eec_forward=False,
-                source_id="sdge_nbt_rules_2026-08-10",
-            ),
-        }
-        return policies[parsed]
-
-
-@dataclass(frozen=True)
-class TrueUpSettlement:
-    """Auditable result of the annual NBT credit reconciliation.
-
-    ``net_bill_adjustment`` is positive for an added charge and negative for
-    an added credit relative to the monthly amounts already paid.
-    Credit applications and balances are exposed through ``accounting``.
-    """
-
-    utility: Utility
-    true_up_month: str
-    annual_import_kwh: float
-    annual_export_kwh: float
-    net_surplus_kwh: float
-    generation_adjustment_rate_usd_per_kwh: float
-    delivery_adjustment_rate_usd_per_kwh: float
-    nsc_rate_usd_per_kwh: float
-    accounting: AnnualSettlement
-    policy_source_id: str
-    adjustment_rate_source_id: str | None
-    nsc_rate_source_id: str | None
-
-    @property
-    def total_eec_adjustment_charge(self) -> float:
-        return self.accounting.surplus_adjustment.total_usd
-
-    @property
-    def generation_eec_adjustment_charge(self) -> float:
-        return self.net_surplus_kwh * self.generation_adjustment_rate_usd_per_kwh
-
-    @property
-    def delivery_eec_adjustment_charge(self) -> float:
-        return self.net_surplus_kwh * self.delivery_adjustment_rate_usd_per_kwh
-
-    @property
-    def nsc_credit(self) -> float:
-        return self.accounting.nsc_entitlement_usd
-
-    @property
-    def net_bill_adjustment(self) -> float:
-        return self.accounting.net_bill_adjustment_usd
-
-    @property
-    def total_forfeited_credit(self) -> float:
-        return self.accounting.forfeited_base.total_usd
-
-
-def calculate_true_up_settlement(
-    *,
-    policy: TrueUpPolicy,
-    annual_import_kwh: float,
-    annual_export_kwh: float,
-    opening: CreditBalances,
-    prior_paid_eligible_energy: EnergyAmounts,
-    adjustment_rate: AverageRetailExportCompensationRate | None = None,
-    nsc_rate: NetSurplusCompensationRate | None = None,
-    true_up_month: str | None = None,
-) -> TrueUpSettlement:
-    """Settle annual NBT base credits without double-paying net surplus.
-
-    The same annual net-surplus kWh are first recouped at the utility-wide
-    average retail export compensation rate and then credited at NSC. Base EEC
-    and prior payments use the same credit pools as monthly billing. This
-    adapter validates energy and source-linked rates, then delegates all
-    credit application and disposition to the shared accounting core.
-    """
-
-    if not isinstance(policy, TrueUpPolicy):
-        raise TypeError("policy must be a TrueUpPolicy")
-    imports = _nonnegative_finite(annual_import_kwh, "annual_import_kwh")
-    exports = _nonnegative_finite(annual_export_kwh, "annual_export_kwh")
-    if not isinstance(opening, CreditBalances):
-        raise TypeError("opening must be CreditBalances")
-    policy.validate_energy_amounts(opening.base)
-    policy.validate_energy_amounts(prior_paid_eligible_energy)
-
-    net_surplus_kwh = annual_net_surplus_kwh(imports, exports)
-    if (adjustment_rate is None) != (nsc_rate is None):
-        raise ValueError("adjustment_rate and nsc_rate must be supplied together")
-    if adjustment_rate is None:
-        if net_surplus_kwh > 0:
-            raise ValueError(
-                "Positive annual net exports require adjustment_rate and nsc_rate"
-            )
-        if true_up_month is None:
-            raise ValueError(
-                "true_up_month is required when no net-surplus rates apply"
-            )
-        resolved_true_up_month = _canonical_true_up_month(true_up_month)
-        generation_adjustment_rate = 0.0
-        delivery_adjustment_rate = 0.0
-        resolved_nsc_rate = 0.0
-        adjustment_source_id = None
-        nsc_source_id = None
-    else:
-        if not isinstance(
-            adjustment_rate, AverageRetailExportCompensationRate
-        ):
-            raise TypeError(
-                "adjustment_rate must be an AverageRetailExportCompensationRate"
-            )
-        if not isinstance(nsc_rate, NetSurplusCompensationRate):
-            raise TypeError("nsc_rate must be a NetSurplusCompensationRate")
-        if adjustment_rate.utility is not policy.utility:
-            raise ValueError(
-                "adjustment_rate utility does not match true-up policy"
-            )
-        if nsc_rate.utility is not policy.utility:
-            raise ValueError("nsc_rate utility does not match true-up policy")
-        if adjustment_rate.true_up_month != nsc_rate.true_up_month:
-            raise ValueError(
-                "adjustment_rate and nsc_rate true-up months do not match"
-            )
-        if true_up_month is not None and (
-            _canonical_true_up_month(true_up_month)
-            != adjustment_rate.true_up_month
-        ):
-            raise ValueError(
-                "explicit true_up_month does not match the supplied rates"
-            )
-        resolved_true_up_month = adjustment_rate.true_up_month
-        generation_adjustment_rate = (
-            adjustment_rate.generation_rate_usd_per_kwh
-        )
-        delivery_adjustment_rate = adjustment_rate.delivery_rate_usd_per_kwh
-        resolved_nsc_rate = nsc_rate.rate_usd_per_kwh
-        adjustment_source_id = adjustment_rate.source_id
-        nsc_source_id = nsc_rate.source_id
-
-    accounting = settle_year(
-        opening=opening,
-        prior_paid_eligible_energy=prior_paid_eligible_energy,
-        surplus_adjustment=policy.energy_amounts(
-            net_surplus_kwh * generation_adjustment_rate,
-            net_surplus_kwh * delivery_adjustment_rate,
-        ),
-        nsc_entitlement_usd=net_surplus_kwh * resolved_nsc_rate,
-        offset_prior_payments=policy.apply_remaining_eec_to_prior_charges,
-        carry_base_credit=policy.carry_remaining_eec_forward,
-    )
-
-    return TrueUpSettlement(
-        utility=policy.utility,
-        true_up_month=resolved_true_up_month,
-        annual_import_kwh=imports,
-        annual_export_kwh=exports,
-        net_surplus_kwh=net_surplus_kwh,
-        generation_adjustment_rate_usd_per_kwh=(
-            generation_adjustment_rate
-        ),
-        delivery_adjustment_rate_usd_per_kwh=(
-            delivery_adjustment_rate
-        ),
-        nsc_rate_usd_per_kwh=resolved_nsc_rate,
-        accounting=accounting,
-        policy_source_id=policy.source_id,
-        adjustment_rate_source_id=adjustment_source_id,
-        nsc_rate_source_id=nsc_source_id,
-    )
 
 
 @dataclass(frozen=True)

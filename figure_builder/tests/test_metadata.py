@@ -46,10 +46,6 @@ def test_capital_cost_metadata_records_both_exact_regime_prices_and_sources():
 
 
 def test_tariff_metadata_records_every_source_used_by_the_sweep(monkeypatch):
-    # Preserve the sourced-adder reference case when the research default excludes it.
-    monkeypatch.setattr(
-        "figure_builder.metadata.NBTScenario", lambda: NBTScenario(include_acc_plus=True),
-    )
     metadata = tariff_metadata()
     utilities = {row["utility"]: row for row in metadata["utilities"]}
     comparison = metadata["comparison"]
@@ -64,17 +60,13 @@ def test_tariff_metadata_records_every_source_used_by_the_sweep(monkeypatch):
         "service_type": "bundled",
         "customer_segment": "standard_non_equity",
         "tariff_snapshot_date": "2026-08-09",
-        "true_up_month": "2026-08",
     }
     assert utilities["PG&E"]["import"]["source_id"] == "pge_e_elec_2026-06-01"
     assert utilities["PG&E"]["export"]["source_ids"] == ["pge_nbt2026"]
-    assert utilities["PG&E"]["acc_plus"]["source_id"] == "pge_advice_7174_e"
     assert utilities["SCE"]["import"]["source_id"] == "sce_tou_d_prime_2026-06-01"
     assert utilities["SCE"]["export"]["source_ids"] == ["sce_nbt2026"]
-    assert utilities["SCE"]["acc_plus"]["source_id"] == "sce_schedule_nbt"
     assert utilities["SDG&E"]["import"]["source_id"] == "sdge_ev_tou_5_2026-08-01"
     assert utilities["SDG&E"]["export"]["source_ids"] == ["sdge_nbt2026"]
-    assert utilities["SDG&E"]["acc_plus"]["source_id"] == "cpuc_nbt_policy"
     annual_true_up = metadata["annual_true_up"]
     # Physical integration now includes the independently tested annual settlement.
     assert annual_true_up["nbt_2026"]["used_by_sizing_objective"] is True
@@ -112,14 +104,6 @@ def test_tariff_metadata_records_every_source_used_by_the_sweep(monkeypatch):
     ]
 
 
-def test_research_metadata_records_acc_plus_exclusion_for_every_utility():
-    for record in tariff_metadata()["utilities"]:
-        assert record["acc_plus"] == {
-            "included": False, "rate_usd_per_kwh": 0.0,
-            "rate_unit": "USD/kWh", "source_id": None,
-        }
-
-
 def test_optimization_metadata_matches_declared_coarse_sweep_settings():
     metadata = optimization_metadata(fine=False)
 
@@ -149,7 +133,7 @@ def test_optimization_metadata_matches_declared_coarse_sweep_settings():
     }
     assert metadata["solver"]["backend"] == "auto"
     assert metadata["solver"]["backend_by_export_compensation_regime"] == {
-        "nbt_2026": "scip", "nem2_at_2026_retail_rates": "highs",
+        "nbt_2026": "highs", "nem2_at_2026_retail_rates": "highs",
     }
     assert metadata["solver"]["mip_relative_gap"] == 1e-6
     assert metadata["sizing_domain"]["max_battery_kwh"] == 40.0

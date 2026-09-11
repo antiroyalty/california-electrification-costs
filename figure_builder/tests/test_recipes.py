@@ -307,7 +307,7 @@ def test_claim4_fragment_reports_policy_effect_without_historical_overclaim():
     assert "not a historical reconstruction" in html
     assert "storage enters 2 of 4 NBT cases and 1 of 4 NEM&nbsp;2 cases" in html
     assert "other three NEM&nbsp;2 cells still require exact checks" in html
-    assert "same monthly credit rules and annual settlement" in html
+    assert "settle base credits annually within the same eligible pools" in html
     assert "does not reproduce every monthly settlement rule" not in html
 
 
@@ -489,9 +489,9 @@ def test_installer_sweep_refreshes_a_compatible_cache_only_when_forced(tmp_path,
 
 def test_shared_accounting_scope_replaces_old_split_between_sizing_and_reporting():
     html = _limitations_fragment(_tariff_metadata_fixture(), 47)
-    assert "same monthly credit rules and annual settlement" in html
-    assert "Opening credit balances are zero" in html
-    assert "Remaining banks receive no extra value" in html
+    assert "settle base credits annually within the same eligible pools" in html
+    assert "ACC Plus is excluded" in html
+    assert "Unused annual credits have no future value" in html
     assert "Annual exports cannot exceed annual imports" in html
     assert "Hourly exports remain allowed" in html
     assert "affect the electrification comparison" in html
@@ -512,19 +512,16 @@ def _tariff_metadata_fixture():
                 "utility": "PG&E",
                 "import": {"plan_name": "E-ELEC", "source_id": "pge-import"},
                 "export": {"source_ids": ["pge-export"]},
-                "acc_plus": {"included": True, "source_id": "pge-adder"},
             },
             {
                 "utility": "SCE",
                 "import": {"plan_name": "TOU-D-PRIME", "source_id": "sce-import"},
                 "export": {"source_ids": ["sce-export"]},
-                "acc_plus": {"included": True, "source_id": "sce-adder"},
             },
             {
                 "utility": "SDG&E",
                 "import": {"plan_name": "EV-TOU-5", "source_id": "sdge-import"},
                 "export": {"source_ids": ["sdge-export"]},
-                "acc_plus": {"included": True, "source_id": "sdge-adder"},
             },
         ],
         "comparison": {
@@ -558,8 +555,8 @@ def test_tariff_status_fragment_uses_current_model_source_identity():
     assert "PG&amp;E E-ELEC (<code>pge-import</code>)" in html
     assert "SCE TOU-D-PRIME (<code>sce-import</code>)" in html
     assert "SDG&amp;E EV-TOU-5 (<code>sdge-import</code>)" in html
-    assert "<code>pge-export</code> plus ACC Plus <code>pge-adder</code>" in html
-    assert "NBT sizing objective includes monthly credit application and annual settlement" in html
+    assert "<code>pge-export</code> (ACC Plus excluded)" in html
+    assert "NBT sizing objective settles base credits annually within eligible pools" in html
     assert "Annual NSC settlement is not part" not in html
     assert "nem2_at_2026_retail_rates" in html
     assert "pge-rules" in html
@@ -567,8 +564,6 @@ def test_tariff_status_fragment_uses_current_model_source_identity():
 
 def test_tariff_status_discloses_excluded_bonus_without_a_false_source():
     metadata = _tariff_metadata_fixture()
-    for record in metadata["utilities"]:
-        record["acc_plus"] = {"included": False, "source_id": None}
     html = _tariff_status_fragment(metadata)
     assert html.count("ACC Plus excluded") == 3
     assert "plus ACC Plus" not in html

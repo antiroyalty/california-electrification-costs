@@ -440,7 +440,7 @@ def _validate_prices(
     expected_import = np.asarray(tariff.import_schedule.rates_for(timestamps))
     expected_export = np.asarray(
         tariff.export_schedule.rates_for(timestamps, component="total")
-    ) + tariff.acc_plus_rate
+    )
     if not np.allclose(
         prices[columns[0]], expected_import, rtol=0.0, atol=1e-12
     ):
@@ -617,7 +617,7 @@ def _validate_county(
         "billing_output_timestamp": electricity_time,
         "import_source_id": preflight.import_source_id,
         "export_source_ids": list(preflight.export_source_ids),
-        "annual_net_surplus_kwh": preflight.net_surplus_kwh,
+        "annual_export_cap_satisfied": True,
     }
     return metrics, tuple(artifacts)
 
@@ -663,9 +663,6 @@ def _validate_shared_outputs(
     normalized_source_paths = (
         spec.repo_root / "data" / "tariffs" / "import_rate_snapshots.json",
         spec.repo_root / "data" / "tariffs" / "nbt_export_rates.csv",
-        spec.repo_root / "data" / "tariffs" / "acc_plus_rates.csv",
-        spec.repo_root / "data" / "tariffs" / "eec_adjustment_rates.csv",
-        spec.repo_root / "data" / "tariffs" / "nsc_rates.csv",
     )
     artifacts.extend(
         _artifact(path, repo_root=spec.repo_root, minimum_time=None)
@@ -879,8 +876,7 @@ def validate_research_run(
                 "interconnection_vintage": spec.nbt_scenario.nbt_vintage,
                 "customer_segment": spec.nbt_scenario.customer_segment.value,
                 "tariff_snapshot_date": spec.nbt_scenario.tariff_snapshot_date,
-                "true_up_month": spec.nbt_scenario.true_up_month,
-                "include_acc_plus": spec.nbt_scenario.include_acc_plus,
+                "nbt_credit_settlement": "annual_base_credits_by_eligible_pool",
             },
             "require_clean": require_clean,
             "require_current_artifacts": require_current_artifacts,

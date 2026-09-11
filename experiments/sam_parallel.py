@@ -291,7 +291,7 @@ def run_county(args, county, output):
     tariff = TariffCatalog().bundle(resolve_county_service_assignment(county).utility, nbt)
     timestamps = full_year_hourly_index(nbt.billing_year)
     buy = tariff.import_schedule.rates_for(timestamps)
-    sell = [v + tariff.acc_plus_rate for v in tariff.export_schedule.rates_for(timestamps)]
+    sell = tariff.export_schedule.rates_for(timestamps)
     sam_yield = sam_pv_yield(resource)
     old_yield = hourly(pv_timeseries_ac_kwh(old_weather, 1.0), "research PV yield")
     county_output = output / county

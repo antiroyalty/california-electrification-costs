@@ -29,8 +29,7 @@ This project requires Python 3 with the following external dependencies:
 - **folium** - Interactive web maps creation
 - **numpy** - Numerical computing library
 - **PuLP** - Linear optimization model construction
-- **SciPy 1.9+** - HiGHS solver for NEM 2 and linear teaching models
-- **PySCIPOpt 6.2.1** - SCIP solver for NBT sizing and dispatch with shared credit accounting
+- **SciPy 1.9+** - HiGHS solver for NBT and NEM 2 sizing and dispatch
 - **requests** - HTTP library for API calls
 - **boto3** - AWS SDK for Python (for accessing building data)
 - **botocore** - Low-level interface to AWS services
@@ -51,14 +50,15 @@ This project requires Python 3 with the following external dependencies:
 #### Installation
 Install all dependencies using pip:
 ```bash
-pip install PySAM pandas geopandas folium numpy pulp "scipy>=1.9" "pyscipopt==6.2.1" requests \
+pip install PySAM pandas geopandas folium numpy pulp "scipy>=1.9" requests \
   boto3 botocore geopy python-dotenv pytest matplotlib pdfplumber
 ```
 
-The shared accounting equations support numeric billing and SCIP optimization.
-Step 9b uses SCIP to minimize the NBT bill plus annualized equipment costs.
-The bill includes credit limits, proportional bonus allocation, and annual
-settlement. Numeric billing does not import or run SCIP. NEM 2 uses HiGHS.
+NBT optimization and reporting share annual base-credit settlement within each
+utility's eligible pools. The model excludes ACC Plus and caps annual exports
+at annual imports. Step 9b uses HiGHS for both NBT and NEM 2. Physical dispatch
+constraints can require binary variables; NBT credit accounting is continuous.
+See [research methods](docs/RESEARCH_METHODS.md) for equations and limitations.
 
 ### Getting Started
 1. Clone the Github repos locally.

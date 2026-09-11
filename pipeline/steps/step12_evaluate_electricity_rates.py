@@ -355,7 +355,6 @@ def process(
             "nbt_billing_year": resolved_nbt_scenario.billing_year,
             "nbt_interconnection_vintage": resolved_nbt_scenario.nbt_vintage,
             "import_tariff_snapshot_as_of": resolved_nbt_scenario.tariff_snapshot_date,
-            "nbt_true_up_month": resolved_nbt_scenario.true_up_month,
         }
         for rate_plan in rate_plans:
             # Retail import-only costs
@@ -400,9 +399,8 @@ def process(
                     solar_nem3[rate_plan]
                 )
             if nbt_ledger is not None:
-                annual_accounting = nbt_ledger.true_up_settlement.accounting
-                # Realized-bill counterpart to Step 9b's marginal export signal.
-                # Unused credit is the wedge between the two; keep it visible.
+                annual_accounting = nbt_ledger.accounting
+                # Earned credits may exceed the amount usable in eligible pools.
                 log_kwargs.update({
                     f"nbt_credit_earned_{rate_plan}": to_number(nbt_ledger.annual_credit_earned),
                     f"nbt_credit_applied_{rate_plan}": to_number(nbt_ledger.annual_credit_applied),
@@ -410,33 +408,13 @@ def process(
                     f"nbt_credit_saturation_{rate_plan}": to_number(
                         nbt_ledger.credit_saturation_ratio
                     ),
-                    f"nbt_expired_base_credit_{rate_plan}": to_number(
-                        nbt_ledger.expired_base_credit
+                    f"nbt_eligible_charge_{rate_plan}": to_number(
+                        sum(annual_accounting.eligible_charge_usd)
                     ),
-                    f"nbt_true_up_net_surplus_kwh_{rate_plan}": to_number(
-                        nbt_ledger.true_up_settlement.net_surplus_kwh
+                    f"nbt_nbc_charge_{rate_plan}": to_number(
+                        annual_accounting.non_bypassable_charge_usd
                     ),
-                    f"nbt_true_up_eec_adjustment_charge_{rate_plan}": to_number(
-                        nbt_ledger.true_up_settlement.total_eec_adjustment_charge
-                    ),
-                    f"nbt_true_up_prior_eligible_energy_charge_{rate_plan}": to_number(
-                        annual_accounting.prior_paid_eligible_energy.total_usd
-                    ),
-                    f"nbt_true_up_nsc_credit_{rate_plan}": to_number(
-                        nbt_ledger.true_up_settlement.nsc_credit
-                    ),
-                    f"nbt_true_up_net_bill_adjustment_{rate_plan}": to_number(
-                        nbt_ledger.true_up_settlement.net_bill_adjustment
-                    ),
-                    f"nbt_true_up_policy_source_{rate_plan}": (
-                        nbt_ledger.true_up_settlement.policy_source_id
-                    ),
-                    f"nbt_true_up_adjustment_rate_source_{rate_plan}": (
-                        nbt_ledger.true_up_settlement.adjustment_rate_source_id
-                    ),
-                    f"nbt_true_up_nsc_rate_source_{rate_plan}": (
-                        nbt_ledger.true_up_settlement.nsc_rate_source_id
-                    ),
+                    f"nbt_fixed_charge_{rate_plan}": to_number(annual_accounting.fixed_charge_usd),
                 })
 
         output_file_path = get_output_file_path(base_output_dir, scenario, housing_type, county, timestamp)

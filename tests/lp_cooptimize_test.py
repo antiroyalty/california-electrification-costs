@@ -399,7 +399,7 @@ class TestACCExportRatesBelowRetailImport:
         bundle = TariffCatalog().bundle("PG&E", NBTScenario())
         ts_index = full_year_hourly_index(2026)
         p_exp = [
-            rate + bundle.acc_plus_rate
+            rate
             for rate in bundle.export_schedule.rates_for(ts_index)
         ]
         p_imp = bundle.import_schedule.rates_for(ts_index)

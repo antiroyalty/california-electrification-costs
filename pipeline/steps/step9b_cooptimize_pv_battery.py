@@ -1035,8 +1035,7 @@ def process(
         # and holiday classification must come from the explicit tariff year.
         ts_index = list(full_year_hourly_index(resolved_scenario.billing_year))
         p_imp = tariff.import_schedule.rates_for(ts_index)
-        base_export = tariff.export_schedule.rates_for(ts_index, component="total")
-        p_exp = [rate + tariff.acc_plus_rate for rate in base_export]
+        p_exp = tariff.export_schedule.rates_for(ts_index, component="total")
 
         if debug_prices:
             _write_price_diagnostics(out_dir, county_slug, ts_index, p_imp, p_exp)
@@ -1292,9 +1291,8 @@ def process(
             "Coopt Export Credit": round(result.export_credit, 4),
             "Coopt Electricity Bill": round(result.nbt_settlement.amount_due_usd, 4),
             "Coopt Earned Export Credit": round(result.nbt_settlement.earned_credit_usd, 4),
-            "Coopt Ending Base Credit": round(sum(result.nbt_settlement.annual.closing_base), 4),
-            "Coopt Ending Bonus Credit": round(result.nbt_settlement.annual.closing_bonus, 4),
-            "Coopt Expired Base Credit": round(sum(result.nbt_settlement.annual.forfeited_base), 4),
+            "Coopt Applied Export Credit": round(result.nbt_settlement.applied_credit_usd, 4),
+            "Coopt Unused Export Credit": round(result.nbt_settlement.unused_credit_usd, 4),
             "Coopt Degradation Cost": round(result.degradation_cost, 4),
             "Allow Grid Charging": bool(allow_grid_charging),
             "Allow Battery Export": bool(allow_batt_export),

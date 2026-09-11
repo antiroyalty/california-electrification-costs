@@ -142,7 +142,7 @@ def run(
     ts_index = full_year_hourly_index(year)
     p_imp = tariff.import_schedule.rates_for(ts_index)
     p_exp = [
-        rate + tariff.acc_plus_rate
+        rate
         for rate in tariff.export_schedule.rates_for(ts_index)
     ]
 

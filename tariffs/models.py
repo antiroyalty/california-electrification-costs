@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date
 from enum import Enum
 import math
 from typing import TYPE_CHECKING, Sequence
@@ -110,10 +110,7 @@ class NBTScenario:
     nbt_vintage: int = 2026
     service_type: ServiceType = ServiceType.BUNDLED
     customer_segment: CustomerSegment = CustomerSegment.STANDARD
-    # Research runs omit the bonus; detailed tariff comparisons can enable it explicitly.
-    include_acc_plus: bool = False
     tariff_snapshot_date: str = "2026-08-09"
-    true_up_month: str = "2026-08"
 
     def __post_init__(self) -> None:
         if self.billing_year < 2023:
@@ -128,14 +125,6 @@ class NBTScenario:
             date.fromisoformat(self.tariff_snapshot_date)
         except ValueError as exc:
             raise ValueError("tariff_snapshot_date must be an ISO date (YYYY-MM-DD)") from exc
-        try:
-            parsed_true_up_month = datetime.strptime(self.true_up_month, "%Y-%m")
-        except (TypeError, ValueError) as exc:
-            raise ValueError("true_up_month must be a canonical YYYY-MM string") from exc
-        if parsed_true_up_month.strftime("%Y-%m") != self.true_up_month:
-            raise ValueError("true_up_month must be a canonical YYYY-MM string")
-        if parsed_true_up_month.year != self.billing_year:
-            raise ValueError("true_up_month must fall within billing_year")
 
 
 @dataclass(frozen=True)
@@ -175,13 +164,6 @@ class TariffBundle:
     scenario: NBTScenario
     import_schedule: "ImportRateSchedule"
     export_schedule: "ExportCreditSchedule"
-    acc_plus_rate: float
-    acc_plus_source_id: str | None
 
     def __post_init__(self) -> None:
-        if self.acc_plus_rate < 0:
-            raise ValueError("ACC Plus rate cannot be negative")
-        if not self.scenario.include_acc_plus and self.acc_plus_rate != 0:
-            raise ValueError("Excluded ACC Plus rate must be zero")
-        if self.scenario.include_acc_plus and not self.acc_plus_source_id:
-            raise ValueError("Included ACC Plus rate must declare a source_id")
+        object.__setattr__(self, "utility", Utility.parse(self.utility))

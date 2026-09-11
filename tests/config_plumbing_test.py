@@ -30,7 +30,6 @@ from tariffs import CustomerSegment
 
 def test_research_config_excludes_acc_plus_by_default():
     cfg = Config(scenario="baseline_coopt", housing_type="single-family-detached")
-    assert cfg.nbt_scenario().include_acc_plus is False
 
 
 def test_config_builds_an_explicit_nbt_policy_scenario():
@@ -40,17 +39,13 @@ def test_config_builds_an_explicit_nbt_policy_scenario():
         nbt_billing_year=2026,
         nbt_vintage=2024,
         nbt_customer_segment=CustomerSegment.EQUITY.value,
-        nbt_include_acc_plus=False,
         nbt_tariff_snapshot_date="2026-08-09",
-        nbt_true_up_month="2026-08",
     )
     scenario = cfg.nbt_scenario()
     assert scenario.billing_year == 2026
     assert scenario.nbt_vintage == 2024
     assert scenario.customer_segment is CustomerSegment.EQUITY
-    assert scenario.include_acc_plus is False
     assert scenario.tariff_snapshot_date == "2026-08-09"
-    assert scenario.true_up_month == "2026-08"
 
 
 def test_solar_storage_module_passes_discount_rate_to_lp():
