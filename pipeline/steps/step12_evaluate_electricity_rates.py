@@ -9,6 +9,7 @@
 # Baseline Allowances for E-TOU-C Rate Plan
 
 import argparse
+import math
 import os
 import pandas as pd
 from collections import defaultdict
@@ -18,6 +19,7 @@ from helpers.electricity_rate_helpers import PGE_RATE_PLANS, SCE_RATE_PLANS, SDG
 from helpers.utility_helpers import get_utility_for_county
 from tariffs import EnergyFlows, NBTScenario, TariffCatalog, calculate_nbt_bill, required_nbt_import_plan
 from tariffs.calendar import calendarize_full_year
+from tariffs.models import require_annual_export_cap
 
 
 RATE_PLANS = {
@@ -190,10 +192,8 @@ def nbt_ledger_for_county(
 ):
     """Compute the full monthly NBT ledger for one county and import plan.
 
-    Returns the whole `BillLedger` rather than just the annual total so callers
-    can also report the credit-bank diagnostics (see `unused_credit`), which
-    are what expose Step 9b's marginal-credit optimization over-valuing exports
-    relative to this realized bill.
+    Validate the research export cap before reporting the annual cost and
+    credit-bank diagnostics. Fixed and optimized designs use the same domain.
     """
     file = os.path.join(file_path, county, f"{INPUT_FILE_NAME}_{county}.csv")
     if not os.path.exists(file):
@@ -212,20 +212,20 @@ def nbt_ledger_for_county(
         timestamps = calendarize_full_year(source_timestamps, resolved_scenario.billing_year)
     imports_col = "nem3.imports.kwh"
     exports_col = "nem3.exports.kwh"
+    flows = EnergyFlows(
+        timestamps=timestamps,
+        import_kwh=df[imports_col].astype(float).tolist(),
+        export_kwh=df[exports_col].astype(float).tolist(),
+    )
+    flows.validated_frame()
+    require_annual_export_cap(math.fsum(flows.import_kwh), math.fsum(flows.export_kwh))
     tariff = TariffCatalog().bundle(
         utility,
         resolved_scenario,
         import_plan=selected_rate_plan,
         non_bypassable_rate=nbc_dollars_per_kwh_override,
     )
-    return calculate_nbt_bill(
-        EnergyFlows(
-            timestamps=timestamps,
-            import_kwh=df[imports_col].astype(float).tolist(),
-            export_kwh=df[exports_col].astype(float).tolist(),
-        ),
-        tariff,
-    )
+    return calculate_nbt_bill(flows, tariff)
 
 
 def process_county_scenario_nem3(

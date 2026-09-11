@@ -309,6 +309,7 @@ def optimization_metadata(*, fine: bool) -> dict:
             "output_absolute_tolerance": SOLVER_OUTPUT_ABSOLUTE_TOLERANCE,
         },
         "sizing_domain": {
+            "nbt_annual_energy_constraint": "annual exported kWh <= annual imported kWh",
             "max_battery_kwh": settings.max_battery_kwh,
             "max_pv_to_annual_load_ratio": settings.max_pv_to_annual_load_ratio,
             "max_pv_to_annual_load_ratio_by_export_compensation_regime": {

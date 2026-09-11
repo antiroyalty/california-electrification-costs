@@ -18,7 +18,7 @@ from .accounting import (
     PooledAmount,
     settle_year,
 )
-from .models import Utility
+from .models import Utility, annual_net_surplus_kwh
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -424,7 +424,7 @@ def calculate_true_up_settlement(
     policy.validate_energy_amounts(opening.base)
     policy.validate_energy_amounts(prior_paid_eligible_energy)
 
-    net_surplus_kwh = max(exports - imports, 0.0)
+    net_surplus_kwh = annual_net_surplus_kwh(imports, exports)
     if (adjustment_rate is None) != (nsc_rate is None):
         raise ValueError("adjustment_rate and nsc_rate must be supplied together")
     if adjustment_rate is None:

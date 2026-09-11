@@ -4,6 +4,7 @@ import pytest
 from tariffs import EnergyFlows, NBTScenario, TariffCatalog, calculate_nbt_bill
 from pipeline.steps.step12_evaluate_electricity_rates import process_county_scenario_nem3
 from tariffs.models import TariffBundle, Utility
+from tariffs.models import annual_net_surplus_kwh, require_annual_export_cap
 from tariffs.accounting import ComponentAmounts, CreditBalances, PooledAmount
 
 
@@ -447,3 +448,45 @@ def test_step12_file_integration_calendarizes_tmy_to_explicit_tariff_year(tmp_pa
         nbt_scenario=NBTScenario(billing_year=2026, nbt_vintage=2026),
     )
     assert 500 < result["E-ELEC"] < 3_000
+
+
+@pytest.mark.parametrize("utility,plan", [("PG&E", "E-ELEC"), ("SCE", "TOU-D-PRIME"),
+                                         ("SDG&E", "EV-TOU-5")])
+@pytest.mark.parametrize("annual_export_kwh,accepted", [(99, True), (100, True),
+                                                      (100 + 5e-7, True), (101, False)])
+def test_county_reporting_checks_the_annual_export_cap(
+    tmp_path, utility, plan, annual_export_kwh, accepted,
+):
+    county_dir = tmp_path / "teaching-county"
+    county_dir.mkdir()
+    pd.DataFrame({
+        "timestamp": ["2026-01-01 00:00", "2026-01-01 12:00"],
+        "nem3.imports.kwh": [100, 0], "nem3.exports.kwh": [0, annual_export_kwh],
+    }).to_csv(county_dir / "loadprofiles_for_rates_teaching-county.csv", index=False)
+    if not accepted:
+        with pytest.raises(ValueError, match="annual exported kWh <= annual imported kWh"):
+            process_county_scenario_nem3(str(tmp_path), "teaching-county", utility, plan)
+    else:
+        result = process_county_scenario_nem3(str(tmp_path), "teaching-county", utility, plan)
+        assert result[plan] >= 0
+
+
+@pytest.mark.parametrize("imports,exports", [(0, 0), (100, 99), (100, 100),
+                                            (0, 1e-6), (100, 100 + 5e-7)])
+def test_annual_energy_equality_tolerance_is_numeric_only(imports, exports):
+    require_annual_export_cap(imports, exports)
+    assert annual_net_surplus_kwh(imports, exports) == 0
+
+
+@pytest.mark.parametrize("imports,exports", [(0, 1.01e-6), (100, 100 + 2e-6), (100, 101)])
+def test_annual_export_cap_rejects_excess_above_numeric_tolerance(imports, exports):
+    assert annual_net_surplus_kwh(imports, exports) > 0
+    with pytest.raises(ValueError, match="annual exported kWh <= annual imported kWh"):
+        require_annual_export_cap(imports, exports)
+
+
+@pytest.mark.parametrize("imports,exports", [(float("nan"), 1), (1, float("inf")),
+                                            (-1, 1), (1, -1)])
+def test_annual_export_cap_rejects_invalid_energy(imports, exports):
+    with pytest.raises(ValueError, match="finite and non-negative"):
+        require_annual_export_cap(imports, exports)

@@ -926,7 +926,7 @@ _LEGACY_TARIFF_STATUS_PATTERN = (
 def _nbt_accounting_scope_fragment() -> str:
     """Shared description of the modeled NBT year for both claims documents."""
     return '''    <li>The NBT results use one modeled billing year.
-      <p>Sizing and reporting use the same monthly credit rules and annual settlement. Opening credit balances are zero. Remaining banks receive no extra value beyond the modeled year. A positive-surplus case requires a sourced adjustment rate before it can be reported.</p>
+      <p>Sizing and reporting use the same monthly credit rules and annual settlement. Opening credit balances are zero. Remaining banks receive no extra value beyond the modeled year. Annual exports cannot exceed annual imports in NBT research results. Hourly exports remain allowed. This research constraint can exclude profitable net-exporting designs and affect the electrification comparison.</p>
       <p>The study retains utility-specific credit pools and year-end treatment, including the SDG&amp;E convention that unused credits expire without offsetting earlier payments.</p>
     </li>'''
 
@@ -993,7 +993,7 @@ def _tariff_status_fragment(metadata: dict) -> str:
         <li>Import schedules: {import_line}.</li>
         <li>Export schedules: {export_line}.</li>
         <li>NEM 2 comparison: {nem2_scenario['research_label']}, tariff snapshot {nem2_scenario['tariff_snapshot_date']}; {nem2_line}.</li>
-        <li>The NBT sizing objective includes monthly credit application and annual settlement, including net-surplus adjustments and compensation where applicable. The NEM 2 objective applies annual credit expiration and source-selected NSC.</li>
+        <li>The NBT sizing objective includes monthly credit application and annual settlement. The research export cap makes annual net-surplus adjustments and compensation zero. The NEM 2 objective applies annual credit expiration and source-selected NSC.</li>
       </ul>
     </li>'''
 

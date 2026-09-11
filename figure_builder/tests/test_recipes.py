@@ -492,7 +492,9 @@ def test_shared_accounting_scope_replaces_old_split_between_sizing_and_reporting
     assert "same monthly credit rules and annual settlement" in html
     assert "Opening credit balances are zero" in html
     assert "Remaining banks receive no extra value" in html
-    assert "positive-surplus case requires a sourced adjustment rate" in html
+    assert "Annual exports cannot exceed annual imports" in html
+    assert "Hourly exports remain allowed" in html
+    assert "affect the electrification comparison" in html
     assert "does not reproduce every monthly" not in html
     assert "Annual NSC settlement is not part" not in html
 

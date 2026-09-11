@@ -8,11 +8,12 @@ derive from this file, so the prose and equations have one maintained source.
 
 ## Implementation status
 
-Updated on September 10, 2026. **ACC Plus is now excluded by default** in
-optimization and reporting. Hourly base export credits remain included.
+Updated on September 11, 2026. **ACC Plus exclusion and the annual export cap
+are implemented.** NBT optimization requires annual exported kWh to be no greater
+than annual imported kWh. County reporting and preflight checks reject profiles
+outside that domain. Hourly base export credits remain included.
 The monthly and annual settlement rules introduced in `1634760` still apply.
-The annual net-export cap and annual base-credit netting are **approved but
-not yet implemented**. The sections below distinguish these stages.
+Annual base-credit netting is **approved but not yet implemented**.
 
 Update this status when integration and validation are complete. Older results
 remain results of their recorded model version until regenerated. Use the
@@ -23,9 +24,10 @@ The implemented battery capital accounting uses a 25-year study period and
 including replacement and a remaining-value credit at year 25. A full research
 rerun remains outstanding; existing results do not yet reflect these accounting changes.
 Independent tests and 288-hour Alameda checks establish optimizer/reporting
-agreement for the battery costs and ACC Plus omission, including a fixed 10 kWh
-battery. Tests also check the omission for all three utilities and verify that
-zero bonus rates create no nonlinear accounting constraints. Full-year
+agreement for the battery costs, ACC Plus omission, and export cap, including a
+fixed 10 kWh battery. Tests cover all three utilities, weighted annual energy,
+curtailment, and numerical equality at the cap. Zero bonus rates create no
+nonlinear accounting constraints. Full-year
 end-to-end validation remains incomplete.
 
 ## Research questions and comparison definitions
@@ -216,9 +218,9 @@ optimization. Explicitly enabled reference comparisons retain the detailed
 bonus rules and their existing tests. This omission is a research assumption;
 it does not change utility eligibility or the sourced base export-credit rates.
 
-Annual settlement applies net-surplus adjustments and compensation where
-required, then the study's
-utility-specific treatment of remaining credits. The modeled year starts with
+The research cap makes annual net-surplus adjustments and compensation zero.
+Annual settlement still applies the utility-specific treatment of remaining
+credits. The modeled year starts with
 zero credit balances. Remaining balances receive no additional value beyond
 that year. PG&E's modeled year-end offsets can cover earlier eligible payments
 and carry remaining base credits. SCE applies such offsets and expires the
@@ -226,12 +228,11 @@ remainder. SDG&E retains the no-backward-offset and expiry convention documented
 in the accounting closure note. These are study treatments; consistency checks
 do not independently verify every utility interpretation.
 
-A competitive positive-surplus candidate with a missing required
-adjustment rate stops for the source; the model does not invent a rate.
-When an adjustment rate is missing, the optimizer may omit its nonnegative
-charge to form an optimistic cost bound. It accepts that solution only if
-annual net surplus is zero, when the omitted charge is also zero. It then
-replays the flows through numeric accounting and rejects bill discrepancies
+The detailed tariff calculator retains sourced surplus adjustments and payments
+for reference examples outside the research domain. The research optimizer
+cannot select those flows. PG&E's missing surplus-adjustment rate therefore
+cannot change a valid research cost. The optimizer replays its flows through
+numeric accounting and rejects bill discrepancies
 above $0.001. The current NBT solver is SCIP; NEM 2 uses HiGHS by default.
 With ACC Plus excluded, the financial constraints are linear, although
 monthly credit application still requires discrete choices in this formulation.
@@ -247,11 +248,11 @@ and reported costs must use this same model after integration.
    a benefit available to eligible households; it does not mean the bonus is
    absent from their utility tariffs.
 2. **Require annual exported energy to be no greater than annual imported
-   energy — pending.** Hourly exports remain allowed. This is a research constraint,
+   energy — implemented.** Hourly exports remain allowed. This is a research constraint,
    separate from the existing PV-size limit. It excludes annual net-exporting
    designs, removing their net-surplus payments and credit adjustments from
-   the scoped calculation. Fixed-design comparisons must respect the same
-   domain or be explicitly identified as outside it.
+   the scoped calculation. Fixed-design comparisons use the same constraint.
+   Older profiles above the cap must be regenerated before county reporting.
 3. **Settle eligible base credits annually within each utility's credit pools — pending.**
    Add hourly dollar charges and credits over the year, then offset each pool's
    charges up to the amount owed. Preserve SCE's combined pool and PG&E/SDG&E's
@@ -268,6 +269,18 @@ Here, $x_h$ and $i_h$ are exported and imported energy in interval $h$, in kWh.
 The set $\mathcal H$ contains the modeled hourly intervals. The weight $w_h$
 is one for full-year hours or the number of represented days for a monthly
 representative hour. Both sides therefore measure annual energy in kWh.
+
+Exports include both direct solar exports and battery exports. Imports include
+both household supply and any permitted grid charging. The existing 150%-of-load
+limit on available NBT solar generation remains separate. A fixed array can
+meet the export cap by curtailing generation, which means leaving some available
+solar energy unused. The model does not reduce its installed capacity or cost.
+
+The solver imposes the inequality directly. Validation and numeric surplus
+accounting treat an excess of at most $10^{-6}$ kWh as numerical equality.
+This is one milliwatt-hour per modeled year. It prevents rounding noise from
+triggering surplus payments or missing-rate errors. Larger excesses fail the
+research checks; validation does not alter the recorded meter flows.
 
 The resulting bill is:
 
@@ -327,7 +340,7 @@ Prioritize a check when the limitation could change a stated conclusion.
 | Battery augmentation costs and gradual capacity loss omitted centrally | Storage is treated more favorably than a model that charges for maintaining capacity. Round-trip efficiency losses and the declared replacement remain included. | Add an explicit degradation or augmentation-cost sensitivity if needed. |
 | Equipment-size bounds, specified charging/export rules, and fixed-design comparisons | An optimum applies within its declared feasible choices. A fixed-design result is not an unrestricted economic optimum. | Report binding constraints and test an expanded domain for an affected claim. |
 | ACC Plus omitted by default | Savings for eligible households can be understated. For a fixed dispatch with zero opening banks, omitted benefit is at most exported kWh times the applicable bonus rate. Unused bonus credits have no current-year value. This bound alone does not establish unchanged optimal sizing. | The sourced standard-customer 2026 rates imply at most $8.80 per 1,000 exported kWh for PG&E, $16 for SCE, and $0 for SDG&E. Apply the bound to affected publication cases before considering a separate sensitivity. |
-| Annual net-export cap in the approved model | Profitable net-exporting designs are excluded. A binding cap can link permitted exports to added electrification load and affect the apparent package effect. | Identify binding cases and compare affected conclusions with the detailed reference model. |
+| Annual net-export cap implemented for NBT research | Profitable net-exporting dispatches are excluded. Fixed arrays may curtail generation to comply. A binding cap can link permitted exports to added electrification load and affect the apparent package effect. This is a study constraint, not a utility rule. | Identify binding cases from annual meter totals. For an affected claim, compare with the pre-cap implementation at `9b61415`, using matched inputs and accounting assumptions. |
 | Annual credit timing in the approved model | SDG&E savings may be overstated relative to the current no-backward-offset convention. A late credit could offset an early charge in the annual model. | Bound the difference using unused eligible credits and earlier eligible payments; inspect affected San Diego cases. |
 | No opening credits or value for balances after the modeled year | Results omit benefits from a household's existing bank or future use of unused credits. | Use specified opening balances or a bounded future-use sensitivity for a question that requires them. |
 | Financial operating value is the objective | The model assigns no monetary value to outage protection, convenience, or household preferences. It therefore does not explain every adoption decision. | Study resilience or preferences separately when such benefits become part of the research question. |

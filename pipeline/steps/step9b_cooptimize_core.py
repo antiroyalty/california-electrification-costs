@@ -15,6 +15,7 @@ from appliances.electric_base import IncentiveScenario
 from tariffs.nem2 import NEM2OptimizationTerms
 from tariffs.optimization import NBTBillValues, NBTOptimizationTerms
 from tariffs.accounting_equations import NumericArithmetic
+from tariffs.models import require_annual_export_cap
 
 # See step9b_cooptimize_pv_battery.py for the full note on why these must
 # match the appliance classes step14 uses for reporting, not a standalone
@@ -739,6 +740,13 @@ def _solve_lp(
     # NBT accounting is attached by the SCIP adapter. Rate-only teaching models
     # retain their linear objective; production NBT callers supply nbt_terms.
     if nbt_terms is not None:
+        # Cap actual annual meter exports, including storage. Hourly exports and
+        # available PV generation above annual load remain allowed through curtailment.
+        prob += pulp.lpSum(
+            float(weights[h])
+            * (pv2grid[h] + batt2grid[h] - grid2load[h] - grid2batt[h])
+            for h in range(H)
+        ) <= 0, "nbt_annual_exports_not_above_imports"
         energy_cost = 0.0
     elif nem2_terms is None:
         energy_cost = pulp.lpSum([
@@ -999,6 +1007,12 @@ def _solve_lp(
     nem2_settlement = None
     nbt_settlement = None
     if nbt_terms is not None:
+        require_annual_export_cap(
+            math.fsum(weights[h] * (flows.grid_to_load[h] + flows.grid_to_batt[h])
+                      for h in range(H)),
+            math.fsum(weights[h] * (flows.pv_to_grid[h] + flows.batt_to_grid[h])
+                      for h in range(H)),
+        )
         nbt_settlement = nbt_terms.bill(
             [flows.grid_to_load[h] + flows.grid_to_batt[h] for h in range(H)],
             [flows.pv_to_grid[h] + flows.batt_to_grid[h] for h in range(H)],

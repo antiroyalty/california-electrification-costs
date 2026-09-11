@@ -11,7 +11,7 @@ from .accounting import (
     PooledAmount,
     settle_month,
 )
-from .models import EnergyFlows, TariffBundle, Utility
+from .models import EnergyFlows, TariffBundle, Utility, annual_net_surplus_kwh
 from .true_up import (
     AverageRetailExportCompensationSchedule,
     NetSurplusCompensationSchedule,
@@ -259,7 +259,7 @@ def calculate_nbt_bill(
 
     annual_import_kwh = float(frame["import_kwh"].sum())
     annual_export_kwh = float(frame["export_kwh"].sum())
-    net_surplus_kwh = max(annual_export_kwh - annual_import_kwh, 0.0)
+    net_surplus_kwh = annual_net_surplus_kwh(annual_import_kwh, annual_export_kwh)
     adjustment_rate = None
     nsc_rate = None
     if net_surplus_kwh > 0:

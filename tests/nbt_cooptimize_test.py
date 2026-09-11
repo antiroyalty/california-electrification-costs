@@ -154,15 +154,24 @@ def test_dispatch_stores_energy_when_export_credit_cannot_pay_the_remaining_bill
     _replay(case, result)
 
 
-def test_positive_surplus_uses_adjustment_and_nsc_inside_the_objective():
+def test_cap_curtails_the_old_surplus_example_and_preserves_its_reference_bill():
     case = _case("SCE", exports=ExportPrices(0.30, 0.45))
     inputs = replace(case[0], load_kwh=[100, 0])
-    result = _solve_lp(inputs, fixed_pv_kw=1.1, fixed_batt_kwh=0)
-    ledger = _replay(case, result)
+    # Preserve the old $26.70 example as a detailed tariff reference. Its
+    # 110 exported kWh against 100 imported kWh are outside the research domain.
+    ledger = calculate_nbt_bill(
+        EnergyFlows(case[2], [100, 0], [0, 110]), case[1],
+        adjustment_schedule=case[3], nsc_schedule=case[4],
+    )
     assert ledger.true_up_settlement.net_surplus_kwh == pytest.approx(10)
     assert ledger.true_up_settlement.total_eec_adjustment_charge == pytest.approx(0.6)
     assert ledger.true_up_settlement.nsc_credit == pytest.approx(0.3)
     assert ledger.annual_amount_due == pytest.approx(26.7)
+    result = _solve_lp(inputs, fixed_pv_kw=1.1, fixed_batt_kwh=0)
+    capped = _replay(case, result)
+    assert capped.annual_export_kwh <= capped.annual_import_kwh + 1e-6
+    assert capped.true_up_settlement.net_surplus_kwh == 0
+    assert capped.annual_amount_due == pytest.approx(27)
 
 
 def test_missing_adjustment_is_accepted_only_when_lower_bound_has_no_surplus():
@@ -172,11 +181,71 @@ def test_missing_adjustment_is_accepted_only_when_lower_bound_has_no_surplus():
     assert _replay(case, result).annual_amount_due == pytest.approx(64)
 
 
-def test_missing_adjustment_cannot_publish_a_competitive_surplus_solution():
+def test_export_cap_makes_missing_surplus_rate_irrelevant_to_optimization():
     case = _case(adjustment=False, bonus=0.10)
     inputs = replace(case[0], load_kwh=[100, 0])
     with pytest.raises(ValueError, match="cannot be certified.*positive annual net exports"):
-        _solve_lp(inputs, fixed_pv_kw=1.5, fixed_batt_kwh=0)
+        inputs.nbt_terms.bill([100, 0], [0, 150], [1, 1], NumericArithmetic())
+    result = _solve_lp(inputs, fixed_pv_kw=1.5, fixed_batt_kwh=0)
+    assert _replay(case, result).true_up_settlement.net_surplus_kwh == 0
+
+
+@pytest.mark.parametrize("utility", ["PG&E", "SCE", "SDG&E"])
+@pytest.mark.parametrize("weights", [[1, 1], [31, 28], [0.3, 0.1]])
+def test_annual_export_cap_uses_weights_and_curtails_fixed_pv(utility, weights):
+    prices = ImportPrices(generation=1, delivery=0, fixed=0)
+    prices.delivery_non_offsettable_rate = 0
+    case = _case(utility, imports=prices, exports=ExportPrices(0.1, 0))
+    inputs = replace(case[0], load_kwh=[100, 0])
+    fixed_pv_kw = 1.5 * weights[0] / weights[1]
+    result = _solve_lp(inputs, weights=weights, fixed_pv_kw=fixed_pv_kw, fixed_batt_kwh=0)
+    annual_imports = sum(w * v for w, v in zip(weights, result.flows.grid_to_load))
+    annual_exports = sum(w * v for w, v in zip(weights, result.flows.pv_to_grid))
+    assert result.pv_kw == pytest.approx(fixed_pv_kw)
+    assert annual_exports == pytest.approx(annual_imports)
+    assert result.flows.pv_to_grid[1] == pytest.approx(100 * weights[0] / weights[1])
+    assert result.nbt_settlement.net_surplus_kwh == pytest.approx(0, abs=1e-8)
+    # Available generation remains 150% of load. Only actual meter exports are capped.
+    assert fixed_pv_kw * 100 * weights[1] == pytest.approx(1.5 * annual_imports)
+
+
+def test_annual_export_cap_applies_when_pv_capacity_is_optimized():
+    prices = ImportPrices(generation=1, delivery=0, fixed=0)
+    prices.delivery_non_offsettable_rate = 0
+    case = _case("SCE", imports=prices, exports=ExportPrices(0.1, 0))
+    inputs = replace(case[0], load_kwh=[100, 0])
+    result = _solve_lp(inputs, fixed_batt_kwh=0, c_pv_kw=1 / crf(0.07, 25))
+    assert result.pv_kw == pytest.approx(1)
+    assert result.flows.pv_to_grid[1] == pytest.approx(100)
+
+
+def test_annual_export_cap_counts_battery_exports():
+    class EveningExports(ExportPrices):
+        def rates_for(self, timestamps, component="total"):
+            return [rate if t.hour == 2 else 0 for t, rate in
+                    zip(timestamps, super().rates_for(timestamps, component))]
+
+    case = _case("SCE", exports=EveningExports(0.30, 0.45))
+    timestamps = pd.date_range("2026-01-01", periods=3, freq="h")
+    terms = NBTOptimizationTerms.from_tariff(
+        case[1], timestamps, adjustment_schedule=case[3], nsc_schedule=case[4],
+    )
+    inputs = CooptInputs(
+        [0, 100, 0], [100, 0, 0], list(terms.import_rates), list(terms.export_rates),
+        nbt_terms=terms,
+    )
+    result = _solve_lp(inputs, fixed_pv_kw=1.5, fixed_batt_kwh=250)
+    flows = result.flows
+    annual_imports = sum(flows.grid_to_load) + sum(flows.grid_to_batt)
+    annual_exports = sum(flows.pv_to_grid) + sum(flows.batt_to_grid)
+    assert annual_exports <= annual_imports + 1e-6
+    assert result.nbt_settlement.net_surplus_kwh == pytest.approx(0, abs=1e-6)
+
+
+def test_annual_export_cap_preserves_the_zero_system():
+    case = _case()
+    result = _solve_lp(case[0], fixed_pv_kw=0, fixed_batt_kwh=0)
+    assert _replay(case, result).annual_export_kwh == 0
 
 
 @pytest.mark.parametrize("utility", ["PG&E", "SCE", "SDG&E"])

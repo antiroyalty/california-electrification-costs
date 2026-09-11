@@ -16,7 +16,7 @@ from .accounting_equations import (
     AccountingArithmetic, Amount, AnnualValues, MonthlyValues, NumericArithmetic,
     annual_accounting, monthly_accounting,
 )
-from .models import TariffBundle
+from .models import TariffBundle, annual_net_surplus_kwh
 from .true_up import (
     AverageRetailExportCompensationRate,
     AverageRetailExportCompensationSchedule,
@@ -221,7 +221,11 @@ class NBTOptimizationTerms:
             earned += sum(base) + bonus
         annual_imports = sum(w * v for w, v in zip(weights, imports))
         annual_exports = sum(w * v for w, v in zip(weights, exports))
-        surplus = annual_exports - arithmetic.minimum(annual_exports, annual_imports)
+        surplus = (
+            annual_net_surplus_kwh(annual_imports, annual_exports)
+            if isinstance(arithmetic, NumericArithmetic)
+            else annual_exports - arithmetic.minimum(annual_exports, annual_imports)
+        )
         if self.adjustment_rate is None:
             if not missing_rate_lower_bound and surplus > 0:
                 raise ValueError(

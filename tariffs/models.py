@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime
 from enum import Enum
+import math
 from typing import TYPE_CHECKING, Sequence
 
 import pandas as pd
@@ -10,6 +11,28 @@ import pandas as pd
 if TYPE_CHECKING:
     from .catalog import ExportCreditSchedule
     from .import_rates import ImportRateSchedule
+
+
+# One milliwatt-hour per modeled year: numerical equality, not a sizing allowance.
+ANNUAL_ENERGY_TOLERANCE_KWH = 1e-6
+
+
+def annual_net_surplus_kwh(annual_import_kwh: float, annual_export_kwh: float) -> float:
+    """Return positive annual meter surplus, treating rounding noise as zero."""
+    if any(not math.isfinite(v) or v < 0 for v in (annual_import_kwh, annual_export_kwh)):
+        raise ValueError("Annual meter energy must be finite and non-negative")
+    surplus_kwh = annual_export_kwh - annual_import_kwh
+    return surplus_kwh if surplus_kwh > ANNUAL_ENERGY_TOLERANCE_KWH else 0.0
+
+
+def require_annual_export_cap(annual_import_kwh: float, annual_export_kwh: float) -> None:
+    """Reject meter flows outside the NBT research model's annual energy domain."""
+    if annual_net_surplus_kwh(annual_import_kwh, annual_export_kwh) > 0:
+        raise ValueError(
+            "NBT research requires annual exported kWh <= annual imported kWh; "
+            f"imports={annual_import_kwh:.12g}, exports={annual_export_kwh:.12g}. "
+            "Regenerate dispatch within the cap before reporting research costs."
+        )
 
 
 class Utility(str, Enum):

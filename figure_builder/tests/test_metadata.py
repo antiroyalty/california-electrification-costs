@@ -153,6 +153,9 @@ def test_optimization_metadata_matches_declared_coarse_sweep_settings():
     }
     assert metadata["solver"]["mip_relative_gap"] == 1e-6
     assert metadata["sizing_domain"]["max_battery_kwh"] == 40.0
+    assert metadata["sizing_domain"]["nbt_annual_energy_constraint"] == (
+        "annual exported kWh <= annual imported kWh"
+    )
     assert metadata["sizing_domain"]["max_pv_to_annual_load_ratio"] == 1.5
     assert metadata["sizing_domain"][
         "max_pv_to_annual_load_ratio_by_export_compensation_regime"
