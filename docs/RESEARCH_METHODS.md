@@ -17,8 +17,11 @@ reconstruction of monthly utility statements.
 
 Battery capital accounting uses a 25-year study period and 15-year battery life.
 Optimization and EAC reporting share replacement costs and the remaining-value
-credit at year 25. A full research rerun remains outstanding. Existing results
-retain their recorded model version until regenerated.
+credit at year 25. The September 11 core rerun at `8a98b96` covers 47 counties,
+the three paper scenarios, and the supporting baseline at full-year resolution.
+The [results and claim assessment](research_logs/2026-09-11.md) records its
+findings and validation. Other electrification scenarios, ITC and battery-price
+sensitivities, and NEM 2 comparisons retain their earlier model versions.
 
 The [accounting closure note](HOUSEHOLD_COST_RECONCILIATION.md) preserves the
 worked tariff examples and the earlier model's history. Frozen examples compare
@@ -26,10 +29,11 @@ old and new accounting without replacing old expected values. The annual model
 preserves the PG&E/SCE examples and deliberately changes the SDG&E late-credit
 example from $148 to $138. Matched 288-hour Alameda checks preserve both the
 free-sizing result and fixed 10 kWh result, with optimizer/reporting agreement.
-A full 8,760-hour Alameda run completed sizing, billing, capital reporting,
-and county diagnostics. Its annual electricity bill reconciled within $0.001.
-The isolated run omitted payback and cross-scenario outputs whose comparison
-ledgers were absent. Those outputs require the complete scenario rerun.
+The core rerun completed sizing, billing, capital reporting, and county
+diagnostics. All 141 paper scenario/county annual bills reconciled within
+$0.001; the strict statewide validator passed 49 checks. Auxiliary payback
+outputs remain outside the validated EAC conclusions because their optimized
+EV comparison selects a different baseline.
 
 ## Research questions and comparison definitions
 
@@ -318,15 +322,17 @@ Prioritize a check when the limitation could change a stated conclusion.
 | Declared equipment costs, lifetimes, and incentive cases | These are sourced modeling inputs, not a new survey of prices available to every household. | Refresh cost benchmarks or report a focused sensitivity when cost uncertainty affects a claim. |
 | County equipment costs include imputed values | The heat-pump cost inputs use the median of available counties where source data are absent: three counties for space heating and nine for water heating. These are not local price observations. | Identify these counties in cost interpretation and refresh their inputs when local data become available. |
 | Battery remaining-value and replacement-cost assumptions | The method values five remaining years at one-third of replacement cost. It assumes unchanged real purchase costs and incentive treatment. Future prices, incentives, and resale values can differ; the direction of error is uncertain. | State these assumptions with the results. Use a focused sensitivity if they could change an adoption conclusion. |
-| Older results and auxiliary tools can use different capital accounting | Cached sizing and reports predate this correction. Standalone solar/battery/combined sweeps, the older Step 9 size optimizer, and auxiliary NPV diagnostics retain separate conventions. They cannot establish consistency with the current EAC model. | Regenerate central results with the current optimizer and EAC collectors. Align an auxiliary tool before using it for a comparison under these methods. |
+| Older results and auxiliary tools can use different capital accounting | The core scenarios were regenerated at `8a98b96`. Other cached sizing and reports retain their recorded versions. Standalone solar/battery/combined sweeps, the older Step 9 size optimizer, and auxiliary NPV diagnostics retain separate conventions. | Use the dated claim assessment for current evidence. Align an auxiliary tool before using it for a comparison under these methods. |
+| Auxiliary payback uses a different baseline for the optimized EV case | Its comparison selects `baseline` rather than `baseline_ice_car`. These payback outputs do not support the current Claims 2/3 EAC conclusions, which select their scenarios explicitly. | Correct and validate the payback comparison before citing it. |
 | The 2025 incentive sensitivity simplifies eligibility | Its continuous battery sizing uses an ITC-adjusted unit price without a separate 3 kWh eligibility constraint. The appliance policy registry also records separate caps for each appliance under the 25C heat-pump credit, in place of a combined household cap. Affected 2025 cases can overstate incentives. | Check sub-3-kWh battery conclusions and whole-household cases using both heating credits if these support a published claim. These issues do not change zero-credit post-ITC inputs. |
 | Battery augmentation costs and gradual capacity loss omitted centrally | Storage is treated more favorably than a model that charges for maintaining capacity. Round-trip efficiency losses and the declared replacement remain included. | Add an explicit degradation or augmentation-cost sensitivity if needed. |
 | Equipment-size bounds, specified charging/export rules, and fixed-design comparisons | An optimum applies within its declared feasible choices. A fixed-design result is not an unrestricted economic optimum. | Report binding constraints and test an expanded domain for an affected claim. |
+| Continuous sizing has no minimum commercial unit size | The optimizer can select very small positive capacities. These values indicate a modeled cost optimum, not an available product or a forecast of adoption. | State their scale. Use minimum unit sizes or a discrete equipment catalog if product-level decisions are needed. |
 | ACC Plus omitted | Savings for eligible households can be understated. For a fixed dispatch with zero opening banks, omitted benefit is at most exported kWh times the applicable bonus rate. Unused bonus credits have no current-year value. This bound alone does not establish unchanged optimal sizing. | The sourced standard-customer 2026 rates imply at most $8.80 per 1,000 exported kWh for PG&E, $16 for SCE, and $0 for SDG&E. Apply the bound to affected publication cases before considering a separate sensitivity. |
 | Annual net-export cap implemented for NBT research | Profitable net-exporting dispatches are excluded. Fixed arrays may curtail generation to comply. A binding cap can link permitted exports to added electrification load and affect the apparent package effect. This is a study constraint, not a utility rule. | Identify binding cases from annual meter totals. For an affected claim, compare with the pre-cap implementation at `9b61415`, using matched inputs and accounting assumptions. |
 | Annual credit timing | SDG&E savings may be overstated relative to the former no-backward-offset convention. A late credit could offset an early charge in the annual model. | Bound the difference using unused eligible credits and earlier eligible payments; inspect affected San Diego cases. |
 | No opening credits or value for balances after the modeled year | Results omit benefits from a household's existing bank or future use of unused credits. | Use a separately specified future-use sensitivity if a claim requires it; opening balances are not supported centrally. |
-| Persisted equipment capacities use two decimal places | Downstream capital reporting can differ slightly from the optimizer, which uses full precision. The full-year Alameda check differed by $0.66/year in solar capital cost; its electricity bill reconciled. | Preserve full precision in capacity artifacts and round only presentation in a separate correction. |
+| Persisted equipment capacities use two decimal places | Downstream capital reporting can differ slightly from the optimizer, which uses full precision. The core rerun at `8a98b96` had a maximum difference of $1.37/year, in San Mateo; all annual electricity bills reconciled. | Preserve full precision in capacity artifacts and round only presentation in a separate correction. |
 | Financial operating value is the objective | The model assigns no monetary value to outage protection, convenience, or household preferences. It therefore does not explain every adoption decision. | Study resilience or preferences separately when such benefits become part of the research question. |
 
 ## Verification and publication boundaries

@@ -120,7 +120,7 @@
       "boundaries": "Count purchases strictly before study end; do not buy at the terminal date. Credit only the last battery. Multiple replacements are included when required. Zero interest gives 1/n. Reject negative or non-finite discount rates and nonpositive or non-finite lifetimes and study periods.",
       "integration": "Step 9b, EAC collectors, county annual-cost charts, and SAM capital-cost scoring call this shared coefficient. EAC reporting has no alternative npv_framing switch. Dispatch constraints are unchanged.",
       "pv": "Solar life equals the study period, so PV uses CRF(r,N) for one purchase with no remaining life at study end.",
-      "result_status": "Implemented and covered by independent cash-flow and integration tests. Alameda 288-hour checks reconcile at free sizing and a fixed 10 kWh battery. A full-year Alameda CostService run was interrupted after ten minutes without a result; end-to-end validation is incomplete. Previously generated results require regeneration."
+      "result_status": "Implemented and covered by independent cash-flow and integration tests, including Alameda free sizing and a fixed 10 kWh battery. The September 11 core rerun at 8a98b96 completed 47 counties and three paper scenarios plus the supporting baseline at 8760 hours. All 49 statewide checks passed. Other sensitivities retain earlier versions. See docs/research_logs/2026-09-11.md."
     },
     "data_sources": {
       "remaining_value_method": "NIST Life-Cycle Costing Manual, section 4.5.3: https://tsapps.nist.gov/publication/get_pdf.cfm?pub_id=934909",
@@ -218,7 +218,7 @@
       "energy_domain": "Weighted annual exports must not exceed weighted annual imports. Numeric reporting enforces the same domain as optimization; NBT does not load surplus-payment rates.",
       "numerical_equality": "Annual excess exports at or below 1e-6 kWh are treated as zero surplus. Research validation rejects larger excesses without changing meter flows. The solver imposes the exact annual energy inequality.",
       "scope": "Annual settlement is an explicit research approximation, not a reconstruction of monthly utility statements. It can reduce SDG&E costs relative to the former no-backward-offset convention.",
-      "status": "All three approved simplifications are implemented. Publication outputs require regeneration before interpretation under these assumptions."
+      "status": "All three approved simplifications are implemented. The core paper scenarios were regenerated at 8a98b96 for 47 counties and 8760 hours; all 141 annual bills reconcile within $0.001. Other policy and price sensitivities were not rerun. See docs/research_logs/2026-09-11.md for claim boundaries."
     },
     "data_sources": {
       "tariff_inputs": "data/tariffs/README.md and import/export source manifests; utility pool evidence in docs/HOUSEHOLD_COST_RECONCILIATION.md",
@@ -235,12 +235,12 @@
     "title": "Implemented Solar and Storage Sizing Objective",
     "formula": "Minimize annualized PV cost + annualized battery cost + modeled electricity bill + specified battery-throughput cost.",
     "assumptions": {
-      "decisions": "Continuous PV capacity in kW, battery energy capacity in kWh, battery power in kW, and hourly operation. Appliance and vehicle choices are fixed by the scenario. Zero PV and zero storage are feasible choices in free sizing.",
+      "decisions": "Continuous PV capacity in kW, battery energy capacity in kWh, battery power in kW, and hourly operation. Appliance and vehicle choices are fixed by the scenario. Zero PV and zero storage are feasible choices in free sizing. Continuous sizing does not enforce minimum commercial unit sizes.",
       "physical_constraints": "Conserve energy; enforce load balance, battery power and charge limits, and one meter direction per interval. Central runs prohibit grid charging and allow battery export.",
       "sizing_domain": "Default optimized battery ceiling 40 kWh, power at most 1C, and available annual PV generation at most 150% of load for NBT or 100% for NEM 2. NBT also requires weighted annual exports <= weighted annual imports. Exports include solar and battery flows; imports include household supply and any permitted grid charging. Fixed designs face the same cap and can curtail unused generation. County reporting and preflight reject profiles above the cap.",
       "chronology": "Full-year 8760-hour runs have cyclic annual battery charge. Weighted 12x24 sensitivities close each representative day's battery cycle and weight annual dollars and energy by days per month.",
       "solver": "NBT and NEM 2 use HiGHS by default; CBC is also supported. NBT annual credit accounting adds one continuous remaining-charge variable per eligible pool, constrained to be nonnegative and at least annual charges minus annual credits. Minimizing the bill makes this equal the positive part. Financial credit accounting needs no binary variables. Physical meter-direction binaries remain.",
-      "bill_replay": "The NBT result is replayed through numeric shared accounting; a bill discrepancy above $0.001 is rejected. Tests reconcile capital formulas using full-precision capacities. Persisted capacity CSVs still round to two decimals, so downstream capital reporting can differ slightly; the full-year Alameda check differed by $0.66/year. Preserving artifact precision is a separate follow-up."
+      "bill_replay": "The NBT result is replayed through numeric shared accounting; a bill discrepancy above $0.001 is rejected. Tests reconcile capital formulas using full-precision capacities. Persisted capacity CSVs still round to two decimals. The core rerun at 8a98b96 had a maximum annual capital difference of $1.37 in San Mateo; all 141 annual bills reconciled. Preserving artifact precision is a separate follow-up."
     },
     "code": [
       "pipeline/steps/step9b_cooptimize_core.py:_solve_lp",
@@ -266,7 +266,7 @@
     "title": "Implemented Annual NBT Simplifications",
     "formula": "B = F + N + sum_p max(C_p - E_p, 0); C_p = sum_h w_h i_h r_imp[p,h]; E_p = sum_h w_h x_h r_exp[p,h].",
     "assumptions": {
-      "status": "All three changes are implemented. Publication results must be regenerated before interpreting them under the new assumptions.",
+      "status": "All three changes are implemented. The September 11 core rerun at 8a98b96 validates the three paper scenarios across 47 counties at 8760 hours. ITC, battery-price, and NEM 2 sensitivities retain earlier versions. Current findings and claim implications are recorded in docs/research_logs/2026-09-11.md.",
       "changes": "Exclude ACC Plus; constrain annual exported kWh to be no greater than annual imported kWh; settle base credits annually within the existing utility credit pools.",
       "preserved": "Hourly prices and dispatch, non-bypassable and fixed charges, SCE's combined pool, PG&E/SDG&E component restrictions, and zero additional value for unused credits beyond the modeled year.",
       "limitations": "Omitting the bonus can understate eligible-household savings. With fixed dispatch and zero opening banks, its current-year benefit is at most annual exported kWh times the bonus rate. Standard 2026 rates are PG&E $0.0088/kWh, SCE $0.016/kWh, SDG&E $0/kWh; this bound does not establish unchanged optimal sizing. The research export cap excludes annual net-exporting dispatches and can affect the electrification comparison when binding. Compare affected claims with pre-cap revision 9b61415 under matched assumptions. Annual timing can overstate SDG&E savings relative to the former no-backward-offset convention. At fixed flows, the difference is bounded by the sum across pools of min(unused annual-end credit, earlier eligible payments) in that prior model."

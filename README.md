@@ -18,6 +18,15 @@ that still require integration and validation.
 references used by the diagnostics. Every code change requires a methods review
 under the [repository guidelines](AGENTS.md#research-methods-documentation).
 
+### Latest validated results
+
+The [September 11 results and claim assessment](docs/research_logs/2026-09-11.md)
+records the full-year rerun at model commit `8a98b96`: 47 counties, three paper
+scenarios, and the supporting baseline. It gives updated numbers and wording
+for Claims 1–3, validation evidence, and the limits of the policy and
+electrification comparisons. Older generated claim pages and sensitivities
+retain their recorded model versions until refreshed.
+
 ### Dependencies
 
 This project requires Python 3 with the following external dependencies:
