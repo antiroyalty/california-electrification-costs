@@ -29,7 +29,7 @@ retain their recorded model versions until refreshed.
 
 ### Dependencies
 
-This project requires Python 3 with the following external dependencies:
+This project requires Python 3.11 or later with the following external dependencies:
 
 #### Core Dependencies
 - **PySAM** - NREL's System Advisor Model Python wrapper for solar and battery modeling
@@ -38,7 +38,7 @@ This project requires Python 3 with the following external dependencies:
 - **folium** - Interactive web maps creation
 - **numpy** - Numerical computing library
 - **PuLP** - Linear optimization model construction
-- **SciPy 1.9+** - HiGHS solver for NBT and NEM 2 sizing and dispatch
+- **SciPy 1.16.1+** - HiGHS solver with absolute annual-cost stopping tolerance
 - **requests** - HTTP library for API calls
 - **boto3** - AWS SDK for Python (for accessing building data)
 - **botocore** - Low-level interface to AWS services
@@ -59,7 +59,7 @@ This project requires Python 3 with the following external dependencies:
 #### Installation
 Install all dependencies using pip:
 ```bash
-pip install PySAM pandas geopandas folium numpy pulp "scipy>=1.9" requests \
+pip install PySAM pandas geopandas folium numpy pulp "scipy>=1.16.1" requests \
   boto3 botocore geopy python-dotenv pytest matplotlib pdfplumber
 ```
 

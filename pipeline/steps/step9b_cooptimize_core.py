@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 import math
+import time
 from typing import List, Optional, Tuple
 
 import pandas as pd
@@ -15,6 +16,14 @@ from appliances.electric_base import IncentiveScenario
 from tariffs.nem2 import NEM2OptimizationTerms
 from tariffs.nbt import AnnualCreditSettlement, NBTAnnualTerms
 from tariffs.models import require_annual_export_cap
+from pipeline.solver import (
+    COST_CERTIFICATE_ROUNDOFF_USD,
+    SolverOptions,
+    SolverReport,
+    remaining_seconds,
+    solve_cbc,
+    solve_highs,
+)
 
 # See step9b_cooptimize_pv_battery.py for the full note on why these must
 # match the appliance classes step14 uses for reporting, not a standalone
@@ -34,10 +43,6 @@ _DEFAULT_BATT_CAPEX_PER_KWH = BatteryStorageAppliance.per_kwh_cost_net(Incentive
 # not a tariff value. It implements the 30–40 kWh range documented in the
 # optimization design notes and can be overridden for sensitivity analyses.
 DEFAULT_MAX_BATTERY_KWH = 40.0
-# On a several-thousand-dollar annual objective this proves the solution to
-# substantially less than one cent while avoiding work that cannot affect any
-# reported research value.
-HIGHS_MIP_RELATIVE_GAP = 1e-6
 # If the first continuous relaxation exploits many intervals, adding only the
 # currently violated rows can make a later constraint-generation round harder
 # than the compact eager model. This affects performance only, never the
@@ -112,6 +117,7 @@ class CooptResult:
     flows: FlowSeries
     meter_binary_count: int
     solver_rounds: int
+    solver: SolverReport
     nbt_settlement: Optional[AnnualCreditSettlement[float]] = None
 
 
@@ -378,95 +384,6 @@ def _meter_direction_hours(inputs: CooptInputs, *, tolerance: float = 1e-9) -> l
     ]
 
 
-def _solve_with_highs(problem) -> None:
-    """Solve a PuLP linear model with SciPy's HiGHS MILP backend.
-
-    PuLP remains the readable model-construction layer. Converting its sparse
-    linear expressions here avoids CBC's severe branch-and-bound slowdown on
-    the 8,760-hour formulation while preserving one authoritative model.
-    """
-
-    try:
-        import numpy as np
-        from scipy.optimize import Bounds, LinearConstraint, milp
-        from scipy.sparse import coo_matrix
-    except ImportError as exc:
-        raise RuntimeError(
-            "Full-resolution co-optimization requires scipy.optimize.milp (HiGHS)"
-        ) from exc
-
-    variables = list(problem.variables())
-    variable_index = {variable: index for index, variable in enumerate(variables)}
-    objective = np.array(
-        [float(problem.objective.get(variable, 0.0)) for variable in variables],
-        dtype=float,
-    )
-    lower_bounds = np.array(
-        [
-            -np.inf if variable.lowBound is None else float(variable.lowBound)
-            for variable in variables
-        ],
-        dtype=float,
-    )
-    upper_bounds = np.array(
-        [
-            np.inf if variable.upBound is None else float(variable.upBound)
-            for variable in variables
-        ],
-        dtype=float,
-    )
-    integrality = np.array(
-        [1 if variable.cat == pulp.LpInteger else 0 for variable in variables],
-        dtype=np.uint8,
-    )
-
-    row_indices: list[int] = []
-    column_indices: list[int] = []
-    coefficients: list[float] = []
-    constraint_lower: list[float] = []
-    constraint_upper: list[float] = []
-    for row, constraint in enumerate(problem.constraints.values()):
-        for variable, coefficient in constraint.items():
-            row_indices.append(row)
-            column_indices.append(variable_index[variable])
-            coefficients.append(float(coefficient))
-        rhs = float(-constraint.constant)
-        if constraint.sense == pulp.LpConstraintLE:
-            constraint_lower.append(-np.inf)
-            constraint_upper.append(rhs)
-        elif constraint.sense == pulp.LpConstraintGE:
-            constraint_lower.append(rhs)
-            constraint_upper.append(np.inf)
-        elif constraint.sense == pulp.LpConstraintEQ:
-            constraint_lower.append(rhs)
-            constraint_upper.append(rhs)
-        else:
-            raise ValueError(f"Unknown PuLP constraint sense {constraint.sense}")
-
-    matrix = coo_matrix(
-        (coefficients, (row_indices, column_indices)),
-        shape=(len(constraint_lower), len(variables)),
-    ).tocsr()
-    result = milp(
-        c=objective,
-        integrality=integrality,
-        bounds=Bounds(lower_bounds, upper_bounds),
-        constraints=LinearConstraint(
-            matrix,
-            np.asarray(constraint_lower, dtype=float),
-            np.asarray(constraint_upper, dtype=float),
-        ),
-        options={"presolve": True, "mip_rel_gap": HIGHS_MIP_RELATIVE_GAP},
-    )
-    if not result.success or result.x is None:
-        raise RuntimeError(
-            f"HiGHS MILP did not solve to optimality: status={result.status}, "
-            f"message={result.message}"
-        )
-    for variable, value in zip(variables, result.x):
-        variable.varValue = float(value)
-
-
 def _solve_lp(
     inputs: CooptInputs,
     *,
@@ -486,6 +403,7 @@ def _solve_lp(
     max_battery_kwh: float = DEFAULT_MAX_BATTERY_KWH,
     max_pv_to_annual_load_ratio: float | None = None,
     solver_backend: str = "auto",
+    solver_options: SolverOptions = SolverOptions(),
 ) -> CooptResult:
     """Minimize annualized equipment cost plus the tariff bill and degradation.
 
@@ -505,6 +423,10 @@ def _solve_lp(
     Both NBT and NEM 2 use HiGHS by default, with CBC available explicitly.
     """
     _ensure_pulp()
+    started = time.monotonic()
+    if solver_backend != "auto":
+        solver_options = replace(solver_options, backend=solver_backend)
+    deadline = started + solver_options.time_limit_seconds
     L = inputs.load_kwh
     G = inputs.pv_gen_per_kw
     p_imp = inputs.import_rates
@@ -558,10 +480,6 @@ def _solve_lp(
         max_pv_to_annual_load_ratio = inputs.max_pv_to_annual_load_ratio
     if max_pv_to_annual_load_ratio <= 0:
         raise ValueError("max_pv_to_annual_load_ratio must be positive")
-    if solver_backend == "auto":
-        solver_backend = "highs"
-    if solver_backend not in {"highs", "cbc"}:
-        raise ValueError("solver_backend must be 'auto', 'highs', or 'cbc'")
     if weights is None:
         weights = [1.0] * H
     if len(weights) != H:
@@ -891,12 +809,11 @@ def _solve_lp(
 
     prob += capex_annual + energy_cost + degrade_cost
 
-    # Solve with exact constraint generation. Each intermediate problem is a
-    # relaxation of the physical meter model. If its global optimum has no
-    # simultaneous import/export, it is feasible for the full model while also
-    # furnishing a lower bound, which proves it is the full model's optimum.
-    # Otherwise add tight binary disjunctions only at the violating intervals.
+    # Each intermediate model relaxes physical meter constraints. Its lower
+    # bound is valid for the full problem, even with an early solver stop.
+    # Accept only a physically valid candidate within the declared cost gap.
     solver_rounds = 0
+    certificates = []
     while True:
         solver_rounds += 1
         if solver_rounds > MAX_METER_DIRECTION_ROUNDS:
@@ -906,15 +823,20 @@ def _solve_lp(
                 f"pinned over {H} intervals). The relaxation is not tightening, which "
                 f"indicates a defect in the disjunction bounds rather than a hard instance."
             )
-        if solver_backend == "highs":
-            _solve_with_highs(prob)
+        remaining_seconds(deadline)
+        if solver_options.backend == "highs":
+            certificate = solve_highs(prob, solver_options, deadline)
         else:
-            solver = pulp.PULP_CBC_CMD(msg=False)
-            prob.solve(solver)
-            if pulp.LpStatus[prob.status] != "Optimal":
-                raise RuntimeError(
-                    f"CBC MILP did not solve to optimality: status={pulp.LpStatus[prob.status]}"
-                )
+            certificate = solve_cbc(prob, solver_options, deadline)
+        certificates.append(certificate)
+        print(
+            f"[coopt] {solver_options.backend} round {solver_rounds}, "
+            f"{len(grid_import_mode)} meter binaries, "
+            f"candidate=${certificate.objective_usd:.6f}/year, "
+            f"lower bound=${certificate.lower_bound_usd:.6f}/year, "
+            f"elapsed={time.monotonic() - started:.1f}s ({certificate.termination})",
+            flush=True,
+        )
 
         violations = []
         for h in range(H):
@@ -1151,6 +1073,15 @@ def _solve_lp(
         - export_credit_val
         + degradation_cost_val
     )
+    lower_bound = max(c.lower_bound_usd for c in certificates)
+    if lower_bound > total_cost_val + COST_CERTIFICATE_ROUNDOFF_USD:
+        raise RuntimeError("Solver lower bound exceeds the replayed household objective")
+    gap = max(0.0, total_cost_val - lower_bound)
+    if gap > solver_options.annual_cost_gap_usd + COST_CERTIFICATE_ROUNDOFF_USD:
+        raise RuntimeError(
+            f"County optimization incomplete: annual cost gap ${gap:.6f} exceeds "
+            f"${solver_options.annual_cost_gap_usd:.6f}; no result accepted"
+        )
     result = CooptResult(
         pv_kw=pv_kw_val,
         batt_kwh=b_e_val,
@@ -1164,6 +1095,9 @@ def _solve_lp(
         flows=flows,
         meter_binary_count=len(grid_import_mode),
         solver_rounds=solver_rounds,
+        solver=SolverReport(
+            solver_options, time.monotonic() - started, lower_bound, gap, tuple(certificates),
+        ),
         nbt_settlement=nbt_settlement,
     )
     _verify_invariants(result, inputs)

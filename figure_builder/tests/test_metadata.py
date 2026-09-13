@@ -126,7 +126,7 @@ def test_optimization_metadata_matches_declared_coarse_sweep_settings():
             "nem2_at_2026_retail_rates__itc_2025",
         ],
         "purpose": (
-            "Exact current-law NBT observations for Claim 1 market-price "
+            "Full-year current-law NBT observations for Claim 1 market-price "
             "annotations. The four-cell NBT/NEM 2 comparison uses one "
             "common weighted 12x24 resolution."
         ),
@@ -135,7 +135,10 @@ def test_optimization_metadata_matches_declared_coarse_sweep_settings():
     assert metadata["solver"]["backend_by_export_compensation_regime"] == {
         "nbt_2026": "highs", "nem2_at_2026_retail_rates": "highs",
     }
-    assert metadata["solver"]["mip_relative_gap"] == 1e-6
+    # The approved stopping rule now bounds annual dollars, not relative error.
+    assert metadata["solver"]["mip_relative_gap"] == 0.0
+    assert metadata["solver"]["mip_absolute_gap_usd"] == 1.0
+    assert metadata["solver"]["time_limit_seconds"] == 300.0
     assert metadata["sizing_domain"]["max_battery_kwh"] == 40.0
     assert metadata["sizing_domain"]["nbt_annual_energy_constraint"] == (
         "annual exported kWh <= annual imported kWh"

@@ -255,13 +255,15 @@ def optimization_metadata(*, fine: bool) -> dict:
     """The actual fixed settings passed to the sweep co-optimization."""
 
     from pipeline.steps.step9b_cooptimize_core import (
-        HIGHS_MIP_RELATIVE_GAP,
         SOLVER_OUTPUT_ABSOLUTE_TOLERANCE,
         _RTE,
         _SOC_MAX_FR,
         _SOC_MIN_FR,
     )
 
+    from pipeline.solver import SolverOptions
+
+    solver_options = SolverOptions()
     settings = SWEEP_MODEL_SETTINGS
     return {
         "billing_year": settings.billing_year,
@@ -284,7 +286,7 @@ def optimization_metadata(*, fine: bool) -> dict:
                 if case not in FULL_HOURLY_POLICY_CASES
             ],
             "purpose": (
-                "Exact current-law NBT observations for Claim 1 market-price "
+                "Full-year current-law NBT observations for Claim 1 market-price "
                 "annotations. The four-cell NBT/NEM 2 comparison uses one "
                 "common weighted 12x24 resolution."
             ),
@@ -295,7 +297,9 @@ def optimization_metadata(*, fine: bool) -> dict:
                 "nbt_2026": "highs",
                 "nem2_at_2026_retail_rates": "highs",
             },
-            "mip_relative_gap": HIGHS_MIP_RELATIVE_GAP,
+            "mip_relative_gap": 0.0,
+            "mip_absolute_gap_usd": solver_options.annual_cost_gap_usd,
+            "time_limit_seconds": solver_options.time_limit_seconds,
             "output_absolute_tolerance": SOLVER_OUTPUT_ABSOLUTE_TOLERANCE,
         },
         "sizing_domain": {

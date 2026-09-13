@@ -25,6 +25,7 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 from pipeline.config import Config
+from pipeline.solver import SolverOptions
 from tariffs import CustomerSegment
 
 
@@ -86,6 +87,17 @@ def test_solar_storage_module_passes_explicit_battery_sizing_bound():
 
     _, kwargs = mock_step9b.process.call_args
     assert kwargs["max_battery_kwh"] == 55.0
+
+
+def test_solar_storage_module_passes_explicit_solver_controls():
+    import pipeline.modules.solar_storage as mod
+
+    options = SolverOptions(backend="cbc", annual_cost_gap_usd=.25, time_limit_seconds=60)
+    cfg = Config(scenario="baseline_coopt", housing_type="single-family-detached",
+                 counties=["Alameda County"], coopt_solver=options)
+    with patch.object(mod, "WeatherFiles"), patch.object(mod, "Step9bCoopt") as step:
+        mod.run(cfg)
+    assert step.process.call_args.kwargs["solver_options"] == options
 
 
 def test_solar_storage_module_sizes_against_net_cost_for_the_configured_incentive_scenario():

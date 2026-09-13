@@ -193,6 +193,45 @@ Standard optimized storage is limited to 40 kWh, with explicit overrides for
 declared sensitivities. Current PV-generation bounds are 150% of annual load
 under NBT and 100% under the NEM 2 comparison.
 
+The default numerical stopping rule accepts a physically valid design within
+**$1/year of the model optimum**. Each intermediate solver model supplies a
+lower cost bound, $L$. The final design's replayed annual cost, $C$, must satisfy
+$0 \leq C-L \leq \epsilon$, where the default $\epsilon$ is $1/year.
+We retain the strongest bound across meter-constraint rounds. Numerical
+comparisons allow $10^{-6}$ dollars for floating-point roundoff. This cost
+tolerance does not relax energy conservation, meter direction, or billing checks.
+The certificate uses full-precision capacities. Rounding in saved capacity
+tables can add the separate reporting difference documented below.
+
+HiGHS remains the default backend and requires SciPy 1.16.1 or later, the
+validated minimum version. The earlier SciPy 1.11.4 wrapper drops the
+absolute-gap setting. CBC can be selected explicitly. Each county
+sizing/dispatch problem has a default 300-second budget shared across
+model construction and all solver rounds. Data preparation and optional
+sensitivity cases are separate; each sensitivity solve has its own budget.
+Solver limits are cooperative, so finalization and validation can add overhead.
+A timeout is accepted only if the available candidate passes the cost bound
+and all physical checks. Otherwise the run stops with an error.
+
+`Config.coopt_solver` contains these settings as `SolverOptions`. Step 9b also
+exposes `--solver-backend`, `--solver-cost-gap-usd`, and
+`--solver-time-limit-seconds`. County outputs record the settings, elapsed time,
+cost gap, and lower bound. A `coopt_solver_<county>.json` file records each round.
+CBC's printed bounds are adjusted downward for their displayed rounding.
+Changing a backend is an explicit run choice; there is no automatic retry.
+
+The $1 bound concerns annual cost, not identical equipment capacities. Nearly
+equal-cost systems can have different sizes. A claim about a battery adoption
+threshold therefore needs a tighter tolerance or a separate comparison around
+that threshold. The validated results at `8a98b96` retain their original solver
+settings; this update does not regenerate the publication results.
+
+An isolated full-year check of this stopping rule retained the saved capacities
+and annual objectives for San Diego, Alameda, and Los Angeles. Their solves
+took 93, 154, and 144 seconds; all bills replayed within $0.001. See the
+[local benchmark record](../analysis_results/solver_controls_3ea830b/README.md).
+These timings combine a runtime update with the new stopping tolerance.
+
 Full-year runs preserve chronological storage operation. Large sensitivity
 sweeps also use a reduced profile with 24 representative hours for each of
 12 months. These 288 hours are weighted by days in the month, with a daily
@@ -333,6 +372,7 @@ Prioritize a check when the limitation could change a stated conclusion.
 | Annual credit timing | SDG&E savings may be overstated relative to the former no-backward-offset convention. A late credit could offset an early charge in the annual model. | Bound the difference using unused eligible credits and earlier eligible payments; inspect affected San Diego cases. |
 | No opening credits or value for balances after the modeled year | Results omit benefits from a household's existing bank or future use of unused credits. | Use a separately specified future-use sensitivity if a claim requires it; opening balances are not supported centrally. |
 | Persisted equipment capacities use two decimal places | Downstream capital reporting can differ slightly from the optimizer, which uses full precision. The core rerun at `8a98b96` had a maximum difference of $1.37/year, in San Mateo; all annual electricity bills reconciled. | Preserve full precision in capacity artifacts and round only presentation in a separate correction. |
+| Cost tolerance and finite solver budget | New solves allow up to $1/year of cost suboptimality, subject to unchanged physical checks. This does not bound capacity differences. Difficult cases can fail the five-minute budget. | Record the cost certificate. Use a tighter tolerance for capacity-threshold claims. Adding tariff-identified meter constraints together is a pending performance change. |
 | Financial operating value is the objective | The model assigns no monetary value to outage protection, convenience, or household preferences. It therefore does not explain every adoption decision. | Study resilience or preferences separately when such benefits become part of the research question. |
 
 ## Verification and publication boundaries

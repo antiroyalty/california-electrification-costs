@@ -5,6 +5,7 @@ from typing import Dict, List, Optional
 
 from evaluations.constants import DEFAULT_DISCOUNT_RATE
 from tariffs.models import CustomerSegment, NBTScenario, ServiceType
+from pipeline.solver import SolverOptions
 
 
 @dataclass
@@ -50,6 +51,8 @@ class Config:
     # bound is also what makes the full-year meter-direction formulation
     # numerically tight; sensitivity runs should override and report it.
     max_battery_kwh: float = 40.0
+    # The budget applies to one sizing/dispatch solve across all meter rounds.
+    coopt_solver: SolverOptions = field(default_factory=SolverOptions)
 
     def nbt_scenario(self) -> NBTScenario:
         return NBTScenario(
