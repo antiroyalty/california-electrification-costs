@@ -47,6 +47,10 @@ class SolverReport:
     optimality_gap_usd: float
     rounds: tuple[CostCertificate, ...]
 
+    @property
+    def round_count(self) -> int:
+        return len(self.rounds)
+
 
 def remaining_seconds(deadline: float) -> float:
     remaining = deadline - time.monotonic()
@@ -177,4 +181,62 @@ def solve_cbc(problem, options: SolverOptions, deadline: float) -> CostCertifica
         return cbc_cost_certificate(
             log_path.read_text(), float(pulp.value(problem.objective)),
             float(problem.objective.constant),
+        )
+
+
+class SolverRun:
+    """Manage one optimization time budget and its cost certificates."""
+
+    def __init__(self, options: SolverOptions):
+        self.options = options
+        self._started = time.monotonic()
+        self._deadline = self._started + options.time_limit_seconds
+        self._rounds: list[CostCertificate] = []
+
+    @property
+    def elapsed_seconds(self) -> float:
+        return time.monotonic() - self._started
+
+    @property
+    def round_count(self) -> int:
+        return len(self._rounds)
+
+    def solve_round(self, problem) -> CostCertificate:
+        """Solve one relaxation within the shared run budget."""
+
+        remaining_seconds(self._deadline)
+        if self.options.backend == "highs":
+            certificate = solve_highs(problem, self.options, self._deadline)
+        else:
+            certificate = solve_cbc(problem, self.options, self._deadline)
+        self._rounds.append(certificate)
+        return certificate
+
+    def finalize(self, replayed_objective_usd: float) -> SolverReport:
+        """Validate the strongest bound against the replayed household cost."""
+
+        if not self._rounds:
+            raise RuntimeError("Cannot finalize a solver run without a cost certificate")
+        if not math.isfinite(replayed_objective_usd):
+            raise RuntimeError("Replayed household objective must be finite")
+
+        lower_bound_usd = max(round_.lower_bound_usd for round_ in self._rounds)
+        if lower_bound_usd > replayed_objective_usd + COST_CERTIFICATE_ROUNDOFF_USD:
+            raise RuntimeError("Solver lower bound exceeds the replayed household objective")
+        optimality_gap_usd = max(0.0, replayed_objective_usd - lower_bound_usd)
+        if (
+            optimality_gap_usd
+            > self.options.annual_cost_gap_usd + COST_CERTIFICATE_ROUNDOFF_USD
+        ):
+            raise RuntimeError(
+                "County optimization incomplete: annual cost gap "
+                f"${optimality_gap_usd:.6f} exceeds "
+                f"${self.options.annual_cost_gap_usd:.6f}; no result accepted"
+            )
+        return SolverReport(
+            options=self.options,
+            elapsed_seconds=self.elapsed_seconds,
+            lower_bound_usd=lower_bound_usd,
+            optimality_gap_usd=optimality_gap_usd,
+            rounds=tuple(self._rounds),
         )

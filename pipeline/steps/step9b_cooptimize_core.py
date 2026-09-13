@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 import math
-import time
 from typing import List, Optional, Tuple
 
 import pandas as pd
@@ -17,12 +16,9 @@ from tariffs.nem2 import NEM2OptimizationTerms
 from tariffs.nbt import AnnualCreditSettlement, NBTAnnualTerms
 from tariffs.models import require_annual_export_cap
 from pipeline.solver import (
-    COST_CERTIFICATE_ROUNDOFF_USD,
     SolverOptions,
     SolverReport,
-    remaining_seconds,
-    solve_cbc,
-    solve_highs,
+    SolverRun,
 )
 
 # See step9b_cooptimize_pv_battery.py for the full note on why these must
@@ -116,9 +112,12 @@ class CooptResult:
     nem2_settlement: Optional["NEM2CooptSettlement"]
     flows: FlowSeries
     meter_binary_count: int
-    solver_rounds: int
     solver: SolverReport
     nbt_settlement: Optional[AnnualCreditSettlement[float]] = None
+
+    @property
+    def solver_rounds(self) -> int:
+        return self.solver.round_count
 
 
 @dataclass(frozen=True)
@@ -423,10 +422,9 @@ def _solve_lp(
     Both NBT and NEM 2 use HiGHS by default, with CBC available explicitly.
     """
     _ensure_pulp()
-    started = time.monotonic()
     if solver_backend != "auto":
         solver_options = replace(solver_options, backend=solver_backend)
-    deadline = started + solver_options.time_limit_seconds
+    solver_run = SolverRun(solver_options)
     L = inputs.load_kwh
     G = inputs.pv_gen_per_kw
     p_imp = inputs.import_rates
@@ -812,29 +810,22 @@ def _solve_lp(
     # Each intermediate model relaxes physical meter constraints. Its lower
     # bound is valid for the full problem, even with an early solver stop.
     # Accept only a physically valid candidate within the declared cost gap.
-    solver_rounds = 0
-    certificates = []
     while True:
-        solver_rounds += 1
-        if solver_rounds > MAX_METER_DIRECTION_ROUNDS:
+        round_number = solver_run.round_count + 1
+        if round_number > MAX_METER_DIRECTION_ROUNDS:
             raise RuntimeError(
                 f"Meter-direction constraint generation did not converge within "
                 f"{MAX_METER_DIRECTION_ROUNDS} rounds ({len(grid_import_mode)} binaries "
                 f"pinned over {H} intervals). The relaxation is not tightening, which "
                 f"indicates a defect in the disjunction bounds rather than a hard instance."
             )
-        remaining_seconds(deadline)
-        if solver_options.backend == "highs":
-            certificate = solve_highs(prob, solver_options, deadline)
-        else:
-            certificate = solve_cbc(prob, solver_options, deadline)
-        certificates.append(certificate)
+        certificate = solver_run.solve_round(prob)
         print(
-            f"[coopt] {solver_options.backend} round {solver_rounds}, "
+            f"[coopt] {solver_options.backend} round {round_number}, "
             f"{len(grid_import_mode)} meter binaries, "
             f"candidate=${certificate.objective_usd:.6f}/year, "
             f"lower bound=${certificate.lower_bound_usd:.6f}/year, "
-            f"elapsed={time.monotonic() - started:.1f}s ({certificate.termination})",
+            f"elapsed={solver_run.elapsed_seconds:.1f}s ({certificate.termination})",
             flush=True,
         )
 
@@ -856,7 +847,7 @@ def _solve_lp(
             break
 
         hours_to_constrain = set(violations)
-        if solver_rounds == 1 and len(violations) > METER_BINARY_EAGER_THRESHOLD:
+        if round_number == 1 and len(violations) > METER_BINARY_EAGER_THRESHOLD:
             hours_to_constrain.update(_meter_direction_hours(inputs))
 
         for h in sorted(hours_to_constrain):
@@ -1073,15 +1064,7 @@ def _solve_lp(
         - export_credit_val
         + degradation_cost_val
     )
-    lower_bound = max(c.lower_bound_usd for c in certificates)
-    if lower_bound > total_cost_val + COST_CERTIFICATE_ROUNDOFF_USD:
-        raise RuntimeError("Solver lower bound exceeds the replayed household objective")
-    gap = max(0.0, total_cost_val - lower_bound)
-    if gap > solver_options.annual_cost_gap_usd + COST_CERTIFICATE_ROUNDOFF_USD:
-        raise RuntimeError(
-            f"County optimization incomplete: annual cost gap ${gap:.6f} exceeds "
-            f"${solver_options.annual_cost_gap_usd:.6f}; no result accepted"
-        )
+    solver_report = solver_run.finalize(total_cost_val)
     result = CooptResult(
         pv_kw=pv_kw_val,
         batt_kwh=b_e_val,
@@ -1094,10 +1077,7 @@ def _solve_lp(
         nem2_settlement=nem2_settlement,
         flows=flows,
         meter_binary_count=len(grid_import_mode),
-        solver_rounds=solver_rounds,
-        solver=SolverReport(
-            solver_options, time.monotonic() - started, lower_bound, gap, tuple(certificates),
-        ),
+        solver=solver_report,
         nbt_settlement=nbt_settlement,
     )
     _verify_invariants(result, inputs)

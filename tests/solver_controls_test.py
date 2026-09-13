@@ -10,7 +10,7 @@ import pytest
 from scipy.optimize import OptimizeResult
 
 from pipeline import solver
-from pipeline.solver import CostCertificate, SolverOptions
+from pipeline.solver import CostCertificate, SolverOptions, SolverRun
 from pipeline.steps import step9b_cooptimize_core as core
 
 
@@ -113,24 +113,60 @@ def test_cbc_unknown_or_incomplete_proofs_are_rejected(log):
         solver.cbc_cost_certificate(log, 29, 25)
 
 
+def test_solver_run_keeps_the_strongest_round_bound(monkeypatch):
+    certificates = iter([
+        CostCertificate(40, 38.5, "time_limit"),
+        CostCertificate(40, 39.25, "time_limit"),
+    ])
+    monkeypatch.setattr(solver, "solve_highs", lambda *args: next(certificates))
+
+    run = SolverRun(SolverOptions(annual_cost_gap_usd=1))
+    run.solve_round(object())
+    run.solve_round(object())
+    report = run.finalize(40)
+
+    assert report.round_count == 2
+    assert report.lower_bound_usd == pytest.approx(39.25)
+    assert report.optimality_gap_usd == pytest.approx(0.75)
+
+
+@pytest.mark.parametrize("replayed_cost", [float("nan"), float("inf")])
+def test_solver_run_rejects_a_nonfinite_replayed_cost(monkeypatch, replayed_cost):
+    monkeypatch.setattr(
+        solver,
+        "solve_highs",
+        lambda *args: CostCertificate(40, 40, "optimal"),
+    )
+    run = SolverRun(SolverOptions())
+    run.solve_round(object())
+    with pytest.raises(RuntimeError, match="must be finite"):
+        run.finalize(replayed_cost)
+
+
+def test_solver_run_requires_a_certificate_before_finalizing():
+    with pytest.raises(RuntimeError, match="without a cost certificate"):
+        SolverRun(SolverOptions()).finalize(40)
+
+
 def _no_solar_inputs():
     return core.CooptInputs([100], [0], [.4], [.1])
 
 
 @pytest.mark.parametrize("gap,accepted", [(0.5, True), (1.0, True), (1.001, False)])
 def test_final_dispatch_must_meet_cost_gap_even_with_a_feasible_timeout(monkeypatch, gap, accepted):
-    original = core.solve_highs
+    original = solver.solve_cbc
 
     def timed_out(problem, options, deadline):
         result = original(problem, options, deadline)
         return CostCertificate(result.objective_usd, result.objective_usd - gap, "time_limit")
 
-    monkeypatch.setattr(core, "solve_highs", timed_out)
+    monkeypatch.setattr(solver, "solve_cbc", timed_out)
+    options = SolverOptions(backend="cbc")
     if not accepted:
         with pytest.raises(RuntimeError, match="annual cost gap.*exceeds"):
-            core._solve_lp(_no_solar_inputs())
+            core._solve_lp(_no_solar_inputs(), solver_options=options)
     else:
-        result = core._solve_lp(_no_solar_inputs())
+        result = core._solve_lp(_no_solar_inputs(), solver_options=options)
         assert result.total_cost == pytest.approx(40)
         assert result.solver.optimality_gap_usd == pytest.approx(gap)
         assert result.solver.lower_bound_usd == pytest.approx(40 - gap)
@@ -141,7 +177,7 @@ def _meter_case():
 
 
 def test_economic_tolerance_does_not_allow_simultaneous_meter_flows(monkeypatch):
-    original = core.solve_highs
+    original = solver.solve_cbc
 
     def invalid_second_round(problem, options, deadline):
         certificate = original(problem, options, deadline)
@@ -150,34 +186,38 @@ def test_economic_tolerance_does_not_allow_simultaneous_meter_flows(monkeypatch)
                 problem.variablesDict()[name].varValue = value
         return certificate
 
-    monkeypatch.setattr(core, "solve_highs", invalid_second_round)
+    monkeypatch.setattr(solver, "solve_cbc", invalid_second_round)
     with pytest.raises(RuntimeError, match="Meter-direction constraint violated solver tolerance"):
-        core._solve_lp(_meter_case(), fixed_pv_kw=2, fixed_batt_kwh=0)
+        core._solve_lp(
+            _meter_case(),
+            fixed_pv_kw=2,
+            fixed_batt_kwh=0,
+            solver_options=SolverOptions(backend="cbc"),
+        )
 
 
 def test_time_budget_is_shared_by_all_meter_rounds(monkeypatch):
-    original = core.solve_highs
     now = [time.monotonic()]
     clock = SimpleNamespace(monotonic=lambda: now[0])
-    monkeypatch.setattr(core, "time", clock)
     monkeypatch.setattr(solver, "time", clock)
     calls = []
 
     def uses_budget(problem, options, deadline):
         calls.append(deadline)
-        certificate = original(problem, options, deadline)
         now[0] = deadline + .01
-        return certificate
+        return CostCertificate(40, 40, "optimal")
 
-    monkeypatch.setattr(core, "solve_highs", uses_budget)
+    monkeypatch.setattr(solver, "solve_highs", uses_budget)
+    run = SolverRun(SolverOptions())
+    run.solve_round(object())
     with pytest.raises(RuntimeError, match="County optimization time budget exhausted"):
-        core._solve_lp(_meter_case(), fixed_pv_kw=2, fixed_batt_kwh=0)
+        run.solve_round(object())
     assert len(calls) == 1
 
 
 def test_stricter_cost_tolerance_remains_available():
     result = core._solve_lp(_meter_case(), fixed_pv_kw=2, fixed_batt_kwh=0,
-                            solver_options=SolverOptions(annual_cost_gap_usd=0))
+                            solver_options=SolverOptions("cbc", 0))
     assert result.solver.optimality_gap_usd <= 1e-6
 
 

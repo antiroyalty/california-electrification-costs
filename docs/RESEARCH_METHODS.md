@@ -196,7 +196,7 @@ under NBT and 100% under the NEM 2 comparison.
 The default numerical stopping rule accepts a physically valid design within
 **$1/year of the model optimum**. Each intermediate solver model supplies a
 lower cost bound, $L$. The final design's replayed annual cost, $C$, must satisfy
-$0 \leq C-L \leq \epsilon$, where the default $\epsilon$ is $1/year.
+$0 \leq C-L \leq \epsilon$, where the default $\epsilon$ is $1/year$.
 We retain the strongest bound across meter-constraint rounds. Numerical
 comparisons allow $10^{-6}$ dollars for floating-point roundoff. This cost
 tolerance does not relax energy conservation, meter direction, or billing checks.
@@ -219,6 +219,9 @@ exposes `--solver-backend`, `--solver-cost-gap-usd`, and
 cost gap, and lower bound. A `coopt_solver_<county>.json` file records each round.
 CBC's printed bounds are adjusted downward for their displayed rounding.
 Changing a backend is an explicit run choice; there is no automatic retry.
+`SolverRun` owns the shared deadline, selects the configured backend, retains
+the round certificates, and validates the final cost bound. Step 9b separately
+constructs the model and validates its physical and billing results.
 
 The $1 bound concerns annual cost, not identical equipment capacities. Nearly
 equal-cost systems can have different sizes. A claim about a battery adoption
