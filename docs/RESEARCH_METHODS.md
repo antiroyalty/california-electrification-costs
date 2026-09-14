@@ -132,6 +132,21 @@ Appliance costs use their declared service lives.
 The [methods manifest](methods.yaml) gives the annualization
 formulas and capital-cost sources.
 
+Reports with and without solar/storage now use one county-level cost
+calculation. Both include the same appliance and vehicle purchases, declared
+service lives, and vehicle operating costs. The no-solar case sets solar and
+storage capital costs to zero and uses the bill for the original household
+load. It does not require a solar/storage capital summary. County means and
+medians are calculated from these same itemized costs.
+
+Reporting requires the capital ledger, its cost fields, and rows for each
+requested county and incentive case. Missing data do not represent free
+equipment. Invalid costs, nonpositive service lives, and duplicate equipment
+rows raise errors. Explicit zero costs and negative net costs or operating-cost
+adjustments remain valid. Both solar choices can select an exact saved bill
+timestamp; selecting that timestamp does not establish the provenance of other
+input files. The matched four-case publication dataset remains pending.
+
 Equipment service life and the investment comparison period are different
 assumptions. The approved study period is 25 years, matching the assumed solar
 life. This is within the Department of Energy's typical 20–30-year photovoltaic
@@ -359,6 +374,7 @@ Prioritize a check when the limitation could change a stated conclusion.
 |---|---|---|
 | One representative household and utility per county; 47 counties covered | Results do not describe household variation or every utility customer. County summaries are unweighted, so they are not statewide adoption estimates. | Sample household types and service territories; report population-weighted results when appropriate. |
 | One standardized demand/weather year and one tariff snapshot | Results are annualized scenarios, not forecasts of actual lifetime bills or a historical before/after study. | Examine additional weather years, demand profiles, and explicitly specified tariff trajectories. |
+| No-solar and solar reports can use different import-rate plans | The no-solar report retains its configured retail plan; the solar report selects its configured billing variant, normally NEM 3. Their cost difference can include a rate-plan change. Shared capital accounting does not remove this effect. | Match tariff selection between household types within each solar choice, and identify any adoption-related plan change in the four-case comparison. |
 | Known profiles and prices throughout an optimization run | Dispatch assumes advance knowledge of the modeled year. Real controllers face forecast errors, which can reduce achievable savings. | Compare a controller with limited forecasts on the same cases. |
 | Reduced 12 × 24 sensitivity chronology | Averaging can change cycling, usable credits, and optimal capacities. Mixed-resolution comparisons cannot isolate a policy effect by themselves. | Use full-year checks for findings near a threshold or sensitive to chronology. |
 | Declared equipment costs, lifetimes, and incentive cases | These are sourced modeling inputs, not a new survey of prices available to every household. | Refresh cost benchmarks or report a focused sensitivity when cost uncertainty affects a claim. |

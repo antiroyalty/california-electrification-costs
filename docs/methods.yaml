@@ -144,7 +144,10 @@
       "lifetimes": "solar=25, storage=15, appliance rows use lifetime_years (default 15 if missing)",
       "incentives": "full/half/no incentives applied to PV/storage capex",
       "capital_recovery_factor": "CRF = r(1+r)^n / ((1+r)^n - 1)",
-      "battery_annualization": "Always use alpha_batt_npv, shared with Step 9b. The study period equals the declared solar life; replacement and proportional remaining value are included."
+      "battery_annualization": "Always use alpha_batt_npv, shared with Step 9b. The study period equals the declared solar life; replacement and proportional remaining value are included.",
+      "reporting_validation": "County and aggregate EAC reports share one county collector. It requires a capital ledger with explicit county, incentive, appliance identity, finite costs and operating costs, and positive service lives. Missing county/incentive rows and duplicate equipment rows fail. Explicit zero costs and negative net costs or operating-cost adjustments remain valid. The low-level EAC function retains its existing optional-input conventions; report collectors validate inputs before calling it.",
+      "no_solar_counterfactual": "Step 20 calls the shared EAC collectors with with_solar=False and electricity_variant=retail. Solar/storage capital is deliberately zero and no PV summary is read. Appliance and vehicle costs use the same ledger and calculation as the with-solar case. Bills come from the original-load row. An optional exact timestamp selects saved bills, not other input provenance. The four-case publication collector and results remain pending.",
+      "comparison_tariffs": "No-solar reporting retains the configured retail import plan; with-solar reporting retains the configured variant, normally NEM 3. Their difference can include a plan change. The four-case comparison must match tariff selection between household types within each solar choice and state any adoption-related plan change."
     },
     "data_sources": {
       "capex_ledger": "capital_costs_<scenario>_<housing>.csv",
@@ -157,7 +160,8 @@
       "helpers/plot_scenario_comparison_helper.py:collect_eac_components",
       "helpers/plot_scenario_comparison_helper.py:collect_eac_components_by_county",
       "figure_builder/datasets.py:build_claims_eac_source",
-      "pipeline/steps/step20_no_solar_storage_electrification.py:collect_eac_no_pv"
+      "pipeline/steps/step20_no_solar_storage_electrification.py:collect_eac_no_pv",
+      "pipeline/steps/step20_no_solar_storage_electrification.py:collect_eac_no_pv_by_county"
     ]
   },
   "incentives.apply_pv_storage_incentives": {
