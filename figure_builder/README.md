@@ -16,6 +16,7 @@ redefined here.
 | `dispatch.py` | Turn a county slug into 8760-hour load / PV / import / export arrays. |
 | `pricing.py` | `live_prices(regime)` — net capital costs, read from the appliance classes so captions can't drift from the model. |
 | `datasets.py` | Strict collectors (`collect_*`) that run the model or validate complete, source-locked result tables and return tidy DataFrames. |
+| `electrification.py` | Collect the matched gas/ICE × electric/EV, no-solar × optimized-solar comparison and its package effect. |
 | `charts.py` | Pure plot functions (`plot_*`): DataFrame → matplotlib Figure. No IO. |
 | `docio.py` | Pure string primitives: embed PNGs, patch/splice HTML documents idempotently. |
 | `recipes.py` | Compose the above into specific document figures (Claim 1 mechanism/county figures, statewide Claims 2/3, bridge, split). |
@@ -86,6 +87,36 @@ filename) in place between HTML-comment markers, so re-running is idempotent
 (no duplicated blocks).
 
 ## Run metadata
+
+The full-electrification comparison has its own source builder. First run
+`baseline_ice_car_coopt` and `full_electric_ev_coopt` under matched model settings.
+Both runs must include billing, capital costs, and county diagnostics. The
+collector derives each no-solar case from the original-load bills in the same
+run. It does not solve the optimization or regenerate the three-case figures.
+
+```bash
+python3 -m figure_builder.electrification \
+  --model-run-sha <model-sha> \
+  --gas-run-timestamp <YYYYMMDD_HH> \
+  --electric-run-timestamp <YYYYMMDD_HH> \
+  --base-input-dir <run-directory>/loadprofiles \
+  --completion-dir <run-directory>/county_diagnostics \
+  --source <run-directory>/electrification_2x2.csv
+```
+
+By default, all 47 counties must have all four cases. Use `--counties alameda`
+for an explicit pilot. The output includes itemized costs, actual tariff
+columns, selected sizes, and numerical diagnostics. Adjacent `.comparisons.csv`
+and `.manifest.json` files contain the savings calculations and source receipt.
+Use `load_electrification_costs` to check the source fingerprint and four-case
+coverage, then `summarize_electrification_costs` to derive comparisons.
+
+Gas and electric households share a plan within each solar choice. Adoption
+comparisons include the transition from the declared retail plan to the NEM 3
+plan. The package-effect column measures the change in adoption savings, not
+total electrification savings. Differences within the reported numerical bound
+need tighter precision before their sign supports a claim. See the
+[research methods](../docs/RESEARCH_METHODS.md) for equations and interpretation.
 
 `python3 -m figure_builder all` writes `figures/run_metadata.json` after all
 artifacts exist. The manifest records the Git SHA and runtime, hashes the exact

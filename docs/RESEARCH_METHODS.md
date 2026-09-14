@@ -88,6 +88,65 @@ required research comparison, not a result already established by those figures.
 The mappings and arithmetic are in the
 [publication data collector](../figure_builder/datasets.py).
 
+The [matched electrification collector](../figure_builder/electrification.py)
+now implements the four-case comparison below. It uses `baseline_ice_car_coopt`
+and `full_electric_ev_coopt`, including each scenario's no-solar counterfactual.
+The statewide matched results and their publication figure remain pending.
+
+| Household | No solar or storage | Optimally sized solar and storage |
+|---|---|---|
+| Gas appliances and gasoline car, $g$ | $C^0_{c,g}$ | $C^*_{c,g}$ |
+| Electric appliances and EV, $e$ | $C^0_{c,e}$ | $C^*_{c,e}$ |
+
+Electrification savings without solar/storage are
+$E^0_c=C^0_{c,g}-C^0_{c,e}$. Savings when both households can resize solar/storage
+are $E^*_c=C^*_{c,g}-C^*_{c,e}$. The latter includes the economic response of the
+solar/storage design to electrification. These differences satisfy:
+
+$$
+P_{c,e}=E^*_c-E^0_c
+=\left(C^0_{c,e}-C^*_{c,e}\right)-\left(C^0_{c,g}-C^*_{c,g}\right).
+$$
+
+A positive $P_{c,e}$ means electrification increases adoption savings.
+Electrification can reduce household cost while reducing adoption savings;
+the collector reports both results separately. This comparison measures combined
+building and vehicle electrification. It does not attribute savings to either
+part separately.
+
+Within each solar choice, both households use the same utility and electricity
+plan. The no-solar plans are PG&E E-TOU-D, SCE TOU-D-4-9PM, and SDG&E TOU-DR1.
+The optimized cases use the required NEM 3 plans: E-ELEC, TOU-D-PRIME, and
+EV-TOU-5, respectively. Adoption savings therefore include this plan change.
+They measure the modeled financial adoption package, including its tariff
+treatment. A result with zero solar and storage capacity cannot establish a
+benefit from installing those assets.
+
+The collector requires four complete cells for each county, 8,760-hour demand
+inputs, identical weather files, and matching recorded tariff and optimization
+settings. Appliance capital, gas bills, and vehicle operating costs must remain
+unchanged between a household's two solar choices. An exact timestamp selects
+both annual bill files for each scenario. The source receipt records these
+timestamps, SHA-labelled completion files, and hashes of the collected inputs.
+It checks that these inputs do not change during collection. Execution history
+and unrecorded run overrides still require the isolated model-run record;
+file names and hashes alone do not establish that history.
+
+The table retains selected capacities and numerical cost diagnostics. For the
+optimized electrification saving and package effect, it reports a conservative
+numerical bound:
+
+$$
+u_c=\epsilon_{c,g}+\epsilon_{c,e}+|d_{c,g}|+|d_{c,e}|+10^{-4}.
+$$
+
+Each $\epsilon$ is the recorded solver cost gap, in dollars per year. Each $d$
+is reported solar/storage capital plus electricity cost, minus the saved solver
+objective. This captures the separate effect of rounding stored capacities.
+The final term covers rounding two saved objectives to four decimal places.
+Differences within $u_c$ do not establish a sign at the recorded numerical
+precision. This bound does not cover modeling uncertainty or bound capacities.
+
 ## Households, energy profiles, and tariffs
 
 The publication data cover 47 counties, with one representative single-family
@@ -374,7 +433,8 @@ Prioritize a check when the limitation could change a stated conclusion.
 |---|---|---|
 | One representative household and utility per county; 47 counties covered | Results do not describe household variation or every utility customer. County summaries are unweighted, so they are not statewide adoption estimates. | Sample household types and service territories; report population-weighted results when appropriate. |
 | One standardized demand/weather year and one tariff snapshot | Results are annualized scenarios, not forecasts of actual lifetime bills or a historical before/after study. | Examine additional weather years, demand profiles, and explicitly specified tariff trajectories. |
-| No-solar and solar reports can use different import-rate plans | The no-solar report retains its configured retail plan; the solar report selects its configured billing variant, normally NEM 3. Their cost difference can include a rate-plan change. Shared capital accounting does not remove this effect. | Match tariff selection between household types within each solar choice, and identify any adoption-related plan change in the four-case comparison. |
+| Adoption includes an import-rate plan change | The four-case collector matches plans between households within each solar choice. It compares the declared retail plan without solar to the required NEM 3 plan with optimized equipment. Adoption savings and the package effect therefore include the tariff transition. | State the selected plans with the results. A separate comparison at common import rates could isolate the equipment effect if needed. |
+| Building and vehicle electrification are bundled | The matched comparison identifies their combined household-cost effect. It cannot attribute the effect to appliances or the EV separately. | Add matched intermediate scenarios if separate attribution becomes a research question. |
 | Known profiles and prices throughout an optimization run | Dispatch assumes advance knowledge of the modeled year. Real controllers face forecast errors, which can reduce achievable savings. | Compare a controller with limited forecasts on the same cases. |
 | Reduced 12 × 24 sensitivity chronology | Averaging can change cycling, usable credits, and optimal capacities. Mixed-resolution comparisons cannot isolate a policy effect by themselves. | Use full-year checks for findings near a threshold or sensitive to chronology. |
 | Declared equipment costs, lifetimes, and incentive cases | These are sourced modeling inputs, not a new survey of prices available to every household. | Refresh cost benchmarks or report a focused sensitivity when cost uncertainty affects a claim. |

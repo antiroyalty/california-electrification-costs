@@ -146,7 +146,7 @@
       "capital_recovery_factor": "CRF = r(1+r)^n / ((1+r)^n - 1)",
       "battery_annualization": "Always use alpha_batt_npv, shared with Step 9b. The study period equals the declared solar life; replacement and proportional remaining value are included.",
       "reporting_validation": "County and aggregate EAC reports share one county collector. It requires a capital ledger with explicit county, incentive, appliance identity, finite costs and operating costs, and positive service lives. Missing county/incentive rows and duplicate equipment rows fail. Explicit zero costs and negative net costs or operating-cost adjustments remain valid. The low-level EAC function retains its existing optional-input conventions; report collectors validate inputs before calling it.",
-      "no_solar_counterfactual": "Step 20 calls the shared EAC collectors with with_solar=False and electricity_variant=retail. Solar/storage capital is deliberately zero and no PV summary is read. Appliance and vehicle costs use the same ledger and calculation as the with-solar case. Bills come from the original-load row. An optional exact timestamp selects saved bills, not other input provenance. The four-case publication collector and results remain pending.",
+      "no_solar_counterfactual": "Step 20 calls the shared EAC collectors with with_solar=False and electricity_variant=retail. Solar/storage capital is deliberately zero and no PV summary is read. Appliance and vehicle costs use the same ledger and calculation as the with-solar case. Bills come from the original-load row. An optional exact timestamp selects saved bills, not other input provenance. The four-case collector is implemented in figure_builder/electrification.py; statewide results and its publication figure remain pending.",
       "comparison_tariffs": "No-solar reporting retains the configured retail import plan; with-solar reporting retains the configured variant, normally NEM 3. Their difference can include a plan change. The four-case comparison must match tariff selection between household types within each solar choice and state any adoption-related plan change."
     },
     "data_sources": {
@@ -162,6 +162,25 @@
       "figure_builder/datasets.py:build_claims_eac_source",
       "pipeline/steps/step20_no_solar_storage_electrification.py:collect_eac_no_pv",
       "pipeline/steps/step20_no_solar_storage_electrification.py:collect_eac_no_pv_by_county"
+    ]
+  },
+  "electrification.matched_comparison": {
+    "title": "Matched full-electrification and solar/storage adoption comparison",
+    "formula": "Let A=C_gas,no_solar, B=C_gas,optimized, C=C_electric,no_solar, D=C_electric,optimized. Electrification savings without solar=A-C; with optimized equipment=B-D. Gas adoption savings=A-B; electric adoption savings=C-D. Package effect=(C-D)-(A-B)=(B-D)-(A-C). All values are USD/year.",
+    "assumptions": {
+      "households": "baseline_ice_car_coopt versus full_electric_ev_coopt; includes building appliances and vehicle. Both choose PV/storage freely, including zero capacity. No separate appliance-versus-EV attribution.",
+      "accounting": "Use the shared county EAC collector at 7% real discount, full incentive capture, 25-year solar/study period and 15-year battery life with replacement and remaining value. Within each household, appliance capital, gas bills and vehicle operating costs must match between solar choices. Negative net appliance costs and vehicle adjustments remain valid.",
+      "tariffs": "Match exact electricity columns between households within each solar choice. No-solar: PG&E E-TOU-D, SCE TOU-D-4-9PM, SDG&E TOU-DR1. Optimized: required NBT import plans E-ELEC, TOU-D-PRIME, EV-TOU-5. Adoption savings include the plan transition. Report capacities; zero PV and storage cannot establish an installation benefit.",
+      "validation": "Require all four unique cells per expected county, finite costs and capacities, totals that reconcile to their components, zero DER costs/sizes in no-solar cases, paired utility/plan/source/vintage/battery-bound/charging/export/cost-tolerance metadata, identical weather files, and 8760 finite nonnegative demand observations per household. Exact bill columns and scenario timestamps are checked before collection; no latest-file or unmatched-plan substitution is allowed.",
+      "numerical_bound": "For B-D and the package effect, u=gap_gas+gap_electric+abs(d_gas)+abs(d_electric)+0.0001 USD/year. Each gap is the recorded solver certificate gap. d is reported PV/storage annual capital plus electricity bill minus saved Coopt Total Cost. It captures capacity-rounding differences. The final term bounds two objectives rounded to four decimals. This is a conservative numerical cost bound, not a bound on modeling assumptions or capacities.",
+      "provenance": "Record declared model SHA, reporting SHA/code hash, exact bill timestamps, matched settings, SHA-labelled completion markers, and fingerprints of capital ledgers, PV summaries, capacity summaries, weather, loads and annual bills. Reject input changes during collection. Hashes identify the collected files; generation history and overrides still depend on the isolated run record.",
+      "status": "Collector, comparisons, CLI and validation implemented. Statewide matched results and publication figure remain pending. Existing three-case Claims 2/3 outputs retain their original interpretation."
+    },
+    "code": [
+      "figure_builder/electrification.py:build_electrification_source",
+      "figure_builder/electrification.py:validate_electrification_costs",
+      "figure_builder/electrification.py:summarize_electrification_costs",
+      "figure_builder/tests/test_electrification.py"
     ]
   },
   "incentives.apply_pv_storage_incentives": {
