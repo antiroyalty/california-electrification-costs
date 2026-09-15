@@ -39,10 +39,9 @@ _DEFAULT_BATT_CAPEX_PER_KWH = BatteryStorageAppliance.per_kwh_cost_net(Incentive
 # not a tariff value. It implements the 30–40 kWh range documented in the
 # optimization design notes and can be overridden for sensitivity analyses.
 DEFAULT_MAX_BATTERY_KWH = 40.0
-# If the first continuous relaxation exploits many intervals, adding only the
-# currently violated rows can make a later constraint-generation round harder
-# than the compact eager model. This affects performance only, never the
-# feasible region or optimum.
+# NBT batches price-risk hours after its first meter violation. Other accounting
+# models retain their existing violation-count trigger for the same bulk path.
+# This affects constraint-generation order, not the feasible region or optimum.
 METER_BINARY_EAGER_THRESHOLD = 96
 # Constraint generation terminates on its own: every round pins at least one
 # previously unconstrained interval, so it cannot exceed the interval count.
@@ -411,8 +410,10 @@ def _solve_lp(
       grid_to_load, grid_to_batt, soc
 
     PV, battery, and flow decisions remain continuous. The model first solves
-    a relaxation of the meter constraints, then creates binary variables only at
-    intervals whose relaxed solution actually imports and exports at once.
+    a relaxation of the meter constraints, then constrains simultaneous import
+    and export. On the first NBT violation, it also constrains all hours whose
+    export price meets or exceeds the import price. Valid relaxations need no
+    meter binaries; other accounting models retain their existing trigger.
     ``max_battery_kwh`` is the explicit household sizing ceiling and, with the
     1C constraint, supplies a tight battery-power bound for those disjunctions.
     A fixed-size sensitivity is itself an explicit override and therefore uses
@@ -847,7 +848,9 @@ def _solve_lp(
             break
 
         hours_to_constrain = set(violations)
-        if round_number == 1 and len(violations) > METER_BINARY_EAGER_THRESHOLD:
+        if round_number == 1 and (
+            nbt_terms is not None or len(violations) > METER_BINARY_EAGER_THRESHOLD
+        ):
             hours_to_constrain.update(_meter_direction_hours(inputs))
 
         for h in sorted(hours_to_constrain):

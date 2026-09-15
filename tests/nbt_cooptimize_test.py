@@ -82,6 +82,56 @@ def _replay(case, result):
     return ledger
 
 
+def test_nbt_batches_price_candidates_after_one_meter_violation(monkeypatch):
+    """Credit saturation can hide a second risky hour in the first relaxation."""
+    from pipeline.solver import SolverRun
+
+    class PeakedExports(ExportPrices):
+        def rates_for(self, timestamps, component="total"):
+            if component == "delivery":
+                return [0.0] * len(timestamps)
+            return [[2.0, 0.4, 0.0][timestamp.hour] for timestamp in timestamps]
+
+    tariff = _case("SCE", imports=ImportPrices(fixed=0), exports=PeakedExports())[1]
+    timestamps = pd.date_range("2026-01-01", periods=3, freq="h")
+    terms = NBTAnnualTerms.from_tariff(tariff, timestamps)
+    inputs = CooptInputs([1, 1, 5], [1, 1, 0], list(terms.import_rates),
+                         list(terms.export_rates), nbt_terms=terms)
+    solve_round = SolverRun.solve_round
+    violations_by_round = []
+
+    def record_round(self, problem):
+        certificate = solve_round(self, problem)
+        variables = problem.variablesDict()
+        violations_by_round.append([
+            h for h in range(3)
+            if variables[f"grid2load_{h}"].value() > 1e-6
+            and variables[f"pv2grid_{h}"].value() > 1e-6
+        ])
+        return certificate
+
+    monkeypatch.setattr(SolverRun, "solve_round", record_round)
+    result = _solve_lp(inputs, fixed_pv_kw=1, fixed_batt_kwh=0, c_pv_kw=0)
+
+    # Only the high-credit hour is initially exploited. Pinning it alone exposes
+    # the lower-credit hour, so a violation-count threshold causes a third solve.
+    assert violations_by_round[0] == [0]
+    assert violations_by_round[-1] == []
+    assert result.solver_rounds == 2
+    assert result.meter_binary_count == 2
+    # All available solar serves the two daytime loads. Five nighttime kWh
+    # remain at $0.32/kWh; no credit or battery can reduce that physical bill.
+    assert _replay((inputs, tariff, timestamps), result).annual_amount_due == pytest.approx(1.6)
+
+
+def test_nbt_valid_first_relaxation_keeps_the_no_binary_fast_path():
+    case = _case()
+    result = _solve_lp(case[0], fixed_pv_kw=0, fixed_batt_kwh=0)
+    assert result.solver_rounds == 1
+    assert result.meter_binary_count == 0
+    _replay(case, result)
+
+
 @pytest.mark.parametrize("utility,payment", [("PG&E", 64), ("SCE", 54), ("SDG&E", 64)])
 def test_example_5_fixed_physical_system_uses_the_billing_rules(utility, payment):
     case = _case(utility)

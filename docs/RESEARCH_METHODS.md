@@ -339,6 +339,22 @@ Changing a backend is an explicit run choice; there is no automatic retry.
 the round certificates, and validates the final cost bound. Step 9b separately
 constructs the model and validates its physical and billing results.
 
+If the first NEM 3 solution imports and exports at once, the next solve adds
+meter-direction constraints for all hours where export prices meet or exceed
+import prices. Annual credit limits can hide some of these hours in the first
+solution. Adding them together avoids discovering each group through another
+solve. A physically valid first solution needs no additional meter constraints.
+The NEM 2 constraint-generation rule is unchanged. This changes the order in
+which physical constraints enter the solver, not the economic or physical model.
+
+A [paired full-year benchmark](../analysis_results/sd_gas_runtime_0d0e9ac/README.md)
+changed San Diego gas/ICE from a 314-second budget failure to a 35-second success.
+The electric/EV case fell from 96 to 37 seconds. Alameda and Los Angeles gas/ICE
+cases increased from 169 to 187 and 161 to 168 seconds. All accepted objectives
+and capacities matched; all four revised bills replayed exactly and retained
+cost gaps below $1/year. These are single measurements, not guaranteed runtimes.
+The batch adds work to some cases that already needed only one correction round.
+
 The $1 bound concerns annual cost, not identical equipment capacities. Nearly
 equal-cost systems can have different sizes. A claim about a battery adoption
 threshold therefore needs a tighter tolerance or a separate comparison around
@@ -495,7 +511,7 @@ Prioritize a check when the limitation could change a stated conclusion.
 | Annual credit timing | SDG&E savings may be overstated relative to the former no-backward-offset convention. A late credit could offset an early charge in the annual model. | Bound the difference using unused eligible credits and earlier eligible payments; inspect affected San Diego cases. |
 | No opening credits or value for balances after the modeled year | Results omit benefits from a household's existing bank or future use of unused credits. | Use a separately specified future-use sensitivity if a claim requires it; opening balances are not supported centrally. |
 | Persisted equipment capacities use two decimal places | Downstream capital reporting can differ slightly from the optimizer, which uses full precision. The core rerun at `8a98b96` had a maximum difference of $1.37/year, in San Mateo; all annual electricity bills reconciled. | Preserve full precision in capacity artifacts and round only presentation in a separate correction. |
-| Cost tolerance and finite solver budget | New solves allow up to $1/year of cost suboptimality, subject to unchanged physical checks. This does not bound capacity differences. Difficult cases can fail the five-minute budget. The existing bulk-constraint trigger can miss such cases. | Record the cost certificate and execution settings. The matched run explicitly activated the existing bulk-constraint path for San Diego's gas household. Expose or retune this trigger for repeat runs. Use a tighter tolerance for capacity-threshold claims. |
+| Cost tolerance and finite solver budget | New solves allow up to $1/year of cost suboptimality, subject to unchanged physical checks. This does not bound capacity differences. Difficult cases can still fail the five-minute budget. NEM 3 now batches meter constraints after its first violation; this fixes the tested San Diego failure but adds solver work to some other counties. | Record cost certificates and execution settings. Faster constraint generation does not guarantee a runtime or identical capacities. Use a tighter tolerance for capacity-threshold claims. |
 | Financial operating value is the objective | The model assigns no monetary value to outage protection, convenience, or household preferences. It therefore does not explain every adoption decision. | Study resilience or preferences separately when such benefits become part of the research question. |
 
 ## Verification and publication boundaries
