@@ -8,7 +8,7 @@ derive from this file, so the prose and equations have one maintained source.
 
 ## Implementation status
 
-Updated on September 11, 2026. **All three accounting simplifications are
+Updated on September 14, 2026. **All three accounting simplifications are
 implemented:** omit ACC Plus, require annual exports no greater than imports,
 and settle base credits annually within each utility's eligible pools.
 Optimization and reporting use one annual cost equation. Unused credits have
@@ -34,6 +34,18 @@ diagnostics. All 141 paper scenario/county annual bills reconciled within
 $0.001; the strict statewide validator passed 49 checks. Auxiliary payback
 outputs remain outside the validated EAC conclusions because their optimized
 EV comparison selects a different baseline.
+
+The September 14 matched run at `11b7dba` covers both optimized households in
+all 47 counties and their no-solar counterfactuals. Its 188 cost cells pass the
+comparison checks. All 94 NEM 3 bills reconcile within $0.001, and both statewide
+validation reports pass all 49 checks. The [matched results and figure](research_logs/2026-09-14.md)
+separate the equipment benefit from the larger tariff-inclusive package effect.
+
+Review of vehicle energy costs then found a $916.35/year maintenance discrepancy
+in each gas-household ledger and a zero gasoline price for Alpine. Whole-household
+electrification cost headlines are on hold pending correction. The discrepancy
+cancels within each household's adoption comparison, so the matched scatterplot
+and package effect remain unchanged. The results note records the diagnostic.
 
 ## Research questions and comparison definitions
 
@@ -79,7 +91,7 @@ selects solar and battery capacities and operation within that scenario. It does
 not decide which appliances a household should electrify. Scenario definitions
 are maintained in [scenarios.py](../scenarios.py).
 
-The current statewide Claims 2 and 3 use `baseline_ice_car`, `full_electric_ev`,
+The older three-case Claims 2 and 3 use `baseline_ice_car`, `full_electric_ev`,
 and `full_electric_ev_coopt`. Their gas/vehicle reference retains fixed
 solar/storage. These figures compare total scenario costs and fixed versus
 optimized equipment; they do not by themselves supply both matched adoption
@@ -91,7 +103,8 @@ The mappings and arithmetic are in the
 The [matched electrification collector](../figure_builder/electrification.py)
 now implements the four-case comparison below. It uses `baseline_ice_car_coopt`
 and `full_electric_ev_coopt`, including each scenario's no-solar counterfactual.
-The statewide matched results and their publication figure remain pending.
+The [statewide matched results and figure](research_logs/2026-09-14.md) are now
+available. The older three-case figures retain their original comparison.
 
 | Household | No solar or storage | Optimally sized solar and storage |
 |---|---|---|
@@ -122,6 +135,20 @@ They measure the modeled financial adoption package, including its tariff
 treatment. A result with zero solar and storage capacity cannot establish a
 benefit from installing those assets.
 
+An optimized NEM 3 system can still cost more than the no-solar retail option.
+In that case, declining adoption has lower modeled cost. The cheapest available
+option for each household is $\min(C^0,C^*)$. Report this distinction when
+comparing whole-household costs; free equipment sizing alone does not optimize
+the choice between the two tariff arrangements.
+
+A run diagnostic separates equipment benefits from billing-path changes.
+It uses the optimizer's saved hourly load and timestamps for both a zero-export
+NEM 3 bill and a retail bill on the same calendar. Differences between calendars,
+between plans, and from adding equipment sum to the reported adoption saving.
+Their changes between households sum to the package effect. This decomposition
+does not establish no-solar tariff eligibility or select the cheapest eligible
+plan for each household. The results note reports each contribution separately.
+
 The collector requires four complete cells for each county, 8,760-hour demand
 inputs, identical weather files, and matching recorded tariff and optimization
 settings. Appliance capital, gas bills, and vehicle operating costs must remain
@@ -146,6 +173,15 @@ objective. This captures the separate effect of rounding stored capacities.
 The final term covers rounding two saved objectives to four decimal places.
 Differences within $u_c$ do not establish a sign at the recorded numerical
 precision. This bound does not cover modeling uncertainty or bound capacities.
+
+The matched adoption figure plots $S_{c,g}$ horizontally and $S_{c,e}$ vertically.
+Points above the equal-savings diagonal have a positive package effect. Its
+headline counts effects greater than $u_c$, and reports the unweighted median
+of county effects. This median can differ from the difference of median savings.
+Each axis shows an error bar of $\epsilon+|d|+0.00005$ dollars per year.
+These bars show numerical bounds, not statistical confidence intervals.
+The figure reads the verified four-case source and records its hash, code hashes,
+statistics, and output hashes in an adjacent receipt.
 
 ## Households, energy profiles, and tariffs
 
@@ -198,13 +234,19 @@ storage capital costs to zero and uses the bill for the original household
 load. It does not require a solar/storage capital summary. County means and
 medians are calculated from these same itemized costs.
 
+Vehicle-cost review found two maintenance amounts in the current ICE calculation:
+$283.65/year in the vehicle's declared attributes and $1,200/year in an estimation
+method's default argument. Step 14's subtraction and addition use the former,
+but the saved total inherits the latter. This is a pending accounting correction,
+not an uncertainty covered by the solar/storage solver's cost bound.
+
 Reporting requires the capital ledger, its cost fields, and rows for each
 requested county and incentive case. Missing data do not represent free
 equipment. Invalid costs, nonpositive service lives, and duplicate equipment
 rows raise errors. Explicit zero costs and negative net costs or operating-cost
 adjustments remain valid. Both solar choices can select an exact saved bill
 timestamp; selecting that timestamp does not establish the provenance of other
-input files. The matched four-case publication dataset remains pending.
+input files. The matched four-case dataset supplies the completed comparison.
 
 Equipment service life and the investment comparison period are different
 assumptions. The approved study period is 25 years, matching the assumed solar
@@ -433,8 +475,10 @@ Prioritize a check when the limitation could change a stated conclusion.
 |---|---|---|
 | One representative household and utility per county; 47 counties covered | Results do not describe household variation or every utility customer. County summaries are unweighted, so they are not statewide adoption estimates. | Sample household types and service territories; report population-weighted results when appropriate. |
 | One standardized demand/weather year and one tariff snapshot | Results are annualized scenarios, not forecasts of actual lifetime bills or a historical before/after study. | Examine additional weather years, demand profiles, and explicitly specified tariff trajectories. |
-| Adoption includes an import-rate plan change | The four-case collector matches plans between households within each solar choice. It compares the declared retail plan without solar to the required NEM 3 plan with optimized equipment. Adoption savings and the package effect therefore include the tariff transition. | State the selected plans with the results. A separate comparison at common import rates could isolate the equipment effect if needed. |
+| Adoption includes an import-rate plan change | The four-case collector matches plans between households within each solar choice. It compares the declared retail plan without solar to the required NEM 3 plan with optimized equipment. Adoption savings and the package effect therefore include the tariff transition. | Report the aligned-load diagnostic, which separates calendar, plan, and equipment contributions. Choosing the cheapest eligible no-solar plan remains outside this comparison. |
+| Retail and NEM 3 use different calendars | Retail bills retain the source profile calendar; NEM 3 uses the declared 2026 calendar. The aligned-load diagnostic bounds the package-effect difference at $3.64/year across the matched run. All 47 signs remain positive. | Use one calendar in future reporting. This bounded difference does not explain the tariff-inclusive or within-tariff equipment finding. |
 | Building and vehicle electrification are bundled | The matched comparison identifies their combined household-cost effect. It cannot attribute the effect to appliances or the EV separately. | Add matched intermediate scenarios if separate attribution becomes a research question. |
+| Vehicle accounting and fuel inputs need correction | The ICE ledger exceeds the same vehicle's itemized operating cost by $916.35/year. Alpine also has a zero gasoline price despite positive mileage. Whole-household gas-versus-electric costs are affected; within-household adoption differences cancel the vehicle-dollar error. | Resolve the maintenance assumption, validate fuel inputs, add regression tests, and regenerate affected cost reports before citing whole-household electrification savings. These dollar-only corrections do not require new dispatch optimizations. |
 | Known profiles and prices throughout an optimization run | Dispatch assumes advance knowledge of the modeled year. Real controllers face forecast errors, which can reduce achievable savings. | Compare a controller with limited forecasts on the same cases. |
 | Reduced 12 × 24 sensitivity chronology | Averaging can change cycling, usable credits, and optimal capacities. Mixed-resolution comparisons cannot isolate a policy effect by themselves. | Use full-year checks for findings near a threshold or sensitive to chronology. |
 | Declared equipment costs, lifetimes, and incentive cases | These are sourced modeling inputs, not a new survey of prices available to every household. | Refresh cost benchmarks or report a focused sensitivity when cost uncertainty affects a claim. |
@@ -451,7 +495,7 @@ Prioritize a check when the limitation could change a stated conclusion.
 | Annual credit timing | SDG&E savings may be overstated relative to the former no-backward-offset convention. A late credit could offset an early charge in the annual model. | Bound the difference using unused eligible credits and earlier eligible payments; inspect affected San Diego cases. |
 | No opening credits or value for balances after the modeled year | Results omit benefits from a household's existing bank or future use of unused credits. | Use a separately specified future-use sensitivity if a claim requires it; opening balances are not supported centrally. |
 | Persisted equipment capacities use two decimal places | Downstream capital reporting can differ slightly from the optimizer, which uses full precision. The core rerun at `8a98b96` had a maximum difference of $1.37/year, in San Mateo; all annual electricity bills reconciled. | Preserve full precision in capacity artifacts and round only presentation in a separate correction. |
-| Cost tolerance and finite solver budget | New solves allow up to $1/year of cost suboptimality, subject to unchanged physical checks. This does not bound capacity differences. Difficult cases can fail the five-minute budget. | Record the cost certificate. Use a tighter tolerance for capacity-threshold claims. Adding tariff-identified meter constraints together is a pending performance change. |
+| Cost tolerance and finite solver budget | New solves allow up to $1/year of cost suboptimality, subject to unchanged physical checks. This does not bound capacity differences. Difficult cases can fail the five-minute budget. The existing bulk-constraint trigger can miss such cases. | Record the cost certificate and execution settings. The matched run explicitly activated the existing bulk-constraint path for San Diego's gas household. Expose or retune this trigger for repeat runs. Use a tighter tolerance for capacity-threshold claims. |
 | Financial operating value is the objective | The model assigns no monetary value to outage protection, convenience, or household preferences. It therefore does not explain every adoption decision. | Study resilience or preferences separately when such benefits become part of the research question. |
 
 ## Verification and publication boundaries

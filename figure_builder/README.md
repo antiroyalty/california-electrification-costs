@@ -111,6 +111,22 @@ and `.manifest.json` files contain the savings calculations and source receipt.
 Use `load_electrification_costs` to check the source fingerprint and four-case
 coverage, then `summarize_electrification_costs` to derive comparisons.
 
+Render the matched adoption figure from that verified source:
+
+```bash
+python3 -m figure_builder.electrification_figure \
+  --source <run-directory>/electrification_2x2.csv \
+  --output-prefix <run-directory>/figures/matched_adoption_savings
+```
+
+This writes a PNG, a PDF, and a JSON receipt. The receipt identifies the plotted
+source, figure code, output hashes, and summary statistics. Each point compares
+one county's gas/ICE adoption savings with its electric/EV adoption savings.
+Points above the equal-savings diagonal indicate a positive package effect.
+The headline counts only effects larger than their numerical bounds. The median
+is calculated from county differences; it is not a difference of medians.
+Error bars describe numerical precision, not uncertainty in model assumptions.
+
 Gas and electric households share a plan within each solar choice. Adoption
 comparisons include the transition from the declared retail plan to the NEM 3
 plan. The package-effect column measures the change in adoption savings, not

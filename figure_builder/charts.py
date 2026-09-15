@@ -65,6 +65,89 @@ EAC_COMPONENT_STYLE = [
 ]
 
 
+def plot_matched_adoption_savings(costs: pd.DataFrame) -> Tuple["object", dict]:
+    """Compare within-household adoption savings using the validated four cells."""
+    from figure_builder.electrification import (
+        summarize_electrification_costs, validate_electrification_costs,
+    )
+
+    costs = validate_electrification_costs(costs, set(costs["county_slug"]))
+    summary = summarize_electrification_costs(costs).set_index("county_slug")
+    optimized = costs[costs["case"].str.endswith("_optimized")].copy()
+    optimized["numerical_bound"] = (
+        optimized["solver_cost_gap_usd_per_year"]
+        + optimized["reporting_cost_difference_usd_per_year"].abs()
+        + 0.00005
+    )
+    bounds = optimized.pivot(index="county_slug", columns="case", values="numerical_bound")
+    utilities = costs.groupby("county_slug")["utility"].first()
+    x = summary["gas_adoption_savings_usd_per_year"]
+    y = summary["electric_adoption_savings_usd_per_year"]
+    effect = summary["package_effect_usd_per_year"]
+    uncertainty = summary["comparison_numerical_bound_usd_per_year"]
+    higher = int((effect > uncertainty).sum())
+    lower = int((effect < -uncertainty).sum())
+    meta = {
+        "county_count": len(summary), "higher_adoption_savings_count": higher,
+        "lower_adoption_savings_count": lower,
+        "unresolved_sign_count": len(summary) - higher - lower,
+        "median_package_effect_usd_per_year": float(effect.median()),
+        "median_gas_adoption_savings_usd_per_year": float(x.median()),
+        "median_electric_adoption_savings_usd_per_year": float(y.median()),
+        "maximum_comparison_numerical_bound_usd_per_year": float(uncertainty.max()),
+        "maximum_saved_battery_kwh": float(optimized["battery_kwh"].max()),
+    }
+
+    apply_style()
+    import matplotlib.pyplot as plt
+    from matplotlib.ticker import StrMethodFormatter
+
+    fig, ax = plt.subplots(figsize=(8, 8.6))
+    fig.subplots_adjust(left=0.15, right=0.96, bottom=0.24, top=0.86)
+    fig.suptitle("Solar/storage adoption savings, including the rate-plan change",
+                 fontsize=13, x=0.06, ha="left", y=0.97)
+    fig.text(0.06, 0.924,
+             f"Higher savings in {higher} of {len(summary)} counties  ·  "
+             f"Median change: {'+' if effect.median() >= 0 else '−'}"
+             f"${abs(effect.median()):,.0f}/year", fontsize=11, color=ACCENT_INK)
+
+    low = min(0.0, (x - bounds.gas_optimized).min(), (y - bounds.electric_optimized).min())
+    high = max(0.0, (x + bounds.gas_optimized).max(), (y + bounds.electric_optimized).max())
+    padding = max(high - low, 1.0) * 0.08
+    limits = (low - padding, high + padding)
+    ax.plot(limits, limits, color=INK_FAINT, linestyle="--", linewidth=1,
+            label="Equal adoption savings", zorder=1)
+    ax.axhline(0, color=RULE, linewidth=0.8, zorder=0)
+    ax.axvline(0, color=RULE, linewidth=0.8, zorder=0)
+    styles = {"PG&E": (ACCENT, "o"), "SCE": (CAUT, "s"), "SDG&E": ("#70538C", "D")}
+    for utility, (color, marker) in styles.items():
+        counties = utilities[utilities == utility].index
+        if len(counties) == 0:
+            continue
+        ax.errorbar(x.loc[counties], y.loc[counties],
+                    xerr=bounds.loc[counties, "gas_optimized"],
+                    yerr=bounds.loc[counties, "electric_optimized"],
+                    fmt=marker, color=color, markersize=5, alpha=0.8,
+                    elinewidth=0.7, capsize=0, label=utility, zorder=3)
+    ax.set(xlim=limits, ylim=limits, aspect="equal")
+    ax.set_xlabel("Adoption savings: gas home + gasoline car ($/year)", labelpad=10)
+    ax.set_ylabel("Adoption savings: electric home + EV ($/year)", labelpad=10)
+    ax.xaxis.set_major_formatter(StrMethodFormatter("{x:,.0f}"))
+    ax.yaxis.set_major_formatter(StrMethodFormatter("{x:,.0f}"))
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.legend(loc="lower left", bbox_to_anchor=(0, 1.02), ncol=4,
+              frameon=False, fontsize=9, borderaxespad=0)
+    fig.text(0.06, 0.16,
+             "Adoption savings = annual household cost without solar/storage − cost with optimized equipment.\n"
+             "Above the diagonal: electrification increases adoption savings. One household per county.\n"
+             "Includes the retail-to-NEM 3 rate-plan change. Home and vehicle electrification are combined.\n"
+             "Error bars show numerical cost bounds; they do not represent modeling uncertainty.\n"
+             f"Largest selected battery: {meta['maximum_saved_battery_kwh']:.2f} kWh "
+             "(capacities saved to 0.01 kWh).",
+             fontsize=8.5, linespacing=1.5, va="top", color=INK_SOFT)
+    return fig, meta
+
+
 def solar_generation_weighted_export_rate(dispatch) -> float:
     """Average hourly export credit weighted by modeled PV production.
 

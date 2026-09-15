@@ -67,6 +67,48 @@ def test_zero_interaction_and_unfavorable_adoption_remain_valid(totals, expected
     assert result.loc[0, "package_effect_usd_per_year"] == expected
 
 
+def test_adoption_figure_uses_paired_differences_and_respects_numerical_bounds():
+    from figure_builder.charts import plot_matched_adoption_savings
+    import matplotlib.pyplot as plt
+
+    costs = pd.concat([
+        _cost_example(),
+        _cost_example("los-angeles", (1000, 900, 800, 750)),
+        _cost_example("san-diego", (1000, 900, 1000, 899.8)),
+        _cost_example("marin", (1000, 1100, 1000, 1050)),
+    ])
+    fig, meta = plot_matched_adoption_savings(costs)
+    try:
+        assert meta["county_count"] == 4
+        assert meta["higher_adoption_savings_count"] == 2
+        assert meta["lower_adoption_savings_count"] == 1
+        assert meta["unresolved_sign_count"] == 1
+        assert meta["median_package_effect_usd_per_year"] == pytest.approx(25.1)
+        # The median interaction must not be replaced by a difference of medians.
+        assert meta["median_electric_adoption_savings_usd_per_year"] == pytest.approx(75.1)
+        assert meta["median_gas_adoption_savings_usd_per_year"] == 100
+        assert meta["maximum_comparison_numerical_bound_usd_per_year"] == pytest.approx(0.6501)
+        plotted = [tuple(point) for container in fig.axes[0].containers
+                   for point in zip(*container.lines[0].get_data())]
+        expected = [(-100, -50), (100, 50), (100, 100.2), (100, 200)]
+        assert len(plotted) == len(expected)
+        for actual, point in zip(sorted(plotted), expected):
+            assert actual == pytest.approx(point)
+        assert fig.axes[0].get_xlim()[0] < -100
+        caption = "\n".join(text.get_text() for text in fig.texts)
+        assert "rate-plan change" in caption
+        assert "modeling uncertainty" in caption
+    finally:
+        plt.close(fig)
+
+
+def test_adoption_figure_rejects_an_incomplete_county():
+    from figure_builder.charts import plot_matched_adoption_savings
+
+    with pytest.raises(ValueError, match="four unique cases"):
+        plot_matched_adoption_savings(_cost_example().iloc[:-1])
+
+
 @pytest.mark.parametrize("defect,message", [
     ("missing_case", "four unique cases"),
     ("extra_county", "four unique cases"),
@@ -191,6 +233,27 @@ def _saved_runs(tmp_path, counties=("alameda", "los-angeles", "san-diego")):
         pd.DataFrame(designs).to_csv(assets / "electrified_assets.csv", index=False)
     return dict(model_run_sha="abc1234", run_timestamps=timestamps, base_input_dir=base,
                 completion_dir=completion, source=tmp_path / "matched.csv", counties=set(counties))
+
+
+def test_renders_verified_source_with_image_pdf_and_receipt(tmp_path):
+    from figure_builder.electrification_figure import render_adoption_figure
+
+    source = comparison.build_electrification_source(**_saved_runs(tmp_path))
+    prefix = tmp_path / "figures" / "adoption"
+    receipt = render_adoption_figure(source, prefix)
+    assert prefix.with_suffix(".png").read_bytes().startswith(b"\x89PNG")
+    assert prefix.with_suffix(".pdf").read_bytes().startswith(b"%PDF")
+    assert json.loads(prefix.with_suffix(".json").read_text()) == receipt
+    assert receipt["source"] == comparison.file_identity(source)
+    assert receipt["statistics"]["county_count"] == 3
+    assert receipt["statistics"]["unresolved_sign_count"] == 3
+    for suffix, artifact in zip((".png", ".pdf"), receipt["artifacts"]):
+        assert comparison.file_identity(prefix.with_suffix(suffix)) == artifact
+    with pytest.raises(ValueError, match="cannot replace"):
+        render_adoption_figure(source, source.with_suffix(".manifest"))
+    source.write_text(source.read_text() + "\n")
+    with pytest.raises(ValueError, match="fingerprint"):
+        render_adoption_figure(source, prefix)
 
 
 def test_builds_four_cells_from_two_completed_runs_and_records_exact_sources(tmp_path):
