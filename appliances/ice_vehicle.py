@@ -39,26 +39,8 @@ class ICEVehicleAppliance:
         """Return annualized cost over the vehicle lifetime."""
         return self.base_cost / self.lifetime_years
 
-    def get_annual_operating_cost_estimate(self, 
-                                         county_name: str,
-                                         annual_maintenance_cost: float = 1200.0) -> float:
-        """
-        Estimate annual operating costs for ICE vehicle using county-specific data.
-        
-        Args:
-            county_name: County name for location-specific costs and VMT
-            annual_maintenance_cost: Annual maintenance cost (default: $1,200)
-            
-        Returns:
-            Estimated annual operating cost for ICE vehicle
-        """
-        fuel_data = calculate_annual_fuel_cost(county_name, self.fuel_efficiency_mpg)
-        annual_fuel_cost = fuel_data['annual_fuel_cost']
-        
-        return annual_fuel_cost + annual_maintenance_cost
-    
     def get_cost_breakdown(self, county_name: str) -> Dict:
-        """Return detailed cost breakdown for ICE vehicle."""
+        """Return capital and annual fuel, maintenance, and insurance costs."""
         # Calculate fuel costs using county-specific data
         fuel_data = calculate_annual_fuel_cost(county_name, self.fuel_efficiency_mpg)
         annual_fuel_cost = fuel_data['annual_fuel_cost']
