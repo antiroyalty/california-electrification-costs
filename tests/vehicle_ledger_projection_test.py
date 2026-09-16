@@ -148,6 +148,100 @@ def test_step15_selects_matching_vehicle_cost_for_each_payback_case(monkeypatch)
 
 
 @pytest.mark.parametrize(
+    "scenario,baseline",
+    [
+        ("full_electric_ev_coopt", "baseline_ice_car_coopt"),
+        ("full_electric_ev", "baseline_ice_car"),
+        ("baseline_ev_car", "baseline_ice_car"),
+        ("heat_pump", "baseline"),
+    ],
+)
+def test_step15_bill_savings_use_the_declared_household_baseline(
+    monkeypatch, scenario, baseline,
+):
+    bills = {(baseline, False): 1000, (scenario, False): 700, (scenario, True): 600}
+
+    def load_bill(_base_dir, _county, scenario_name, _housing, with_solar=False):
+        return bills[(scenario_name, with_solar)]
+
+    monkeypatch.setattr(step15, "load_annual_costs", load_bill)
+
+    assert step15.calculate_annual_savings(
+        "unused", "Alameda County", scenario, "single-family-detached"
+    ) == (1000, 700, 600, 300, 400)
+
+
+@pytest.mark.parametrize("include_plain_baseline", [False, True])
+def test_step15_matched_payback_reads_the_same_household_for_bills_and_vehicles(
+    tmp_path, monkeypatch, include_plain_baseline,
+):
+    """Real saved-file lookups must ignore an unrelated baseline, even if present."""
+    scenario = "full_electric_ev_coopt"
+    baseline = "baseline_ice_car_coopt"
+    housing = "single-family-detached"
+    cap_dir = tmp_path / "capital_costs"
+    cap_dir.mkdir()
+
+    def write_ledger(name, vehicle_type, category, costs):
+        ledger = _vehicle_ledger(vehicle_type, category, costs)
+        ledger["county"] = "Alameda County"
+        ledger["base_cost"] = ledger["net_cost"] = 6000 if category == "electric" else 1000
+        ledger.to_csv(
+            cap_dir / f"capital_costs_{name}_{housing.replace('-', '_')}.csv",
+            index=False,
+        )
+
+    def write_bill(name, cost, with_solar=False):
+        variant = "solarstorage" if with_solar else "totals"
+        directory = tmp_path / name / housing / "alameda" / "results" / variant
+        directory.mkdir(parents=True)
+        pd.DataFrame([{
+            "scenario": f"{name}.solarstorage" if with_solar else name,
+            "total.PG&E.fixture+PG&E.G-1": cost,
+        }]).to_csv(directory / "RESULTS_total_annual_costs_alameda_20260914_16.csv", index=False)
+
+    write_ledger(baseline, "vehicle_fuel", "gas", [300, 200, 100])
+    write_ledger(scenario, "vehicle_charging", "electric", [30, 20, 10])
+    write_bill(baseline, 1000)
+    write_bill(scenario, 700)
+    write_bill(scenario, 600, with_solar=True)
+    if include_plain_baseline:
+        write_ledger("baseline", "vehicle_fuel", "gas", [9000, 9000, 9000])
+        write_bill("baseline", 10000)
+
+    summary = pd.DataFrame([{
+        "county_slug": "alameda",
+        "net_outlay_full": 5000,
+        "net_outlay_half": 9000,
+        "net_outlay_none": 12000,
+        "net_outlay_full_with_pv": 6700,
+        "net_outlay_half_with_pv": 11600,
+        "net_outlay_none_with_pv": 14700,
+        "pv_storage_net_full": 1700,
+        "pv_storage_net_half": 2600,
+        "pv_storage_net_none": 2700,
+    }])
+    for prefix in ("capital_costs_summary", "capital_costs_summary_with_pv"):
+        summary.to_csv(
+            cap_dir / f"{prefix}_{scenario}_{housing.replace('-', '_')}.csv", index=False
+        )
+    monkeypatch.setattr(step15, "_should_log_diagnostic", lambda _county: False)
+
+    result = step15.calculate_payback_periods(
+        str(tmp_path), scenario, housing, ["Alameda County"]
+    )
+
+    assert len(result) == 3
+    assert result["incentive_scenario"].tolist() == INCENTIVES
+    assert result["baseline_annual_cost"].tolist() == [1300, 1200, 1100]
+    assert result["scenario_annual_cost"].tolist() == [730, 720, 710]
+    assert result["scenario_solar_annual_cost"].tolist() == [630, 620, 610]
+    assert result["annual_savings_scenario_only"].tolist() == [570, 480, 390]
+    assert result["annual_savings_used"].tolist() == [670, 580, 490]
+    assert result["payback_period_years"].tolist() == [10, 20, 30]
+
+
+@pytest.mark.parametrize(
     "module_name",
     [
         "experiments.solar_size_sweep",

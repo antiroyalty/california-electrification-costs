@@ -207,6 +207,25 @@
       "evaluations/incentives.py:apply_pv_storage_incentives"
     ]
   },
+  "payback.household_baseline": {
+    "title": "Household Baseline for Auxiliary Payback",
+    "formula": "For scenario s, select household b(s) from COMPARISON_BASELINE. Baseline annual operating cost = b(s) utility bills without solar + b(s) ICE operating cost for the selected county and incentive case.",
+    "assumptions": {
+      "optimized_ev": "full_electric_ev_coopt compares against baseline_ice_car_coopt.",
+      "other_ev": "full_electric_ev and baseline_ev_car compare against baseline_ice_car.",
+      "other_scenarios": "Other scenarios retain the existing plain baseline comparison.",
+      "consistent_selection": "Bill savings and vehicle-ledger lookup use the same mapping. The baseline bill is always the household's no-solar bill, even when its scenario also has an optimized solar/storage solution.",
+      "scope": "This fixes household selection in Step 15. Its existing capital-summary, tariff-column selection, and missing-bill handling remain separate legacy conventions. Publication EAC uses its own explicit matched-case collector.",
+      "result_status": "The mapping and savings/payback tests are corrected. Saved downstream reports have not been regenerated. No new optimization is needed."
+    },
+    "validation": "Saved-file fixtures cover the optimized EV scenario with and without unrelated plain-baseline files. Independent expected totals check all three incentive cases. Direct bill tests also cover the existing EV mappings and an appliance-only scenario.",
+    "code": [
+      "pipeline/steps/step15_payback_periods.py:COMPARISON_BASELINE",
+      "pipeline/steps/step15_payback_periods.py:calculate_annual_savings",
+      "pipeline/steps/step15_payback_periods.py:calculate_payback_periods",
+      "tests/vehicle_ledger_projection_test.py"
+    ]
+  },
   "payback.choose_annual_savings": {
     "title": "Annual Savings Selection (Payback)",
     "formula": "with_solar = baseline - scenario_solar; scenario_only = baseline - scenario",
@@ -369,7 +388,7 @@
       "ice_operating_inputs": "Default ICE fuel efficiency is 24.25 mpg and annual insurance is $1836; EV annual insurance is $2040. Maintenance uses the fixed ownership-period allowances documented in vehicles.maintenance_allowances. Explicit overrides, including zero, are preserved.",
       "ledger_integration": "Step 14 copies ICE fuel, maintenance, insurance, and annual operating total from get_cost_breakdown. The shared projection reads one exact county/incentive case. This prevents Step 15 from summing the three alternative incentive rows and prevents sweeps from replacing invalid vehicle data with zero.",
       "validation": "Focused tests use three deliberately different incentive-case costs to verify helper selection, Step 15 savings and payback, unchanged publication EAC behavior for valid inputs, and propagated sweep errors. The saved Alameda comparison selects one row instead of the three-row county sum. No dispatch optimization is required because this change reads existing ledger costs.",
-      "correction_status": "New ledgers use corrected ICE arithmetic, revised ICE/EV maintenance allowances, and Alpine's explicit gasoline-price proxy. September 14 publication results retain the former values, the $916.35/year arithmetic discrepancy relative to the former ICE assumption, and zero Alpine fuel cost. Regenerate downstream reports after the separate Step 15 correction is validated. The earlier 5-versus-42 count remains an arithmetic diagnostic. Vehicle-dollar changes cancel within adoption differences."
+      "correction_status": "New ledgers use corrected ICE arithmetic, revised ICE/EV maintenance allowances, and Alpine's explicit gasoline-price proxy. September 14 publication results retain the former values, the $916.35/year arithmetic discrepancy relative to the former ICE assumption, and zero Alpine fuel cost. Step 15 now selects the matching household and incentive case; downstream reports remain pending regeneration. The earlier 5-versus-42 count remains an arithmetic diagnostic. Vehicle-dollar changes cancel within adoption differences."
     },
     "data_sources": {
       "ledger_df": "capital_costs_<scenario>_<housing>.csv"
@@ -393,7 +412,7 @@
       "failure_rules": "Missing counties and nonnumeric, nonfinite, zero, or negative gasoline prices raise ValueError. Boolean values are invalid. Other county prices are unchanged.",
       "mileage_and_efficiency": "The existing 12000-mile annual reference and 24.25-mpg ICE default are unchanged. This change does not revise mileage selection or fuel-efficiency validation.",
       "effect": "Alpine fuel cost rises from zero to 12000 / 24.25 * 4.589 = 2270.845360824742 USD/year. Each 1 USD/gallon difference changes annual fuel cost by 494.845360824742 USD. Vehicle expenses cancel within each household's solar/storage adoption comparison.",
-      "limitations": "An unweighted county median does not establish Alpine's local price. The source snapshot date remains unknown. Saved results remain unchanged pending the separate Step 15 correction and downstream recomputation."
+      "limitations": "An unweighted county median does not establish Alpine's local price. The source snapshot date remains unknown. Saved results remain unchanged pending downstream recomputation."
     },
     "data_sources": {
       "catalogue": "docs/data_sources.yaml:aaa_county_gasoline_prices",

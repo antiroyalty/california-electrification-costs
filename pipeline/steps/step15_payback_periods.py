@@ -39,7 +39,8 @@ from helpers.utility_helpers import get_utility_for_county
 COMPARISON_BASELINE = {
     "baseline_ev_car": "baseline_ice_car",
     "full_electric_ev": "baseline_ice_car",
-    # everything else falls back to plain "baseline"
+    "full_electric_ev_coopt": "baseline_ice_car_coopt",
+    # Other scenarios retain the plain household baseline.
 }
 
 def load_capital_costs(base_input_dir: str, scenario: str, housing_type: str) -> pd.DataFrame:
@@ -192,8 +193,11 @@ def calculate_annual_savings(base_input_dir: str, county: str, scenario: str, ho
     Returns:
         Tuple of (baseline_cost, scenario_cost, solar_cost, savings_scenario_only, savings_with_solar)
     """
-    # 1. Baseline costs (no electrification)
-    baseline_annual_cost = load_annual_costs(base_input_dir, county, "baseline", housing_type, with_solar=False)
+    # Use the same household baseline as the vehicle-cost ledger.
+    baseline_name = COMPARISON_BASELINE.get(scenario, "baseline")
+    baseline_annual_cost = load_annual_costs(
+        base_input_dir, county, baseline_name, housing_type, with_solar=False
+    )
     
     # 2. Scenario costs (electrification only, no solar)
     scenario_annual_cost = load_annual_costs(base_input_dir, county, scenario, housing_type, with_solar=False)

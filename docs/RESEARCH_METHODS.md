@@ -34,9 +34,9 @@ example from $148 to $138. Matched 288-hour Alameda checks preserve both the
 free-sizing result and fixed 10 kWh result, with optimizer/reporting agreement.
 The core rerun completed sizing, billing, capital reporting, and county
 diagnostics. All 141 paper scenario/county annual bills reconciled within
-$0.001; the strict statewide validator passed 49 checks. Auxiliary payback
-outputs remain outside the validated EAC conclusions because their optimized
-EV comparison selects a different baseline.
+$0.001; the strict statewide validator passed 49 checks. Archived auxiliary
+payback outputs used a different baseline for the optimized EV comparison.
+The current code corrects that selection; saved payback outputs remain unchanged.
 
 The September 14 matched run at `11b7dba` covers both optimized households in
 all 47 counties and their no-solar counterfactuals. Its 188 cost cells pass the
@@ -49,10 +49,10 @@ each saved gas-household ledger and a zero gasoline price for Alpine. The ledger
 code now uses the vehicle's itemized calculation. Maintenance defaults now
 average the first 144,000 miles, replacing the former new-vehicle allowances.
 Alpine now uses the explicit gasoline-price proxy described below. Saved results
-retain the former inputs. Whole-household headlines remain on hold until the
-separate Step 15 correction is validated and cost reports are regenerated. Vehicle dollars
-cancel within adoption comparisons; the matched scatterplot and package effect
-remain unchanged.
+retain the former inputs. Step 15's household and incentive selection are now
+corrected. Whole-household headlines remain on hold until cost reports are
+regenerated. Vehicle dollars cancel within adoption comparisons; the matched
+scatterplot and package effect remain unchanged.
 
 ## Research questions and comparison definitions
 
@@ -335,6 +335,14 @@ accounting boundary. It does not change vehicle assumptions, residential-chargin
 scope, public-charging scope, or dispatch. Existing ledgers are sufficient for
 validation; dispatch optimization does not need to run again.
 
+Step 15 also uses one household mapping for both utility bills and vehicle
+costs. `full_electric_ev_coopt` compares against `baseline_ice_car_coopt`.
+The older `full_electric_ev` and `baseline_ev_car` scenarios compare against
+`baseline_ice_car`. Other scenarios retain their plain `baseline` comparison.
+The reference uses the selected household's bills without solar. Each incentive
+case uses that same household's vehicle costs. Saved-file tests verify the
+optimized comparison with and without unrelated plain-baseline files.
+
 Equipment service life and the investment comparison period are different
 assumptions. The approved study period is 25 years, matching the assumed solar
 life. This is within the Department of Energy's typical 20–30-year photovoltaic
@@ -585,7 +593,7 @@ Prioritize a check when the limitation could change a stated conclusion.
 | Charging away from home is intentionally outside the model scope | Home load includes residential charging only. Public/workplace and DC fast charging costs are also excluded, so reported household costs do not cover all transport expenditure. Simon's $642.54/year estimate remains historical context. | A future extension could verify those prices and demand, then add a separate expense outside the home electricity bill. This is not required for publication within the stated scope. A constant expense cancels within each household's adoption comparison. |
 | Some vehicle input provenance remains incomplete | Simon identifies AAA gasoline prices, but the snapshot date and exact citation are missing. The $3,000 utility rebate lacks program-specific support. Insurance uses older national estimates, and the 12-year vehicle-life citation describes batteries. | Use the source catalogue to resolve material gaps and state the remaining reference assumptions. These findings do not change inputs in this documentation review. |
 | Alpine gasoline uses a proxy; the original price date is unknown | Alpine uses $4.589/gallon, the unweighted median of the other 57 stored county prices. This does not establish its local price. Each $1/gallon difference changes annual fuel cost by $494.85. | Retain this explicit assumption and check price sensitivity if Alpine's classification drives a claim. Replace it with a documented observation when revisiting gasoline inputs. |
-| Saved vehicle costs need regeneration | New ledgers use itemized ICE costs, revised maintenance allowances, and the Alpine gasoline proxy. Saved results retain the former maintenance values, the $916.35 arithmetic discrepancy relative to the former ICE assumption, and zero Alpine fuel cost. | Validate the separate Step 15 correction, then regenerate affected cost reports before citing whole-household electrification savings. Vehicle-dollar corrections cancel within adoption differences and require no new dispatch optimization. |
+| Saved vehicle costs need regeneration | New ledgers use itemized ICE costs, revised maintenance allowances, and the Alpine gasoline proxy. Saved results retain the former maintenance values, the $916.35 arithmetic discrepancy relative to the former ICE assumption, and zero Alpine fuel cost. | Regenerate affected cost reports with the corrected Step 15 household and incentive selection before citing whole-household electrification savings. Vehicle-dollar corrections cancel within adoption differences and require no new dispatch optimization. |
 | Constant vehicle repair and maintenance allowances | The allowances average 144,000 miles from new using older survey rates. They do not represent county or vehicle-model variation, inflation, or actual repair timing. At 7%, the flat allowance increases the ICE-minus-EV maintenance difference by $21.93/year against a 12-year calculation with mileage bands applied each year. | Use the documented constant allowance for the current comparison. A future sensitivity can update prices or ownership patterns. The timing check covers maintenance alone; it is not a full household-cost uncertainty bound. |
 | Known profiles and prices throughout an optimization run | Dispatch assumes advance knowledge of the modeled year. Real controllers face forecast errors, which can reduce achievable savings. | Compare a controller with limited forecasts on the same cases. |
 | Reduced 12 × 24 sensitivity chronology | Averaging can change cycling, usable credits, and optimal capacities. Mixed-resolution comparisons cannot isolate a policy effect by themselves. | Use full-year checks for findings near a threshold or sensitive to chronology. |
@@ -593,7 +601,7 @@ Prioritize a check when the limitation could change a stated conclusion.
 | County equipment costs include imputed values | The heat-pump cost inputs use the median of available counties where source data are absent: three counties for space heating and nine for water heating. These are not local price observations. | Identify these counties in cost interpretation and refresh their inputs when local data become available. |
 | Battery remaining-value and replacement-cost assumptions | The method values five remaining years at one-third of replacement cost. It assumes unchanged real purchase costs and incentive treatment. Future prices, incentives, and resale values can differ; the direction of error is uncertain. | State these assumptions with the results. Use a focused sensitivity if they could change an adoption conclusion. |
 | Older results and auxiliary tools can use different capital accounting | The core scenarios were regenerated at `8a98b96`. Other cached sizing and reports retain their recorded versions. Standalone solar/battery/combined sweeps, the older Step 9 size optimizer, and auxiliary NPV diagnostics retain separate conventions. | Use the dated claim assessment for current evidence. Align an auxiliary tool before using it for a comparison under these methods. |
-| Auxiliary payback uses a different baseline for the optimized EV case | Its comparison selects `baseline` rather than `baseline_ice_car`. These payback outputs do not support the current Claims 2/3 EAC conclusions, which select their scenarios explicitly. | Correct and validate the payback comparison before citing it. |
+| Saved auxiliary payback predates the household-baseline correction | Current Step 15 uses the matching gas/ICE household for optimized EV bills and vehicle costs. Saved payback outputs have not been refreshed. Legacy tariff-column selection, missing-bill handling, and capital-summary conventions remain; publication EAC uses its separate matched-case collector. | Regenerate payback outputs before citing them and check those legacy conventions if payback becomes a paper result. |
 | The 2025 incentive sensitivity simplifies eligibility | Its continuous battery sizing uses an ITC-adjusted unit price without a separate 3 kWh eligibility constraint. The appliance policy registry also records separate caps for each appliance under the 25C heat-pump credit, in place of a combined household cap. Affected 2025 cases can overstate incentives. | Check sub-3-kWh battery conclusions and whole-household cases using both heating credits if these support a published claim. These issues do not change zero-credit post-ITC inputs. |
 | Battery augmentation costs and gradual capacity loss omitted centrally | Storage is treated more favorably than a model that charges for maintaining capacity. Round-trip efficiency losses and the declared replacement remain included. | Add an explicit degradation or augmentation-cost sensitivity if needed. |
 | Equipment-size bounds, specified charging/export rules, and fixed-design comparisons | An optimum applies within its declared feasible choices. A fixed-design result is not an unrestricted economic optimum. | Report binding constraints and test an expanded domain for an affected claim. |
