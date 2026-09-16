@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from scripts.capex_grid_sweep import GridSpec, run
+from tariffs import NBTScenario, TariffCatalog
 
 
 def test_run_uses_resolved_tariff_plan_in_plot_title(tmp_path):
@@ -11,14 +12,8 @@ def test_run_uses_resolved_tariff_plan_in_plot_title(tmp_path):
     (county_dir / "weather_TMY_alameda.csv").touch()
     (county_dir / "combined_profiles_baseline_alameda.csv").touch()
 
-    tariff = SimpleNamespace(
-        import_schedule=SimpleNamespace(
-            plan_name="E-ELEC",
-            rates_for=lambda timestamps: [0.30] * 8760,
-        ),
-        export_schedule=SimpleNamespace(rates_for=lambda timestamps: [0.05] * 8760),
-        acc_plus_rate=0.0088,
-    )
+    # The caller now supplies component prices and settlement rules to sizing.
+    tariff = TariffCatalog().bundle("PG&E", NBTScenario(), import_plan="E-ELEC")
     result = SimpleNamespace(
         pv_kw=3.0,
         batt_kwh=10.0,
@@ -44,8 +39,7 @@ def test_run_uses_resolved_tariff_plan_in_plot_title(tmp_path):
             return_value=SimpleNamespace(utility="PG&E"),
         ),
         patch("scripts.capex_grid_sweep.TariffCatalog.bundle", return_value=tariff),
-        patch("scripts.capex_grid_sweep.full_year_hourly_index", return_value=range(8760)),
-        patch("scripts.capex_grid_sweep._solve_lp", return_value=result),
+        patch("scripts.capex_grid_sweep._solve_lp", return_value=result) as solve,
         patch("scripts.capex_grid_sweep._plot_heatmap") as plot,
     ):
         csv_path, png_path = run(
@@ -70,3 +64,4 @@ def test_run_uses_resolved_tariff_plan_in_plot_title(tmp_path):
     assert Path(csv_path).exists()
     assert png_path.endswith("capex_grid_alameda.png")
     assert plot.call_args.kwargs["title"].endswith("(alameda, E-ELEC)")
+    assert solve.call_args.args[0].nbt_terms is not None

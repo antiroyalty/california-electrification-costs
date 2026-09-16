@@ -183,15 +183,14 @@ def test_normalized_schedule_values_are_semantically_stable():
     [("PG&E", 0.0088, 0.0360), ("SCE", 0.0160, 0.0370), ("SDG&E", 0.0, 0.0)],
 )
 def test_exact_2026_vintage_acc_plus_adders(utility, standard, equity):
-    catalog = TariffCatalog()
-    assert catalog.acc_plus_rate(
-        utility,
-        NBTScenario(nbt_vintage=2026, customer_segment=CustomerSegment.STANDARD),
-    ) == pytest.approx(standard)
-    assert catalog.acc_plus_rate(
-        utility,
-        NBTScenario(nbt_vintage=2026, customer_segment=CustomerSegment.EQUITY),
-    ) == pytest.approx(equity)
+    # Bonus rates remain source evidence, not an optional research calculation.
+    data = pd.read_csv(ROOT / "data/tariffs/acc_plus_rates.csv")
+    for segment, expected in [(CustomerSegment.STANDARD, standard), (CustomerSegment.EQUITY, equity)]:
+        rows = data[(data.utility == utility) & (data.nbt_vintage == 2026)
+                    & (data.customer_segment == segment.value)]
+        assert len(rows) == 1
+        assert rows.rate_usd_per_kwh.item() == pytest.approx(expected)
+        assert rows.source_id.item()
 
 
 def test_county_selects_utility_but_does_not_select_a_climate_zone_schedule():

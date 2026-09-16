@@ -1,0 +1,428 @@
+schema_version: 1
+review:
+  date: '2026-09-15'
+  code_head: c5d6b37c1abfd55a004852afb0efb45a20c8545b
+  scope: >-
+    Initial catalogue of vehicle inputs and the supporting household sources
+    identified in code, methods documents, and Simon La Vieille's August 2025 report.
+    This is not yet an exhaustive inventory of every pipeline input.
+  working_tree: >-
+    Includes the existing, uncommitted vehicle maintenance revision. Saved September
+    14 results have not been regenerated with that revision. This source review
+    changes documentation and archives only; it does not validate new research results.
+  interpretation: >-
+    Source verification establishes provenance, not that an assumption is representative
+    of every household. Distinguish original source values, model choices, and saved results.
+  maintenance: >-
+    Update affected entries when source data, provenance, or assumptions change.
+    Keep equations in methods.yaml and interpretation in RESEARCH_METHODS.md.
+    Preserve dated archives; record later versions separately.
+  paths: Repository-relative. Report section and table references refer to the archived August 2025 report.
+
+sources:
+  simon_ev_integration_2025:
+    title: EV Integration to Ana's Project
+    author: Simon La Vieille
+    publication_date: '2025-08'
+    role: historical_methods_report
+    url: https://www.overleaf.com/project/68a362771ff44e733ac948e1
+    archive: docs/sources/simon_ev_integration/2026-09-15
+    verification: >-
+      Read all 12 PDF pages, the complete main.tex, and all 21 bibliography entries.
+      See the archive README and checksums for capture details and existing source defects.
+    limitations: >-
+      Historical rationale, not the current model specification. Maintenance, mileage,
+      incentives, and some cost treatment differ from current code.
+
+  cec_ab2127_charging_2024:
+    title: Assembly Bill 2127 Second Electric Vehicle Charging Infrastructure Assessment
+    publisher: California Energy Commission; charging model developed with NREL
+    publication_date: '2024-03-06'
+    role: implemented_input
+    url: https://www.energy.ca.gov/publications/2024/assembly-bill-2127-second-electric-vehicle-charging-infrastructure-assessment
+    local_input: data/AB2127_LoadCurveData_Eleanor.xlsx
+    local_input_git_status: ignored; present locally, not supplied by an ordinary clone
+    locator: Figure 20 sheet; source!A1:A4; report section 2.4 and Table 1
+    code:
+      - pipeline/steps/step6_build_electric_vehicle_load_profiles.py
+    use: >-
+      Average minute observations to 24 hourly values, divide statewide MW by
+      7,100,000 vehicles, and convert MW to kW. Sum residential Level 1 and Level 2.
+      Repeat the daily profile 365 times for every county.
+    verification: >-
+      Workbook source sheet attributes the data to CEC staff and states repository
+      permission. The public assessment confirms the 7.1-million-vehicle 2030 forecast.
+      Simon explicitly identifies this as the selected dataset.
+    limitations:
+      - One 2030 statewide day; no county, seasonal, or weekday/weekend variation.
+      - Simon describes a BEV/PHEV fleet mix, with 12 percent PHEVs; this share was not independently re-estimated.
+      - Home charging intentionally excludes the public/workplace and DC-fast columns; their costs are also outside the current model scope.
+      - Charging energy is not normalized to the ICE model's 12000 annual miles.
+      - The module's EVI-Pro Lite API description is stale; the workbook is the active input.
+
+  doe_vehicle_purchase_costs_2022:
+    title: 2022 Incremental Purchase Cost Methodology and Results for Clean Vehicles
+    publisher: US Department of Energy; Argonne Autonomie model
+    publication_date: '2022-12-23'
+    role: implemented_input
+    url: https://www.energy.gov/sites/default/files/2022-12/2022.12.23%202022%20Incremental%20Purchase%20Cost%20Methodology%20and%20Results%20for%20Clean%20Vehicles.pdf
+    locator: DOE Table 2; Simon section 3.1.1, Figure 2, and Table 2
+    code: [appliances/electric_vehicle.py, appliances/ice_vehicle.py]
+    use: >-
+      Representative midsize SUV: 47500 USD BEV and 33500 USD ICE in the source.
+      Apply 1.034 to obtain 49115 and 34639 USD. Add charger cost separately to BEV.
+    verification: Source table and Simon's inflation-adjusted table agree with the implemented vehicle costs.
+    limitations: >-
+      Modeled representative vehicle classes, not observed Tesla Model Y prices.
+      The Tesla comment is too specific. Values are historical benchmarks, not current quotes.
+    related_sources: [bls_cpi_december_2023, dot_home_charger_installation]
+
+  bls_cpi_december_2023:
+    title: Consumer Price Index - December 2023
+    publisher: US Bureau of Labor Statistics
+    publication_date: '2024-01-11'
+    role: implemented_input
+    url: https://www.bls.gov/news.release/archives/cpi_01112024.htm
+    report_url: https://www.dol.gov/newsroom/economicdata/cpi_01112024.pdf
+    locator: Simon sections 3.1.1 and 4.5; bibliography key Inflation
+    code:
+      - appliances/electric_vehicle.py
+      - appliances/ice_vehicle.py
+      - appliances/electric_cooking.py
+      - appliances/gas_stove.py
+      - appliances/gas_water_heating.py
+      - appliances/gas_heating.py
+    use: Multiply the selected 2022 purchase/installed costs by 1.034.
+    verification: Simon explicitly documents the adjustment; the BLS release confirms the 3.4 percent value.
+    limitations: >-
+      This is December-to-December all-items CPI-U, not an annual-average or
+      vehicle-specific price index. Other inputs retain different source-dollar years.
+      The report's bibliography labels the series year as 2023; the release date is 2024.
+
+  dot_home_charger_installation:
+    title: Estimated average installation cost for single-family Level 2 charging
+    publisher: US DOT ITS Knowledge Resources, summarizing Michael Nicholas / ICCT
+    publication_date: '2020'
+    underlying_study_year: 2019
+    role: implemented_input
+    url: https://www.itskrs.its.dot.gov/2020-sc00472
+    locator: Simon section 3.1.1; bibliography key L2ChargerCost
+    code: [appliances/electric_vehicle.py]
+    use: 1400 USD added once to the EV capital-cost input.
+    verification: The DOT entry identifies the ICCT study and the 1400 USD allowance.
+    limitations: Historical average; no county variation or explicit inflation adjustment.
+
+  icct_vehicle_costs_2021:
+    title: When might lower-income drivers benefit from electric vehicles? Quantifying the economic equity implications of electric vehicle adoption
+    publisher: International Council on Clean Transportation
+    publication_date: '2021-02'
+    role: implemented_insurance_and_historical_maintenance
+    url: https://theicct.org/wp-content/uploads/2021/06/EV-equity-feb2021.pdf
+    accessible_copy: https://lindseyresearch.com/wp-content/uploads/2021/12/NHTSA-2021-0053-1578-Exhibit-86-Bauer-et-al-2021.pdf
+    locator: ICCT insurance and maintenance sections; Simon sections 3.2.1 and 3.2.2
+    code: [appliances/electric_vehicle.py, appliances/ice_vehicle.py]
+    use: 170 USD/month BEV and 153 USD/month ICE become 2040 and 1836 USD/year.
+    verification: >-
+      ICCT attributes insurance premiums to Insure.com and identifies the quoted
+      estimates as new-vehicle premiums in 2020. Its maintenance discussion cites Harto/Consumer Reports.
+    limitations:
+      - The quoted insurance passage does not establish California-specific premiums, despite the EV code comment.
+      - No county, vehicle-age, or inflation adjustment is applied to insurance.
+      - ICCT and Consumer Reports are not independent evidence for the maintenance rates.
+    related_sources: [consumer_reports_maintenance_2020]
+
+  consumer_reports_maintenance_2020:
+    title: Electric Vehicle Ownership Costs - Maintenance Cost White Paper
+    publisher: Consumer Reports
+    publication_date: '2020-09'
+    role: implemented_in_current_working_tree
+    url: https://advocacy.consumerreports.org/wp-content/uploads/2020/09/Maintenance-Cost-White-Paper-9.24.20-1.pdf
+    locator: Table 2.1; docs/research_logs/2026-09-15.md
+    code: [appliances/electric_vehicle.py, appliances/ice_vehicle.py]
+    methods_key: vehicles.maintenance_allowances
+    use: >-
+      Average the first 144000 odometer miles over 12 years. Use 50000, 50000,
+      and 44000 miles at the three mileage-band rates. Annual allowances are
+      324.333333 USD BEV and 656.333333 USD ICE before rounding.
+    verification: Prior source check and maintenance tests are recorded in the September 15 research log.
+    limitations: >-
+      Retains 2020 source dollars and a constant annual allowance. High-mileage BEV
+      evidence is limited. These revised values supersede Simon's new-vehicle-only
+      allowances; existing September 14 publication results still use former inputs.
+
+  fhwa_california_mileage_2022:
+    title: Highway Statistics 2022 - MV-1 and VM-2
+    publisher: Federal Highway Administration
+    data_year: 2022
+    role: historical_derivation_and_current_code_citation
+    urls:
+      - https://www.fhwa.dot.gov/policyinformation/statistics/2022/mv1.cfm
+      - https://www.fhwa.dot.gov/policyinformation/statistics/2022/vm2.cfm
+    locator: Simon section 3.2; bibliography keys NumberVehiclesCalifornia and TotalVMTCalifornia
+    code: [helpers/gasoline_cost_helper.py, appliances/ice_vehicle.py]
+    use: >-
+      Simon divides 315244 million annual miles by 31119113 registered vehicles
+      to obtain approximately 10130 miles per vehicle, used for the original maintenance allowances.
+      Current fuel and revised maintenance calculations instead assume 12000 miles/year.
+    verification: FHWA tables support the report's aggregate figures; current code uses the common mileage default.
+    limitations: >-
+      Fleet-wide totals are not measured mileage for a representative midsize SUV.
+      The county mileage table is zero/missing and supplies no county variation.
+      Caltrans PRD appears only as a suggested future refinement in a comment.
+
+  cec_gasoline_volume:
+    title: California Gasoline Data, Facts, and Statistics
+    publisher: California Energy Commission, citing CDTFA gasoline sales
+    role: current_code_citation
+    url: https://www.energy.ca.gov/data-reports/energy-almanac/transportation-energy/california-gasoline-data-facts-and-statistics
+    code: [appliances/ice_vehicle.py]
+    use: Cited beside the 24.25 mpg assumption together with FHWA 2022 registrations and mileage.
+    verification: Current CEC page reports 13.4 billion gallons sold in 2024. The code does not retain a derivation.
+    limitations: >-
+      The cited inputs mix years and fleet definitions. This review does not validate
+      24.25 mpg as a matched midsize-SUV estimate. This gasoline-volume source is not the county price source.
+
+  aaa_county_gasoline_prices:
+    title: AAA gasoline prices, as attributed by Simon
+    publisher: AAA
+    role: implemented_input_with_incomplete_provenance
+    url: null
+    data_date: null
+    locator: Simon section 3.2.3, page 8; missing bibliography key AAAFuelPrices
+    code: [helpers/gasoline_cost_helper.py]
+    use: Hardcoded county USD/gallon values multiplied by annual miles divided by mpg.
+    verification: >-
+      Simon explicitly names AAA and daily updates. The current code has no source
+      URL or capture date; the report's AAA citation has no bibliography entry.
+      Attribution is recovered, but the actual county snapshot is not verified.
+    limitations: >-
+      Alpine is zero despite positive mileage. Missing counties also default to zero
+      gasoline price. These are unresolved input problems, not supported zero fuel costs.
+
+  driveclean_public_charging_and_incentives:
+    title: DriveClean California material cited for charging prices and incentives
+    publisher: California Air Resources Board / DriveClean
+    role: historical_report_assumptions_not_current_cost_inputs
+    url: https://driveclean.ca.gov/search-incentives?field_zipcode_target_id=92103&new_or_used=1&vehicle_type%5B%5D=32226&incentive_type%5B%5D=All&user_type=34960&scrap_retire=No&household_size=All&include_income=1&include_income_triggered=1&exlcude_incentives=
+    report_access_date: '2025-08-20'
+    locator: Simon Tables 3 and 4; bibliography key DriveClean
+    code: [appliances/electric_vehicle.py, pipeline/steps/step6_build_electric_vehicle_load_profiles.py]
+    use: >-
+      Simon estimates public/work Level 2 at 0.30 USD/kWh and DC fast charging at
+      0.40 USD/kWh, yielding 301.85 plus 340.69 = 642.54 USD/year away from home.
+      He also lists several charger/vehicle incentives, including income-based programs.
+    verification: >-
+      Values are in the report. Current EV operating costs contain maintenance and
+      insurance only; household electricity includes residential charging only.
+      Exclusion of public/workplace and DC fast charging from home load and modeled
+      EV costs is intentional, as confirmed by the researcher. Reported household
+      costs therefore exclude this transport expenditure.
+    limitations:
+      - The bibliography URL is an incentive search for ZIP 92103, not direct support for the charging prices.
+      - Rounded daily energy in Table 4 does not reproduce the annual dollars exactly; retain underlying precision before reuse.
+      - The report's incentive table does not establish universal eligibility or the current 3000 USD utility rebate.
+      - The 642.54 USD/year estimate is historical context. Reuse in a future extension requires verification; adding it is not a pending accounting fix.
+
+  doe_vehicle_battery_life:
+    title: At a Glance - Electric Vehicles
+    publisher: US DOE Alternative Fuels Data Center
+    publication_date: '2023-08'
+    role: current_code_citation_with_scope_mismatch
+    url: https://afdc.energy.gov/files/u/publication/electric-drive_vehicles.pdf
+    code: [appliances/electric_vehicle.py, appliances/ice_vehicle.py]
+    use: The EV comment cites 12-15 years beside a 12-year vehicle life; both vehicle classes use 12 years.
+    verification: The cited passage describes battery lifetime under normal conditions, not whole-vehicle retirement.
+    limitations: The whole-vehicle 12-year period is a model choice, not directly established by this citation.
+
+  irs_federal_vehicle_credit:
+    title: IRS guidance on accelerated termination of clean-energy credits
+    publisher: Internal Revenue Service
+    publication_date: '2025-08-21'
+    role: implemented_policy_source
+    url: https://www.irs.gov/newsroom/faqs-for-modification-of-sections-25c-25d-25e-30c-30d-45l-45w-and-179d-under-public-law-119-21-139-stat-72-july-4-2025-commonly-known-as-the-one-big-beautiful-bill-obbb
+    code: [appliances/incentive_policy.py, appliances/electric_vehicle.py]
+    use: The declared policy regime gates the federal 7500 USD vehicle credit; the post-ITC 2026 case excludes it.
+    verification: IRS guidance confirms the September 30, 2025 acquisition cutoff for section 30D.
+    limitations: >-
+      Historical incentive cases simplify household and vehicle eligibility. The
+      separate charger-credit block in electric_vehicle.py is commented out and inactive.
+
+  cpuc_utility_ev_rebate:
+    title: Electric Vehicle Financial Assistance
+    publisher: California Public Utilities Commission
+    role: implemented_assumption_with_unverified_amount
+    url: https://www.cpuc.ca.gov/consumer-support/financial-assistance-savings-and-discounts/electric-vehicle-financial-assistance
+    code: [appliances/electric_vehicle.py]
+    use: Assume a 3000 USD California utility rebate, subject to full/half/no incentive capture.
+    verification: >-
+      Code cites the generic assistance page. No utility-by-utility calculation or
+      current eligibility evidence establishes the assumed average. report/coopt_model.tex
+      already flags program availability as unconfirmed; Simon's Table 3 does not resolve it.
+    limitations: Do not describe the allowance as a verified universal rebate.
+
+  cpuc_solar_cost_2023:
+    title: Decision Revising Net Energy Metering Tariff and Subtariffs
+    publisher: California Public Utilities Commission
+    role: implemented_input
+    url: https://docs.cpuc.ca.gov/PublishedDocs/Published/G000/M499/K921/499921246.PDF
+    locator: Simon section 4.1; bibliography key CostofSolar
+    code: [appliances/solar_system.py]
+    methods_key: appliances.solar_system
+    use: 3300 USD/kW installed solar benchmark for 2023.
+    verification: Simon and the methods manifest identify the same adopted benchmark.
+    limitations: NREL ATB and Tracking the Sun values discussed alongside it are comparisons, not additional active solar prices.
+
+  nrel_atb_storage_2024:
+    title: Annual Technology Baseline 2024 - Residential Battery Storage
+    publisher: National Renewable Energy Laboratory
+    role: implemented_input
+    urls:
+      - https://atb.nrel.gov/electricity/2024/data
+      - https://atb.nrel.gov/electricity/2024/residential_battery_storage
+    locator: Simon section 4.2; bibliography key ATB2024
+    code: [appliances/battery_storage.py, evaluations/constants.py]
+    use: Moderate-scenario 2023 installed cost of 18258 USD for 5 kW / 12.5 kWh; 15-year battery life.
+    verification: Current methods and Simon identify this cost benchmark; the life and omitted augmentation are documented in methods.yaml.
+    limitations: >-
+      National representative cost. NREL's life assumption includes augmentation
+      operating costs that the central research model omits. Simon invokes the CEC
+      report below as precedent; it is not the origin of the selected ATB 2024 value.
+    related_sources: [cec_distributed_generation_2024]
+
+  cec_distributed_generation_2024:
+    title: Modeling Distributed Generation in California
+    publisher: California Energy Commission
+    publication_date: '2024'
+    role: supporting_context
+    url: https://www.energy.ca.gov/sites/default/files/2024-07/CEC-200-2024-011.pdf
+    locator: Simon section 4.2; bibliography key CECStorage
+    use: Supports the choice to use a national ATB storage benchmark in California research.
+    verification: Simon describes this CEC report as using ATB 2022, then selects ATB 2024 for this project.
+    limitations: Do not conflate the CEC report's data vintage with the project's selected benchmark.
+
+  tech_clean_california_heat_pumps:
+    title: TECH Clean California installation project data, aggregated by county
+    publisher: TECH Clean California
+    role: implemented_input
+    url: null
+    data_date: null
+    local_inputs: [data/County_Median_HPSH_Stats.csv, data/County_Median_HPWH_Stats.csv]
+    locator: Simon sections 4.3 and 4.4
+    code: [appliances/electric_heating.py, appliances/electric_water_heating.py]
+    use: >-
+      County median turnkey costs. Water heaters use single-family installations
+      and the listed HPWH categories. Space heaters retain ducted AHRI types without -O.
+      Missing counties receive the median of available county values.
+    verification: Simon documents filters and contractor-cost scope; current CSVs are tracked and the methods identify missing counties.
+    limitations: >-
+      Raw export date, exact download URL, and aggregation receipt remain to be recovered.
+      Simon counts 13 water-heater and 5 space-heater gaps across California; current
+      methods count 9 and 3 among the 47 study counties. These are different coverage scopes.
+
+  carb_appliance_costs:
+    title: Residential Appliance Comparison
+    publisher: California Air Resources Board
+    role: implemented_input
+    url: https://ww2.arb.ca.gov/capp/cst/tch/residential-appliance-comparison
+    locator: Simon section 4.5 and Table 5; bibliography key ApplianceCost
+    code: [appliances/electric_cooking.py, appliances/gas_stove.py, appliances/gas_water_heating.py, appliances/gas_heating.py]
+    use: >-
+      2022 capital, installation, and other costs for induction cooking and gas
+      cooking/water heating/HVAC, multiplied by 1.034. Exact components remain in methods.yaml.
+    verification: Simon's table matches the current documented component totals.
+    limitations: Confirm whether the source's Gas HVAC scope matches the modeled gas-heating equipment.
+    related_sources: [bls_cpi_december_2023]
+
+  eia_appliance_lifetimes:
+    title: Technology Forecast Updates - Residential and Commercial Building Technologies - Advanced Case
+    publisher: US Energy Information Administration
+    role: historical_basis_for_planning_assumption
+    url: https://www.eia.gov/analysis/studies/buildings/equipcosts/pdf/appendix-b.pdf
+    locator: Simon section 4.6 and Table 6; bibliography key EIALifetimes
+    code: [evaluations/constants.py]
+    use: >-
+      Simon reports equipment lifetimes near 15 years and documents the decision
+      to simplify household appliance lives to a common 15-year planning value.
+    verification: Report rationale recovered; exact source edition and rows were not independently rechecked in this audit.
+    limitations: >-
+      Simon's prose says 2023 while the bibliography says 2025. The shared 15-year
+      value is a modeling simplification, not each source row's empirical lifetime.
+
+  nrel_resstock:
+    title: End-Use Load Profiles for the US Building Stock - California ResStock
+    publisher: National Renewable Energy Laboratory
+    role: implemented_household_input
+    url: https://data.openei.org/s3_viewer?bucket=oedi-data-lake&prefix=nrel-pds-building-stock%2Fend-use-load-profiles-for-us-building-stock%2F2024%2F
+    code: [pipeline/steps/step1_identify_suitable_buildings.py]
+    use: Building metadata and simulated household energy profiles used in representative-county scenarios.
+    verification: Source comments identify 2024 ResStock releases; exact run input selection remains in pipeline inputs and receipts.
+    limitations: Comments list both AMY2018 and TMY3 variants; this catalogue does not certify a single weather vintage for all saved results.
+
+  nrel_solar_weather:
+    title: National Solar Radiation Database and System Advisor Model
+    publisher: National Renewable Energy Laboratory
+    role: implemented_household_input
+    url: https://developer.nrel.gov/api/solar/nsrdb_psm3_download.csv
+    code: [pipeline/steps/step8_get_weather_files.py]
+    use: Weather inputs for solar simulation; SAM/PySAM is a calculation tool, not a separate observed household dataset.
+    verification: Weather download endpoint is present in code. Match saved weather files using run receipts.
+    limitations: This entry does not replace file-specific weather provenance.
+
+  utility_tariffs:
+    title: PG&E, SCE, and SDG&E import tariffs and NBT export compensation
+    publisher: The respective utilities and CPUC
+    role: implemented_input
+    local_inputs: [data/tariffs/README.md, data/tariffs/sources]
+    code: [helpers/electricity_rate_helpers.py]
+    use: Household import costs, home EV charging costs, and eligible export-credit pools.
+    verification: The tariff README and archived source manifests record exact schedules and effective dates.
+    limitations: Use those maintained manifests for rate versions; do not treat this summary as a replacement tariff dataset.
+
+  investigated_charging_alternatives:
+    title: Charging datasets investigated before selecting CEC's workbook
+    role: investigated_not_adopted
+    locator: Simon sections 2.1-2.3 and Table 1
+    urls:
+      - https://docs.nrel.gov/docs/fy23osti/83916.pdf
+      - https://afdc.energy.gov/evi-x-toolbox#/evi-pro-loads
+      - https://www.energy.ca.gov/filebrowser/download/2853
+      - https://www.energy.ca.gov/data-reports/reports/integrated-energy-policy-report-iepr
+    use: >-
+      NREL TEMPO county projections, EVI-Pro Lite, and the utility-level dataset
+      Simon calls ISO data were investigated. The IEPR report supplied context.
+      None is an additional active vehicle-charging dataset in Step 6.
+    verification: Selection history is recorded in Simon's report and agrees with the workbook-based implementation.
+    limitations: >-
+      Simon's statements about model availability and behavior are historical assessments,
+      not newly verified descriptions of current tools. His EVI-Pro Lite prose and
+      TOU table disagree. His ISO citation names a CEC demand forecast, so its claimed
+      measurement-versus-simulation status should not be repeated without checking.
+
+  report_background_references:
+    title: Other contextual references retained in Simon's bibliography
+    role: background_or_implementation_not_traced
+    urls:
+      - https://afdc.energy.gov/data/10962
+      - https://docs.nrel.gov/docs/fy21osti/78001.pdf
+      - https://myenergy.ny.gov/how-to-upgrade/appliances-electronics/induction-stoves
+      - https://www.energy.gov/articles/making-switch-induction-stoves-or-cooktops?
+    locator: Simon introduction and section 4.5
+    use: EV registration context, TEMPO introduction, and induction-efficiency discussion.
+    verification: The archived bibliography retains each original title, year, URL, and access date.
+    limitations: This review did not establish that the report's 85 percent induction efficiency is an active numerical input.
+
+follow_up:
+  publication_relevant:
+    - >-
+      Verify matched travel demand between the CEC charging profile and the common
+      12000-mile ICE fuel assumption before claiming equal transport service.
+    - >-
+      State that household cost comparisons exclude public/workplace and DC fast
+      charging by design. Do not describe them as covering all transport expenditure.
+    - Recover or replace the dated AAA county price snapshot, reject unsupported zero prices, and resolve Alpine.
+    - Establish the amount and eligibility of the assumed 3000 USD utility rebate, or explicitly revise the assumption.
+  documentation_and_bounded_checks:
+    - Explain generic vehicle costs, insurance geography/vintage, and the 12-year whole-vehicle life as declared assumptions.
+    - State the December-to-December CPI convention and mixed source-dollar years; prioritize sensitivity only if it affects a claim.
+    - Preserve the CEC charging workbook in a separately reviewed data change if ordinary-clone reproducibility is required.
+    - Recover TECH raw export provenance and resolve EIA source edition and Gas HVAC scope when those inputs are revisited.

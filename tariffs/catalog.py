@@ -9,10 +9,22 @@ import pandas as pd
 from .calendar import day_types
 from .import_rates import DEFAULT_IMPORT_SNAPSHOT_DATA, ImportRateSchedule
 from .models import CustomerSegment, NBTScenario, TariffBundle, Utility
+from .nem2 import (
+    DEFAULT_IMPORT_SOURCE_MANIFEST,
+    DEFAULT_NEM2_RATE_TREATMENT_DATA,
+    DEFAULT_NEM2_SOURCE_MANIFEST,
+    NEM2RateTreatmentSchedule,
+    NEM2Scenario,
+    NEM2TariffBundle,
+)
+from .true_up import (
+    DEFAULT_NSC_DATA,
+    DEFAULT_TRUE_UP_SOURCE_MANIFEST,
+    NetSurplusCompensationSchedule,
+)
 
 
 DEFAULT_EXPORT_DATA = Path(__file__).resolve().parents[1] / "data" / "tariffs" / "nbt_export_rates.csv"
-DEFAULT_ACC_PLUS_DATA = Path(__file__).resolve().parents[1] / "data" / "tariffs" / "acc_plus_rates.csv"
 
 
 @dataclass(frozen=True)
@@ -69,12 +81,20 @@ class TariffCatalog:
     def __init__(
         self,
         export_data_path: str | Path = DEFAULT_EXPORT_DATA,
-        acc_plus_data_path: str | Path = DEFAULT_ACC_PLUS_DATA,
         import_snapshot_data_path: str | Path = DEFAULT_IMPORT_SNAPSHOT_DATA,
+        import_source_manifest_path: str | Path = DEFAULT_IMPORT_SOURCE_MANIFEST,
+        nem2_rate_treatment_data_path: str | Path = DEFAULT_NEM2_RATE_TREATMENT_DATA,
+        nem2_source_manifest_path: str | Path = DEFAULT_NEM2_SOURCE_MANIFEST,
+        nsc_data_path: str | Path = DEFAULT_NSC_DATA,
+        true_up_source_manifest_path: str | Path = DEFAULT_TRUE_UP_SOURCE_MANIFEST,
     ):
         self.export_data_path = Path(export_data_path)
-        self.acc_plus_data_path = Path(acc_plus_data_path)
         self.import_snapshot_data_path = Path(import_snapshot_data_path)
+        self.import_source_manifest_path = Path(import_source_manifest_path)
+        self.nem2_rate_treatment_data_path = Path(nem2_rate_treatment_data_path)
+        self.nem2_source_manifest_path = Path(nem2_source_manifest_path)
+        self.nsc_data_path = Path(nsc_data_path)
+        self.true_up_source_manifest_path = Path(true_up_source_manifest_path)
 
     def _read_export_data(self) -> pd.DataFrame:
         if not self.export_data_path.exists():
@@ -128,32 +148,6 @@ class TariffCatalog:
             )
         return ExportCreditSchedule(parsed, scenario.billing_year, scenario.nbt_vintage, rows)
 
-    def acc_plus_rate(self, utility: str | Utility, scenario: NBTScenario) -> float:
-        if not scenario.include_acc_plus:
-            return 0.0
-        parsed = Utility.parse(utility)
-        if not self.acc_plus_data_path.exists():
-            raise FileNotFoundError(f"ACC Plus source data not found: {self.acc_plus_data_path}")
-        data = pd.read_csv(self.acc_plus_data_path)
-        required = {"utility", "nbt_vintage", "customer_segment", "rate_usd_per_kwh", "source_id"}
-        missing = required - set(data.columns)
-        if missing:
-            raise ValueError(f"ACC Plus data is missing columns: {sorted(missing)}")
-        rows = data[
-            (data["utility"] == parsed.value)
-            & (data["nbt_vintage"] == scenario.nbt_vintage)
-            & (data["customer_segment"] == scenario.customer_segment.value)
-        ]
-        if len(rows) != 1:
-            raise KeyError(
-                f"Expected exactly one ACC Plus rate for {parsed.value}, NBT{scenario.nbt_vintage}, "
-                f"segment={scenario.customer_segment.value}; found {len(rows)}"
-            )
-        rate = float(rows["rate_usd_per_kwh"].item())
-        if rate < 0:
-            raise ValueError("ACC Plus rate cannot be negative")
-        return rate
-
     def bundle(
         self,
         utility: str | Utility,
@@ -174,5 +168,44 @@ class TariffCatalog:
                 snapshot_data_path=self.import_snapshot_data_path,
             ),
             export_schedule=self.export_schedule(parsed, scenario),
-            acc_plus_rate=self.acc_plus_rate(parsed, scenario),
+        )
+
+    def nem2_bundle(
+        self,
+        utility: str | Utility,
+        scenario: NEM2Scenario,
+        *,
+        import_plan: str | None = None,
+    ) -> NEM2TariffBundle:
+        """Resolve one source-complete NEM 2 counterfactual bundle."""
+
+        parsed = Utility.parse(utility)
+        treatment = NEM2RateTreatmentSchedule(
+            data_path=self.nem2_rate_treatment_data_path,
+            import_source_manifest_path=self.import_source_manifest_path,
+            nem2_source_manifest_path=self.nem2_source_manifest_path,
+        ).resolve(
+            parsed,
+            snapshot_as_of=scenario.tariff_snapshot_date,
+        )
+        import_schedule = ImportRateSchedule.resolve(
+            parsed,
+            import_plan,
+            snapshot_as_of=scenario.tariff_snapshot_date,
+            snapshot_data_path=self.import_snapshot_data_path,
+        )
+        if import_schedule.source_id != treatment.import_source_id:
+            raise ValueError(
+                "NEM 2 import tariff source does not match its rate-treatment source"
+            )
+        nsc_rate = NetSurplusCompensationSchedule.from_csv(
+            self.nsc_data_path,
+            self.true_up_source_manifest_path,
+        ).resolve(parsed, scenario.true_up_month)
+        return NEM2TariffBundle(
+            utility=parsed,
+            scenario=scenario,
+            import_schedule=import_schedule,
+            rate_treatment=treatment,
+            nsc_rate=nsc_rate,
         )

@@ -85,11 +85,14 @@ def plot_first_weeks(
     title: Optional[str] = None,
     show: bool = True,
     save_path: Optional[str] = None,
+    close: bool = False,
 ) -> Tuple[plt.Figure, np.ndarray]:
     """Create an 8-panel figure: two weeks (Jan and Jul), four rows of plots.
 
     Inputs are 8760-hour series (lists or arrays). Battery→Load should be the
     delivered energy to the load. PV→Load is computed internally as min(PV, Load).
+    Set ``close=True`` for fire-and-forget rendering loops; the default keeps
+    the returned figure open for callers that need to inspect or embed it.
     """
     # Normalize inputs to 8760
     load = _ensure_len(load_kwh)
@@ -235,4 +238,7 @@ def plot_first_weeks(
             plt.show()
     except Exception as e:
         print("[PlotHelper] Save/show failed:", e)
+    finally:
+        if close:
+            plt.close(fig)
     return fig, axes

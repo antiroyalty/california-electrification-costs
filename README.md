@@ -6,9 +6,30 @@ This project models the residential costs of increasing household electrificatio
 
 Costs of electrifying, and adopting solar and storage, are presented for each county for single-family detached homes, with utility tariffs from PG&E, SCE, and SDG&E. Electricity costs, gas costs, and capital costs are all considered. For instance, if a gas stove is replaced by an induction stove, the decrease in gas costs, along with the injection of capital cost, and the changes in the energy bill due to the increased electricity consumption are all considered.
 
+### Research methods and limitations
+
+[Research methods and approach](docs/RESEARCH_METHODS.md) is the maintained
+narrative for the paper. It explains the research questions, comparisons,
+accounting, assumptions, and known limitations, constraints, and potential
+future improvements. It distinguishes implemented methods from approved changes
+that still require integration and validation.
+
+[The methods manifest](docs/methods.yaml) contains technical formulas and source
+references used by the diagnostics. Every code change requires a methods review
+under the [repository guidelines](AGENTS.md#research-methods-documentation).
+
+### Latest validated results
+
+The [September 11 results and claim assessment](docs/research_logs/2026-09-11.md)
+records the full-year rerun at model commit `8a98b96`: 47 counties, three paper
+scenarios, and the supporting baseline. It gives updated numbers and wording
+for Claims 1–3, validation evidence, and the limits of the policy and
+electrification comparisons. Older generated claim pages and sensitivities
+retain their recorded model versions until refreshed.
+
 ### Dependencies
 
-This project requires Python 3 with the following external dependencies:
+This project requires Python 3.11 or later with the following external dependencies:
 
 #### Core Dependencies
 - **PySAM** - NREL's System Advisor Model Python wrapper for solar and battery modeling
@@ -17,7 +38,7 @@ This project requires Python 3 with the following external dependencies:
 - **folium** - Interactive web maps creation
 - **numpy** - Numerical computing library
 - **PuLP** - Linear optimization model construction
-- **SciPy 1.9+** - HiGHS mixed-integer solver used by solar-storage co-optimization
+- **SciPy 1.16.1+** - HiGHS solver with absolute annual-cost stopping tolerance
 - **requests** - HTTP library for API calls
 - **boto3** - AWS SDK for Python (for accessing building data)
 - **botocore** - Low-level interface to AWS services
@@ -38,9 +59,15 @@ This project requires Python 3 with the following external dependencies:
 #### Installation
 Install all dependencies using pip:
 ```bash
-pip install PySAM pandas geopandas folium numpy pulp "scipy>=1.9" requests \
+pip install PySAM pandas geopandas folium numpy pulp "scipy>=1.16.1" requests \
   boto3 botocore geopy python-dotenv pytest matplotlib pdfplumber
 ```
+
+NBT optimization and reporting share annual base-credit settlement within each
+utility's eligible pools. The model excludes ACC Plus and caps annual exports
+at annual imports. Step 9b uses HiGHS for both NBT and NEM 2. Physical dispatch
+constraints can require binary variables; NBT credit accounting is continuous.
+See [research methods](docs/RESEARCH_METHODS.md) for equations and limitations.
 
 ### Getting Started
 1. Clone the Github repos locally.

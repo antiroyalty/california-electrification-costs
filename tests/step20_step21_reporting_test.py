@@ -8,11 +8,36 @@ from pipeline.steps.step20_no_solar_storage_electrification import (
     collect_eac_no_pv_by_county,
 )
 from pipeline.steps import step21_compare_eac_with_vs_without as step21
+from helpers.plot_scenario_comparison_helper import (
+    collect_eac_components,
+    collect_eac_components_by_county,
+)
 
 
 HOUSING_TYPE = "single-family-detached"
 SCENARIO = "baseline_coopt"
 PLAN_PREFERENCES = ["E-TOU-D", "TOU-D-4-9PM", "TOU-DR1"]
+
+
+def _write_ledger(base_dir, rows, scenario=SCENARIO):
+    directory = base_dir / "capital_costs"
+    directory.mkdir(exist_ok=True)
+    path = directory / f"capital_costs_{scenario}_single_family_detached.csv"
+    pd.DataFrame(rows).to_csv(path, index=False)
+    return path
+
+
+def _zero_cost_equipment(county="alameda"):
+    return {
+        "county_slug": county,
+        "incentive_scenario": "full_incentives",
+        "appliance_category": "electric",
+        "appliance_type": "appliances",
+        "net_cost": 0.0,
+        "base_cost": 0.0,
+        "lifetime_years": 15,
+        "annual_operating_cost": 0.0,
+    }
 
 
 def _write_bill_results(
@@ -44,6 +69,8 @@ def _write_bill_results(
 def test_step20_uses_configured_retail_plan_for_aggregate_and_county(
     tmp_path: Path,
 ) -> None:
+    # Zero equipment cost is an explicit input, not an absent ledger.
+    _write_ledger(tmp_path, [_zero_cost_equipment(c) for c in ("alameda", "los-angeles")])
     _write_bill_results(
         tmp_path,
         "alameda",
@@ -192,3 +219,162 @@ def test_step21_rejects_nonmatching_county_coverage() -> None:
 
     with pytest.raises(ValueError, match="do not cover the same rows"):
         step21._build_county_comparison(_with_county_rows(), no_rows)
+
+
+def _write_household_case(base_dir, scenario):
+    """Write distinct equipment, fuel, and solar costs for an accounting example."""
+    electric = scenario == "full_electric_ev_coopt"
+    category = "electric" if electric else "gas"
+    rows = []
+    for incentive, appliance_net, vehicle_net in (
+        ("full_incentives", 1500, 18000),
+        ("half_incentives", 1750, 20000),
+        ("no_incentives", 2000, 22000),
+    ):
+        for kind, base, net, life, operating in (
+            ("heating", 2000 if electric else 600, appliance_net, 15 if electric else 10, 0),
+            ("vehicle_charging" if electric else "vehicle_fuel",
+             22000 if electric else 12000, vehicle_net, 12, -60 if electric else 120),
+        ):
+            rows.append({
+                **_zero_cost_equipment(), "incentive_scenario": incentive,
+                "appliance_category": category, "appliance_type": kind,
+                "base_cost": base, "net_cost": net, "lifetime_years": life,
+                "annual_operating_cost": operating,
+            })
+        for kind in ("solar", "storage"):
+            rows.append({
+                **_zero_cost_equipment(), "incentive_scenario": incentive,
+                "appliance_type": kind, "base_cost": 90000, "net_cost": 90000,
+            })
+    ledger_path = _write_ledger(base_dir, rows, scenario)
+    pv_path = ledger_path.with_name(ledger_path.name.replace("capital_costs_", "capital_costs_summary_with_pv_"))
+    pd.DataFrame([{
+        "county_slug": "alameda", "pv_capex": 3300, "storage_capex": 10000,
+        "pv_incentives_full": 0, "storage_incentives_full": 0,
+    }]).to_csv(pv_path, index=False)
+    for fuel, values in (
+        ("electricity", {"electricity.PG&E.E-TOU-D": 900,
+                         "electricity.PG&E.E-ELEC_NEM3": 600}),
+        ("gas", {"gas.default": 0 if electric else 300}),
+    ):
+        directory = base_dir / scenario / HOUSING_TYPE / "alameda" / "results" / fuel
+        directory.mkdir(parents=True)
+        pd.DataFrame([
+            {"scenario": scenario, **values},
+            {"scenario": f"{scenario}.solarstorage", **values},
+        ]).to_csv(directory / f"RESULTS_{fuel}_annual_costs_alameda_20260814_11.csv", index=False)
+    return ledger_path, pv_path
+
+
+@pytest.mark.parametrize("scenario", ["baseline_ice_car_coopt", "full_electric_ev_coopt"])
+@pytest.mark.parametrize("rate", [0.0, 0.07])
+@pytest.mark.parametrize("incentive,appliance_net,vehicle_net", [
+    ("full_incentives", 1500, 18000),
+    ("half_incentives", 1750, 20000),
+    ("no_incentives", 2000, 22000),
+])
+def test_shared_reports_match_independent_household_costs(
+    tmp_path, scenario, rate, incentive, appliance_net, vehicle_net,
+):
+    """Annualize explicit purchases independently and retain negative EV O&M."""
+    _write_household_case(tmp_path, scenario)
+    args = (str(tmp_path), HOUSING_TYPE, [scenario], ["Alameda County"])
+    kwargs = dict(incentive=incentive, discount_rate=rate,
+                  electricity_plan_preference=PLAN_PREFERENCES)
+    without = collect_eac_no_pv_by_county(*args, **kwargs).iloc[0]
+    with_solar = collect_eac_components_by_county(*args, **kwargs).iloc[0]
+    annualize = lambda cost, life: cost / sum((1 + rate) ** -t for t in range(1, life + 1))
+    electric = scenario == "full_electric_ev_coopt"
+    expected_electric = annualize(appliance_net, 15) + annualize(vehicle_net, 12) if electric else 0
+    expected_gas = 0 if electric else annualize(600, 10) + annualize(12000, 12)
+    expected_operating = -60 if electric else 120
+    for row in (without, with_solar):
+        assert row["capex_electric"] == pytest.approx(expected_electric)
+        assert row["capex_gas"] == pytest.approx(expected_gas)
+        assert row["vehicle_om"] == expected_operating
+        assert row["annual_bill_gas"] == (0 if electric else 300)
+    assert without["annual_bill_electric"] == 900
+    assert with_solar["annual_bill_electric"] == 600
+    expected_total = expected_electric + expected_gas + expected_operating + 900 + (0 if electric else 300)
+    assert without.drop(["scenario", "county_slug"]).sum() == pytest.approx(expected_total)
+    for collector, county_row in ((collect_eac_no_pv, without), (collect_eac_components, with_solar)):
+        aggregate = collector(*args, **kwargs).iloc[0]
+        pd.testing.assert_series_equal(aggregate, county_row.drop("county_slug"))
+
+
+@pytest.mark.parametrize("collector", [collect_eac_no_pv, collect_eac_no_pv_by_county])
+def test_no_solar_requires_a_ledger_even_when_bills_exist(tmp_path, collector):
+    _write_bill_results(tmp_path, "alameda", {"electricity.PG&E.E-TOU-D": 300}, 100)
+    with pytest.raises(FileNotFoundError, match="Capital ledger"):
+        collector(str(tmp_path), HOUSING_TYPE, [SCENARIO], ["Alameda County"])
+
+
+@pytest.mark.parametrize("problem,message", [
+    ("missing_column", "missing columns"),
+    ("missing_county", "No capital ledger rows"),
+    ("missing_incentive", "No capital ledger rows"),
+    ("missing_label", "non-empty text"),
+    ("duplicate", "duplicate"),
+    ("category", "appliance_category"),
+    ("text_cost", "net_cost must be numeric"),
+    ("missing_cost", "base_cost must be finite"),
+    ("infinite_operating", "annual_operating_cost must be finite"),
+    ("zero_life", "lifetime_years must be positive"),
+    ("negative_life", "lifetime_years must be positive"),
+    ("missing_life", "lifetime_years must be finite"),
+])
+@pytest.mark.parametrize("with_solar", [False, True])
+def test_shared_reports_reject_invalid_capital_data(tmp_path, problem, message, with_solar):
+    scenario = "full_electric_ev_coopt"
+    path, _ = _write_household_case(tmp_path, scenario)
+    frame = pd.read_csv(path)
+    if problem == "missing_column":
+        frame = frame.drop(columns="lifetime_years")
+    elif problem == "missing_county":
+        frame["county_slug"] = "los-angeles"
+    elif problem == "missing_incentive":
+        frame = frame[frame["incentive_scenario"] != "full_incentives"]
+    elif problem == "duplicate":
+        frame = pd.concat([frame, frame.iloc[[0]]])
+    else:
+        field, value = {
+            "missing_label": ("appliance_type", None),
+            "category": ("appliance_category", "unknown"),
+            "text_cost": ("net_cost", "unknown"),
+            "missing_cost": ("base_cost", float("nan")),
+            "infinite_operating": ("annual_operating_cost", float("inf")),
+            "zero_life": ("lifetime_years", 0),
+            "negative_life": ("lifetime_years", -1),
+            "missing_life": ("lifetime_years", float("nan")),
+        }[problem]
+        frame[field] = frame[field].astype(object)
+        frame.loc[0, field] = value
+    frame.to_csv(path, index=False)
+    with pytest.raises((ValueError, KeyError), match=message):
+        collect_eac_components_by_county(
+            str(tmp_path), HOUSING_TYPE, [scenario], ["Alameda County"],
+            with_solar=with_solar,
+        )
+
+
+def test_no_solar_does_not_require_pv_summary_or_use_latest_bill_when_timestamp_given(tmp_path):
+    scenario = "full_electric_ev_coopt"
+    _, pv_path = _write_household_case(tmp_path, scenario)
+    pv_path.unlink()
+    for fuel in ("electricity", "gas"):
+        directory = tmp_path / scenario / HOUSING_TYPE / "alameda" / "results" / fuel
+        old = directory / f"RESULTS_{fuel}_annual_costs_alameda_20260814_11.csv"
+        newer = pd.read_csv(old)
+        newer.iloc[:, 1:] = 9999
+        newer.to_csv(directory / f"RESULTS_{fuel}_annual_costs_alameda_20260815_11.csv", index=False)
+    args = (str(tmp_path), HOUSING_TYPE, [scenario], ["Alameda County"])
+    for collector in (collect_eac_no_pv, collect_eac_no_pv_by_county):
+        row = collector(*args, timestamp="20260814_11",
+                        electricity_plan_preference=PLAN_PREFERENCES).iloc[0]
+        assert row["annual_bill_electric"] == 900
+        assert row["annual_bill_gas"] == 0
+        with pytest.raises(FileNotFoundError, match="timestamp 20260816_11"):
+            collector(*args, timestamp="20260816_11")
+    with pytest.raises(FileNotFoundError, match="Capital summary with PV"):
+        collect_eac_components_by_county(*args)

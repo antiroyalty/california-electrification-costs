@@ -1,0 +1,376 @@
+{
+  "revision": "860949ef7ca10e012bfb194a856cac0f00e4b0f3",
+  "teaching_import_rates": {
+    "generation": 0.1,
+    "delivery": 0.22,
+    "nbc": 0.02,
+    "fixed_per_represented_day_usd": 25
+  },
+  "cases": [
+    {
+      "name": "example_5",
+      "utility": "PG&E",
+      "generation_credit_usd": [
+        30
+      ],
+      "delivery_credit_usd": 5,
+      "monthly_import_kwh": 200,
+      "monthly_export_kwh": 100,
+      "old_bill_usd": 64.0,
+      "old_unused_credit_usd": 10.0
+    },
+    {
+      "name": "steady",
+      "utility": "PG&E",
+      "generation_credit_usd": [
+        30,
+        30,
+        30,
+        30,
+        30,
+        30,
+        30,
+        30,
+        30,
+        30,
+        30,
+        30
+      ],
+      "delivery_credit_usd": 5,
+      "monthly_import_kwh": 200,
+      "monthly_export_kwh": 100,
+      "old_bill_usd": 768.0,
+      "old_unused_credit_usd": 120.0
+    },
+    {
+      "name": "late_credit",
+      "utility": "PG&E",
+      "generation_credit_usd": [
+        0,
+        30
+      ],
+      "delivery_credit_usd": 5,
+      "monthly_import_kwh": 200,
+      "monthly_export_kwh": 100,
+      "old_bill_usd": 138.0,
+      "old_unused_credit_usd": 0.0
+    },
+    {
+      "name": "early_credit",
+      "utility": "PG&E",
+      "generation_credit_usd": [
+        30,
+        0
+      ],
+      "delivery_credit_usd": 5,
+      "monthly_import_kwh": 200,
+      "monthly_export_kwh": 100,
+      "old_bill_usd": 138.0,
+      "old_unused_credit_usd": 0.0
+    },
+    {
+      "name": "saturation",
+      "utility": "PG&E",
+      "generation_credit_usd": [
+        25,
+        25,
+        25,
+        25,
+        25,
+        25,
+        25,
+        25,
+        25,
+        25,
+        25,
+        25
+      ],
+      "delivery_credit_usd": 45,
+      "monthly_import_kwh": 200,
+      "monthly_export_kwh": 100,
+      "old_bill_usd": 348.0,
+      "old_unused_credit_usd": 120.0
+    },
+    {
+      "name": "no_credit",
+      "utility": "PG&E",
+      "generation_credit_usd": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "delivery_credit_usd": 0,
+      "monthly_import_kwh": 200,
+      "monthly_export_kwh": 100,
+      "old_bill_usd": 1068.0,
+      "old_unused_credit_usd": 0.0
+    },
+    {
+      "name": "example_5",
+      "utility": "SCE",
+      "generation_credit_usd": [
+        30
+      ],
+      "delivery_credit_usd": 5,
+      "monthly_import_kwh": 200,
+      "monthly_export_kwh": 100,
+      "old_bill_usd": 54.0,
+      "old_unused_credit_usd": 0.0
+    },
+    {
+      "name": "steady",
+      "utility": "SCE",
+      "generation_credit_usd": [
+        30,
+        30,
+        30,
+        30,
+        30,
+        30,
+        30,
+        30,
+        30,
+        30,
+        30,
+        30
+      ],
+      "delivery_credit_usd": 5,
+      "monthly_import_kwh": 200,
+      "monthly_export_kwh": 100,
+      "old_bill_usd": 648.0,
+      "old_unused_credit_usd": 0.0
+    },
+    {
+      "name": "late_credit",
+      "utility": "SCE",
+      "generation_credit_usd": [
+        0,
+        30
+      ],
+      "delivery_credit_usd": 5,
+      "monthly_import_kwh": 200,
+      "monthly_export_kwh": 100,
+      "old_bill_usd": 138.0,
+      "old_unused_credit_usd": 0.0
+    },
+    {
+      "name": "early_credit",
+      "utility": "SCE",
+      "generation_credit_usd": [
+        30,
+        0
+      ],
+      "delivery_credit_usd": 5,
+      "monthly_import_kwh": 200,
+      "monthly_export_kwh": 100,
+      "old_bill_usd": 138.0,
+      "old_unused_credit_usd": 0.0
+    },
+    {
+      "name": "saturation",
+      "utility": "SCE",
+      "generation_credit_usd": [
+        25,
+        25,
+        25,
+        25,
+        25,
+        25,
+        25,
+        25,
+        25,
+        25,
+        25,
+        25
+      ],
+      "delivery_credit_usd": 45,
+      "monthly_import_kwh": 200,
+      "monthly_export_kwh": 100,
+      "old_bill_usd": 348.0,
+      "old_unused_credit_usd": 120.0
+    },
+    {
+      "name": "no_credit",
+      "utility": "SCE",
+      "generation_credit_usd": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "delivery_credit_usd": 0,
+      "monthly_import_kwh": 200,
+      "monthly_export_kwh": 100,
+      "old_bill_usd": 1068.0,
+      "old_unused_credit_usd": 0.0
+    },
+    {
+      "name": "example_5",
+      "utility": "SDG&E",
+      "generation_credit_usd": [
+        30
+      ],
+      "delivery_credit_usd": 5,
+      "monthly_import_kwh": 200,
+      "monthly_export_kwh": 100,
+      "old_bill_usd": 64.0,
+      "old_unused_credit_usd": 10.0
+    },
+    {
+      "name": "steady",
+      "utility": "SDG&E",
+      "generation_credit_usd": [
+        30,
+        30,
+        30,
+        30,
+        30,
+        30,
+        30,
+        30,
+        30,
+        30,
+        30,
+        30
+      ],
+      "delivery_credit_usd": 5,
+      "monthly_import_kwh": 200,
+      "monthly_export_kwh": 100,
+      "old_bill_usd": 768.0,
+      "old_unused_credit_usd": 120.0
+    },
+    {
+      "name": "late_credit",
+      "utility": "SDG&E",
+      "generation_credit_usd": [
+        0,
+        30
+      ],
+      "delivery_credit_usd": 5,
+      "monthly_import_kwh": 200,
+      "monthly_export_kwh": 100,
+      "old_bill_usd": 148.0,
+      "old_unused_credit_usd": 10.0
+    },
+    {
+      "name": "early_credit",
+      "utility": "SDG&E",
+      "generation_credit_usd": [
+        30,
+        0
+      ],
+      "delivery_credit_usd": 5,
+      "monthly_import_kwh": 200,
+      "monthly_export_kwh": 100,
+      "old_bill_usd": 138.0,
+      "old_unused_credit_usd": 0.0
+    },
+    {
+      "name": "saturation",
+      "utility": "SDG&E",
+      "generation_credit_usd": [
+        25,
+        25,
+        25,
+        25,
+        25,
+        25,
+        25,
+        25,
+        25,
+        25,
+        25,
+        25
+      ],
+      "delivery_credit_usd": 45,
+      "monthly_import_kwh": 200,
+      "monthly_export_kwh": 100,
+      "old_bill_usd": 348.0,
+      "old_unused_credit_usd": 120.0
+    },
+    {
+      "name": "no_credit",
+      "utility": "SDG&E",
+      "generation_credit_usd": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "delivery_credit_usd": 0,
+      "monthly_import_kwh": 200,
+      "monthly_export_kwh": 100,
+      "old_bill_usd": 1068.0,
+      "old_unused_credit_usd": 0.0
+    }
+  ],
+  "excluded_reference_examples": [
+    {
+      "name": "example_4_carryover",
+      "utility": "PG&E",
+      "first_year_bill_usd": 348.0,
+      "first_year_unused_usd": 120.0,
+      "following_year_bill_usd": 348.0,
+      "following_without_opening_usd": 468.0
+    },
+    {
+      "name": "example_4_carryover",
+      "utility": "SCE",
+      "first_year_bill_usd": 348.0,
+      "first_year_unused_usd": 120.0,
+      "following_year_bill_usd": 468.0,
+      "following_without_opening_usd": 468.0
+    },
+    {
+      "name": "example_4_carryover",
+      "utility": "SDG&E",
+      "first_year_bill_usd": 348.0,
+      "first_year_unused_usd": 120.0,
+      "following_year_bill_usd": 468.0,
+      "following_without_opening_usd": 468.0
+    },
+    {
+      "name": "example_1_bonus",
+      "utility": "PG&E",
+      "old_bill_usd": 877.44,
+      "base_only_bill_usd": 888.0,
+      "bonus_rate": 0.0088,
+      "exports_kwh": 1200
+    },
+    {
+      "name": "surplus_example",
+      "utility": "SCE",
+      "imports_kwh": 100,
+      "exports_kwh": 110,
+      "old_bill_usd": 26.7,
+      "adjustment_usd": 0.6,
+      "nsc_usd": 0.3,
+      "capped_bill_usd": 27
+    }
+  ]
+}

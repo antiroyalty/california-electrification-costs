@@ -4,6 +4,14 @@ from appliances.incentive_policy import (
     PolicyRegime, DEFAULT_POLICY_REGIME, federal_30d_amount, regime_summary,
 )
 
+# Constant repair/maintenance allowance: 12 years at 12,000 miles/year.
+# CR Table 2.1 gives rates for 0–50k, 50–100k, and 100–200k odometer miles:
+# https://advocacy.consumerreports.org/wp-content/uploads/2020/09/Maintenance-Cost-White-Paper-9.24.20-1.pdf
+# Average the first 144,000 miles; retain source dollars without inflation adjustment.
+DEFAULT_ANNUAL_MAINTENANCE_COST_USD = (
+    50_000 * 0.012 + 50_000 * 0.028 + 44_000 * 0.043
+) / 12
+
 class ElectricVehicleAppliance(ElectricAppliance):
     def __init__(self, 
                  vehicle_type: str = "BEV", # assuming midsize SUV (tesla model Y) for now, other values may be found in the excel 
@@ -12,10 +20,7 @@ class ElectricVehicleAppliance(ElectricAppliance):
                     # https://www.itskrs.its.dot.gov/2020-sc00472 - L2 charger cost
                 # charger_cost: float = 1400.0, # https://www.itskrs.its.dot.gov/2020-sc00472 - L2 charger cost
                  lifetime_years: int = 12, #between 12 and 15 https://afdc.energy.gov/files/u/publication/electric-drive_vehicles.pdf?46ed6d7f2c=
-                 annual_maintenance_cost: float = 121.56, 
-                    # https://theicct.org/wp-content/uploads/2021/06/EV-equity-feb2021.pdf - $/mile
-                    # https://www.fhwa.dot.gov/policyinformation/statistics/2022/mv1.cfm - # of vehicles in CA
-                    # https://www.fhwa.dot.gov/policyinformation/statistics/2022/vm2.cfm - # of miles driven in CA for all cars
+                 annual_maintenance_cost: float = DEFAULT_ANNUAL_MAINTENANCE_COST_USD,
                  annual_insurance_cost: float = 2040.0, # https://theicct.org/wp-content/uploads/2021/06/EV-equity-feb2021.pdf - monthly insurance cost for EVs in CA
                  policy_regime: PolicyRegime = DEFAULT_POLICY_REGIME):
         """
@@ -25,7 +30,9 @@ class ElectricVehicleAppliance(ElectricAppliance):
             vehicle_type: Type of electric vehicle (default: "BEV" - Battery Electric Vehicle)
             base_cost: Base vehicle purchase cost in dollars
             lifetime_years: Expected vehicle ownership period in years
-            annual_maintenance_cost: Annual maintenance cost in dollars
+            annual_maintenance_cost: Annual repair/maintenance allowance in dollars.
+                The default represents 12 years at 12,000 miles/year. Pass an
+                explicit allowance when changing that reference ownership pattern.
             annual_insurance_cost: Annual insurance cost in dollars
             policy_regime: Decides whether the federal 30D credit legally applies.
         """

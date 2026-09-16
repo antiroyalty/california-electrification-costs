@@ -63,6 +63,7 @@ def run(cfg: Config) -> None:
             pv_capex_per_kw=SolarSystemAppliance.per_kw_cost_net(incentive_scenario),
             batt_capex_per_kwh=BatteryStorageAppliance.per_kwh_cost_net(incentive_scenario),
             max_battery_kwh=cfg.max_battery_kwh,
+            solver_options=cfg.coopt_solver,
             nbt_scenario=cfg.nbt_scenario(),
             nbc_dollars_per_kwh_override=cfg.nbc_dollars_per_kwh_override,
         )

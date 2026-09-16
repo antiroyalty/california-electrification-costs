@@ -989,6 +989,35 @@ def plot_pv_size_bar(
     return fig
 
 
+def _validate_eac_ledger(ledger: pd.DataFrame, context: str) -> pd.DataFrame:
+    """Require explicit equipment costs before invoking the cost calculation."""
+    keys = ["county_slug", "incentive_scenario", "appliance_category", "appliance_type"]
+    numbers = ["net_cost", "base_cost", "lifetime_years", "annual_operating_cost"]
+    _require_columns(ledger, keys + numbers, context)
+    ledger = ledger.copy()
+    for column in keys:
+        if not ledger[column].map(
+            lambda value: isinstance(value, str) and bool(value.strip())
+        ).all():
+            raise ValueError(f"{context}: {column} must contain non-empty text")
+    ledger["county_slug"] = ledger["county_slug"].str.lower()
+    ledger["incentive_scenario"] = ledger["incentive_scenario"].str.lower()
+    if not ledger["appliance_category"].isin(["electric", "gas"]).all():
+        raise ValueError(f"{context}: appliance_category must be electric or gas")
+    if ledger.duplicated(keys).any():
+        raise ValueError(f"{context}: duplicate county/incentive/appliance rows")
+    for column in numbers:
+        try:
+            ledger[column] = pd.to_numeric(ledger[column], errors="raise")
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{context}: {column} must be numeric") from exc
+        if not np.isfinite(ledger[column]).all():
+            raise ValueError(f"{context}: {column} must be finite")
+    if (ledger["lifetime_years"] <= 0).any():
+        raise ValueError(f"{context}: lifetime_years must be positive")
+    return ledger
+
+
 def collect_eac_components(
     base_input_dir: str,
     housing_type: str,
@@ -1000,130 +1029,29 @@ def collect_eac_components(
     timestamp: Optional[str] = None,
     electricity_plan_preference: Optional[Iterable[str]] = None,
     electricity_variant: Optional[str] = "nem3",
+    *,
+    with_solar: bool = True,
 ) -> pd.DataFrame:
-    """Collect Equivalent Annual Cost components.
+    """Aggregate the shared county EAC components using a mean or median.
 
-    Components per scenario (aggregated across counties):
-      - capex_pv (annualized)
-      - capex_storage (annualized)
-      - capex_electric (annualized, excluding PV/storage)
-      - capex_gas (annualized)
-      - annual_bill_with_solar (defaults to NEM 3.0 if available)
-      - vehicle_om (ICE for baseline_ice_car; EV for full_electric_ev; else 0)
-
-    Parameters
-    - electricity_plan_preference: optional ordered list of plan tokens to match
-      (e.g., ["E-TOU-D", "TOU-D-4-9PM", "TOU-DR1"]).
-    - electricity_variant: billing variant for with-solar electricity bills.
-      Defaults to "nem3". Use "retail" to ignore export credits and use import-only.
+    The default selects with-solar NEM 3 bills. For a retail no-solar
+    counterfactual, set with_solar=False and electricity_variant='retail'.
+    Plan selection and the optional exact bill timestamp pass to the county
+    collector unchanged. Aggregation preserves the requested scenario order.
     """
-    inc = incentive.lower()
-    county_slugs = [slugify_county_name(c) for c in counties]
-    rows = []
-    if not scenarios:
-        raise ValueError("No scenarios provided for EAC collection")
-    if not counties:
-        raise ValueError("No counties provided for EAC collection")
-    for scen in scenarios:
-        ledger = _read_capital_ledger(base_input_dir, scen, housing_type)
-        pvsum = _read_capital_summary_with_pv(base_input_dir, scen, housing_type)
-        _require_columns(
-            ledger,
-            [
-                "county_slug",
-                "incentive_scenario",
-                "appliance_category",
-                "appliance_type",
-                "net_cost",
-                "base_cost",
-                "lifetime_years",
-                "annual_operating_cost",
-            ],
-            "Capital ledger",
-        )
-        _require_columns(
-            pvsum,
-            [
-                "county_slug",
-                "pv_capex",
-                "storage_capex",
-                "pv_incentives_full",
-                "storage_incentives_full",
-            ],
-            "PV summary",
-        )
-
-        per_county = []
-        for slug in county_slugs:
-            # Bills split into electricity + gas under with-solar variant
-            e_bill, g_bill = _annual_bill_parts(
-                base_input_dir,
-                scen,
-                housing_type,
-                slug,
-                with_solar=True,
-                timestamp=timestamp,
-                electricity_plan_preference=electricity_plan_preference,
-                electricity_variant=electricity_variant,
-            )
-
-            df = ledger.copy()
-            df = df[df['county_slug'].str.lower() == slug]
-            df['incentive_scenario'] = df['incentive_scenario'].str.lower()
-            df = df[df['incentive_scenario'] == inc]
-            if df.empty:
-                raise ValueError(f"No capital ledger rows for scenario '{scen}', county '{slug}', incentive '{inc}'")
-            county_ledger = df
-
-            row = pvsum[pvsum['county_slug'].str.lower() == slug]
-            if row.empty:
-                raise ValueError(f"PV summary missing county '{slug}' for scenario '{scen}'")
-            pv_row = row.iloc[0]
-
-            vehicle_om = 0.0
-            adders = vehicle_annual_adders_from_ledger(county_ledger)
-            if slug in adders.index:
-                ev_val = float(adders.loc[slug, 'ev_operating']) if 'ev_operating' in adders.columns else 0.0
-                ice_val = float(adders.loc[slug, 'ice_operating']) if 'ice_operating' in adders.columns else 0.0
-                scen_l = (scen or '').lower()
-                if ('ev' in scen_l) or (ev_val > 0):
-                    vehicle_om += ev_val
-                if ('ice' in scen_l) or (ice_val > 0 and 'ev' not in scen_l):
-                    vehicle_om += ice_val
-
-            comp = compute_eac_from_inputs(
-                ledger_df=county_ledger,
-                pv_summary_row=pv_row,
-                incentive=inc,
-                discount_rate=discount_rate,
-                lifetimes=LIFETIMES,
-                annual_bill_electric=e_bill,
-                annual_bill_gas=g_bill,
-                vehicle_om=vehicle_om,
-            )
-
-            per_county.append({
-                'scenario': scen,
-                'county_slug': slug,
-                'capex_pv': comp.capex_pv,
-                'capex_storage': comp.capex_storage,
-                'capex_electric': comp.capex_electric,
-                'capex_gas': comp.capex_gas,
-                'annual_bill_electric': comp.annual_bill_electric,
-                'annual_bill_gas': comp.annual_bill_gas,
-                'vehicle_om': comp.vehicle_om,
-            })
-
-        if not per_county:
-            raise ValueError(f"No per-county EAC rows collected for scenario '{scen}'")
-        per_df = pd.DataFrame(per_county)
-        if agg == 'median':
-            agg_df = per_df.groupby('scenario').median(numeric_only=True).reset_index()
-        else:
-            agg_df = per_df.groupby('scenario').mean(numeric_only=True).reset_index()
-        rows.append(agg_df.iloc[0].to_dict())
-
-    return pd.DataFrame(rows)
+    if agg not in {"mean", "median"}:
+        raise ValueError("EAC aggregation must be 'mean' or 'median'")
+    by_county = collect_eac_components_by_county(
+        base_input_dir, housing_type, scenarios, counties,
+        incentive=incentive, discount_rate=discount_rate, timestamp=timestamp,
+        electricity_plan_preference=electricity_plan_preference,
+        electricity_variant=electricity_variant, with_solar=with_solar,
+    )
+    return (
+        by_county.groupby("scenario", sort=False)
+        .agg(agg, numeric_only=True)
+        .reset_index()
+    )
 
 
 def collect_eac_components_by_county(
@@ -1136,107 +1064,110 @@ def collect_eac_components_by_county(
     timestamp: Optional[str] = None,
     electricity_plan_preference: Optional[Iterable[str]] = None,
     electricity_variant: Optional[str] = "nem3",
+    *,
+    with_solar: bool = True,
 ) -> pd.DataFrame:
-    """Return per-county Equivalent Annual Cost components for each scenario.
+    """Return itemized annual household costs for each scenario and county.
 
-    Columns:
-      scenario, county_slug, capex_pv, capex_storage, capex_electric, capex_gas,
-      annual_bill_electric, annual_bill_gas, vehicle_om
-
-    Notes
-      - Uses the same accounting as collect_eac_components but does not aggregate.
-      - electricity_variant defaults to 'nem3' for with-solar electricity bills.
+    Both solar choices use the same equipment ledger and EAC calculation.
+    with_solar=False selects the original load's bill and deliberately sets
+    PV/storage costs to zero, without reading a PV/storage summary. Specify
+    electricity_variant='retail' for the no-solar retail counterfactual.
     """
     inc = (incentive or "").lower()
+    if inc not in {"full_incentives", "half_incentives", "no_incentives"}:
+        raise ValueError(f"Unknown EAC incentive case: {incentive}")
+    if not np.isfinite(discount_rate) or discount_rate < 0:
+        raise ValueError("EAC discount_rate must be finite and nonnegative")
+    scenarios = list(scenarios)
     county_slugs = [slugify_county_name(c) for c in counties]
-    out_rows: List[Dict] = []
     if not scenarios:
         raise ValueError("No scenarios provided for EAC-by-county collection")
-    if not counties:
+    if not county_slugs:
         raise ValueError("No counties provided for EAC-by-county collection")
+    if len(set(scenarios)) != len(scenarios) or len(set(county_slugs)) != len(county_slugs):
+        raise ValueError("EAC scenarios and counties must be unique")
+    if electricity_plan_preference is not None:
+        electricity_plan_preference = list(electricity_plan_preference)
+
+    rows = []
     for scen in scenarios:
-        ledger = _read_capital_ledger(base_input_dir, scen, housing_type)
-        pvsum = _read_capital_summary_with_pv(base_input_dir, scen, housing_type)
-        _require_columns(
-            ledger,
-            [
-                "county_slug",
-                "incentive_scenario",
-                "appliance_category",
-                "appliance_type",
-                "net_cost",
-                "base_cost",
-                "lifetime_years",
-                "annual_operating_cost",
-            ],
-            "Capital ledger",
+        ledger = _validate_eac_ledger(
+            _read_capital_ledger(base_input_dir, scen, housing_type),
+            f"Capital ledger for {scen}",
         )
-        _require_columns(
-            pvsum,
-            [
-                "county_slug",
-                "pv_capex",
-                "storage_capex",
-                "pv_incentives_full",
-                "storage_incentives_full",
-            ],
-            "PV summary",
-        )
+        if with_solar:
+            pvsum = _read_capital_summary_with_pv(base_input_dir, scen, housing_type)
+            _require_columns(
+                pvsum,
+                ["county_slug", "pv_capex", "storage_capex",
+                 "pv_incentives_full", "storage_incentives_full"],
+                "PV summary",
+            )
         for slug in county_slugs:
+            county_ledger = ledger[
+                (ledger["county_slug"] == slug) & (ledger["incentive_scenario"] == inc)
+            ]
+            if county_ledger.empty:
+                raise ValueError(
+                    f"No capital ledger rows for scenario '{scen}', "
+                    f"county '{slug}', incentive '{inc}'"
+                )
+            # None denotes an explicit no-solar case, never a missing summary.
+            pv_row = None
+            if with_solar:
+                matching = pvsum[pvsum["county_slug"].str.lower() == slug]
+                if len(matching) != 1:
+                    raise ValueError(
+                        f"PV summary requires one row for county '{slug}', scenario '{scen}'; "
+                        f"found {len(matching)}"
+                    )
+                pv_row = matching.iloc[0]
+                pv_columns = ["pv_capex", "storage_capex",
+                              "pv_incentives_full", "storage_incentives_full"]
+                pv_values = pd.to_numeric(pv_row[pv_columns], errors="raise")
+                if not np.isfinite(pv_values).all():
+                    raise ValueError(f"PV summary costs must be finite for {scen}/{slug}")
+
             e_bill, g_bill = _annual_bill_parts(
-                base_input_dir,
-                scen,
-                housing_type,
-                slug,
-                with_solar=True,
+                base_input_dir, scen, housing_type, slug, with_solar=with_solar,
                 timestamp=timestamp,
                 electricity_plan_preference=electricity_plan_preference,
                 electricity_variant=electricity_variant,
             )
-            df = ledger.copy()
-            df = df[df['county_slug'].str.lower() == slug]
-            df['incentive_scenario'] = df['incentive_scenario'].str.lower()
-            df = df[df['incentive_scenario'] == inc]
-            if df.empty:
-                raise ValueError(f"No capital ledger rows for scenario '{scen}', county '{slug}', incentive '{inc}'")
-            county_ledger = df
-            row = pvsum[pvsum['county_slug'].str.lower() == slug]
-            if row.empty:
-                raise ValueError(f"PV summary missing county '{slug}' for scenario '{scen}'")
-            pv_row = row.iloc[0]
-            vehicle_om = 0.0
+            if not np.isfinite([e_bill, g_bill]).all():
+                raise ValueError(f"Annual bills must be finite for {scen}/{slug}")
+
             adders = vehicle_annual_adders_from_ledger(county_ledger)
-            if slug in adders.index:
-                ev_val = float(adders.loc[slug, 'ev_operating']) if 'ev_operating' in adders.columns else 0.0
-                ice_val = float(adders.loc[slug, 'ice_operating']) if 'ice_operating' in adders.columns else 0.0
-                scen_l = (scen or '').lower()
-                if ('ev' in scen_l) or (ev_val > 0):
-                    vehicle_om += ev_val
-                if ('ice' in scen_l) or (ice_val > 0 and 'ev' not in scen_l):
-                    vehicle_om += ice_val
+            ev_val = float(adders.loc[slug, "ev_operating"])
+            ice_val = float(adders.loc[slug, "ice_operating"])
+            vehicle_om = 0.0
+            scen_l = scen.lower()
+            if "ev" in scen_l or ev_val > 0:
+                vehicle_om += ev_val
+            if "ice" in scen_l or (ice_val > 0 and "ev" not in scen_l):
+                vehicle_om += ice_val
+
             comp = compute_eac_from_inputs(
-                ledger_df=county_ledger,
-                pv_summary_row=pv_row,
-                incentive=inc,
-                discount_rate=discount_rate,
-                lifetimes=LIFETIMES,
-                annual_bill_electric=e_bill,
-                annual_bill_gas=g_bill,
+                ledger_df=county_ledger, pv_summary_row=pv_row,
+                incentive=inc, discount_rate=discount_rate, lifetimes=LIFETIMES,
+                annual_bill_electric=e_bill, annual_bill_gas=g_bill,
                 vehicle_om=vehicle_om,
             )
-            out_rows.append({
-                'scenario': scen,
-                'county_slug': slug,
-                'capex_pv': comp.capex_pv,
-                'capex_storage': comp.capex_storage,
-                'capex_electric': comp.capex_electric,
-                'capex_gas': comp.capex_gas,
-                'annual_bill_electric': comp.annual_bill_electric,
-                'annual_bill_gas': comp.annual_bill_gas,
-                'vehicle_om': comp.vehicle_om,
+            if not np.isfinite(comp.total()):
+                raise ValueError(f"Annual household cost must be finite for {scen}/{slug}")
+            rows.append({
+                "scenario": scen,
+                "county_slug": slug,
+                "capex_pv": comp.capex_pv,
+                "capex_storage": comp.capex_storage,
+                "capex_electric": comp.capex_electric,
+                "capex_gas": comp.capex_gas,
+                "annual_bill_electric": comp.annual_bill_electric,
+                "annual_bill_gas": comp.annual_bill_gas,
+                "vehicle_om": comp.vehicle_om,
             })
-
-    return pd.DataFrame(out_rows)
+    return pd.DataFrame(rows)
 
 
 def plot_eac_stacked_bar(

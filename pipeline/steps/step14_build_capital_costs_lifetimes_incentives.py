@@ -249,22 +249,19 @@ def build_capex_ledger_df(
                 })
             # gas rows (no incentives)
             for appliance_name, appliance in gas_instances.items():
-                # Calculate annual operating costs, especially for ICE vehicles
-                annual_maintenance_cost = getattr(appliance, 'annual_maintenance_cost', 0.0)
-                annual_insurance_cost = getattr(appliance, 'annual_insurance_cost', 0.0)
-                
-                # For ICE vehicles, also include fuel costs
-                annual_fuel_cost = 0.0
-                if appliance_name == "vehicle_fuel" and hasattr(appliance, 'get_annual_operating_cost_estimate'):
-                    try:
-                        # Use county name for fuel cost calculation
-                        annual_fuel_cost = appliance.get_annual_operating_cost_estimate(county) - annual_maintenance_cost
-                        # get_annual_operating_cost_estimate includes maintenance, so subtract it to get just fuel
-                    except:
-                        # Fallback if county-specific calculation fails
-                        annual_fuel_cost = 0.0
-                
-                annual_operating_cost = annual_maintenance_cost + annual_insurance_cost + annual_fuel_cost
+                if appliance_name == "vehicle_fuel":
+                    # Copy the itemized vehicle costs; do not infer fuel by
+                    # subtracting maintenance from a separate estimate.
+                    costs = appliance.get_cost_breakdown(county)
+                    annual_fuel_cost = costs['annual_fuel_cost']
+                    annual_maintenance_cost = costs['annual_maintenance_cost']
+                    annual_insurance_cost = costs['annual_insurance_cost']
+                    annual_operating_cost = costs['annual_operating_cost']
+                else:
+                    annual_fuel_cost = 0.0
+                    annual_maintenance_cost = getattr(appliance, 'annual_maintenance_cost', 0.0)
+                    annual_insurance_cost = getattr(appliance, 'annual_insurance_cost', 0.0)
+                    annual_operating_cost = annual_maintenance_cost + annual_insurance_cost
                 
                 rows.append({
                     'county': county,

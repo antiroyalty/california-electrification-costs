@@ -1,41 +1,128 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
+import numpy as np
 import pandas as pd
 
 
-def vehicle_annual_adders_from_ledger(ledger_df: pd.DataFrame) -> pd.DataFrame:
-    """Return county-indexed EV/ICE annual O&M adders from a capital ledger DataFrame.
+REQUIRED_LEDGER_COLUMNS = {
+    "county_slug",
+    "incentive_scenario",
+    "appliance_category",
+    "appliance_type",
+    "annual_operating_cost",
+}
 
-    Output columns:
-      - ev_operating: annual O&M for electric vehicle rows (appliance_category='electric', appliance_type='vehicle_charging')
-      - ice_operating: annual O&M for ICE vehicle rows (appliance_category='gas', appliance_type='vehicle_fuel')
-    Missing columns are filled with sensible defaults; returns an index of 'county_slug'.
+VEHICLE_ROW_TYPES = {
+    "vehicle_charging": "electric",
+    "vehicle_fuel": "gas",
+}
+
+
+class VehicleLedgerValidationError(ValueError):
+    """The capital ledger cannot support a requested vehicle-cost calculation."""
+
+
+@dataclass(frozen=True)
+class VehicleAnnualAdders:
+    """Annual vehicle operating costs for one county and incentive case."""
+
+    ev_operating_usd_per_year: float
+    ice_operating_usd_per_year: float
+
+
+def _required_text(value: str, field: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise VehicleLedgerValidationError(f"{field} must be non-empty text")
+    return value.strip().lower()
+
+
+def vehicle_annual_adders_from_ledger(
+    ledger_df: pd.DataFrame,
+    *,
+    county_slug: str,
+    incentive_scenario: str,
+) -> VehicleAnnualAdders:
+    """Select one county and incentive case and return its vehicle O&M adders.
+
+    Incentive cases are alternative evaluations of the same household. The
+    function therefore selects one case before reading vehicle costs. A valid
+    selected case can omit either vehicle type, which represents an explicit
+    zero for that type. Missing requested cases, malformed costs, and duplicate
+    vehicle rows raise ``VehicleLedgerValidationError``.
     """
-    df = ledger_df.copy() if ledger_df is not None else pd.DataFrame()
-    if df.empty:
-        return pd.DataFrame(columns=["ev_operating", "ice_operating"]).set_index(pd.Index([], name="county_slug"))
+    if not isinstance(ledger_df, pd.DataFrame):
+        raise VehicleLedgerValidationError("ledger_df must be a pandas DataFrame")
 
-    # Ensure required columns exist
-    for col in ["county_slug", "appliance_category", "appliance_type", "annual_operating_cost"]:
-        if col not in df.columns:
-            df[col] = 0.0 if col != "appliance_type" and col != "county_slug" else ""
+    missing_columns = sorted(REQUIRED_LEDGER_COLUMNS - set(ledger_df.columns))
+    if missing_columns:
+        raise VehicleLedgerValidationError(
+            f"Vehicle ledger is missing columns: {', '.join(missing_columns)}"
+        )
 
-    ev = (
-        df[(df["appliance_category"] == "electric") & (df["appliance_type"] == "vehicle_charging")]
-        .groupby("county_slug", as_index=False)["annual_operating_cost"].sum()
-        .rename(columns={"annual_operating_cost": "ev_operating"})
+    requested_county = _required_text(county_slug, "county_slug")
+    requested_incentive = _required_text(incentive_scenario, "incentive_scenario")
+    df = ledger_df.copy()
+
+    for column in ("county_slug", "incentive_scenario"):
+        if not df[column].map(
+            lambda value: isinstance(value, str) and bool(value.strip())
+        ).all():
+            raise VehicleLedgerValidationError(
+                f"Vehicle ledger {column} must contain non-empty text"
+            )
+        df[column] = df[column].str.strip().str.lower()
+
+    county_rows = df[df["county_slug"] == requested_county]
+    if county_rows.empty:
+        raise VehicleLedgerValidationError(
+            f"Vehicle ledger has no rows for county '{requested_county}'"
+        )
+
+    selected = county_rows[
+        county_rows["incentive_scenario"] == requested_incentive
+    ]
+    if selected.empty:
+        raise VehicleLedgerValidationError(
+            "Vehicle ledger has no rows for "
+            f"county '{requested_county}', incentive '{requested_incentive}'"
+        )
+
+    vehicle_rows = selected[selected["appliance_type"].isin(VEHICLE_ROW_TYPES)].copy()
+    for appliance_type, expected_category in VEHICLE_ROW_TYPES.items():
+        rows = vehicle_rows[vehicle_rows["appliance_type"] == appliance_type]
+        if len(rows) > 1:
+            raise VehicleLedgerValidationError(
+                "Vehicle ledger has duplicate rows for "
+                f"county '{requested_county}', incentive '{requested_incentive}', "
+                f"appliance '{appliance_type}'"
+            )
+        if not rows.empty and rows.iloc[0]["appliance_category"] != expected_category:
+            raise VehicleLedgerValidationError(
+                f"Vehicle ledger appliance '{appliance_type}' must have category "
+                f"'{expected_category}'"
+            )
+
+    if not vehicle_rows.empty:
+        try:
+            vehicle_rows["annual_operating_cost"] = pd.to_numeric(
+                vehicle_rows["annual_operating_cost"], errors="raise"
+            )
+        except (TypeError, ValueError) as exc:
+            raise VehicleLedgerValidationError(
+                "Vehicle ledger annual_operating_cost must be numeric"
+            ) from exc
+        if not np.isfinite(vehicle_rows["annual_operating_cost"]).all():
+            raise VehicleLedgerValidationError(
+                "Vehicle ledger annual_operating_cost must be finite"
+            )
+
+    def cost_for(appliance_type: str) -> float:
+        rows = vehicle_rows[vehicle_rows["appliance_type"] == appliance_type]
+        return 0.0 if rows.empty else float(rows.iloc[0]["annual_operating_cost"])
+
+    return VehicleAnnualAdders(
+        ev_operating_usd_per_year=cost_for("vehicle_charging"),
+        ice_operating_usd_per_year=cost_for("vehicle_fuel"),
     )
-    ice = (
-        df[(df["appliance_category"] == "gas") & (df["appliance_type"] == "vehicle_fuel")]
-        .groupby("county_slug", as_index=False)["annual_operating_cost"].sum()
-        .rename(columns={"annual_operating_cost": "ice_operating"})
-    )
-
-    out = pd.DataFrame({"county_slug": pd.unique(df["county_slug"])})
-    out = (
-        out.merge(ev, on="county_slug", how="left")
-        .merge(ice, on="county_slug", how="left")
-        .fillna({"ev_operating": 0.0, "ice_operating": 0.0})
-    )
-    return out.set_index("county_slug")
-

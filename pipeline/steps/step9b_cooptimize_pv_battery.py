@@ -77,6 +77,8 @@ Assumptions
 from __future__ import annotations
 
 import argparse
+from dataclasses import asdict
+import json
 import os
 from typing import List, Optional
 
@@ -88,6 +90,7 @@ from helpers.main_helpers import (
     slugify_county_name,
 )
 from tariffs import NBTScenario, TariffCatalog, resolve_county_service_assignment
+from tariffs import NBTAnnualTerms
 from tariffs.calendar import full_year_hourly_index
 
 from .step9_solar_storage_dispatch_core import (
@@ -101,6 +104,7 @@ from .step9b_cooptimize_core import (
     _solve_lp,
 )
 from evaluations.constants import DEFAULT_DISCOUNT_RATE
+from pipeline.solver import SolverOptions
 from appliances.solar_system import SolarSystemAppliance
 from appliances.battery_storage import BatteryStorageAppliance
 from appliances.electric_base import IncentiveScenario
@@ -297,6 +301,7 @@ def _write_batt_capex_sweep(
     discount_rate: float,
     batt_degrade_cost_per_kwh: float,
     max_battery_kwh: float,
+    solver_options: SolverOptions = SolverOptions(),
     weights: Optional[List[float]] = None,
     cycle_monthly: bool = False,
     file_tag: Optional[str] = None,
@@ -315,6 +320,7 @@ def _write_batt_capex_sweep(
             discount_rate=discount_rate,
             c_deg_per_kwh=batt_degrade_cost_per_kwh,
             max_battery_kwh=max_battery_kwh,
+            solver_options=solver_options,
             weights=weights,
             cycle_monthly=cycle_monthly,
         )
@@ -682,6 +688,7 @@ def _write_batt_cost_heatmap(
     discount_rate: float,
     batt_degrade_cost_per_kwh: float,
     max_battery_kwh: float,
+    solver_options: SolverOptions = SolverOptions(),
     marker_batt_kwh: Optional[float] = None,
     marker_capex_kwh: Optional[float] = None,
     weights: Optional[List[float]] = None,
@@ -704,6 +711,7 @@ def _write_batt_cost_heatmap(
                 discount_rate=discount_rate,
                 c_deg_per_kwh=batt_degrade_cost_per_kwh,
                 max_battery_kwh=max_battery_kwh,
+                solver_options=solver_options,
                 weights=weights,
                 cycle_monthly=cycle_monthly,
             )
@@ -832,6 +840,7 @@ def _write_pv_batt_cost_heatmap(
     discount_rate: float,
     batt_degrade_cost_per_kwh: float,
     max_battery_kwh: float,
+    solver_options: SolverOptions = SolverOptions(),
     marker_pv_kw: Optional[float] = None,
     marker_batt_kwh: Optional[float] = None,
     weights: Optional[List[float]] = None,
@@ -855,6 +864,7 @@ def _write_pv_batt_cost_heatmap(
                 discount_rate=discount_rate,
                 c_deg_per_kwh=batt_degrade_cost_per_kwh,
                 max_battery_kwh=max_battery_kwh,
+                solver_options=solver_options,
                 weights=weights,
                 cycle_monthly=cycle_monthly,
             )
@@ -990,6 +1000,7 @@ def process(
     batt_life_yrs: int = 15,
     batt_degrade_cost_per_kwh: float = 0.0,
     max_battery_kwh: float = 40.0,
+    solver_options: SolverOptions = SolverOptions(),
     nbt_scenario: NBTScenario | None = None,
     nbc_dollars_per_kwh_override: float | None = None,
 ) -> None:
@@ -1034,8 +1045,7 @@ def process(
         # and holiday classification must come from the explicit tariff year.
         ts_index = list(full_year_hourly_index(resolved_scenario.billing_year))
         p_imp = tariff.import_schedule.rates_for(ts_index)
-        base_export = tariff.export_schedule.rates_for(ts_index, component="total")
-        p_exp = [rate + tariff.acc_plus_rate for rate in base_export]
+        p_exp = tariff.export_schedule.rates_for(ts_index, component="total")
 
         if debug_prices:
             _write_price_diagnostics(out_dir, county_slug, ts_index, p_imp, p_exp)
@@ -1046,6 +1056,7 @@ def process(
             pv_gen_per_kw=G,
             import_rates=p_imp,
             export_rates=p_exp,
+            nbt_terms=NBTAnnualTerms.from_tariff(tariff, ts_index),
         )
         result = _solve_lp(
             inputs,
@@ -1059,21 +1070,23 @@ def process(
             discount_rate=discount_rate,
             c_deg_per_kwh=batt_degrade_cost_per_kwh,
             max_battery_kwh=max_battery_kwh,
+            solver_options=solver_options,
         )
 
         sweep_inputs = inputs
         sweep_weights = None
         sweep_cycle = False
         if coarse_sweeps:
-            try:
-                sweep_inputs, sweep_weights = build_monthly_hourly_inputs(inputs, year=2018)
-                sweep_cycle = True
-            except Exception as e:
-                print(f"[step9b] Coarse sweep aggregation failed for {county_slug}: {e}")
-                sweep_inputs, sweep_weights, sweep_cycle = inputs, None, False
+            sweep_inputs, sweep_weights = build_monthly_hourly_inputs(
+                inputs, year=resolved_scenario.billing_year
+            )
+            sweep_cycle = True
 
         # Write outputs (Step 9 compatibility)
         _write_step9_outputs(out_dir, county_slug, ts_index, load_kwh, G, result.pv_kw, result.flows)
+        with open(os.path.join(out_dir, f"coopt_solver_{county_slug}.json"), "w") as handle:
+            json.dump(asdict(result.solver), handle, indent=2, allow_nan=False)
+            handle.write("\n")
         print(f"[step9b] {county_slug}: PV={result.pv_kw:.2f} kW, Battery={result.batt_kwh:.2f} kWh")
 
         if batt_capex_sweep:
@@ -1091,6 +1104,7 @@ def process(
                 discount_rate=discount_rate,
                 batt_degrade_cost_per_kwh=batt_degrade_cost_per_kwh,
                 max_battery_kwh=max_battery_kwh,
+                solver_options=solver_options,
                 weights=sweep_weights,
                 cycle_monthly=sweep_cycle,
             )
@@ -1122,6 +1136,7 @@ def process(
                 discount_rate=discount_rate,
                 batt_degrade_cost_per_kwh=batt_degrade_cost_per_kwh,
                 max_battery_kwh=max_battery_kwh,
+                solver_options=solver_options,
                 marker_batt_kwh=result.batt_kwh,
                 marker_capex_kwh=batt_capex_per_kwh,
                 weights=sweep_weights,
@@ -1145,6 +1160,7 @@ def process(
                 discount_rate=discount_rate,
                 batt_degrade_cost_per_kwh=batt_degrade_cost_per_kwh,
                 max_battery_kwh=max_battery_kwh,
+                solver_options=solver_options,
                 marker_pv_kw=result.pv_kw,
                 marker_batt_kwh=result.batt_kwh,
                 weights=sweep_weights,
@@ -1166,6 +1182,7 @@ def process(
                     discount_rate=discount_rate,
                     c_deg_per_kwh=batt_degrade_cost_per_kwh,
                     max_battery_kwh=max_battery_kwh,
+                    solver_options=solver_options,
                     weights=sweep_weights,
                     cycle_monthly=sweep_cycle,
                 )
@@ -1185,6 +1202,7 @@ def process(
                         discount_rate=discount_rate,
                         batt_degrade_cost_per_kwh=batt_degrade_cost_per_kwh,
                         max_battery_kwh=max_battery_kwh,
+                        solver_options=solver_options,
                         file_tag=tag,
                         weights=sweep_weights,
                         cycle_monthly=sweep_cycle,
@@ -1205,6 +1223,7 @@ def process(
                         discount_rate=discount_rate,
                         batt_degrade_cost_per_kwh=batt_degrade_cost_per_kwh,
                         max_battery_kwh=max_battery_kwh,
+                        solver_options=solver_options,
                         marker_batt_kwh=sweep_result.batt_kwh,
                         marker_capex_kwh=batt_capex_per_kwh,
                         file_tag=tag,
@@ -1228,6 +1247,7 @@ def process(
                         discount_rate=discount_rate,
                         batt_degrade_cost_per_kwh=batt_degrade_cost_per_kwh,
                         max_battery_kwh=max_battery_kwh,
+                        solver_options=solver_options,
                         marker_pv_kw=sweep_result.pv_kw,
                         marker_batt_kwh=sweep_result.batt_kwh,
                         file_tag=tag,
@@ -1286,10 +1306,20 @@ def process(
             "Battery Capacity Upper Bound (kWh)": float(max_battery_kwh),
             "Meter Direction Binaries": int(result.meter_binary_count),
             "Solver Rounds": int(result.solver_rounds),
+            "Solver Backend": result.solver.options.backend,
+            "Solver Cost Tolerance (USD/year)": result.solver.options.annual_cost_gap_usd,
+            "Solver Time Budget (seconds)": result.solver.options.time_limit_seconds,
+            "Solver Elapsed (seconds)": result.solver.elapsed_seconds,
+            "Solver Lower Bound (USD/year)": result.solver.lower_bound_usd,
+            "Solver Cost Gap (USD/year)": result.solver.optimality_gap_usd,
             "Coopt Total Cost": round(result.total_cost, 4),
             "Coopt Capex Annual": round(result.capex_annual, 4),
             "Coopt Import Cost": round(result.import_cost, 4),
             "Coopt Export Credit": round(result.export_credit, 4),
+            "Coopt Electricity Bill": round(result.nbt_settlement.amount_due_usd, 4),
+            "Coopt Earned Export Credit": round(result.nbt_settlement.earned_credit_usd, 4),
+            "Coopt Applied Export Credit": round(result.nbt_settlement.applied_credit_usd, 4),
+            "Coopt Unused Export Credit": round(result.nbt_settlement.unused_credit_usd, 4),
             "Coopt Degradation Cost": round(result.degradation_cost, 4),
             "Allow Grid Charging": bool(allow_grid_charging),
             "Allow Battery Export": bool(allow_batt_export),
@@ -1343,6 +1373,9 @@ def main():
     p.add_argument("--pv-capex-kw", type=float, default=DEFAULT_PV_CAPEX_PER_KW)
     p.add_argument("--batt-capex-kwh", type=float, default=DEFAULT_BATT_CAPEX_PER_KWH)
     p.add_argument("--max-battery-kwh", type=float, default=40.0)
+    p.add_argument("--solver-backend", choices=["highs", "cbc"], default="highs")
+    p.add_argument("--solver-cost-gap-usd", type=float, default=1.0)
+    p.add_argument("--solver-time-limit-seconds", type=float, default=300.0)
     args = p.parse_args()
 
     sweep_vals = list(DEFAULT_BATT_CAPEX_SWEEP) if args.use_defaults else None
@@ -1368,6 +1401,9 @@ def main():
         pv_capex_per_kw=args.pv_capex_kw,
         batt_capex_per_kwh=args.batt_capex_kwh,
         max_battery_kwh=args.max_battery_kwh,
+        solver_options=SolverOptions(
+            args.solver_backend, args.solver_cost_gap_usd, args.solver_time_limit_seconds,
+        ),
         batt_capex_per_kw=0.0,
         pv_life_yrs=25,
         batt_life_yrs=15,
