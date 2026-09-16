@@ -56,7 +56,7 @@ sources:
     limitations:
       - One 2030 statewide day; no county, seasonal, or weekday/weekend variation.
       - Simon describes a BEV/PHEV fleet mix, with 12 percent PHEVs; this share was not independently re-estimated.
-      - Home charging excludes the public/workplace and DC-fast columns.
+      - Home charging intentionally excludes the public/workplace and DC-fast columns; their costs are also outside the current model scope.
       - Charging energy is not normalized to the ICE model's 12000 annual miles.
       - The module's EVI-Pro Lite API description is stale; the workbook is the active input.
 
@@ -214,12 +214,14 @@ sources:
     verification: >-
       Values are in the report. Current EV operating costs contain maintenance and
       insurance only; household electricity includes residential charging only.
-      No public-charging cost adder was found in the current ledger/report path.
+      Exclusion of public/workplace and DC fast charging from home load and modeled
+      EV costs is intentional, as confirmed by the researcher. Reported household
+      costs therefore exclude this transport expenditure.
     limitations:
       - The bibliography URL is an incentive search for ZIP 92103, not direct support for the charging prices.
       - Rounded daily energy in Table 4 does not reproduce the annual dollars exactly; retain underlying precision before reuse.
       - The report's incentive table does not establish universal eligibility or the current 3000 USD utility rebate.
-      - Treat 642.54 USD/year as a historical estimate requiring verification, not an approved correction.
+      - The 642.54 USD/year estimate is historical context. Reuse in a future extension requires verification; adding it is not a pending accounting fix.
 
   doe_vehicle_battery_life:
     title: At a Glance - Electric Vehicles
@@ -415,9 +417,8 @@ follow_up:
       Verify matched travel demand between the CEC charging profile and the common
       12000-mile ICE fuel assumption before claiming equal transport service.
     - >-
-      Resolve the public-charging cost omission and verify price evidence before
-      publishing total household electrification savings. A constant vehicle-cost
-      adder cancels within adoption differences; changing charging demand can alter sizing and package effects.
+      State that household cost comparisons exclude public/workplace and DC fast
+      charging by design. Do not describe them as covering all transport expenditure.
     - Recover or replace the dated AAA county price snapshot, reject unsupported zero prices, and resolve Alpine.
     - Establish the amount and eligibility of the assumed 3000 USD utility rebate, or explicitly revise the assumption.
   documentation_and_bounded_checks:

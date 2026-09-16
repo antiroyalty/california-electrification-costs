@@ -5,7 +5,7 @@
       "catalogue": "docs/data_sources.yaml",
       "historical_report": "docs/sources/simon_ev_integration/2026-09-15/README.md"
     },
-    "notes": "The catalogue records source versions, current uses, historical alternatives, and unresolved gaps. Simon La Vieille's August 2025 report is archived as historical evidence. It confirms the 3.4% vehicle-cost adjustment and AAA gasoline attribution. It also estimates public charging costs that are absent from the current EV cost path. These are source-review findings, not approved input changes or refreshed results; see the narrative limitations."
+    "notes": "The catalogue records source versions, current uses, historical alternatives, and unresolved gaps. Simon La Vieille's August 2025 report is archived as historical evidence. It confirms the 3.4% vehicle-cost adjustment and AAA gasoline attribution. Its public-charging estimate remains historical context: charging away from home is intentionally excluded from home load and modeled EV costs. This is a declared scope limitation, not a pending accounting fix; see the narrative limitations."
   },
   "constants": {
     "title": "Evaluation Constants",
@@ -359,10 +359,11 @@
   },
   "vehicles.vehicle_annual_adders_from_ledger": {
     "title": "Vehicle O&M Adders from Ledger",
-    "formula": "ICE annual fuel USD = annual driving miles / fuel efficiency mpg * gasoline USD/gallon. ICE annual operating USD = fuel + maintenance + insurance. EV annual operating USD = maintenance + insurance; charging is already in the electricity bill. Sum annual_operating_cost by county and vehicle type for reporting.",
+    "formula": "ICE annual fuel USD = annual driving miles / fuel efficiency mpg * gasoline USD/gallon. ICE annual operating USD = fuel + maintenance + insurance. EV annual operating USD = maintenance + insurance; residential charging is already in the electricity bill. Sum annual_operating_cost by county and vehicle type for reporting.",
     "assumptions": {
       "ev_rows": "appliance_category='electric' AND appliance_type='vehicle_charging'",
       "ice_rows": "appliance_category='gas' AND appliance_type='vehicle_fuel'",
+      "charging_scope": "Residential Level 1 and Level 2 charging enter home load and the electricity bill. Public/workplace and DC fast charging are intentionally excluded from home load and modeled EV costs. Reported costs therefore exclude this transport expenditure. A separate expense could be added in future after source verification; it is not required for publication within the stated scope. A constant expense cancels within each household's solar/storage adoption comparison.",
       "missing_columns": "filled with 0.0 or '' for safe grouping",
       "ice_operating_inputs": "Default ICE fuel efficiency is 24.25 mpg and annual insurance is $1836; EV annual insurance is $2040. Maintenance uses the fixed ownership-period allowances documented in vehicles.maintenance_allowances. Explicit overrides, including zero, are preserved.",
       "ledger_integration": "Step 14 copies ICE fuel, maintenance, insurance, and annual operating total from get_cost_breakdown. The redundant estimator with a separate $1200 maintenance default is removed. Fuel lookup errors and missing breakdowns propagate. Maintenance defaults for both vehicles now change; other appliance accounting is unchanged.",
