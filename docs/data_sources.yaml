@@ -7,9 +7,11 @@ review:
     identified in code, methods documents, and Simon La Vieille's August 2025 report.
     This is not yet an exhaustive inventory of every pipeline input.
   working_tree: >-
-    Includes the existing, uncommitted vehicle maintenance revision. Saved September
-    14 results have not been regenerated with that revision. This source review
-    changes documentation and archives only; it does not validate new research results.
+    The initial source review included the then-uncommitted maintenance revision.
+    The September 15 matched cost refresh at 668a07e now applies the committed
+    allowances, corrected ICE arithmetic, and Alpine proxy. See
+    docs/research_logs/2026-09-15-cost-refresh.md. Original September 14 results
+    remain archived; this update does not expand the source verification scope.
   interpretation: >-
     Source verification establishes provenance, not that an assumption is representative
     of every household. Distinguish original source values, model choices, and saved results.
@@ -210,7 +212,8 @@ sources:
       The median is unweighted and does not establish Alpine's local price.
       At 12000 miles/year and 24.25 mpg, each 1 USD/gallon price difference changes
       Alpine's annual fuel cost by 494.85 USD. The historical snapshot date remains
-      unverified. Saved downstream results have not been regenerated.
+      unverified. The September 15 matched cost refresh applies this proxy;
+      older archived reports retain their original inputs.
 
   driveclean_public_charging_and_incentives:
     title: DriveClean California material cited for charging prices and incentives
