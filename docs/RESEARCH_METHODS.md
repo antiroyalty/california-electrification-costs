@@ -2,7 +2,10 @@
 
 This is the maintained narrative for the research paper. It explains what the
 model measures, how it works, and where its conclusions apply. Detailed formulas
-and source references remain in the [methods manifest](methods.yaml).
+remain in the [methods manifest](methods.yaml). The [data source catalogue](data_sources.yaml)
+records provenance, current uses, and unresolved source gaps. The catalogue links
+to a [local archive of Simon La Vieille's report](sources/simon_ev_integration/2026-09-15/README.md).
+That August 2025 report preserves the original rationale; it does not define current behavior.
 The narrative uses Markdown with LaTeX equations. A later LaTeX export should
 derive from this file, so the prose and equations have one maintained source.
 
@@ -43,10 +46,12 @@ separate the equipment benefit from the larger tariff-inclusive package effect.
 
 Review of vehicle energy costs found a $916.35/year maintenance discrepancy in
 each saved gas-household ledger and a zero gasoline price for Alpine. The ledger
-code now uses the vehicle's itemized calculation. Saved results still contain
-the discrepancy, so whole-household headlines remain on hold until the fuel
-input and cost reports are corrected. Vehicle dollars cancel within adoption
-comparisons; the matched scatterplot and package effect remain unchanged.
+code now uses the vehicle's itemized calculation. Maintenance defaults now
+average the first 144,000 miles, replacing the former new-vehicle allowances.
+Saved results contain neither correction, so whole-household headlines remain
+on hold until the fuel input and cost reports are corrected. Vehicle dollars
+cancel within adoption comparisons; the matched scatterplot and package effect
+remain unchanged.
 
 ## Research questions and comparison definitions
 
@@ -248,21 +253,47 @@ Here, $D_c$ is annual driving distance in miles, $\eta_{\mathrm{ICE}}$ is fuel
 efficiency in miles per gallon, and $p_c$ is the gasoline price in dollars per
 gallon. $M$ and $I$ are annual maintenance and insurance costs. All $O$ values
 are dollars per year. EV charging is already included in the electricity bill.
-The declared ICE values remain 24.25 miles per gallon, $283.65/year maintenance,
-and $1,836/year insurance. Custom maintenance and insurance values use the same
-calculation, including explicit zeros. Fuel lookup errors and missing breakdown
-fields propagate instead of becoming zero fuel costs.
+The ICE fuel efficiency remains 24.25 miles per gallon. Annual insurance remains
+$1,836 for ICE and $2,040 for EV. Custom maintenance and insurance values use
+the same calculation, including explicit zeros. Fuel lookup errors and missing
+breakdown fields propagate instead of becoming zero fuel costs.
+
+Maintenance includes repairs. Each vehicle uses a constant annual allowance
+averaged over 12 years at 12,000 miles/year, or 144,000 miles from new. This
+mileage matches the current ICE fuel calculation. The reference applies to
+both maintenance allowances; it does not rescale the separate EV charging profile.
+Consumer Reports' [Table 2.1](https://advocacy.consumerreports.org/wp-content/uploads/2020/09/Maintenance-Cost-White-Paper-9.24.20-1.pdf)
+provides per-mile rates for three successive odometer bands. We apply the first
+two rates to 50,000 miles each and the third to the remaining 44,000 miles:
+
+$$
+M_{\mathrm{ICE}} = \frac{50{,}000(0.028)+50{,}000(0.060)+44{,}000(0.079)}{12}
+= \$656.33/\mathrm{year},
+$$
+$$
+M_{\mathrm{EV}} = \frac{50{,}000(0.012)+50{,}000(0.028)+44{,}000(0.043)}{12}
+= \$324.33/\mathrm{year}.
+$$
+
+Code retains the unrounded averages. This approximation holds the allowance
+constant each year; it does not model individual repair timing. These are the
+2020 report's source-dollar rates without an inflation adjustment or a new
+California vehicle survey. Changing the reference mileage or ownership period
+requires an explicit allowance override. A custom service life does not silently
+recalculate maintenance. The [source check and timing sensitivity](research_logs/2026-09-15.md)
+record the derivation and remaining limits.
 
 The old ledger used a separate $1,200 maintenance default and overstated ICE
-operating costs by $916.35/year relative to the declared assumption. The redundant
-ICE estimator has been removed. This corrects arithmetic; it does not refresh
-the source cost assumptions, Alpine's gasoline price, or saved publication data.
+operating costs by $916.35/year relative to the then-declared $283.65 assumption.
+The redundant ICE estimator has been removed. The later maintenance review
+changes both vehicle allowances; it does not change Alpine's gasoline price or
+saved publication data.
 
 An [isolated ledger check](../analysis_results/vehicle_cost_accounting_6c14268/README.md)
-compares all 1,692 rows for both households across 47 counties and three incentive
-cases. Only gas-vehicle fuel, operating costs, and their lifetime totals change.
-All EV and other appliance fields remain unchanged. The same check exercises
-the Step 14 entry point for both households in one county per utility area.
+verified the earlier arithmetic correction across 1,692 rows for both households,
+47 counties, and three incentive cases. Only gas-vehicle fuel, operating costs,
+and their lifetime totals changed in that check. The subsequent maintenance
+change has separate validation because it changes both ICE and EV costs.
 
 Reporting requires the capital ledger, its cost fields, and rows for each
 requested county and incentive case. Missing data do not represent free
@@ -518,7 +549,11 @@ Prioritize a check when the limitation could change a stated conclusion.
 | Adoption includes an import-rate plan change | The four-case collector matches plans between households within each solar choice. It compares the declared retail plan without solar to the required NEM 3 plan with optimized equipment. Adoption savings and the package effect therefore include the tariff transition. | Report the aligned-load diagnostic, which separates calendar, plan, and equipment contributions. Choosing the cheapest eligible no-solar plan remains outside this comparison. |
 | Retail and NEM 3 use different calendars | Retail bills retain the source profile calendar; NEM 3 uses the declared 2026 calendar. The aligned-load diagnostic bounds the package-effect difference at $3.64/year across the matched run. All 47 signs remain positive. | Use one calendar in future reporting. This bounded difference does not explain the tariff-inclusive or within-tariff equipment finding. |
 | Building and vehicle electrification are bundled | The matched comparison identifies their combined household-cost effect. It cannot attribute the effect to appliances or the EV separately. | Add matched intermediate scenarios if separate attribution becomes a research question. |
-| Saved vehicle costs and fuel inputs need correction | New ledgers use the itemized ICE calculation, with regression coverage. Saved results still contain the $916.35/year discrepancy. Alpine has a zero gasoline price despite positive mileage, and the fuel helper retains its existing price and mileage defaults. | Validate the gasoline inputs and regenerate affected cost reports before citing whole-household electrification savings. The vehicle-dollar correction does not require new dispatch optimizations and cancels within adoption differences. |
+| Vehicle charging and driving use independent reference inputs | Home charging repeats a statewide 2030 fleet-average day. ICE fuel uses 12,000 miles per year. Equal transport service has not been established. | Check their mileage and vehicle-efficiency basis before describing the comparison as equal travel demand. See the data source catalogue. |
+| Charging away from home is absent from current vehicle costs | Simon's report estimates $642.54/year for public/workplace and fast charging. Current EV operating costs include maintenance and insurance; the electricity bill includes home charging. Total household costs can therefore omit transport expenditure. | Verify the report's charging prices and demand basis, then resolve the cost scope before publishing whole-household savings. The historical estimate is not an approved correction. A constant vehicle-cost adder cancels within adoption differences. |
+| Some vehicle input provenance remains incomplete | Simon identifies AAA gasoline prices, but the snapshot date and exact citation are missing. The $3,000 utility rebate lacks program-specific support. Insurance uses older national estimates, and the 12-year vehicle-life citation describes batteries. | Use the source catalogue to resolve material gaps and state the remaining reference assumptions. These findings do not change inputs in this documentation review. |
+| Saved vehicle costs and fuel inputs need correction | New ledgers use itemized ICE costs and revised ICE/EV maintenance allowances. Saved results retain the former maintenance values and the $916.35 arithmetic discrepancy relative to the former ICE assumption. Alpine has a zero gasoline price despite positive mileage; the fuel helper retains its existing defaults. | Validate the gasoline inputs and regenerate affected cost reports before citing whole-household electrification savings. Vehicle-dollar corrections cancel within adoption differences and require no new dispatch optimization. |
+| Constant vehicle repair and maintenance allowances | The allowances average 144,000 miles from new using older survey rates. They do not represent county or vehicle-model variation, inflation, or actual repair timing. At 7%, the flat allowance increases the ICE-minus-EV maintenance difference by $21.93/year against a 12-year calculation with mileage bands applied each year. | Use the documented constant allowance for the current comparison. A future sensitivity can update prices or ownership patterns. The timing check covers maintenance alone; it is not a full household-cost uncertainty bound. |
 | Known profiles and prices throughout an optimization run | Dispatch assumes advance knowledge of the modeled year. Real controllers face forecast errors, which can reduce achievable savings. | Compare a controller with limited forecasts on the same cases. |
 | Reduced 12 × 24 sensitivity chronology | Averaging can change cycling, usable credits, and optimal capacities. Mixed-resolution comparisons cannot isolate a policy effect by themselves. | Use full-year checks for findings near a threshold or sensitive to chronology. |
 | Declared equipment costs, lifetimes, and incentive cases | These are sourced modeling inputs, not a new survey of prices available to every household. | Refresh cost benchmarks or report a focused sensitivity when cost uncertainty affects a claim. |

@@ -1,4 +1,12 @@
 {
+  "documentation.data_sources": {
+    "title": "Data Source Provenance Catalogue",
+    "data_sources": {
+      "catalogue": "docs/data_sources.yaml",
+      "historical_report": "docs/sources/simon_ev_integration/2026-09-15/README.md"
+    },
+    "notes": "The catalogue records source versions, current uses, historical alternatives, and unresolved gaps. Simon La Vieille's August 2025 report is archived as historical evidence. It confirms the 3.4% vehicle-cost adjustment and AAA gasoline attribution. It also estimates public charging costs that are absent from the current EV cost path. These are source-review findings, not approved input changes or refreshed results; see the narrative limitations."
+  },
   "constants": {
     "title": "Evaluation Constants",
     "constants": {
@@ -305,6 +313,50 @@
     },
     "notes": "See docs/RESEARCH_METHODS.md for equations and validation boundaries. ACC Plus source rates remain archived in data/tariffs/acc_plus_rates.csv. They are not optional inputs to the research model."
   },
+  "vehicles.maintenance_allowances": {
+    "title": "Constant Vehicle Repair and Maintenance Allowances",
+    "formula": "M_vehicle = sum(miles_in_odometer_band * repair_and_maintenance_USD_per_mile) / reference_service_life_years. Apply M_vehicle as a constant annual operating allowance.",
+    "assumptions": {
+      "reference_annual_miles": 12000,
+      "reference_service_life_years": 12,
+      "reference_initial_odometer_miles": 0,
+      "odometer_band_upper_bounds_miles": [
+        50000,
+        100000,
+        200000
+      ],
+      "miles_used_per_band": [
+        50000,
+        50000,
+        44000
+      ],
+      "ice_usd_per_mile_by_band": [
+        0.028,
+        0.06,
+        0.079
+      ],
+      "bev_usd_per_mile_by_band": [
+        0.012,
+        0.028,
+        0.043
+      ],
+      "ice_annual_allowance_usd": 656.3333333333334,
+      "bev_annual_allowance_usd": 324.3333333333333,
+      "scope": "Each appliance stores its unrounded fixed allowance. Reference mileage matches the current ICE fuel model. EV charging profiles are independent and unchanged. Custom mileage or service life requires an explicit revised allowance; constructor overrides, including zero, are retained.",
+      "limitations": "Use the 2020 report source-dollar rates without inflation adjustment. The allowances omit county/model variation and repair timing. High-mileage BEV evidence is limited. At 7%, replacing the flat mean with an equivalent annual cost of 12 yearly mileage-band payments reduces the ICE-minus-EV maintenance difference by $21.93/year. This is a maintenance-only timing check, not a full study-horizon uncertainty bound."
+    },
+    "data_sources": {
+      "maintenance_rates": "Consumer Reports (2020), Table 2.1: https://advocacy.consumerreports.org/wp-content/uploads/2020/09/Maintenance-Cost-White-Paper-9.24.20-1.pdf",
+      "reference_mileage": "Existing ICE fuel calculation: helpers/gasoline_cost_helper.py:get_annual_vmt_for_county. The 12000-mile value is a reference assumption, not measured county mileage.",
+      "derivation_and_prior_inputs": "docs/research_logs/2026-09-15.md"
+    },
+    "code": [
+      "appliances/ice_vehicle.py:DEFAULT_ANNUAL_MAINTENANCE_COST_USD",
+      "appliances/electric_vehicle.py:DEFAULT_ANNUAL_MAINTENANCE_COST_USD",
+      "tests/vehicle_maintenance_assumptions_test.py"
+    ],
+    "validation": "Isolated checks reconcile all 1692 ledger rows across 47 counties and three incentive cases against the prior accounting-correction ledgers. Exactly 141 ICE and 141 EV rows change in maintenance, operating, and lifetime totals; all other fields match. Six actual Step 14 cases pass. See analysis_results/vehicle_maintenance_c5d6b37/README.md."
+  },
   "vehicles.vehicle_annual_adders_from_ledger": {
     "title": "Vehicle O&M Adders from Ledger",
     "formula": "ICE annual fuel USD = annual driving miles / fuel efficiency mpg * gasoline USD/gallon. ICE annual operating USD = fuel + maintenance + insurance. EV annual operating USD = maintenance + insurance; charging is already in the electricity bill. Sum annual_operating_cost by county and vehicle type for reporting.",
@@ -312,10 +364,10 @@
       "ev_rows": "appliance_category='electric' AND appliance_type='vehicle_charging'",
       "ice_rows": "appliance_category='gas' AND appliance_type='vehicle_fuel'",
       "missing_columns": "filled with 0.0 or '' for safe grouping",
-      "ice_operating_inputs": "Default fuel efficiency is 24.25 mpg, annual maintenance is $283.65, and annual insurance is $1836. Constructor overrides, including zero maintenance or insurance, use the same itemized calculation. These declared input values are unchanged by the accounting correction.",
-      "ledger_integration": "Step 14 copies fuel, maintenance, insurance, and annual operating total from ICEVehicleAppliance.get_cost_breakdown. The redundant ICE estimator with a separate $1200 maintenance default is removed. Fuel lookup errors, missing breakdown fields, and a vehicle without the breakdown method fail instead of producing zero fuel. EV and non-vehicle appliance accounting are unchanged.",
-      "validation": "Independent mileage/price examples check annual and lifetime totals, custom and zero maintenance/insurance, reporting adders, and propagated errors. Isolated rebuilding checks all 1692 ledger rows for the two matched households across 47 counties and three incentive cases. Only 141 ICE rows change by $916.35/year and corresponding lifetime amounts; all other fields match. Six representative Step 14 cases also pass. See analysis_results/vehicle_cost_accounting_6c14268/README.md.",
-      "correction_status": "Vehicle ledger arithmetic is corrected and covered by independent component-total and failure-path tests. The September 14 saved gas-household operating costs still exceed the itemized calculation by $916.35/year. Alpine's zero gasoline price and the fuel helper's existing price/mileage defaults remain input-validation follow-ups. Whole-household electrification headlines stay on hold until valid inputs and refreshed cost reports exist. The earlier 5-versus-42 count is only an arithmetic diagnostic. Vehicle dollars cancel within adoption comparisons, so the scatterplot and package effect remain unchanged. See docs/research_logs/2026-09-14.md."
+      "ice_operating_inputs": "Default ICE fuel efficiency is 24.25 mpg and annual insurance is $1836; EV annual insurance is $2040. Maintenance uses the fixed ownership-period allowances documented in vehicles.maintenance_allowances. Explicit overrides, including zero, are preserved.",
+      "ledger_integration": "Step 14 copies ICE fuel, maintenance, insurance, and annual operating total from get_cost_breakdown. The redundant estimator with a separate $1200 maintenance default is removed. Fuel lookup errors and missing breakdowns propagate. Maintenance defaults for both vehicles now change; other appliance accounting is unchanged.",
+      "validation": "The earlier arithmetic-correction check covered 1692 rows with the former maintenance defaults; see analysis_results/vehicle_cost_accounting_6c14268/README.md. New maintenance tests independently check 12-year component totals through appliances, ledgers, and reporting, plus explicit overrides. Existing accounting regression expectations are unchanged.",
+      "correction_status": "New ledgers use corrected ICE arithmetic and revised ICE/EV maintenance allowances. September 14 publication results retain the former values and the $916.35/year arithmetic discrepancy relative to the former ICE assumption. Alpine gasoline and fuel-helper defaults remain input-validation follow-ups. Hold whole-household headlines until inputs and reports are refreshed. The earlier 5-versus-42 count remains an arithmetic diagnostic. Vehicle-dollar changes cancel within adoption differences."
     },
     "data_sources": {
       "ledger_df": "capital_costs_<scenario>_<housing>.csv"
