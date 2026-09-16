@@ -186,18 +186,31 @@ sources:
     title: AAA gasoline prices, as attributed by Simon
     publisher: AAA
     role: implemented_input_with_incomplete_provenance
-    url: null
+    url: https://gasprices.aaa.com/?state=CA
     data_date: null
+    imported_on: '2025-08-06'
+    import_commit: d86887e1df7a23e49d93c410a412c7b9943a4938
     locator: Simon section 3.2.3, page 8; missing bibliography key AAAFuelPrices
     code: [helpers/gasoline_cost_helper.py]
     use: Hardcoded county USD/gallon values multiplied by annual miles divided by mpg.
     verification: >-
-      Simon explicitly names AAA and daily updates. The current code has no source
-      URL or capture date; the report's AAA citation has no bibliography entry.
-      Attribution is recovered, but the actual county snapshot is not verified.
+      Simon explicitly names AAA and daily updates; the report's AAA citation has
+      no bibliography entry. Git history dates the table import to August 6, 2025,
+      with Alpine left at zero. The exact observation date remains unknown.
+      AAA's county map checked on September 15, 2026 also leaves Alpine blank.
+      That current page does not verify the historical prices.
+    alpine_assumption:
+      price_usd_per_gallon: 4.589
+      basis: Fixed median of the other 57 positive county prices in the existing table.
+      approved_on: '2026-09-15'
+      status: Explicit researcher-approved proxy; not an observed Alpine price.
+      update_rule: Keep the proxy fixed until an explicit input revision; do not use a general missing-price fallback.
+    validation: Missing counties and nonnumeric, nonfinite, zero, or negative prices raise ValueError before fuel costs are calculated.
     limitations: >-
-      Alpine is zero despite positive mileage. Missing counties also default to zero
-      gasoline price. These are unresolved input problems, not supported zero fuel costs.
+      The median is unweighted and does not establish Alpine's local price.
+      At 12000 miles/year and 24.25 mpg, each 1 USD/gallon price difference changes
+      Alpine's annual fuel cost by 494.85 USD. The historical snapshot date remains
+      unverified. Saved downstream results have not been regenerated.
 
   driveclean_public_charging_and_incentives:
     title: DriveClean California material cited for charging prices and incentives
@@ -419,7 +432,7 @@ follow_up:
     - >-
       State that household cost comparisons exclude public/workplace and DC fast
       charging by design. Do not describe them as covering all transport expenditure.
-    - Recover or replace the dated AAA county price snapshot, reject unsupported zero prices, and resolve Alpine.
+    - Retain the explicit Alpine proxy and unknown gasoline observation date in reporting; recover the dated AAA snapshot when revisiting these inputs.
     - Establish the amount and eligibility of the assumed 3000 USD utility rebate, or explicitly revise the assumption.
   documentation_and_bounded_checks:
     - Explain generic vehicle costs, insurance geography/vintage, and the 12-year whole-vehicle life as declared assumptions.

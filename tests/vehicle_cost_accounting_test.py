@@ -62,11 +62,19 @@ def test_ledger_and_reporting_use_the_itemized_vehicle_cost(
             assert 5036 - row["annual_operating_cost"] == pytest.approx(916.35)
 
     for incentive in IncentiveScenario:
-        selected = ledger[ledger.incentive_scenario == incentive.value]
-        reported = vehicle_annual_adders_from_ledger(selected)
-        assert reported.loc["alameda", "ice_operating"] == pytest.approx(
+        alameda = vehicle_annual_adders_from_ledger(
+            ledger,
+            county_slug="alameda",
+            incentive_scenario=incentive.value,
+        )
+        los_angeles = vehicle_annual_adders_from_ledger(
+            ledger,
+            county_slug="los-angeles",
+            incentive_scenario=incentive.value,
+        )
+        assert alameda.ice_operating_usd_per_year == pytest.approx(
             2000 + maintenance + insurance)
-        assert reported.loc["los-angeles", "ice_operating"] == pytest.approx(
+        assert los_angeles.ice_operating_usd_per_year == pytest.approx(
             800 + maintenance + insurance)
 
 

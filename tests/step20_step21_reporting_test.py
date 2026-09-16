@@ -303,6 +303,42 @@ def test_shared_reports_match_independent_household_costs(
         pd.testing.assert_series_equal(aggregate, county_row.drop("county_slug"))
 
 
+@pytest.mark.parametrize(
+    "scenario,vehicle_type",
+    [
+        ("baseline_ice_car_coopt", "vehicle_fuel"),
+        ("full_electric_ev_coopt", "vehicle_charging"),
+    ],
+)
+def test_publication_eac_selects_the_requested_vehicle_incentive_case(
+    tmp_path, scenario, vehicle_type,
+):
+    """Publication EAC selects alternative cases without summing or pinning one."""
+    ledger_path, _ = _write_household_case(tmp_path, scenario)
+    ledger = pd.read_csv(ledger_path)
+    operating_by_incentive = {
+        "full_incentives": -40,
+        "half_incentives": 0,
+        "no_incentives": 80,
+    }
+    vehicle_rows = ledger["appliance_type"] == vehicle_type
+    ledger.loc[vehicle_rows, "annual_operating_cost"] = ledger.loc[
+        vehicle_rows, "incentive_scenario"
+    ].map(operating_by_incentive)
+    ledger.to_csv(ledger_path, index=False)
+
+    for incentive, expected in operating_by_incentive.items():
+        result = collect_eac_no_pv_by_county(
+            str(tmp_path),
+            HOUSING_TYPE,
+            [scenario],
+            ["Alameda County"],
+            incentive=incentive,
+            electricity_plan_preference=PLAN_PREFERENCES,
+        ).iloc[0]
+        assert result["vehicle_om"] == expected
+
+
 @pytest.mark.parametrize("collector", [collect_eac_no_pv, collect_eac_no_pv_by_county])
 def test_no_solar_requires_a_ledger_even_when_bills_exist(tmp_path, collector):
     _write_bill_results(tmp_path, "alameda", {"electricity.PG&E.E-TOU-D": 300}, 100)

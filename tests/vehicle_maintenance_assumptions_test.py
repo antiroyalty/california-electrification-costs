@@ -62,10 +62,18 @@ def test_default_allowance_covers_144000_miles_and_reaches_reporting(
             row["net_cost"] + lifetime_maintenance + 12 * (insurance + fuel)
         )
     for incentive in IncentiveScenario:
-        selected = ledger[ledger.incentive_scenario == incentive.value]
-        reported = vehicle_annual_adders_from_ledger(selected)
+        reported = vehicle_annual_adders_from_ledger(
+            ledger,
+            county_slug="alameda",
+            incentive_scenario=incentive.value,
+        )
         column = "ice_operating" if is_ice else "ev_operating"
-        assert reported.loc["alameda", column] == pytest.approx(expected_operating)
+        reported_value = (
+            reported.ice_operating_usd_per_year
+            if column == "ice_operating"
+            else reported.ev_operating_usd_per_year
+        )
+        assert reported_value == pytest.approx(expected_operating)
 
 
 @pytest.mark.parametrize("vehicle_class", [ice_vehicle.ICEVehicleAppliance, ElectricVehicleAppliance])

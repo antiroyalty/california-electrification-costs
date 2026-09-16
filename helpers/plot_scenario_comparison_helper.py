@@ -1138,9 +1138,13 @@ def collect_eac_components_by_county(
             if not np.isfinite([e_bill, g_bill]).all():
                 raise ValueError(f"Annual bills must be finite for {scen}/{slug}")
 
-            adders = vehicle_annual_adders_from_ledger(county_ledger)
-            ev_val = float(adders.loc[slug, "ev_operating"])
-            ice_val = float(adders.loc[slug, "ice_operating"])
+            adders = vehicle_annual_adders_from_ledger(
+                ledger,
+                county_slug=slug,
+                incentive_scenario=inc,
+            )
+            ev_val = adders.ev_operating_usd_per_year
+            ice_val = adders.ice_operating_usd_per_year
             vehicle_om = 0.0
             scen_l = scen.lower()
             if "ev" in scen_l or ev_val > 0:
