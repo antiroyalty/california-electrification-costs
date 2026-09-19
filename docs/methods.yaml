@@ -1,10 +1,19 @@
 {
+  "documentation.data_sources": {
+    "title": "Data Source Provenance Catalogue",
+    "data_sources": {
+      "catalogue": "docs/data_sources.yaml",
+      "historical_report": "docs/sources/simon_ev_integration/2026-09-15/README.md"
+    },
+    "notes": "The catalogue records source versions, current uses, historical alternatives, and unresolved gaps. Simon La Vieille's August 2025 report is archived as historical evidence. It confirms the 3.4% vehicle-cost adjustment and AAA gasoline attribution. Its public-charging estimate remains historical context: charging away from home is intentionally excluded from home load and modeled EV costs. This is a declared scope limitation, not a pending accounting fix; see the narrative limitations."
+  },
   "constants": {
     "title": "Evaluation Constants",
     "constants": {
       "LIFETIMES_DEFAULT": "solar=25, storage=15, heat_pump=15, induction_stove=15, water_heater=15 (years)",
       "LIFETIMES_SOURCE": "Storage 15-yr service life: NREL ATB 2024 Residential Battery Storage (https://atb.nrel.gov/electricity/2024/residential_battery_storage), the same source as the battery $/kWh cost. CAVEAT: NREL's 15-yr life is paired with a Fixed O&M (~2.5%/yr of capex) for battery augmentation to offset degradation and hold rated capacity. This model currently omits that O&M and sets degradation cost to 0, so it is MORE generous to storage than NREL. TODO: add augmentation O&M or run a degradation sensitivity (either would make storage pencil slightly worse, strengthening Claim 1). Solar 25-yr and appliance 15-yr are conventional planning assumptions.",
-      "THERM_TO_KWH": "29.3001 kWh/therm"
+      "THERM_TO_KWH": "29.3001 kWh/therm",
+      "DEFAULT_DISCOUNT_RATE": "0.07 real annual rate"
     },
     "code": [
       "evaluations/constants.py"
@@ -53,7 +62,8 @@
       "solar_storage_savings": "scenario_cost - scenario_solar_cost",
       "all_electrification_savings": "baseline_cost - scenario_solar_cost",
       "horizon_years": "default 25",
-      "discount_rate": "default 0.07"
+      "discount_rate": "default 0.07",
+      "cash_flow_scope": "Upfront equipment cost plus constant annual operating savings. This helper does not add battery replacement or residual equipment value; it is not the Step 9b objective."
     },
     "data_sources": {
       "baseline_cost": "totals results (baseline)",
@@ -91,7 +101,7 @@
   "eac.EACComponents": {
     "title": "EAC Components (Data Structure)",
     "assumptions": {
-      "units": "All values are $/year except annual_bill_* which are already annual flows."
+      "units": "Every component is in dollars per year, including annual electricity and gas bills."
     },
     "data_sources": {
       "capex_pv": "annualized PV capex",
@@ -107,17 +117,32 @@
     ]
   },
   "eac.alpha_batt_npv": {
-    "title": "Battery Capex Coefficient under NPV Framing",
-    "formula": "alpha_batt = (1 + (1+r)^(-n_batt)) / PVA(r, N)",
+    "title": "Shared Battery Capital Annualization with Remaining Value",
+    "formula": "alpha_batt = [sum(j=0..k-1, (1+r)^(-j*n)) - ((k*n-N)/n)*(1+r)^(-N)] * CRF(r,N), where k=ceil(N/n).",
     "assumptions": {
-      "derivation": "Over a horizon N, a battery with lifetime n_batt < N requires replacement at t=n_batt. K_batt = 1 + (1+r)^(-n_batt) is the present value of both purchases. Dividing by PVA(r,N) = (1-(1+r)^(-N))/r converts to annual-equivalent cost.",
-      "vs_crf": "alpha_batt > CRF(r, n_batt) because CRF prices only one battery purchase. At r=0.07, n_batt=15, N=25: alpha_batt=0.1169 vs CRF=0.1098 (+6.4%).",
-      "pv_unchanged": "For PV, n_pv = N = 25, so K_pv = 1 and alpha_pv = 1/PVA = CRF(r, N). No change to PV coefficient."
+      "units": "Annual battery capital cost per dollar of modeled purchase cost; r is the real annual discount rate, n is battery service life in years, and N is the study period in years.",
+      "central_case": "N=25, matching the assumed solar life; n=15. Purchases occur at years 0 and 15. At year 25 credit one-third of replacement cost, then discount that credit to year 0.",
+      "cost_basis": "Initial and replacement purchases use the same real cost and incentive treatment. The remaining-value credit uses that same replacement-cost basis. Future price and incentive changes are not forecast.",
+      "remaining_value": "Value is proportional to unused service life. This estimates remaining service value, not a resale price.",
+      "worked_example": "At r=0.07 the coefficient is 0.111642025 per year. For a $10,000 purchase cost: year-25 remaining value $3,333.33, present credit $614.16, annual battery capital cost $1,116.42.",
+      "boundaries": "Count purchases strictly before study end; do not buy at the terminal date. Credit only the last battery. Multiple replacements are included when required. Zero interest gives 1/n. Reject negative or non-finite discount rates and nonpositive or non-finite lifetimes and study periods.",
+      "integration": "Step 9b, EAC collectors, county annual-cost charts, and SAM capital-cost scoring call this shared coefficient. EAC reporting has no alternative npv_framing switch. Dispatch constraints are unchanged.",
+      "pv": "Solar life equals the study period, so PV uses CRF(r,N) for one purchase with no remaining life at study end.",
+      "result_status": "Implemented and covered by independent cash-flow and integration tests, including Alameda free sizing and a fixed 10 kWh battery. The September 11 core rerun at 8a98b96 completed 47 counties and three paper scenarios plus the supporting baseline at 8760 hours. All 49 statewide checks passed. Other sensitivities retain earlier versions. See docs/research_logs/2026-09-11.md."
+    },
+    "data_sources": {
+      "remaining_value_method": "NIST Life-Cycle Costing Manual, section 4.5.3: https://tsapps.nist.gov/publication/get_pdf.cfm?pub_id=934909",
+      "solar_period_context": "DOE typical photovoltaic performance period of 20-30 years: https://www.energy.gov/cmei/femp/life-cycle-photovoltaic-systems-prepare-end-performance-period"
     },
     "code": [
       "evaluations/eac.py:alpha_batt_npv",
-      "pipeline/steps/step9b_cooptimize_core.py:_solve_lp"
-    ]
+      "pipeline/steps/step9b_cooptimize_core.py:_solve_lp",
+      "helpers/diagnostics_cost_plots.py:create_cost_waterfall_chart",
+      "helpers/diagnostics_cost_plots.py:create_storage_value_vs_cost_chart",
+      "experiments/sam_parallel.py:score",
+      "tests/battery_annualization_test.py"
+    ],
+    "notes": "Legacy standalone experiments/solar_size_sweep.py, battery_size_sweep.py, combined_sweep.py and pipeline/steps/step9_optimize_solar_storage.py retain service-life CRFs. Auxiliary NPV diagnostics omit replacement and remaining value. Align those tools before using them for comparisons under this method."
   },
   "eac.compute_eac_from_inputs": {
     "title": "Equivalent Annual Cost (EAC)",
@@ -127,7 +152,10 @@
       "lifetimes": "solar=25, storage=15, appliance rows use lifetime_years (default 15 if missing)",
       "incentives": "full/half/no incentives applied to PV/storage capex",
       "capital_recovery_factor": "CRF = r(1+r)^n / ((1+r)^n - 1)",
-      "npv_framing": "When npv_framing=True, storage uses alpha_batt_npv instead of CRF — see eac.alpha_batt_npv"
+      "battery_annualization": "Always use alpha_batt_npv, shared with Step 9b. The study period equals the declared solar life; replacement and proportional remaining value are included.",
+      "reporting_validation": "County and aggregate EAC reports share one county collector. It requires a capital ledger with explicit county, incentive, appliance identity, finite costs and operating costs, and positive service lives. Missing county/incentive rows and duplicate equipment rows fail. Explicit zero costs and negative net costs or operating-cost adjustments remain valid. The low-level EAC function retains its existing optional-input conventions; report collectors validate inputs before calling it.",
+      "no_solar_counterfactual": "Step 20 calls the shared EAC collectors with with_solar=False and electricity_variant=retail. Solar/storage capital is deliberately zero and no PV summary is read. Appliance and vehicle costs use the same ledger and calculation as the with-solar case. Bills come from the original-load row. An optional exact timestamp selects saved bills, not other input provenance. The four-case collector and figure are implemented; the September 14 matched run at 11b7dba covers all 47 counties. See docs/research_logs/2026-09-14.md.",
+      "comparison_tariffs": "No-solar reporting retains the configured retail import plan; with-solar reporting retains the configured variant, normally NEM 3. Their difference can include a plan change. The four-case comparison must match tariff selection between household types within each solar choice and state any adoption-related plan change."
     },
     "data_sources": {
       "capex_ledger": "capital_costs_<scenario>_<housing>.csv",
@@ -138,17 +166,64 @@
     "code": [
       "evaluations/eac.py:compute_eac_from_inputs",
       "helpers/plot_scenario_comparison_helper.py:collect_eac_components",
-      "pipeline/steps/step20_no_solar_storage_electrification.py:collect_eac_no_pv"
+      "helpers/plot_scenario_comparison_helper.py:collect_eac_components_by_county",
+      "figure_builder/datasets.py:build_claims_eac_source",
+      "pipeline/steps/step20_no_solar_storage_electrification.py:collect_eac_no_pv",
+      "pipeline/steps/step20_no_solar_storage_electrification.py:collect_eac_no_pv_by_county"
+    ]
+  },
+  "electrification.matched_comparison": {
+    "title": "Matched full-electrification and solar/storage adoption comparison",
+    "formula": "Let A=C_gas,no_solar, B=C_gas,optimized, C=C_electric,no_solar, D=C_electric,optimized. Electrification savings without solar=A-C; with optimized equipment=B-D. Gas adoption savings=A-B; electric adoption savings=C-D. Package effect=(C-D)-(A-B)=(B-D)-(A-C). The lowest modeled cost allowing each household to decline adoption is min(A,B) for gas and min(C,D) for electric. All values are USD/year.",
+    "assumptions": {
+      "households": "baseline_ice_car_coopt versus full_electric_ev_coopt; includes building appliances and vehicle. Both choose PV/storage freely, including zero capacity. No separate appliance-versus-EV attribution.",
+      "accounting": "Use the shared county EAC collector at 7% real discount, full incentive capture, 25-year solar/study period and 15-year battery life with replacement and remaining value. Within each household, appliance capital, gas bills and vehicle operating costs must match between solar choices. Negative net appliance costs and vehicle adjustments remain valid.",
+      "tariffs": "Match exact electricity columns between households within each solar choice. No-solar: PG&E E-TOU-D, SCE TOU-D-4-9PM, SDG&E TOU-DR1. Optimized: required NBT import plans E-ELEC, TOU-D-PRIME, EV-TOU-5. Adoption savings include the plan transition. Report capacities; zero PV and storage cannot establish an installation benefit.",
+      "tariff_decomposition": "Use the saved optimizer Load Profile and timestamps, verified against the source profile's rotation to January 1. Bill this aligned load without exports on both the NBT schedule and the retail plan. Define calendar term H=B_retail,original_calendar-B_retail,2026; plan term T=B_retail,2026-B_NBT,no_DER; equipment term Q=B_NBT,no_DER-B_NBT,optimized-K_PV-K_battery. Then S=H+T+Q and P=delta_H+delta_T+delta_Q. Check Q is nonnegative within its numerical bound, because zero capacity is feasible on the same NBT load/calendar. This is not a tariff-eligibility or cheapest-eligible-plan comparison. The initial unaligned attribution diagnostic is archived as invalid; primary four-case costs are unchanged.",
+      "calendar_limitation": "Existing retail billing uses the source profile dates, while NBT uses 2026. Rebilling retail on the optimizer's aligned 2026 calendar changes individual no-solar bills by at most $8.13/year and the package effect by at most $3.64/year in this run. All 47 package-effect signs remain positive; its median becomes $309.11 rather than $307.60. Calendar unification remains a reporting improvement, not a new optimization requirement.",
+      "validation": "Require all four unique cells per expected county, finite costs and capacities, totals that reconcile to their components, zero DER costs/sizes in no-solar cases, paired utility/plan/source/vintage/battery-bound/charging/export/cost-tolerance metadata, identical weather files, and 8760 finite nonnegative demand observations per household. Exact bill columns and scenario timestamps are checked before collection; no latest-file or unmatched-plan substitution is allowed.",
+      "numerical_bound": "For B-D and the package effect, u=gap_gas+gap_electric+abs(d_gas)+abs(d_electric)+0.0001 USD/year. Each gap is the recorded solver certificate gap. d is reported PV/storage annual capital plus electricity bill minus saved Coopt Total Cost. It captures capacity-rounding differences. The final term bounds two objectives rounded to four decimals. This is a conservative numerical cost bound, not a bound on modeling assumptions or capacities.",
+      "figure": "Plot gas/ICE adoption savings on x and electric/EV adoption savings on y. Points above the equal-savings diagonal indicate a positive package effect. Count positive effects only when they exceed u; report the unweighted median of county effects, not a difference of medians. Each axis shows epsilon+abs(d)+0.00005 USD/year numerical error bars, not confidence intervals. The renderer verifies the source receipt and records source/code/output hashes and plotted statistics.",
+      "provenance": "Record declared model SHA, reporting SHA/code hash, exact bill timestamps, matched settings, SHA-labelled completion markers, and fingerprints of capital ledgers, PV summaries, capacity summaries, weather, loads and annual bills. Reject input changes during collection. Hashes identify the collected files; generation history and overrides still depend on the isolated run record.",
+      "status": "The September 15 cost refresh at 668a07e rebuilds all 188 matched cells from the validated September 14 optimizations and bills at 11b7dba. With both systems optimized, electric/EV costs less in 8 counties and more in 39; allowing adoption to be declined gives 7 and 40. Both have median electrification savings of -415.54 USD/year. The package effect remains positive in all 47 counties, median 307.60 USD/year. All 1692 ledger rows and 188 cells reconcile to expected vehicle-only changes. The original 94 bill replays and 98 statewide checks remain evidence for the unchanged optimization and bills. See docs/research_logs/2026-09-15-cost-refresh.md. Older three-case reports and county diagnostic cost displays remain unchanged."
+    },
+    "code": [
+      "figure_builder/electrification.py:build_electrification_source",
+      "figure_builder/electrification.py:validate_electrification_costs",
+      "figure_builder/electrification.py:summarize_electrification_costs",
+      "figure_builder/charts.py:plot_matched_adoption_savings",
+      "figure_builder/electrification_figure.py:render_adoption_figure",
+      "figure_builder/tests/test_electrification.py"
     ]
   },
   "incentives.apply_pv_storage_incentives": {
     "title": "PV/Storage Incentives (Net Capex)",
     "formula": "net_capex = capex - incentive; half_incentives applies 50% of full incentive",
     "assumptions": {
-      "incentive": "full_incentives | half_incentives | no_incentives"
+      "incentive": "full_incentives | half_incentives | no_incentives",
+      "policy_regime": "This function applies the supplied incentive amounts. The appliance policy regime determines which amounts are available before this function is called."
     },
     "code": [
       "evaluations/incentives.py:apply_pv_storage_incentives"
+    ]
+  },
+  "payback.household_baseline": {
+    "title": "Household Baseline for Auxiliary Payback",
+    "formula": "For scenario s, select household b(s) from COMPARISON_BASELINE. Baseline annual operating cost = b(s) utility bills without solar + b(s) ICE operating cost for the selected county and incentive case.",
+    "assumptions": {
+      "optimized_ev": "full_electric_ev_coopt compares against baseline_ice_car_coopt.",
+      "other_ev": "full_electric_ev and baseline_ev_car compare against baseline_ice_car.",
+      "other_scenarios": "Other scenarios retain the existing plain baseline comparison.",
+      "consistent_selection": "Bill savings and vehicle-ledger lookup use the same mapping. The baseline bill is always the household's no-solar bill, even when its scenario also has an optimized solar/storage solution.",
+      "scope": "This fixes household selection in Step 15. Its existing capital-summary, tariff-column selection, and missing-bill handling remain separate legacy conventions. Publication EAC uses its own explicit matched-case collector.",
+      "result_status": "The September 15 cost refresh at 668a07e rebuilds 141 matched optimized-EV payback rows. Independent checks reconcile every selected bill, one vehicle per incentive case, and the current capital-summary formula. The legacy first-column tariff selection, capital numerator, permissive missing-bill handling, and $0.01 denominator for nonpositive savings remain outside the publication EAC method. Every required bill was independently verified for this refresh. Older archived payback outputs remain unchanged."
+    },
+    "validation": "Saved-file fixtures cover the optimized EV scenario with and without unrelated plain-baseline files. Independent expected totals check all three incentive cases. Direct bill tests also cover the existing EV mappings and an appliance-only scenario.",
+    "code": [
+      "pipeline/steps/step15_payback_periods.py:COMPARISON_BASELINE",
+      "pipeline/steps/step15_payback_periods.py:calculate_annual_savings",
+      "pipeline/steps/step15_payback_periods.py:calculate_payback_periods",
+      "tests/vehicle_ledger_projection_test.py"
     ]
   },
   "payback.choose_annual_savings": {
@@ -176,8 +251,9 @@
     "title": "Tariff Plan Selection (Electricity)",
     "assumptions": {
       "variant": "nem3 filters to columns ending with _NEM3; retail filters to non-NEM3 electricity columns",
-      "plan_preference": "ordered substrings matched against electricity.* columns",
-      "fallbacks": "first numeric electricity column, then first numeric in row, then 0.0"
+      "plan_preference": "Ordered substrings matched against numeric electricity.* candidates. A preference must match exactly one candidate; an ambiguous match raises ValueError.",
+      "single_candidate": "A single numeric candidate is accepted even if no preference matches it.",
+      "errors": "Rejects non-Series inputs, unknown variants, missing electricity columns, no numeric candidates, and unresolved multiple candidates. It does not select by column order or substitute zero."
     },
     "data_sources": {
       "row": "results row with electricity.* columns"
@@ -185,21 +261,169 @@
     "code": [
       "evaluations/tariffs.py:select_row_value_for_plan"
     ],
-    "notes": "This selector is permissive; strict selection is enforced in some downstream helpers."
+    "notes": "This selects an existing reported bill. Tariff calculation and credit settlement are separate methods below."
+  },
+  "tariffs.nbt_shared_accounting": {
+    "title": "Annual NBT Research Accounting",
+    "formula": "B = F + N + sum_p max(C_p - E_p, 0); C_p = sum_h w_h i_h r_imp[p,h]; E_p = sum_h w_h x_h r_exp[p,h].",
+    "assumptions": {
+      "scenario": "Bundled service, standard non-equity customer, 2026 NBT vintage and billing year; retail tariff snapshot 2026-08-09.",
+      "credit_pools": "SCE combines eligible generation and delivery charges. PG&E and SDG&E retain separate component pools. Base credits cannot offset fixed or non-bypassable charges.",
+      "annual_settlement": "Aggregate eligible charges and base credits annually, then settle each pool once. ACC Plus, monthly banks, opening balances, surplus adjustments, and future carryover are outside this research calculation. Unused credits have zero future value.",
+      "energy_domain": "Weighted annual exports must not exceed weighted annual imports. Numeric reporting enforces the same domain as optimization; NBT does not load surplus-payment rates.",
+      "numerical_equality": "Annual excess exports at or below 1e-6 kWh are treated as zero surplus. Research validation rejects larger excesses without changing meter flows. The solver imposes the exact annual energy inequality.",
+      "scope": "Annual settlement is an explicit research approximation, not a reconstruction of monthly utility statements. It can reduce SDG&E costs relative to the former no-backward-offset convention.",
+      "status": "All three approved simplifications are implemented. The core paper scenarios were regenerated at 8a98b96 for 47 counties and 8760 hours; all 141 annual bills reconcile within $0.001. Other policy and price sensitivities were not rerun. See docs/research_logs/2026-09-11.md for claim boundaries."
+    },
+    "data_sources": {
+      "tariff_inputs": "data/tariffs/README.md and import/export source manifests; utility pool evidence in docs/HOUSEHOLD_COST_RECONCILIATION.md",
+      "worked_examples": "tests/fixtures/nbt_monthly_reference.json; docs/HOUSEHOLD_COST_RECONCILIATION.md"
+    },
+    "code": [
+      "tariffs/nbt.py:NBTAnnualTerms",
+      "tariffs/nbt.py:settle_annual_credits",
+      "tariffs/nbt.py:calculate_nbt_bill"
+    ],
+    "notes": "Earned export credits are not automatically savings. Applied and unused annual credits are reported separately. The monthly reference engine and tests remain in Git at 860949e; frozen examples preserve old expected values."
+  },
+  "optimization.solar_storage": {
+    "title": "Implemented Solar and Storage Sizing Objective",
+    "formula": "Minimize annualized PV cost + annualized battery cost + modeled electricity bill + specified battery-throughput cost.",
+    "assumptions": {
+      "decisions": "Continuous PV capacity in kW, battery energy capacity in kWh, battery power in kW, and hourly operation. Appliance and vehicle choices are fixed by the scenario. Zero PV and zero storage are feasible choices in free sizing. Continuous sizing does not enforce minimum commercial unit sizes.",
+      "physical_constraints": "Conserve energy; enforce load balance, battery power and charge limits, and one meter direction per interval. Central runs prohibit grid charging and allow battery export.",
+      "grid_charging_sensitivity": "The existing optional branch permits grid charging and tracks separate solar-origin and grid-origin stored energy. Both can supply household demand; only solar-origin energy can be exported. Charge purchases enter annual billing and the annual import/export cap. The completed September 17 sensitivity covers 47 counties and both matched households, holding loads, weather, tariffs, costs, research sizing bounds, and full-year chronology fixed. All 92 PG&E/SCE cases select zero storage within $1/year of optimal and use no grid charging; the maximum remaining possible benefit is $0.980842/year. Explicit separate San Diego runs allow a $30/year gap and establish certified savings ranges of approximately $29.16-$44.16/year for gas/ICE and $57.27-$85.14/year for electric/EV. Their feasible 1.50 and 2.87 kWh batteries are not $1-converged optimal sizes. See docs/research_logs/2026-09-17-grid-charging.md for selection and validation. This modeled dispatch rule does not establish utility interconnection approval or isolate tariff causality from county load and weather differences.",
+      "grid_charging_validation": "Twelve analytical checks across the three utilities verify charging costs and losses, prohibit grid-origin exports even under high export credits, permit solar exports alongside grid charging for household use, and allow expensive storage to be declined. The existing focused suite passed 157 tests before additions; the combined suite passed 169. All 94 full-year cases passed matched-input, physical, energy-origin, and bill checks. A separate readback reconciles all 94 serialized bills and origin balances. Savings lie between max(0, L_off-U_on) and U_off-L_on, with $0.0001 baseline serialization allowance. If a new candidate never charges from the grid, it is feasible under both rules and tightens the savings ceiling to its own cost gap plus $0.000001. Existing tests remain unchanged.",
+      "sizing_domain": "Default optimized battery ceiling 40 kWh, power at most 1C, and available annual PV generation at most 150% of load for NBT or 100% for NEM 2. NBT also requires weighted annual exports <= weighted annual imports. Exports include solar and battery flows; imports include household supply and any permitted grid charging. Fixed designs face the same cap and can curtail unused generation. County reporting and preflight reject profiles above the cap.",
+      "chronology": "Full-year 8760-hour runs have cyclic annual battery charge. Weighted 12x24 sensitivities close each representative day's battery cycle and weight annual dollars and energy by days per month.",
+      "solver": "NBT and NEM 2 use HiGHS by default with SciPy >=1.16.1, the validated minimum version. The earlier SciPy 1.11.4 wrapper drops the absolute-gap setting. CBC can be selected explicitly. NBT annual credit accounting adds one continuous remaining-charge variable per eligible pool, constrained to be nonnegative and at least annual charges minus annual credits. Financial credit accounting needs no binary variables. Physical meter-direction binaries remain. After any first-round NBT meter violation, add constraints for all price-risk hours (export >= import within 1e-9), as well as observed violations, where physical bounds permit both directions. Annual credit saturation can hide risky hours until later rounds. A valid first relaxation adds no meter binaries. Non-NBT models retain the existing more-than-96-violations trigger. This changes constraint-generation order, not the objective, feasible set, time budget, or acceptance checks. The matched run's San Diego gas override is now the standard NBT path.",
+      "solver_precision": "Default epsilon = $1/year. Accept only a physically valid, replayed objective C with 0 <= C - L <= epsilon, where L is the strongest certified lower bound across solver rounds. Dollar comparisons allow 1e-6 for floating-point roundoff. HiGHS and CBC use an absolute MIP gap and zero relative gap. CBC printed lower bounds are adjusted downward for display rounding. The certificate uses full-precision capacities; downstream capacity rounding is separate. A cost bound does not guarantee identical capacities or an unchanged battery-adoption threshold. A tighter tolerance is configurable.",
+      "meter_constraint_validation": "The three-hour regression reproduces a hidden second violation: batching takes two solves instead of three and preserves the independently calculated $1.60 bill. In the paired 8760-hour benchmark based on 0d0e9ac, San Diego gas changes from a 314-second failure to a 35-second success; electric/EV changes from 96 to 37 seconds. Alameda and Los Angeles gas cases increase from 169 to 187 and 161 to 168 seconds. Accepted objectives and capacities match; all four revised bills replay exactly and have cost gaps below $1/year. These are single measurements, not a statewide speedup or runtime guarantee. See analysis_results/sd_gas_runtime_0d0e9ac/README.md.",
+      "solver_budget": "Config.coopt_solver (SolverOptions) selects the backend, annual cost gap, and a default 300-second budget per sizing/dispatch problem across model construction and all meter rounds. SolverRun owns that shared deadline, backend selection, round certificates, and final cost-bound validation. Step 9b separately constructs the model and validates physical and billing results. Data preparation is outside that budget; each optional sensitivity solve has a separate budget. Solver time limits are cooperative and finalization can add overhead. A timeout without a physically valid candidate and sufficient cost certificate fails clearly. No automatic backend retry occurs. Step 9b saves settings, elapsed time, and bounds in the capacity CSV and coopt_solver_<county>.json. The 8a98b96 publication results retain their original precision and runtimes.",
+      "bill_replay": "The NBT result is replayed through numeric shared accounting; a bill discrepancy above $0.001 is rejected. Tests reconcile capital formulas using full-precision capacities. Persisted capacity CSVs still round to two decimals. The core rerun at 8a98b96 had a maximum annual capital difference of $1.37 in San Mateo; all 141 annual bills reconciled. Preserving artifact precision is a separate follow-up."
+    },
+    "code": [
+      "pipeline/steps/step9b_cooptimize_core.py:_solve_lp",
+      "pipeline/steps/step9b_cooptimize_core.py:build_monthly_hourly_inputs",
+      "pipeline/solver.py:SolverRun",
+      "tariffs/models.py:require_annual_export_cap"
+    ]
+  },
+  "tariffs.nem2_counterfactual": {
+    "title": "Implemented NEM 2 Comparison at 2026 Retail Rates",
+    "formula": "Annual bill = max(annual eligible retail import charges - annual retail export credits, 0) + interval non-bypassable charges + monthly net-consumption charges + fixed charges - net-surplus compensation.",
+    "assumptions": {
+      "comparison": "Hold the 2026 retail-rate snapshot and household profiles fixed while changing export compensation. This is not a historical NEM 2 bill reconstruction.",
+      "settlement": "Apply source-selected utility credit exclusions, monthly positive net-consumption recovery charges, annual retail-dollar netting, credit expiry, and net-surplus compensation.",
+      "policy_matrix": "Four counties and two independent axes: NBT versus NEM 2 compensation, and post-ITC versus 2025 ITC capital costs. The four-cell comparison uses the common weighted 12x24 resolution."
+    },
+    "code": [
+      "tariffs/nem2.py:calculate_nem2_bill",
+      "tariffs/nem2.py:NEM2OptimizationTerms",
+      "figure_builder/policy_cases.py:POLICY_CASES"
+    ]
+  },
+  "research.approved_annual_accounting": {
+    "title": "Implemented Annual NBT Simplifications",
+    "formula": "B = F + N + sum_p max(C_p - E_p, 0); C_p = sum_h w_h i_h r_imp[p,h]; E_p = sum_h w_h x_h r_exp[p,h].",
+    "assumptions": {
+      "status": "All three changes are implemented. The September 11 core rerun at 8a98b96 validates the three paper scenarios across 47 counties at 8760 hours. ITC, battery-price, and NEM 2 sensitivities retain earlier versions. Current findings and claim implications are recorded in docs/research_logs/2026-09-11.md.",
+      "changes": "Exclude ACC Plus; constrain annual exported kWh to be no greater than annual imported kWh; settle base credits annually within the existing utility credit pools.",
+      "preserved": "Hourly prices and dispatch, non-bypassable and fixed charges, SCE's combined pool, PG&E/SDG&E component restrictions, and zero additional value for unused credits beyond the modeled year.",
+      "limitations": "Omitting the bonus can understate eligible-household savings. With fixed dispatch and zero opening banks, its current-year benefit is at most annual exported kWh times the bonus rate. Standard 2026 rates are PG&E $0.0088/kWh, SCE $0.016/kWh, SDG&E $0/kWh; this bound does not establish unchanged optimal sizing. The research export cap excludes annual net-exporting dispatches and can affect the electrification comparison when binding. Compare affected claims with pre-cap revision 9b61415 under matched assumptions. Annual timing can overstate SDG&E savings relative to the former no-backward-offset convention. At fixed flows, the difference is bounded by the sum across pools of min(unused annual-end credit, earlier eligible payments) in that prior model."
+    },
+    "notes": "See docs/RESEARCH_METHODS.md for equations and validation boundaries. ACC Plus source rates remain archived in data/tariffs/acc_plus_rates.csv. They are not optional inputs to the research model."
+  },
+  "vehicles.maintenance_allowances": {
+    "title": "Constant Vehicle Repair and Maintenance Allowances",
+    "formula": "M_vehicle = sum(miles_in_odometer_band * repair_and_maintenance_USD_per_mile) / reference_service_life_years. Apply M_vehicle as a constant annual operating allowance.",
+    "assumptions": {
+      "reference_annual_miles": 12000,
+      "reference_service_life_years": 12,
+      "reference_initial_odometer_miles": 0,
+      "odometer_band_upper_bounds_miles": [
+        50000,
+        100000,
+        200000
+      ],
+      "miles_used_per_band": [
+        50000,
+        50000,
+        44000
+      ],
+      "ice_usd_per_mile_by_band": [
+        0.028,
+        0.06,
+        0.079
+      ],
+      "bev_usd_per_mile_by_band": [
+        0.012,
+        0.028,
+        0.043
+      ],
+      "ice_annual_allowance_usd": 656.3333333333334,
+      "bev_annual_allowance_usd": 324.3333333333333,
+      "scope": "Each appliance stores its unrounded fixed allowance. Reference mileage matches the current ICE fuel model. EV charging profiles are independent and unchanged. Custom mileage or service life requires an explicit revised allowance; constructor overrides, including zero, are retained.",
+      "limitations": "Use the 2020 report source-dollar rates without inflation adjustment. The allowances omit county/model variation and repair timing. High-mileage BEV evidence is limited. At 7%, replacing the flat mean with an equivalent annual cost of 12 yearly mileage-band payments reduces the ICE-minus-EV maintenance difference by $21.93/year. This is a maintenance-only timing check, not a full study-horizon uncertainty bound."
+    },
+    "data_sources": {
+      "maintenance_rates": "Consumer Reports (2020), Table 2.1: https://advocacy.consumerreports.org/wp-content/uploads/2020/09/Maintenance-Cost-White-Paper-9.24.20-1.pdf",
+      "reference_mileage": "Existing ICE fuel calculation: helpers/gasoline_cost_helper.py:get_annual_vmt_for_county. The 12000-mile value is a reference assumption, not measured county mileage.",
+      "derivation_and_prior_inputs": "docs/research_logs/2026-09-15.md"
+    },
+    "code": [
+      "appliances/ice_vehicle.py:DEFAULT_ANNUAL_MAINTENANCE_COST_USD",
+      "appliances/electric_vehicle.py:DEFAULT_ANNUAL_MAINTENANCE_COST_USD",
+      "tests/vehicle_maintenance_assumptions_test.py"
+    ],
+    "validation": "Isolated checks reconcile all 1692 ledger rows across 47 counties and three incentive cases against the prior accounting-correction ledgers. Exactly 141 ICE and 141 EV rows change in maintenance, operating, and lifetime totals; all other fields match. Six actual Step 14 cases pass. See analysis_results/vehicle_maintenance_c5d6b37/README.md."
   },
   "vehicles.vehicle_annual_adders_from_ledger": {
     "title": "Vehicle O&M Adders from Ledger",
-    "formula": "Sum annual_operating_cost by county and vehicle type",
+    "formula": "For one explicitly requested county c and incentive case s: ICE annual fuel USD = annual driving miles / fuel efficiency mpg * gasoline USD/gallon; ICE annual operating USD = fuel + maintenance + insurance; EV annual operating USD = maintenance + insurance. Select ledger rows for (c, s) before reading either vehicle cost. Residential charging is already in the electricity bill.",
     "assumptions": {
       "ev_rows": "appliance_category='electric' AND appliance_type='vehicle_charging'",
       "ice_rows": "appliance_category='gas' AND appliance_type='vehicle_fuel'",
-      "missing_columns": "filled with 0.0 or '' for safe grouping"
+      "charging_scope": "Residential Level 1 and Level 2 charging enter home load and the electricity bill. Public/workplace and DC fast charging are intentionally excluded from home load and modeled EV costs. Reported costs therefore exclude this transport expenditure. A separate expense could be added in future after source verification; it is not required for publication within the stated scope. A constant expense cancels within each household's solar/storage adoption comparison.",
+      "case_selection": "The caller must provide county_slug and incentive_scenario. Incentive cases are alternative evaluations of one household, not additive observations. Step 15, publication EAC, and the sweep experiments use the shared selector.",
+      "absence_and_errors": "A selected case can omit EV or ICE, which gives zero for that absent vehicle type. The requested county and incentive case must exist. Missing schema columns, duplicate vehicle rows within the selected case, wrong vehicle categories, and nonnumeric or nonfinite operating costs raise errors. Explicit zero costs and finite negative adjustments remain valid.",
+      "ice_operating_inputs": "Default ICE fuel efficiency is 24.25 mpg and annual insurance is $1836; EV annual insurance is $2040. Maintenance uses the fixed ownership-period allowances documented in vehicles.maintenance_allowances. Explicit overrides, including zero, are preserved.",
+      "ledger_integration": "Step 14 copies ICE fuel, maintenance, insurance, and annual operating total from get_cost_breakdown. The shared projection reads one exact county/incentive case. This prevents Step 15 from summing the three alternative incentive rows and prevents sweeps from replacing invalid vehicle data with zero.",
+      "validation": "Focused tests use three deliberately different incentive-case costs to verify helper selection, Step 15 savings and payback, unchanged publication EAC behavior for valid inputs, and propagated sweep errors. The saved Alameda comparison selects one row instead of the three-row county sum. No dispatch optimization is required because this change reads existing ledger costs.",
+      "correction_status": "The September 15 matched cost refresh at 668a07e applies corrected ICE arithmetic, revised ICE/EV maintenance, and Alpine's explicit proxy to both households. Relative to original September 14 costs, gas/ICE falls by 543.666666666667 USD/year except Alpine, which rises by 1727.178694158076 USD/year; electric/EV rises by 202.773333333333 USD/year everywhere. These changes cancel within adoption differences. Step 15's incentive-selection fix affects auxiliary payback; publication EAC already selected its incentive case. Original archived results remain unchanged. See docs/research_logs/2026-09-15-cost-refresh.md."
     },
     "data_sources": {
       "ledger_df": "capital_costs_<scenario>_<housing>.csv"
     },
     "code": [
-      "evaluations/vehicles.py:vehicle_annual_adders_from_ledger"
+      "appliances/ice_vehicle.py:get_cost_breakdown",
+      "pipeline/steps/step14_build_capital_costs_lifetimes_incentives.py:build_capex_ledger_df",
+      "evaluations/vehicles.py:vehicle_annual_adders_from_ledger",
+      "pipeline/steps/step15_payback_periods.py:calculate_payback_periods",
+      "tests/vehicle_cost_accounting_test.py",
+      "tests/vehicle_ledger_projection_test.py"
+    ]
+  },
+  "vehicles.gasoline_prices": {
+    "title": "County Gasoline Prices and Explicit Alpine Proxy",
+    "formula": "annual_fuel_cost_USD = annual_miles / fuel_efficiency_mpg * gasoline_price_USD_per_gallon",
+    "assumptions": {
+      "price_basis": "The county table was imported in commit d86887e on August 6, 2025. Simon attributes it to AAA. The exact observation date is not retained.",
+      "alpine_price_usd_per_gallon": 4.589,
+      "alpine_basis": "Researcher-approved fixed median of the other 57 positive county prices in the existing table. This is an explicit proxy, not an observed Alpine price or a runtime fallback.",
+      "failure_rules": "Missing counties and nonnumeric, nonfinite, zero, or negative gasoline prices raise ValueError. Boolean values are invalid. Other county prices are unchanged.",
+      "mileage_and_efficiency": "The existing 12000-mile annual reference and 24.25-mpg ICE default are unchanged. This change does not revise mileage selection or fuel-efficiency validation.",
+      "effect": "Alpine fuel cost rises from zero to 12000 / 24.25 * 4.589 = 2270.845360824742 USD/year. Each 1 USD/gallon difference changes annual fuel cost by 494.845360824742 USD. Vehicle expenses cancel within each household's solar/storage adoption comparison.",
+      "limitations": "An unweighted county median does not establish Alpine's local price. The source snapshot date remains unknown. The September 15 matched cost refresh applies the proxy; older archived reports retain their original inputs."
+    },
+    "data_sources": {
+      "catalogue": "docs/data_sources.yaml:aaa_county_gasoline_prices",
+      "attributed_source": "https://gasprices.aaa.com/?state=CA"
+    },
+    "code": [
+      "helpers/gasoline_cost_helper.py:get_gasoline_cost_for_county",
+      "helpers/gasoline_cost_helper.py:calculate_annual_fuel_cost",
+      "tests/gasoline_cost_helper_test.py"
     ]
   },
   "lcoe.present_value_energy": {
@@ -247,7 +471,7 @@
     "formula": "LCOE = PV(costs) / PV(energy)",
     "assumptions": {
       "annual_costs": "include t=0 capex as first element",
-      "annual_generation_kwh": "energy per year; prepend 0 for t=0 to align with NPV"
+      "annual_generation_kwh": "Caller supplies energy for years 1 through N. The function prepends the year-0 zero internally; callers must not prepend another zero."
     },
     "code": [
       "evaluations/lcoe.py:lcoe_from_schedules"
@@ -260,11 +484,12 @@
       "rate": "$3.30/W, CPUC-adopted 2023 California solar cost (docs.cpuc.ca.gov/PublishedDocs/Published/G000/M499/K921/499921246.PDF). Reconciles NREL ATB ($2.34/W, too low) vs. LBNL Tracking the Sun 2019 ($3.80/W, too high); accounts for panel upgrades, delays, inflation."
     },
     "assumptions": {
-      "sizing_vs_reporting": "SolarSystemAppliance.per_kw_cost() is the single source of truth for this rate — the LP's sizing objective (step9b) must use the same value the reporting layer (step14) uses, or the LP optimizes against a price it isn't actually charged. Bug found and fixed 2026-07-06."
+      "sizing_vs_reporting": "per_kw_cost() defines gross unit cost. per_kw_cost_net() applies the selected policy regime and incentive-capture scenario for sizing; reporting uses those same appliance cost definitions. Shared unit prices do not alone establish shared capital annualization."
     },
     "code": [
       "appliances/solar_system.py:SolarSystemAppliance",
-      "appliances/solar_system.py:per_kw_cost"
+      "appliances/solar_system.py:per_kw_cost",
+      "appliances/solar_system.py:per_kw_cost_net"
     ]
   },
   "appliances.battery_storage": {
@@ -274,12 +499,69 @@
       "rate": "NREL ATB 2024 moderate scenario, residential 5kW/12.5kWh system, as used in CEC-200-2024-011 (energy.ca.gov/sites/default/files/2024-07/CEC-200-2024-011.pdf). ATB via atb.nrel.gov/electricity/2024/data."
     },
     "assumptions": {
-      "sizing_vs_reporting": "BatteryStorageAppliance.per_kwh_cost() is the single source of truth for this rate — see appliances.solar_system note. Bug found and fixed 2026-07-06: LP previously sized against a stale $800/kWh default while this reporting rate was ~$1,461/kWh gross."
+      "sizing_vs_reporting": "per_kwh_cost() defines gross unit cost; per_kwh_cost_net() supplies the policy-adjusted sizing price. Step 9b and the statewide EAC collectors also use the same battery annualization coefficient; see eac.alpha_batt_npv."
     },
     "code": [
       "appliances/battery_storage.py:BatteryStorageAppliance",
-      "appliances/battery_storage.py:per_kwh_cost"
+      "appliances/battery_storage.py:per_kwh_cost",
+      "appliances/battery_storage.py:per_kwh_cost_net"
     ]
+  },
+  "appliances.federal_credits": {
+    "title": "Federal Purchase-Credit Rule Registry",
+    "formula": "Policy records only: 25D percentage and battery eligibility; 25C percentage and shared annual cap; 30D maximum per qualifying vehicle. These records do not calculate a household award.",
+    "assumptions": {
+      "scope": "Homeowner-owned solar/storage, heat pumps and heat-pump water heaters, and purchased new vehicles for the declared 2025/2026 comparisons. Other tax-credit categories and federal/state/local rebate programs are outside this registry.",
+      "authority": "Immutable records in appliances/federal_credits.py own amounts, dates, eligible costs, tax treatment, primary-source URLs, and implementation notes. Existing regime helpers import these records. The battery constructor reads the registry's capacity minimum.",
+      "unchanged_behavior": "Registry extraction preserves existing regime amounts, equipment costs, capture fractions, optimization, and reporting. It does not enforce the shared household cap, optimizer battery eligibility, tax liability, credit timing, or EV buyer/vehicle eligibility.",
+      "approved_pending_comparison": "Compare no federal credits, solar/storage credits alone, and the three modeled federal credit families for explicitly eligible purchases. The isolated household amount calculation is implemented in evaluations/federal_credits.py. Pipeline integration, optimizer eligibility, and initial-purchase cash-flow accounting remain pending. Existing non-tax rebate paths, including county heat-pump rebates, still require explicit exclusion from that future comparison."
+    },
+    "code": [
+      "appliances/federal_credits.py:FederalCredit",
+      "appliances/federal_credits.py:FEDERAL_CREDITS",
+      "appliances/incentive_policy.py:federal_itc_fraction",
+      "appliances/battery_storage.py:BatteryStorageAppliance"
+    ]
+  },
+  "evaluations.federal_credits": {
+    "title": "Conditional Household Federal Purchase Credits",
+    "formula": "T_pv = f_25D * B_pv; T_storage = f_25D * B_storage * 1[K >= K_min]; T_heat = min(f_25C * (B_space + B_water), annual_cap_25C); T_vehicle = V. Excluded credit families are zero. Total purchase credit = T_pv + T_storage + T_heat + T_vehicle.",
+    "assumptions": {
+      "units": "B values are eligible installed purchase costs in dollars after required basis adjustments and before these credits. K is storage capacity in kWh. V is an explicitly supplied eligible vehicle credit in dollars, no greater than the registry's maximum. Outputs are potential purchase credits in dollars, not annual savings or guaranteed receipts.",
+      "policy_source": "All percentages, the shared heat-pump cap, storage capacity minimum, and vehicle maximum come from appliances/federal_credits.py.",
+      "cases": "FederalCreditCase selects no federal credits, solar/storage federal credits alone, or all three modeled credit families. It selects credit families rather than a calendar year.",
+      "eligibility": "The caller must establish eligible purchase dates and legal buyer/product requirements. The storage calculation also enforces the capacity threshold. The model covers one taxpayer and one eligible tax year; no other purchase consumes the heat-pump cap. Tax liability, carryforward, and receipt timing are outside this amount calculation.",
+      "scope": "One initial purchase bundle. No replacement credits, state/local rebates, federally funded rebates, or other tax-credit categories are added. Inputs must not be mixed-incentive net costs. The shared heat-pump amount is not allocated back to individual appliances.",
+      "failure_rules": "All six numeric inputs are required and must be finite, nonnegative real numbers, excluding booleans. Validate them even for excluded credit families. Reject positive storage basis with zero capacity, vehicle credits above the maximum, and non-enum cases. Explicit zero represents absence or ineligibility; missing is an error.",
+      "integration_status": "Isolated calculation and tests are implemented. Existing appliance, pipeline, optimizer, and reporting behavior remain unchanged. Integration and dated credit cash-flow accounting are pending."
+    },
+    "validation": "Worked bundle: eligible PV $20,000, storage $10,000 at 10 kWh, space heat $12,000, water heat $4,000, and vehicle credit $7,500 produces $0 / $9,000 / $18,500 across the three cases. The combined heat-pump credit is $2,000 rather than the incorrect independent-cap total of $3,200. Tests cover cap saturation, battery thresholds, declared vehicle amounts, zeros, malformed inputs, and total reconciliation.",
+    "code": [
+      "evaluations/federal_credits.py:FederalCreditCase",
+      "evaluations/federal_credits.py:HouseholdFederalCredits",
+      "evaluations/federal_credits.py:evaluate_federal_purchase_credits",
+      "tests/household_federal_credits_test.py"
+    ]
+  },
+  "appliances.incentive_policy": {
+    "title": "Implemented Policy Regimes and Incentive Capture",
+    "formula": "Net PV/storage unit cost = gross unit cost * (1 - policy ITC fraction * incentive-capture fraction).",
+    "assumptions": {
+      "axes": "The policy regime determines available incentives. Full, half, or no incentives determines capture of those available amounts, using fractions 1, 0.5, or 0.",
+      "post_itc_2026": "Default modeled regime. Federal PV/storage, heat-pump, water-heater, and EV credits are zero. Other separately modeled incentives are not automatically zero.",
+      "itc_2025": "PV/storage unit-cost sensitivity uses the modeled 30% ITC. The appliance policy module also gates separate 25C and 30D credits for scenarios that use them.",
+      "net_unit_prices": "Full capture: post-ITC PV $3,300/kW and battery $1,460.64/kWh; 2025 ITC PV $2,310/kW and battery $1,022.448/kWh.",
+      "eligibility_boundary": "The battery appliance constructor checks a 3 kWh minimum for its ITC. The optimizer's unit-price helper prices a full unit and applies that rate continuously to sized capacity; the 2025 sizing sensitivity does not model the minimum as a separate discrete constraint.",
+      "appliance_cap_boundary": "The policy registry documents that the 2025 25C model applies its cap independently to space and water heating, rather than enforcing a combined household cap. This is follow-up work for affected 2025 whole-household comparisons; the default post-ITC regime has no 25C credit."
+    },
+    "code": [
+      "appliances/incentive_policy.py:PolicyRegime",
+      "appliances/incentive_policy.py:federal_itc_fraction",
+      "appliances/incentive_policy.py:federal_25c_credit",
+      "appliances/incentive_policy.py:federal_30d_amount",
+      "figure_builder/pricing.py:live_prices"
+    ],
+    "notes": "These are the repository's declared policy cases. Federal tax-credit rules and sources are maintained in appliances/federal_credits.py. Regime selection and other incentive provenance remain in appliances/incentive_policy.py."
   },
   "appliances.electric_heating": {
     "title": "Heat Pump Space Heating Installed Cost (per county)",

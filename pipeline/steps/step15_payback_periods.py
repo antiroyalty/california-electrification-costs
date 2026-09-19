@@ -28,6 +28,10 @@ Output:
 
 import os
 import pandas as pd
+from evaluations.vehicles import (
+    VehicleLedgerValidationError,
+    vehicle_annual_adders_from_ledger,
+)
 from helpers.main_helpers import log, slugify_county_name, norcal_counties, socal_counties, central_counties, get_scenario_path
 from helpers.maps_helpers import get_latest_csv_file
 from helpers.utility_helpers import get_utility_for_county
@@ -35,7 +39,8 @@ from helpers.utility_helpers import get_utility_for_county
 COMPARISON_BASELINE = {
     "baseline_ev_car": "baseline_ice_car",
     "full_electric_ev": "baseline_ice_car",
-    # everything else falls back to plain "baseline"
+    "full_electric_ev_coopt": "baseline_ice_car_coopt",
+    # Other scenarios retain the plain household baseline.
 }
 
 def load_capital_costs(base_input_dir: str, scenario: str, housing_type: str) -> pd.DataFrame:
@@ -175,36 +180,6 @@ def pv_adder_for(county_slug: str, incentive_scenario: str, pv_net_df: pd.DataFr
     col = col_map.get(key)
     return float(row.iloc[0][col]) if col in row.columns else 0.0
 
-def vehicle_annual_adders_from_ledger(ledger_df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Returns a DataFrame indexed by county_slug with two columns:
-      ev_operating  – annual O&M for electric vehicle rows (vehicle_charging)
-      ice_operating – annual O&M for ICE vehicle rows (vehicle_fuel)
-    If a scenario doesn't contain one of the vehicles, that column will be 0 for all counties.
-    """
-    df = ledger_df.copy()
-
-    # Guard for missing columns (older CSVs)
-    for col in ["county_slug", "appliance_category", "appliance_type", "annual_operating_cost"]:
-        if col not in df.columns:
-            df[col] = 0.0 if col != "appliance_type" else ""
-
-    # EV O&M lives in electric / vehicle_charging rows
-    ev = (df[(df["appliance_category"] == "electric") & (df["appliance_type"] == "vehicle_charging")]
-            .groupby("county_slug", as_index=False)["annual_operating_cost"].sum()
-            .rename(columns={"annual_operating_cost": "ev_operating"}))
-
-    # ICE O&M lives in gas / vehicle_fuel rows
-    ice = (df[(df["appliance_category"] == "gas") & (df["appliance_type"] == "vehicle_fuel")]
-             .groupby("county_slug", as_index=False)["annual_operating_cost"].sum()
-             .rename(columns={"annual_operating_cost": "ice_operating"}))
-
-    out = pd.DataFrame({"county_slug": pd.unique(df["county_slug"])})
-    out = (out.merge(ev,  on="county_slug", how="left")
-              .merge(ice, on="county_slug", how="left")
-              .fillna({"ev_operating": 0.0, "ice_operating": 0.0}))
-    return out.set_index("county_slug")
-
 def calculate_annual_savings(base_input_dir: str, county: str, scenario: str, housing_type: str):
     """
     Calculate annual savings for a county and scenario.
@@ -218,8 +193,11 @@ def calculate_annual_savings(base_input_dir: str, county: str, scenario: str, ho
     Returns:
         Tuple of (baseline_cost, scenario_cost, solar_cost, savings_scenario_only, savings_with_solar)
     """
-    # 1. Baseline costs (no electrification)
-    baseline_annual_cost = load_annual_costs(base_input_dir, county, "baseline", housing_type, with_solar=False)
+    # Use the same household baseline as the vehicle-cost ledger.
+    baseline_name = COMPARISON_BASELINE.get(scenario, "baseline")
+    baseline_annual_cost = load_annual_costs(
+        base_input_dir, county, baseline_name, housing_type, with_solar=False
+    )
     
     # 2. Scenario costs (electrification only, no solar)
     scenario_annual_cost = load_annual_costs(base_input_dir, county, scenario, housing_type, with_solar=False)
@@ -499,12 +477,6 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
         baseline_name = COMPARISON_BASELINE.get(scenario, "baseline")
         baseline_df  = load_capital_costs(base_input_dir, baseline_name, housing_type)
 
-        scenario_vehicle_adders = vehicle_annual_adders_from_ledger(scenario_df)
-        baseline_vehicle_adders = vehicle_annual_adders_from_ledger(baseline_df)
-
-        print("scenario_vehicle_adders", scenario_vehicle_adders)
-        print("baseline_vehicle_adders", baseline_vehicle_adders)
-        
         # Legacy recompute (kept for debugging only); Option A fix will not rely on this
         capital_summary = summarize_incremental_capex_against_baseline(scenario_df, baseline_df)
         print("capital_summary (legacy, not used for numerators)", capital_summary)
@@ -523,27 +495,18 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
         for county in counties:
             try:
                 # Calculate annual costs and savings
-                baseline_annual_cost, scenario_annual_cost, scenario_solar_annual_cost, savings_scenario_only, savings_with_solar = calculate_annual_savings(
+                (
+                    baseline_bill_annual_cost,
+                    scenario_bill_annual_cost,
+                    scenario_solar_bill_annual_cost,
+                    _,
+                    _,
+                ) = calculate_annual_savings(
                     base_input_dir, county, scenario, housing_type
                 )
 
                 county_slug = slugify_county_name(county)
                 print("county_slug", county_slug)
-
-                # Add vehicle O&M adders to the utility-bill totals
-                # Baseline uses ICE adders from the chosen baseline ledger
-                baseline_annual_cost += float(baseline_vehicle_adders.loc[county_slug, "ice_operating"]) if county_slug in baseline_vehicle_adders.index else 0.0
-                # Scenario uses EV adders from the scenario ledger
-                scenario_annual_cost += float(scenario_vehicle_adders.loc[county_slug, "ev_operating"]) if county_slug in scenario_vehicle_adders.index else 0.0
-                # Scenario + solar uses the same EV O&M adders (solar doesn't change maint/insurance)
-                scenario_solar_annual_cost += float(scenario_vehicle_adders.loc[county_slug, "ev_operating"]) if county_slug in scenario_vehicle_adders.index else 0.0
-
-                savings_scenario_only = baseline_annual_cost - scenario_annual_cost
-                savings_with_solar    = baseline_annual_cost - scenario_solar_annual_cost
-
-                # Skip if no cost data available
-                if baseline_annual_cost == 0 or (scenario_annual_cost == 0 and scenario_solar_annual_cost == 0):
-                    continue
 
                 # Option A: Use Step 14 summary numerators directly, per incentive scenario
                 caps = _capital_summary_details(base_input_dir, scenario, housing_type, county_slug)
@@ -552,6 +515,41 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
                     continue
 
                 for incentive_scenario in ["full_incentives", "half_incentives", "no_incentives"]:
+                    baseline_vehicle_adders = vehicle_annual_adders_from_ledger(
+                        baseline_df,
+                        county_slug=county_slug,
+                        incentive_scenario=incentive_scenario,
+                    )
+                    scenario_vehicle_adders = vehicle_annual_adders_from_ledger(
+                        scenario_df,
+                        county_slug=county_slug,
+                        incentive_scenario=incentive_scenario,
+                    )
+
+                    # Utility bills do not vary by capital-incentive case. Vehicle
+                    # rows do, so select the matching alternative before adding O&M.
+                    baseline_annual_cost = (
+                        baseline_bill_annual_cost
+                        + baseline_vehicle_adders.ice_operating_usd_per_year
+                    )
+                    scenario_annual_cost = (
+                        scenario_bill_annual_cost
+                        + scenario_vehicle_adders.ev_operating_usd_per_year
+                    )
+                    scenario_solar_annual_cost = (
+                        scenario_solar_bill_annual_cost
+                        + scenario_vehicle_adders.ev_operating_usd_per_year
+                    )
+                    savings_scenario_only = baseline_annual_cost - scenario_annual_cost
+                    savings_with_solar = baseline_annual_cost - scenario_solar_annual_cost
+
+                    # Skip if no cost data are available.
+                    if baseline_annual_cost == 0 or (
+                        scenario_annual_cost == 0
+                        and scenario_solar_annual_cost == 0
+                    ):
+                        continue
+
                     # Select numerator by incentive_scenario
                     if incentive_scenario == "full_incentives":
                         num_no_pv = caps.get('net_outlay_full', 0.0)
@@ -663,12 +661,16 @@ def calculate_payback_periods(base_input_dir: str, scenario: str, housing_type: 
                         'payback_period_years': payback_years
                     })
                     
+            except VehicleLedgerValidationError:
+                raise
             except Exception as e:
                 print(f"Error processing {county}: {e}")
                 continue
         
         return pd.DataFrame(payback_data)
         
+    except VehicleLedgerValidationError:
+        raise
     except Exception as e:
         print(f"Error calculating payback periods: {e}")
         log(

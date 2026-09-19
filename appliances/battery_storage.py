@@ -4,6 +4,7 @@ Battery Storage Appliance Class for Capital Cost Analysis
 
 from typing import Dict
 from appliances.electric_base import ElectricAppliance, Incentive, IncentiveScenario
+from appliances.federal_credits import FEDERAL_ITC_25D
 from appliances.incentive_policy import (
     PolicyRegime,
     DEFAULT_POLICY_REGIME,
@@ -14,11 +15,20 @@ from appliances.incentive_policy import (
 class BatteryStorageAppliance(ElectricAppliance):
     """Battery storage system (Tesla Powerwall 3)."""
 
+    BASE_UNIT_COST_USD = 18_258.0
+    UNIT_CAPACITY_KWH = 12.5
+    COST_BASIS_YEAR = 2023
+    COST_SOURCE_ID = "nrel_atb_2024_via_cec_200_2024_011"
+    COST_SOURCE_URLS = (
+        "https://atb.nrel.gov/electricity/2024/data",
+        "https://www.energy.ca.gov/sites/default/files/2024-07/"
+        "CEC-200-2024-011.pdf",
+    )
+
     def __init__(self, num_units: int = 1, lifetime_years: int = 15,
                  policy_regime: PolicyRegime = DEFAULT_POLICY_REGIME):
-        # https://atb.nrel.gov/electricity/2024/data ATB data used by CEC report https://www.energy.ca.gov/sites/default/files/2024-07/CEC-200-2024-011.pdf
-        base_unit_cost = 18258  # $18,258 per unit (2023 value)
-        capacity_per_unit = 12.5  # 12.5 kWh per unit
+        base_unit_cost = self.BASE_UNIT_COST_USD
+        capacity_per_unit = self.UNIT_CAPACITY_KWH
 
         total_cost = base_unit_cost * num_units
         total_capacity = capacity_per_unit * num_units
@@ -30,17 +40,19 @@ class BatteryStorageAppliance(ElectricAppliance):
         self.capacity_kwh = total_capacity
         self.policy_regime = policy_regime
 
-        # Federal storage ITC (IRC 25D, systems >= 3 kWh). Whether it legally exists
-        # is decided by the policy regime, not hardcoded: incentive_policy.py is the
-        # single source of truth. Under the default POST_ITC_2026 regime the credit is
-        # repealed (OBBBA, Pub. L. 119-21) and no incentive is created, so net == gross.
+        # The registry owns the capacity rule; the regime selects whether the
+        # credit is available. The optimizer's continuous-size check is separate.
         itc_fraction = federal_itc_fraction(policy_regime)
-        if total_capacity >= 3.0 and itc_fraction > 0:
+        minimum_capacity_kwh = FEDERAL_ITC_25D.minimum_storage_capacity_kwh
+        if total_capacity >= minimum_capacity_kwh and itc_fraction > 0:
             federal_tax_credit = Incentive(
                 name="federal_storage_tax_credit",
                 value=itc_fraction * 100.0,  # percent
                 unit="%",
-                description=f"Federal energy storage ITC (IRC 25D), systems >= 3 kWh, {regime_summary(policy_regime)}",
+                description=(
+                    f"Federal energy storage ITC (IRC 25D), systems >= "
+                    f"{minimum_capacity_kwh:g} kWh, {regime_summary(policy_regime)}"
+                ),
                 source_url="https://www.energy.gov/eere/solar/homeowners-guide-federal-tax-credit-solar-photovoltaics"
             )
             self.add_incentive(federal_tax_credit)

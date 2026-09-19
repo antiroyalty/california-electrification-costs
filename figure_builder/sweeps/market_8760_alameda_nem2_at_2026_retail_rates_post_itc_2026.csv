@@ -1,0 +1,2 @@
+battery_capex_kwh,pv_kw,batt_kwh,total_cost,coverage,max_battery_kwh,meter_binary_count,solver_rounds,scenario,policy_regime,interval_count
+1460.64,7.317343507488532,0.0,2180.6856445594067,0.9999999999999981,40.0,0,1,full_electric_ev_coopt,post_itc_2026,8760

@@ -24,29 +24,18 @@ from __future__ import annotations
 
 import argparse
 import os
-from typing import Dict, Iterable, List, Optional
+from typing import Iterable, List, Optional
 
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from helpers.main_helpers import slugify_county_name, get_scenario_path, git_short_sha
-from helpers.plot_scenario_comparison_helper import _annual_bill_parts
-from .step15_payback_periods import vehicle_annual_adders_from_ledger
+from helpers.main_helpers import get_scenario_path, git_short_sha
+from helpers.plot_scenario_comparison_helper import (
+    collect_eac_components,
+    collect_eac_components_by_county,
+)
 from scenarios import SCENARIOS
-from evaluations.eac import crf as _crf
-
-def _read_capital_ledger(base_input_dir: str, scenario: str, housing_type: str) -> Optional[pd.DataFrame]:
-    cap_dir = os.path.join(base_input_dir, "capital_costs")
-    fname = f"capital_costs_{scenario}_{housing_type.replace('-', '_')}.csv"
-    path = os.path.join(cap_dir, fname)
-    if not os.path.exists(path):
-        return None
-    try:
-        return pd.read_csv(path)
-    except Exception:
-        return None
-
 
 def collect_eac_no_pv(
     base_input_dir: str,
@@ -58,97 +47,15 @@ def collect_eac_no_pv(
     discount_rate: float = 0.07,
     agg: str = "mean",
     electricity_plan_preference: Optional[Iterable[str]] = None,
+    timestamp: Optional[str] = None,
 ) -> pd.DataFrame:
-    """Collect EAC components WITHOUT PV/storage for each scenario (aggregated over counties).
-
-    Returns a DataFrame with columns:
-      scenario, capex_electric, capex_gas, vehicle_om,
-      annual_bill_electric, annual_bill_gas
-    """
-    inc = incentive.lower()
-    county_slugs = [slugify_county_name(c) for c in counties]
-    out_rows: List[Dict] = []
-
-    for scen in scenarios:
-        ledger = _read_capital_ledger(base_input_dir, scen, housing_type)
-        per_county: List[Dict] = []
-
-        for slug in county_slugs:
-            capex_electric = 0.0
-            capex_gas = 0.0
-            vehicle_om = 0.0
-            # The counterfactual is billed on the configured retail import plan.
-            # Missing or ambiguous plan selection must fail rather than silently
-            # selecting the first tariff column in the results file.
-            e_bill, g_bill = _annual_bill_parts(
-                base_input_dir,
-                scen,
-                housing_type,
-                slug,
-                with_solar=False,
-                electricity_plan_preference=electricity_plan_preference,
-                electricity_variant="retail",
-            )
-
-            # Annualize capital ledger rows (exclude PV/storage entirely)
-            if ledger is not None and not ledger.empty:
-                df = ledger.copy()
-                # Focus on this county and incentive scenario
-                if 'county_slug' in df.columns:
-                    df = df[df['county_slug'].str.lower() == slug]
-                if 'incentive_scenario' in df.columns:
-                    df['incentive_scenario'] = df['incentive_scenario'].str.lower()
-                    df = df[df['incentive_scenario'] == inc]
-                # Loop rows
-                for _, r in df.iterrows():
-                    try:
-                        lt = float(r.get('lifetime_years', 15) or 15)
-                        c = _crf(discount_rate, lt)
-                        cat = r.get('appliance_category')
-                        typ = r.get('appliance_type')
-                        if cat == 'electric' and typ not in ('solar', 'storage'):
-                            net = float(r.get('net_cost', 0.0))
-                            capex_electric += net * c
-                        if cat == 'gas':
-                            base = float(r.get('base_cost', 0.0))
-                            capex_gas += base * c
-                    except Exception:
-                        continue
-
-                # Vehicle O&M adders (ICE/EV), scenario-informed
-                try:
-                    adders = vehicle_annual_adders_from_ledger(df)
-                    if slug in adders.index:
-                        ev_val = float(adders.loc[slug, 'ev_operating']) if 'ev_operating' in adders.columns else 0.0
-                        ice_val = float(adders.loc[slug, 'ice_operating']) if 'ice_operating' in adders.columns else 0.0
-                        scen_l = (scen or '').lower()
-                        if ('ev' in scen_l) or (ev_val > 0):
-                            vehicle_om += ev_val
-                        if ('ice' in scen_l) or (ice_val > 0 and 'ev' not in scen_l):
-                            vehicle_om += ice_val
-                except Exception:
-                    pass
-
-            per_county.append({
-                'scenario': scen,
-                'county_slug': slug,
-                'capex_electric': capex_electric,
-                'capex_gas': capex_gas,
-                'vehicle_om': vehicle_om,
-                'annual_bill_electric': e_bill,
-                'annual_bill_gas': g_bill,
-            })
-
-        if not per_county:
-            continue
-        dfc = pd.DataFrame(per_county)
-        if agg == 'median':
-            agg_df = dfc.groupby('scenario').median(numeric_only=True).reset_index()
-        else:
-            agg_df = dfc.groupby('scenario').mean(numeric_only=True).reset_index()
-        out_rows.append(agg_df.iloc[0].to_dict())
-
-    return pd.DataFrame(out_rows)
+    """Aggregate shared EAC components for the retail no-solar counterfactual."""
+    return collect_eac_components(
+        base_input_dir, housing_type, scenarios, counties,
+        incentive=incentive, discount_rate=discount_rate, agg=agg,
+        electricity_plan_preference=electricity_plan_preference,
+        electricity_variant="retail", with_solar=False, timestamp=timestamp,
+    ).drop(columns=["capex_pv", "capex_storage"])
 
 
 def collect_eac_no_pv_by_county(
@@ -160,73 +67,19 @@ def collect_eac_no_pv_by_county(
     incentive: str = "full_incentives",
     discount_rate: float = 0.07,
     electricity_plan_preference: Optional[Iterable[str]] = None,
+    timestamp: Optional[str] = None,
 ) -> pd.DataFrame:
-    """Per-county EAC components WITHOUT PV/storage for each scenario.
+    """Return shared county EAC components with explicit zero PV/storage costs.
 
-    Columns per row: scenario, county_slug, capex_electric, capex_gas, vehicle_om,
-                     annual_bill_electric, annual_bill_gas
+    Require a complete capital ledger even when its costs are zero. This keeps
+    appliance and vehicle accounting identical to the with-solar reports.
     """
-    inc = (incentive or "").lower()
-    county_slugs = [slugify_county_name(c) for c in counties]
-    rows: List[Dict] = []
-    for scen in scenarios:
-        ledger = _read_capital_ledger(base_input_dir, scen, housing_type)
-        for slug in county_slugs:
-            capex_electric = 0.0
-            capex_gas = 0.0
-            vehicle_om = 0.0
-            e_bill, g_bill = _annual_bill_parts(
-                base_input_dir,
-                scen,
-                housing_type,
-                slug,
-                with_solar=False,
-                electricity_plan_preference=electricity_plan_preference,
-                electricity_variant="retail",
-            )
-
-            if ledger is not None and not ledger.empty:
-                df = ledger.copy()
-                if 'county_slug' in df.columns:
-                    df = df[df['county_slug'].str.lower() == slug]
-                if 'incentive_scenario' in df.columns:
-                    df['incentive_scenario'] = df['incentive_scenario'].str.lower()
-                    df = df[df['incentive_scenario'] == inc]
-                for _, r in df.iterrows():
-                    try:
-                        lt = float(r.get('lifetime_years', 15) or 15)
-                        c = _crf(discount_rate, lt)
-                        cat = r.get('appliance_category')
-                        typ = r.get('appliance_type')
-                        if cat == 'electric' and typ not in ('solar', 'storage'):
-                            capex_electric += float(r.get('net_cost', 0.0)) * c
-                        if cat == 'gas':
-                            capex_gas += float(r.get('base_cost', 0.0)) * c
-                    except Exception:
-                        continue
-                try:
-                    adders = vehicle_annual_adders_from_ledger(df)
-                    if slug in adders.index:
-                        ev_val = float(adders.loc[slug, 'ev_operating']) if 'ev_operating' in adders.columns else 0.0
-                        ice_val = float(adders.loc[slug, 'ice_operating']) if 'ice_operating' in adders.columns else 0.0
-                        scen_l = (scen or '').lower()
-                        if ('ev' in scen_l) or (ev_val > 0):
-                            vehicle_om += ev_val
-                        if ('ice' in scen_l) or (ice_val > 0 and 'ev' not in scen_l):
-                            vehicle_om += ice_val
-                except Exception:
-                    pass
-
-            rows.append({
-                'scenario': scen,
-                'county_slug': slug,
-                'capex_electric': capex_electric,
-                'capex_gas': capex_gas,
-                'vehicle_om': vehicle_om,
-                'annual_bill_electric': e_bill,
-                'annual_bill_gas': g_bill,
-            })
-    return pd.DataFrame(rows)
+    return collect_eac_components_by_county(
+        base_input_dir, housing_type, scenarios, counties,
+        incentive=incentive, discount_rate=discount_rate,
+        electricity_plan_preference=electricity_plan_preference,
+        electricity_variant="retail", with_solar=False, timestamp=timestamp,
+    ).drop(columns=["capex_pv", "capex_storage"])
 
 
 def plot_eac_no_pv_stacked_bar(df: pd.DataFrame, scenario_order: Optional[List[str]] = None, title: str = "EAC (No Solar + Storage) by Scenario") -> plt.Figure:

@@ -1,0 +1,87 @@
+{
+  "artifact_git_sha": "280a4c7",
+  "command_argv": [
+    "python3",
+    "-m",
+    "figure_builder",
+    "claim4"
+  ],
+  "generated_at_utc": "2026-08-20T05:49:27.330731+00:00",
+  "input_policy_metadata": {
+    "path": "figure_builder/figures/policy_matrix_metadata.json",
+    "sha256": "82013418e55caa14c80462d2c830456a9aeff49df4eb15d88831c7abcc575e46",
+    "size_bytes": 16791
+  },
+  "input_results": {
+    "path": "figure_builder/figures/policy_matrix_optimal_sizes.csv",
+    "sha256": "b063d114cc3b5ea51b27e2f2fcad85a75d848ca4780c1d32cc960489ea13ecff",
+    "size_bytes": 3795
+  },
+  "model_results_git_sha": "0eb70b2",
+  "outputs": [
+    {
+      "path": "claim4.html",
+      "sha256": "43a52ff5df29f629296f0ed4de968d95edc3c529b2f88e02514cc3848581941e",
+      "size_bytes": 296043
+    },
+    {
+      "path": "figure_builder/figures/claim4_current_cost_coverage.png",
+      "sha256": "1ed5002cd80c4f63e8124f29985e25d6dc5dd20a97dfdeab88f74834bb1729c1",
+      "size_bytes": 103035
+    },
+    {
+      "path": "figure_builder/figures/claim4_policy_matrix.png",
+      "sha256": "a7238199ad35787d8a5a9744f467b623a7afd416cccf39ab72b90cbb71cf37a4",
+      "size_bytes": 160128
+    }
+  ],
+  "research_design": "Controlled current-rate counterfactual. Both export-compensation regimes use the source-locked 2026 retail tariff snapshot.",
+  "result_summary": {
+    "current_cost_comparison": {
+      "county_count": 4,
+      "current_nontrivial_battery_count": 0,
+      "current_observation_count": 8,
+      "nbt_coverage_max_pct": 30.49268311605856,
+      "nbt_coverage_min_pct": 25.95132594614828,
+      "nbt_median_pv_kw": 1.9328793937502478,
+      "nem2_at_cap_count": 4,
+      "nem2_coverage_max_pct": 100.00000000000009,
+      "nem2_coverage_min_pct": 99.99999999999993,
+      "nem2_median_pv_kw": 6.7873997585808485,
+      "pv_reduction_max_pct": 74.04867405385171,
+      "pv_reduction_min_pct": 69.50731688394147,
+      "temporal_resolution": "weighted_12x24_monthly_hour"
+    },
+    "policy_matrix": {
+      "case_summaries": {
+        "nbt_2026__itc_2025": {
+          "median_battery_kwh": 2.7664648792675095,
+          "median_pv_kw": 3.230432268015478,
+          "nontrivial_battery_count": 2,
+          "pv_sizing_limit_count": 0
+        },
+        "nbt_2026__post_itc_2026": {
+          "median_battery_kwh": 0.0,
+          "median_pv_kw": 1.9328793937502478,
+          "nontrivial_battery_count": 0,
+          "pv_sizing_limit_count": 0
+        },
+        "nem2_at_2026_retail_rates__itc_2025": {
+          "median_battery_kwh": 0.0,
+          "median_pv_kw": 6.7873997585808485,
+          "nontrivial_battery_count": 1,
+          "pv_sizing_limit_count": 4
+        },
+        "nem2_at_2026_retail_rates__post_itc_2026": {
+          "median_battery_kwh": 0.0,
+          "median_pv_kw": 6.7873997585808485,
+          "nontrivial_battery_count": 0,
+          "pv_sizing_limit_count": 4
+        }
+      },
+      "county_count": 4,
+      "temporal_resolution": "weighted_12x24_monthly_hour"
+    }
+  },
+  "schema_version": 1
+}

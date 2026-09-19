@@ -142,15 +142,18 @@ def run(
     ts_index = full_year_hourly_index(year)
     p_imp = tariff.import_schedule.rates_for(ts_index)
     p_exp = [
-        rate + tariff.acc_plus_rate
+        rate
         for rate in tariff.export_schedule.rates_for(ts_index)
     ]
+
+    from tariffs import NBTAnnualTerms
 
     inputs = CooptInputs(
         load_kwh=load_kwh,
         pv_gen_per_kw=pv_gen_per_kw,
         import_rates=p_imp,
         export_rates=p_exp,
+        nbt_terms=NBTAnnualTerms.from_tariff(tariff, ts_index),
     )
 
     weights = None
