@@ -272,10 +272,45 @@ legal requirements. Selecting credit families does not select a calendar year.
 The amounts precede tax-liability limits and do not assume a receipt date or
 carryforward schedule. They do not grant credits for replacement purchases.
 The approved comparison still requires pipeline integration, optimizer eligibility,
-and dated initial-purchase credit accounting. State/local and federally funded
+and declared credit realization and timing. State/local and federally funded
 rebates are outside that comparison. Existing appliance paths still include
 some of those rebates, including county heat-pump rebates. Replacing those paths
 with an explicit federal-only calculation remains pending.
+
+A separate [credit annualization function](../evaluations/eac.py) converts one
+declared receipt into an annual cost reduction. The caller supplies the amount
+actually realized and its timing. A potential credit is not automatically a
+realized credit. The calculation is:
+
+$$
+\Delta A_{\mathrm{credit}} = \frac{C}{(1+r)^t}\operatorname{CRF}(r,N).
+$$
+
+Here, $C$ is the realized credit in dollars, $r$ is the real annual discount
+rate, and $N$ is the study horizon in years. The receipt time $t$ is measured
+from the initial purchase: zero means immediate receipt, and one means a year
+later. All dollar amounts use the study's constant-dollar basis. Fractional
+receipt years are allowed. The function requires $C\geq0$, $r\geq0$, $N>0$,
+and $0\leq t\leq N$. It rejects missing, malformed, and non-finite inputs.
+At zero discount, the annual reduction is $C/N$.
+
+Subtract this positive reduction from costs calculated before that credit.
+Use the 25-year study horizon for a one-time credit, even when the equipment
+has a shorter service life. For example, a fully realized $7,500 credit received
+at purchase reduces annual cost by $643.58 at 7%. Receipt one year later gives
+$601.48/year. The earlier $944/year illustration used a 12-year vehicle horizon;
+it does not represent this one-time credit over the 25-year study.
+
+Initial credits do not reduce future replacement costs or remaining value.
+For a $10,000 battery, retain the $10,000 year-15 replacement and the one-third
+remaining value at year 25. Subtracting one $3,000 credit received at purchase
+gives $858.99/year, compared with $1,116.42/year before that credit. Independent
+cash-flow tests verify this example and delayed receipt. Credits with different
+receipt times must be converted separately and then summed.
+
+This helper is implemented and tested in isolation. Existing optimizer and
+reporting paths still use their current incentive treatment. Integration remains
+pending; these examples do not revise county results or establish tax eligibility.
 
 ## Household costs and system selection
 
@@ -670,7 +705,7 @@ Prioritize a check when the limitation could change a stated conclusion.
 | Older results and auxiliary tools can use different capital accounting | The core scenarios were regenerated at `8a98b96`. Other cached sizing and reports retain their recorded versions. Standalone solar/battery/combined sweeps, the older Step 9 size optimizer, and auxiliary NPV diagnostics retain separate conventions. | Use the dated claim assessment for current evidence. Align an auxiliary tool before using it for a comparison under these methods. |
 | Auxiliary payback retains legacy conventions | The September 15 refresh reconciles all 141 matched optimized-EV payback rows using the corrected household and incentive selection. First-column tariff selection, capital-summary conventions, and a $0.01 denominator for nonpositive savings remain. Missing-bill handling is permissive; this refresh independently verifies every required bill. | Use the explicit matched EAC collector for publication. Address these conventions if payback becomes a paper result. Older archived payback outputs remain unchanged. |
 | The 2025 incentive sensitivity simplifies eligibility | Its continuous battery sizing uses an ITC-adjusted unit price without a separate 3 kWh eligibility constraint. Appliance calculations still apply the 25C cap separately to space and water heating, although the federal registry records the shared annual cap. Affected 2025 cases can overstate incentives. | Check sub-3-kWh battery conclusions and whole-household cases using both heating credits if these support a published claim. These issues do not change zero-credit post-ITC inputs. |
-| Federal purchase credits are conditional on declared eligibility | The isolated calculation enforces the shared heat-pump cap and battery capacity threshold. It requires eligible costs and a declared vehicle credit. It does not determine qualifying dates, buyer/product eligibility, tax liability, or credit receipt timing. Treating these amounts as guaranteed receipts could overstate savings. | Integrate the calculation with explicit eligibility and credit-realization assumptions before using the expanded comparison. Keep initial credits separate from replacement prices and exclude non-tax rebates explicitly. Existing pipeline results remain unchanged. |
+| Federal purchase credits are conditional on declared eligibility and realization | The isolated amount calculation enforces the shared heat-pump cap and battery capacity threshold. A separate helper annualizes one declared receipt. Neither determines qualifying dates, buyer/product eligibility, tax liability, or when a credit is realized. Treating potential credits as immediate guaranteed receipts could overstate savings. | Integrate both calculations with explicit eligibility, realized amounts, and receipt times before using the expanded comparison. Keep initial credits separate from replacement prices and exclude non-tax rebates explicitly. Receipts beyond the study require an explicit model change. Existing pipeline results remain unchanged. |
 | Battery augmentation costs and gradual capacity loss omitted centrally | Storage is treated more favorably than a model that charges for maintaining capacity. Round-trip efficiency losses and the declared replacement remain included. More frequent cycling with grid charging could increase this bias. | Report cycling when interpreting a grid-charging result. Add an explicit degradation or augmentation-cost sensitivity if needed. |
 | Equipment-size bounds, specified charging/export rules, and fixed-design comparisons | An optimum applies within its declared feasible choices. A fixed-design result is not an unrestricted economic optimum. | Report binding constraints and test an expanded domain for an affected claim. |
 | Central cases exclude grid charging | The matched 94-case check preserves zero storage in the 46 PG&E/SCE counties but establishes a small positive storage benefit in San Diego. Exact San Diego sizes remain unresolved; its cost ranges have positive lower bounds. | Report this exception alongside the central findings. Stored grid energy remains ineligible for export. County differences combine assigned utility tariffs with local load and weather; they do not isolate a tariff's causal effect. |

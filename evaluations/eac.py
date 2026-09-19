@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import ceil, fsum, isfinite
+from numbers import Real
 from typing import Mapping, Optional
 
 import pandas as pd
@@ -21,6 +22,59 @@ def crf(rate: float, years: float) -> float:
     if r <= 0:
         return 1.0 / n
     return (r * (1 + r) ** n) / (((1 + r) ** n) - 1)
+
+
+def annualized_one_time_credit(
+    *,
+    credit_usd: float,
+    receipt_year: float,
+    discount_rate: float,
+    horizon_years: float,
+) -> float:
+    """Return a positive annual cost reduction for one declared credit receipt.
+
+    Dollars must use the study's constant-dollar basis with a real discount rate.
+    receipt_year is elapsed time from purchase: 0 means immediate receipt and
+    1 means receipt one year later. Fractional years are allowed. The receipt
+    must occur within the study, including its endpoint.
+
+    Subtract the result from annual costs calculated before this credit. Use the
+    study horizon, not an appliance's service life. Replacement purchases and
+    remaining value retain their gross cost basis; this credit is received once.
+    The caller must declare the amount actually realized and its receipt time.
+    This function does not determine eligibility, tax liability, or carryforward.
+    """
+    values = {
+        "credit_usd": credit_usd,
+        "receipt_year": receipt_year,
+        "discount_rate": discount_rate,
+        "horizon_years": horizon_years,
+    }
+    for name, value in values.items():
+        if isinstance(value, bool) or not isinstance(value, Real):
+            raise ValueError(f"{name} must be a finite real number")
+        try:
+            value = float(value)
+        except OverflowError as exc:
+            raise ValueError(f"{name} must be a finite real number") from exc
+        if not isfinite(value):
+            raise ValueError(f"{name} must be a finite real number")
+        values[name] = value
+    credit = values["credit_usd"]
+    t = values["receipt_year"]
+    r = values["discount_rate"]
+    N = values["horizon_years"]
+    if credit < 0:
+        raise ValueError("credit_usd must be nonnegative")
+    if r < 0:
+        raise ValueError("discount_rate must be nonnegative")
+    if N <= 0:
+        raise ValueError("horizon_years must be positive")
+    if not 0 <= t <= N:
+        raise ValueError("receipt_year must be between zero and horizon_years")
+
+    present_credit = credit * (1 + r) ** (-t)
+    return present_credit * crf(r, N)
 
 
 @dataclass
