@@ -514,13 +514,33 @@
       "scope": "Homeowner-owned solar/storage, heat pumps and heat-pump water heaters, and purchased new vehicles for the declared 2025/2026 comparisons. Other tax-credit categories and federal/state/local rebate programs are outside this registry.",
       "authority": "Immutable records in appliances/federal_credits.py own amounts, dates, eligible costs, tax treatment, primary-source URLs, and implementation notes. Existing regime helpers import these records. The battery constructor reads the registry's capacity minimum.",
       "unchanged_behavior": "Registry extraction preserves existing regime amounts, equipment costs, capture fractions, optimization, and reporting. It does not enforce the shared household cap, optimizer battery eligibility, tax liability, credit timing, or EV buyer/vehicle eligibility.",
-      "approved_pending_comparison": "Compare no federal credits, solar/storage credits alone, and the three modeled federal credit families for explicitly eligible purchases. Household credit evaluation and initial-purchase cash-flow accounting remain pending. Existing non-tax rebate paths, including county heat-pump rebates, still require explicit exclusion from that future comparison."
+      "approved_pending_comparison": "Compare no federal credits, solar/storage credits alone, and the three modeled federal credit families for explicitly eligible purchases. The isolated household amount calculation is implemented in evaluations/federal_credits.py. Pipeline integration, optimizer eligibility, and initial-purchase cash-flow accounting remain pending. Existing non-tax rebate paths, including county heat-pump rebates, still require explicit exclusion from that future comparison."
     },
     "code": [
       "appliances/federal_credits.py:FederalCredit",
       "appliances/federal_credits.py:FEDERAL_CREDITS",
       "appliances/incentive_policy.py:federal_itc_fraction",
       "appliances/battery_storage.py:BatteryStorageAppliance"
+    ]
+  },
+  "evaluations.federal_credits": {
+    "title": "Conditional Household Federal Purchase Credits",
+    "formula": "T_pv = f_25D * B_pv; T_storage = f_25D * B_storage * 1[K >= K_min]; T_heat = min(f_25C * (B_space + B_water), annual_cap_25C); T_vehicle = V. Excluded credit families are zero. Total purchase credit = T_pv + T_storage + T_heat + T_vehicle.",
+    "assumptions": {
+      "units": "B values are eligible installed purchase costs in dollars after required basis adjustments and before these credits. K is storage capacity in kWh. V is an explicitly supplied eligible vehicle credit in dollars, no greater than the registry's maximum. Outputs are potential purchase credits in dollars, not annual savings or guaranteed receipts.",
+      "policy_source": "All percentages, the shared heat-pump cap, storage capacity minimum, and vehicle maximum come from appliances/federal_credits.py.",
+      "cases": "FederalCreditCase selects no federal credits, solar/storage federal credits alone, or all three modeled credit families. It selects credit families rather than a calendar year.",
+      "eligibility": "The caller must establish eligible purchase dates and legal buyer/product requirements. The storage calculation also enforces the capacity threshold. The model covers one taxpayer and one eligible tax year; no other purchase consumes the heat-pump cap. Tax liability, carryforward, and receipt timing are outside this amount calculation.",
+      "scope": "One initial purchase bundle. No replacement credits, state/local rebates, federally funded rebates, or other tax-credit categories are added. Inputs must not be mixed-incentive net costs. The shared heat-pump amount is not allocated back to individual appliances.",
+      "failure_rules": "All six numeric inputs are required and must be finite, nonnegative real numbers, excluding booleans. Validate them even for excluded credit families. Reject positive storage basis with zero capacity, vehicle credits above the maximum, and non-enum cases. Explicit zero represents absence or ineligibility; missing is an error.",
+      "integration_status": "Isolated calculation and tests are implemented. Existing appliance, pipeline, optimizer, and reporting behavior remain unchanged. Integration and dated credit cash-flow accounting are pending."
+    },
+    "validation": "Worked bundle: eligible PV $20,000, storage $10,000 at 10 kWh, space heat $12,000, water heat $4,000, and vehicle credit $7,500 produces $0 / $9,000 / $18,500 across the three cases. The combined heat-pump credit is $2,000 rather than the incorrect independent-cap total of $3,200. Tests cover cap saturation, battery thresholds, declared vehicle amounts, zeros, malformed inputs, and total reconciliation.",
+    "code": [
+      "evaluations/federal_credits.py:FederalCreditCase",
+      "evaluations/federal_credits.py:HouseholdFederalCredits",
+      "evaluations/federal_credits.py:evaluate_federal_purchase_credits",
+      "tests/household_federal_credits_test.py"
     ]
   },
   "appliances.incentive_policy": {
