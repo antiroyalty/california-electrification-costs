@@ -228,6 +228,24 @@ incentives must be evaluated from their own declared inputs.
 See the [tariff data documentation](../data/tariffs/README.md) and
 [publication builder](../figure_builder/README.md).
 
+The [federal-credit registry](../appliances/federal_credits.py) collects the
+modeled solar/storage (25D), heat-pump (25C), and new-vehicle (30D) rules in one
+place. Each record identifies amounts, applicable dates, eligible costs, tax
+treatment, sources, and current implementation limits. The existing regime
+helpers import those records; the battery constructor reads its capacity
+minimum from the same record. This extraction preserves current calculations.
+
+The registry declares legal rules; it does not implement a household tax return.
+In particular, it records the shared annual heat-pump cap and distinguishes
+carryforward from an EV dealer transfer. The current code does not yet enforce
+all those rules. The approved federal-only comparison remains pending: no
+federal credits, solar/storage credits alone, and all three modeled credit
+families for explicitly eligible purchases. It requires household credit
+evaluation, optimizer eligibility, and dated initial-purchase credit accounting.
+State/local and federally funded rebate programs are outside that comparison.
+Existing appliance paths still include some of those rebates, including county
+heat-pump rebates; their explicit exclusion has not yet been implemented.
+
 ## Household costs and system selection
 
 The principal cost measure is equivalent annual cost (EAC): an annual amount that
@@ -620,7 +638,8 @@ Prioritize a check when the limitation could change a stated conclusion.
 | Battery remaining-value and replacement-cost assumptions | The method values five remaining years at one-third of replacement cost. It assumes unchanged real purchase costs and incentive treatment. Future prices, incentives, and resale values can differ; the direction of error is uncertain. | State these assumptions with the results. Use a focused sensitivity if they could change an adoption conclusion. |
 | Older results and auxiliary tools can use different capital accounting | The core scenarios were regenerated at `8a98b96`. Other cached sizing and reports retain their recorded versions. Standalone solar/battery/combined sweeps, the older Step 9 size optimizer, and auxiliary NPV diagnostics retain separate conventions. | Use the dated claim assessment for current evidence. Align an auxiliary tool before using it for a comparison under these methods. |
 | Auxiliary payback retains legacy conventions | The September 15 refresh reconciles all 141 matched optimized-EV payback rows using the corrected household and incentive selection. First-column tariff selection, capital-summary conventions, and a $0.01 denominator for nonpositive savings remain. Missing-bill handling is permissive; this refresh independently verifies every required bill. | Use the explicit matched EAC collector for publication. Address these conventions if payback becomes a paper result. Older archived payback outputs remain unchanged. |
-| The 2025 incentive sensitivity simplifies eligibility | Its continuous battery sizing uses an ITC-adjusted unit price without a separate 3 kWh eligibility constraint. The appliance policy registry also records separate caps for each appliance under the 25C heat-pump credit, in place of a combined household cap. Affected 2025 cases can overstate incentives. | Check sub-3-kWh battery conclusions and whole-household cases using both heating credits if these support a published claim. These issues do not change zero-credit post-ITC inputs. |
+| The 2025 incentive sensitivity simplifies eligibility | Its continuous battery sizing uses an ITC-adjusted unit price without a separate 3 kWh eligibility constraint. Appliance calculations still apply the 25C cap separately to space and water heating, although the federal registry records the shared annual cap. Affected 2025 cases can overstate incentives. | Check sub-3-kWh battery conclusions and whole-household cases using both heating credits if these support a published claim. These issues do not change zero-credit post-ITC inputs. |
+| Federal-credit definitions exceed current eligibility evaluation | The dedicated registry describes the rules but does not enforce household tax liability, credit receipt timing, the shared heat-pump cap, or EV buyer/vehicle eligibility. Existing credit capture is a scenario assumption. | Implement the approved household evaluation before using the expanded federal-credit comparison. Keep initial credits separate from replacement prices and exclude non-tax rebates explicitly. |
 | Battery augmentation costs and gradual capacity loss omitted centrally | Storage is treated more favorably than a model that charges for maintaining capacity. Round-trip efficiency losses and the declared replacement remain included. More frequent cycling with grid charging could increase this bias. | Report cycling when interpreting a grid-charging result. Add an explicit degradation or augmentation-cost sensitivity if needed. |
 | Equipment-size bounds, specified charging/export rules, and fixed-design comparisons | An optimum applies within its declared feasible choices. A fixed-design result is not an unrestricted economic optimum. | Report binding constraints and test an expanded domain for an affected claim. |
 | Central cases exclude grid charging | The matched 94-case check preserves zero storage in the 46 PG&E/SCE counties but establishes a small positive storage benefit in San Diego. Exact San Diego sizes remain unresolved; its cost ranges have positive lower bounds. | Report this exception alongside the central findings. Stored grid energy remains ineligible for export. County differences combine assigned utility tariffs with local load and weather; they do not isolate a tariff's causal effect. |

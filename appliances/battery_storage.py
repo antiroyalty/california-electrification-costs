@@ -4,6 +4,7 @@ Battery Storage Appliance Class for Capital Cost Analysis
 
 from typing import Dict
 from appliances.electric_base import ElectricAppliance, Incentive, IncentiveScenario
+from appliances.federal_credits import FEDERAL_ITC_25D
 from appliances.incentive_policy import (
     PolicyRegime,
     DEFAULT_POLICY_REGIME,
@@ -39,17 +40,19 @@ class BatteryStorageAppliance(ElectricAppliance):
         self.capacity_kwh = total_capacity
         self.policy_regime = policy_regime
 
-        # Federal storage ITC (IRC 25D, systems >= 3 kWh). Whether it legally exists
-        # is decided by the policy regime, not hardcoded: incentive_policy.py is the
-        # single source of truth. Under the default POST_ITC_2026 regime the credit is
-        # repealed (OBBBA, Pub. L. 119-21) and no incentive is created, so net == gross.
+        # The registry owns the capacity rule; the regime selects whether the
+        # credit is available. The optimizer's continuous-size check is separate.
         itc_fraction = federal_itc_fraction(policy_regime)
-        if total_capacity >= 3.0 and itc_fraction > 0:
+        minimum_capacity_kwh = FEDERAL_ITC_25D.minimum_storage_capacity_kwh
+        if total_capacity >= minimum_capacity_kwh and itc_fraction > 0:
             federal_tax_credit = Incentive(
                 name="federal_storage_tax_credit",
                 value=itc_fraction * 100.0,  # percent
                 unit="%",
-                description=f"Federal energy storage ITC (IRC 25D), systems >= 3 kWh, {regime_summary(policy_regime)}",
+                description=(
+                    f"Federal energy storage ITC (IRC 25D), systems >= "
+                    f"{minimum_capacity_kwh:g} kWh, {regime_summary(policy_regime)}"
+                ),
                 source_url="https://www.energy.gov/eere/solar/homeowners-guide-federal-tax-credit-solar-photovoltaics"
             )
             self.add_incentive(federal_tax_credit)

@@ -507,6 +507,22 @@
       "appliances/battery_storage.py:per_kwh_cost_net"
     ]
   },
+  "appliances.federal_credits": {
+    "title": "Federal Purchase-Credit Rule Registry",
+    "formula": "Policy records only: 25D percentage and battery eligibility; 25C percentage and shared annual cap; 30D maximum per qualifying vehicle. These records do not calculate a household award.",
+    "assumptions": {
+      "scope": "Homeowner-owned solar/storage, heat pumps and heat-pump water heaters, and purchased new vehicles for the declared 2025/2026 comparisons. Other tax-credit categories and federal/state/local rebate programs are outside this registry.",
+      "authority": "Immutable records in appliances/federal_credits.py own amounts, dates, eligible costs, tax treatment, primary-source URLs, and implementation notes. Existing regime helpers import these records. The battery constructor reads the registry's capacity minimum.",
+      "unchanged_behavior": "Registry extraction preserves existing regime amounts, equipment costs, capture fractions, optimization, and reporting. It does not enforce the shared household cap, optimizer battery eligibility, tax liability, credit timing, or EV buyer/vehicle eligibility.",
+      "approved_pending_comparison": "Compare no federal credits, solar/storage credits alone, and the three modeled federal credit families for explicitly eligible purchases. Household credit evaluation and initial-purchase cash-flow accounting remain pending. Existing non-tax rebate paths, including county heat-pump rebates, still require explicit exclusion from that future comparison."
+    },
+    "code": [
+      "appliances/federal_credits.py:FederalCredit",
+      "appliances/federal_credits.py:FEDERAL_CREDITS",
+      "appliances/incentive_policy.py:federal_itc_fraction",
+      "appliances/battery_storage.py:BatteryStorageAppliance"
+    ]
+  },
   "appliances.incentive_policy": {
     "title": "Implemented Policy Regimes and Incentive Capture",
     "formula": "Net PV/storage unit cost = gross unit cost * (1 - policy ITC fraction * incentive-capture fraction).",
@@ -525,7 +541,7 @@
       "appliances/incentive_policy.py:federal_30d_amount",
       "figure_builder/pricing.py:live_prices"
     ],
-    "notes": "These are the repository's declared policy cases. Dated legal and program sources are maintained in appliances/incentive_policy.py."
+    "notes": "These are the repository's declared policy cases. Federal tax-credit rules and sources are maintained in appliances/federal_credits.py. Regime selection and other incentive provenance remain in appliances/incentive_policy.py."
   },
   "appliances.electric_heating": {
     "title": "Heat Pump Space Heating Installed Cost (per county)",
