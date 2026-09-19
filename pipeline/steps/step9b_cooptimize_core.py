@@ -3,12 +3,17 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 import math
+from numbers import Real
 from typing import List, Optional, Tuple
 
 import pandas as pd
 
-from evaluations.eac import crf as _crf, alpha_batt_npv as _alpha_batt_npv
+from evaluations.eac import (
+    crf as _crf, alpha_batt_npv as _alpha_batt_npv, annualized_one_time_credit,
+)
+from evaluations.federal_credits import FederalCreditReceipts, PVStorageCreditPolicy
 from evaluations.constants import DEFAULT_DISCOUNT_RATE
+from appliances.federal_credits import FEDERAL_ITC_25D
 from appliances.solar_system import SolarSystemAppliance
 from appliances.battery_storage import BatteryStorageAppliance
 from appliances.electric_base import IncentiveScenario
@@ -113,6 +118,7 @@ class CooptResult:
     meter_binary_count: int
     solver: SolverReport
     nbt_settlement: Optional[AnnualCreditSettlement[float]] = None
+    federal_credit_receipts: FederalCreditReceipts | None = None
 
     @property
     def solver_rounds(self) -> int:
@@ -402,6 +408,7 @@ def _solve_lp(
     max_pv_to_annual_load_ratio: float | None = None,
     solver_backend: str = "auto",
     solver_options: SolverOptions = SolverOptions(),
+    federal_credit_policy: PVStorageCreditPolicy | None = None,
 ) -> CooptResult:
     """Minimize annualized equipment cost plus the tariff bill and degradation.
 
@@ -421,11 +428,36 @@ def _solve_lp(
 
     NBT uses annual credit pools with continuous remaining-charge variables.
     Both NBT and NEM 2 use HiGHS by default, with CBC available explicitly.
+
+    An explicit federal_credit_policy interprets c_pv_kw, c_batt_kwh, and
+    c_batt_kw as gross qualifying installed prices. It deducts initial credits
+    once and preserves gross replacement/remaining-value accounting. Free sizing
+    adds at most one storage-credit binary; fixed sizes use their known eligibility.
+    Sub-threshold batteries remain feasible without credits. None preserves the
+    existing caller-supplied net-price behavior.
     """
     _ensure_pulp()
     if solver_backend != "auto":
         solver_options = replace(solver_options, backend=solver_backend)
     solver_run = SolverRun(solver_options)
+    annual_credit_fraction = 0.0
+    if federal_credit_policy is not None:
+        if not isinstance(federal_credit_policy, PVStorageCreditPolicy):
+            raise ValueError("federal_credit_policy must be a PVStorageCreditPolicy")
+        for name, value in (("c_pv_kw", c_pv_kw), ("c_batt_kwh", c_batt_kwh),
+                            ("c_batt_kw", c_batt_kw)):
+            if (isinstance(value, bool) or not isinstance(value, Real)
+                    or not math.isfinite(value) or value < 0):
+                raise ValueError(f"Federal-only {name} must be finite and nonnegative")
+        credit_capacity_bound = max_battery_kwh if fixed_batt_kwh is None else fixed_batt_kwh
+        if (isinstance(credit_capacity_bound, bool) or not isinstance(credit_capacity_bound, Real)
+                or not math.isfinite(credit_capacity_bound)):
+            raise ValueError("Storage-credit sizing requires a finite battery capacity bound")
+        annual_credit_fraction = annualized_one_time_credit(
+            credit_usd=federal_credit_policy.fraction_of_eligible_cost,
+            receipt_year=federal_credit_policy.receipt_year,
+            discount_rate=discount_rate, horizon_years=pv_life_yrs,
+        )
     L = inputs.load_kwh
     G = inputs.pv_gen_per_kw
     p_imp = inputs.import_rates
@@ -530,6 +562,32 @@ def _solve_lp(
         "B_P_kW", lowBound=0, upBound=battery_capacity_bound, cat=pulp.LpContinuous
     )
     prob += B_P <= B_E  # at most 1C power, consistent with residential batteries
+
+    storage_credit_mode = None
+    eligible_storage_cost = 0.0
+    storage_gross_cost = B_E * c_batt_kwh + B_P * c_batt_kw
+    credit_minimum_kwh = FEDERAL_ITC_25D.minimum_storage_capacity_kwh
+    if annual_credit_fraction > 0:
+        if fixed_batt_kwh is not None:
+            if battery_capacity_bound >= credit_minimum_kwh:
+                eligible_storage_cost = storage_gross_cost
+        elif battery_capacity_bound >= credit_minimum_kwh:
+            maximum_storage_cost = battery_capacity_bound * (c_batt_kwh + c_batt_kw)
+            if not math.isfinite(maximum_storage_cost):
+                raise ValueError("Storage-credit sizing requires a finite installed-cost bound")
+            if maximum_storage_cost > 0:
+                storage_credit_mode = pulp.LpVariable("storage_credit_eligible", cat=pulp.LpBinary)
+                eligible_storage_cost = pulp.LpVariable(
+                    "eligible_storage_cost_usd", lowBound=0, upBound=maximum_storage_cost,
+                )
+                prob += B_E >= credit_minimum_kwh * storage_credit_mode
+                # Linearize eligible cost = gross storage cost * eligibility.
+                # The declared capacity ceiling and 1C bound give a finite cost bound.
+                prob += eligible_storage_cost <= storage_gross_cost
+                prob += eligible_storage_cost <= maximum_storage_cost * storage_credit_mode
+                prob += eligible_storage_cost >= (
+                    storage_gross_cost - maximum_storage_cost * (1 - storage_credit_mode)
+                )
 
     # Flows per hour
     pv_availability_bounds = [pv_kw_cap * float(G[h]) for h in range(H)]
@@ -650,6 +708,10 @@ def _solve_lp(
     alpha_pv = _crf(discount_rate, pv_life_yrs)
     alpha_batt = _alpha_batt_npv(discount_rate, batt_life_yrs, pv_life_yrs)
     capex_annual = PV_kw * c_pv_kw * alpha_pv + B_E * c_batt_kwh * alpha_batt + B_P * c_batt_kw * alpha_batt
+    if federal_credit_policy is not None:
+        capex_annual -= annual_credit_fraction * (
+            PV_kw * c_pv_kw + eligible_storage_cost
+        )
 
     # NBT uses the same annual credit equation as numeric reporting.
     if nbt_terms is not None:
@@ -887,6 +949,13 @@ def _solve_lp(
         pulp.value(B_E),
         label="B_E_kWh",
     )
+    if storage_credit_mode is not None and pulp.value(storage_credit_mode) > 0.5:
+        if b_e_val < credit_minimum_kwh:
+            if credit_minimum_kwh - b_e_val > SOLVER_OUTPUT_ABSOLUTE_TOLERANCE:
+                raise RuntimeError("Storage-credit solution is below the eligibility minimum")
+            # Represent an eligible boundary solution exactly, as with physical zero.
+            # Fixed sub-threshold sizes never enter this normalization path.
+            b_e_val = credit_minimum_kwh
     b_p_val = _normalize_nonnegative_solver_value(
         pulp.value(B_P),
         label="B_P_kW",
@@ -924,6 +993,18 @@ def _solve_lp(
         + b_e_val * c_batt_kwh * alpha_batt
         + b_p_val * c_batt_kw * alpha_batt
     )
+    federal_receipts = None
+    if federal_credit_policy is not None:
+        federal_receipts = federal_credit_policy.receipts_for_system(
+            pv_gross_usd=pv_kw_val * c_pv_kw,
+            storage_gross_usd=b_e_val * c_batt_kwh + b_p_val * c_batt_kw,
+            storage_capacity_kwh=b_e_val,
+        )
+        capex_annual_val -= annualized_one_time_credit(
+            credit_usd=federal_receipts.amounts.pv_25d_usd + federal_receipts.amounts.storage_25d_usd,
+            receipt_year=federal_receipts.home_receipt_year,
+            discount_rate=discount_rate, horizon_years=pv_life_yrs,
+        )
     nem2_settlement = None
     nbt_settlement = None
     if nbt_terms is not None:
@@ -1082,6 +1163,7 @@ def _solve_lp(
         meter_binary_count=len(grid_import_mode),
         solver=solver_report,
         nbt_settlement=nbt_settlement,
+        federal_credit_receipts=federal_receipts,
     )
     _verify_invariants(result, inputs)
     return result

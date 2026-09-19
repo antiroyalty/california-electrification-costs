@@ -54,6 +54,54 @@ class FederalCreditReceipts:
     vehicle_receipt_year: float
 
 
+@dataclass(frozen=True)
+class PVStorageCreditPolicy:
+    """Initial PV/storage credits for otherwise eligible purchases in sizing.
+
+    Unit costs supplied to the optimizer must be gross qualifying installed costs.
+    The declared realization fraction applies to both PV and storage awards.
+    Heat-pump and vehicle credits are constant for a fixed household load scenario;
+    they belong in household reporting, not the PV/storage sizing objective.
+    """
+
+    case: FederalCreditCase
+    receipt_year: float
+    realization_fraction: float
+
+    def __post_init__(self):
+        if not isinstance(self.case, FederalCreditCase):
+            raise ValueError("case must be a FederalCreditCase")
+        _nonnegative_finite(self.receipt_year, "receipt_year")
+        fraction = _nonnegative_finite(self.realization_fraction, "realization_fraction")
+        if fraction > 1:
+            raise ValueError("realization_fraction cannot exceed one")
+
+    @property
+    def fraction_of_eligible_cost(self) -> float:
+        if self.case is FederalCreditCase.NONE:
+            return 0.0
+        return FEDERAL_ITC_25D.fraction * self.realization_fraction
+
+    def receipts_for_system(
+        self, *, pv_gross_usd: float, storage_gross_usd: float, storage_capacity_kwh: float,
+    ) -> FederalCreditReceipts:
+        """Evaluate the chosen design through the same numeric rules as reporting."""
+        eligible = evaluate_federal_purchase_credits(
+            case=self.case, pv_eligible_basis_usd=pv_gross_usd,
+            storage_eligible_basis_usd=storage_gross_usd,
+            storage_capacity_kwh=storage_capacity_kwh,
+            space_heat_pump_eligible_basis_usd=0,
+            water_heat_pump_eligible_basis_usd=0, eligible_vehicle_credit_usd=0,
+        )
+        return FederalCreditReceipts(
+            HouseholdFederalCredits(
+                eligible.pv_25d_usd * self.realization_fraction,
+                eligible.storage_25d_usd * self.realization_fraction, 0.0, 0.0,
+            ),
+            home_receipt_year=self.receipt_year, vehicle_receipt_year=0.0,
+        )
+
+
 def _nonnegative_finite(value: float, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, Real):
         raise ValueError(f"{name} must be a finite, nonnegative number")

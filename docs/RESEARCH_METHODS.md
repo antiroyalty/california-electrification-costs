@@ -240,8 +240,9 @@ now computes potential purchase credits for explicitly eligible costs. It
 supports three cases: no federal credits, solar/storage credits alone, and all
 three modeled credit families. It returns separate solar, storage, shared
 heat-pump, and vehicle amounts. Reporting can now use these amounts when the
-caller explicitly declares their realization and timing. Optimizer integration
-remains pending.
+caller explicitly declares their realization and timing. The optimizer core
+also supports this accounting for solar/storage. County-run configuration and
+the controlled comparison remain pending.
 
 For one taxpayer's purchases in one eligible tax year, the calculation is:
 
@@ -273,8 +274,8 @@ The caller must establish applicable acquisition/installation dates and other
 legal requirements. Selecting credit families does not select a calendar year.
 The amounts precede tax-liability limits and do not assume a receipt date or
 carryforward schedule. They do not grant credits for replacement purchases.
-The approved comparison still requires optimizer integration and declared
-eligibility, realization, and timing. State/local and federally funded rebates
+The approved comparison still requires matched runs with declared eligibility,
+realization, and timing. State/local and federally funded rebates
 are outside that comparison. Default appliance paths still include some rebates,
 including county heat-pump rebates. The explicit federal-only reporting path
 described below excludes them.
@@ -337,9 +338,55 @@ must be established before declaring receipts.
 An explicit declaration of zero credits produces the federal-only no-credit
 comparison and excludes all other incentives. Omitting the declaration preserves
 the existing reporting behavior, including its separately modeled rebates.
-The new path evaluates saved equipment sizes and bills. It does not reoptimize
-them under credits, and it does not update published county results. Matching
-optimizer integration and a controlled comparison run remain pending.
+The reporting path evaluates supplied equipment sizes and bills. It does not
+reoptimize them or update published county results.
+
+The optimizer core accepts an explicit `PVStorageCreditPolicy`. It declares the
+credit case, realization fraction $f$ between zero and one, and receipt year $t$.
+Unit prices must represent gross eligible installed costs. The annual capital
+term becomes:
+
+$$
+A_{\mathrm{capital}}
+= \alpha_{\mathrm{PV}} C_{\mathrm{PV}}
++ \alpha_{\mathrm{battery}} C_{\mathrm{battery}}
+- a(C_{\mathrm{PV}}+Q),\qquad
+a=0.30f(1+r)^{-t}\operatorname{CRF}(r,N).
+$$
+
+Here, $C_{\mathrm{PV}}$ and $C_{\mathrm{battery}}$ are gross installed costs.
+The battery coefficient includes gross replacement and remaining value. $Q$ is
+the battery cost eligible for the initial credit. The no-credit case sets $a=0$.
+Heat-pump and EV credits stay in household reporting. They are constants when
+the household's appliances and load are fixed, so they cannot change optimal
+solar/storage sizing.
+
+Free battery sizing adds one binary variable $y$ when a credit is available and
+the capacity ceiling permits 3 kWh. The linear constraints are:
+
+$$
+K\geq3y,\quad 0\leq Q\leq C_{\mathrm{battery}},\quad
+Q\leq My,\quad Q\geq C_{\mathrm{battery}}-M(1-y).
+$$
+
+$K$ is battery capacity in kWh. $M$ bounds gross battery cost using the declared
+capacity ceiling and the existing power limit of 1 kW per kWh. A credited design
+must reach 3 kWh. Smaller batteries remain feasible without credits. Fixed sizes
+use their known eligibility and need no extra binary variable. The credit does
+not apply again to the year-15 replacement or reduce remaining value at year 25.
+
+After solving, the shared numeric calculator recomputes receipts from the chosen
+design. The resulting annual cost must satisfy the solver's cost-bound check.
+An eligible free-size solution within $10^{-6}$ kWh below 3 kWh is represented
+as exactly 3 kWh. This handles solver precision; fixed sub-threshold inputs
+remain ineligible. Tests reconcile independent cash flows and reporting under
+linear, NBT, and NEM 2 billing. A synthetic case chooses 2.5 kWh without credits
+and 3 kWh with credits; this is a validation example, not a county finding.
+See [the optimizer credit tests](../tests/federal_credit_optimizer_test.py).
+
+Omitting this policy preserves existing optimizer calls. County-run configuration,
+saved credit assumptions, and matched reoptimization remain the next integration
+step. Existing county results are unchanged.
 
 ## Household costs and system selection
 
@@ -484,8 +531,10 @@ $$
 $$
 
 For a modeled battery purchase cost $C$, annual battery capital cost is
-$C\alpha_{\mathrm{shared}}$. Both purchases use the same cost in constant dollars
-and the same modeled incentive treatment. For $C=\$10{,}000$, the year-25 credit
+$C\alpha_{\mathrm{shared}}$. Both purchases use the same cost in constant dollars.
+Legacy net-price calls also repeat their incentive treatment. The explicit
+federal-only path instead uses gross costs and subtracts an initial credit once.
+For gross $C=\$10{,}000$ before federal credits, the year-25 remaining value
 is $3,333.33, its present value is $614.16, and annual capital cost is $1,116.42.
 These are expected accounting examples, not regenerated research results.
 
@@ -683,8 +732,10 @@ The optimizer represents each positive part with a remaining-charge variable
 $z_p$, subject to $z_p \geq C_p-E_p$ and $z_p \geq 0$. Because the objective
 minimizes $F+N+\sum_p z_p$, these bounds give the exact annual bill at the
 optimum. They require one continuous variable for SCE or two for PG&E/SDG&E.
-No financial binary variables or nonlinear allocations are needed. Physical
-meter-direction constraints still use binary variables where required.
+Annual export-credit settlement needs no binary variables or nonlinear
+allocations. Physical meter-direction constraints still use binary variables
+where required. The optional federal purchase-credit path can add one separate
+binary variable for battery eligibility.
 NBT and NEM 2 use HiGHS by default; CBC is also supported.
 
 Numeric reporting evaluates the same equation directly. Optimization replays
@@ -730,12 +781,12 @@ Prioritize a check when the limitation could change a stated conclusion.
 | Reduced 12 × 24 sensitivity chronology | Averaging can change cycling, usable credits, and optimal capacities. Mixed-resolution comparisons cannot isolate a policy effect by themselves. | Use full-year checks for findings near a threshold or sensitive to chronology. |
 | Declared equipment costs, lifetimes, and incentive cases | These are sourced modeling inputs, not a new survey of prices available to every household. | Refresh cost benchmarks or report a focused sensitivity when cost uncertainty affects a claim. |
 | County equipment costs include imputed values | The heat-pump cost inputs use the median of available counties where source data are absent: three counties for space heating and nine for water heating. These are not local price observations. | Identify these counties in cost interpretation and refresh their inputs when local data become available. |
-| Battery remaining-value and replacement-cost assumptions | The method values five remaining years at one-third of replacement cost. It assumes unchanged real purchase costs and incentive treatment. Future prices, incentives, and resale values can differ; the direction of error is uncertain. | State these assumptions with the results. Use a focused sensitivity if they could change an adoption conclusion. |
+| Battery remaining-value and replacement-cost assumptions | The method values five remaining years at one-third of replacement cost. It assumes unchanged real purchase costs. Legacy net-price calls repeat incentive treatment; the explicit federal-only path grants only an initial credit. Future prices and resale values can differ; the direction of error is uncertain. | State these assumptions with the results. Use a focused sensitivity if they could change an adoption conclusion. |
 | Older results and auxiliary tools can use different capital accounting | The core scenarios were regenerated at `8a98b96`. Other cached sizing and reports retain their recorded versions. Standalone solar/battery/combined sweeps, the older Step 9 size optimizer, and auxiliary NPV diagnostics retain separate conventions. | Use the dated claim assessment for current evidence. Align an auxiliary tool before using it for a comparison under these methods. |
 | Auxiliary payback retains legacy conventions | The September 15 refresh reconciles all 141 matched optimized-EV payback rows using the corrected household and incentive selection. First-column tariff selection, capital-summary conventions, and a $0.01 denominator for nonpositive savings remain. Missing-bill handling is permissive; this refresh independently verifies every required bill. | Use the explicit matched EAC collector for publication. Address these conventions if payback becomes a paper result. Older archived payback outputs remain unchanged. |
-| The 2025 incentive sensitivity simplifies eligibility | Its continuous battery sizing uses an ITC-adjusted unit price without a separate 3 kWh eligibility constraint. Appliance calculations still apply the 25C cap separately to space and water heating, although the federal registry records the shared annual cap. Affected 2025 cases can overstate incentives. | Check sub-3-kWh battery conclusions and whole-household cases using both heating credits if these support a published claim. These issues do not change zero-credit post-ITC inputs. |
+| The legacy 2025 incentive sensitivity simplifies eligibility | Its continuous battery sizing uses an ITC-adjusted unit price without a separate 3 kWh eligibility constraint. Legacy appliance calculations apply the 25C cap separately to space and water heating. Affected 2025 cases can overstate incentives. The explicit federal-only optimizer and household calculator enforce these limits. | Rerun affected comparisons through the new path before using them for published claims. These issues do not change zero-credit post-ITC inputs. |
 | Federal purchase credits are conditional on declared eligibility and realization | The amount calculation enforces the shared heat-pump cap and battery threshold. Reporting now applies explicit realized amounts and times to gross costs and excludes other incentives. It does not infer qualifying dates, buyer/product eligibility, or tax liability. Home credits share one receipt time. Treating potential credits as guaranteed receipts could overstate savings. | Declare eligibility and realization assumptions for the comparison. Separate receipt times or installments require an explicit extension. Receipts beyond the study require an explicit model change. Default reports and saved county results remain unchanged. |
-| Federal-only reporting uses the supplied equipment design | The new reporting path changes cost accounting for saved sizes and bills. Those designs were not optimized with the new one-time credits and battery eligibility rule. The result cannot establish optimal credit-era adoption. | Integrate the same rules into optimization, then rerun matched comparison cases before making adoption claims. |
+| Federal-only reporting uses the supplied equipment design | Saved county designs were not optimized with the new one-time credits and battery eligibility rule. Repricing them cannot establish optimal credit-era adoption. The optimizer core now supports these rules, but county-run configuration and saved assumptions remain pending. | Connect the comparison runner, then rerun matched cases before making adoption claims. |
 | Battery augmentation costs and gradual capacity loss omitted centrally | Storage is treated more favorably than a model that charges for maintaining capacity. Round-trip efficiency losses and the declared replacement remain included. More frequent cycling with grid charging could increase this bias. | Report cycling when interpreting a grid-charging result. Add an explicit degradation or augmentation-cost sensitivity if needed. |
 | Equipment-size bounds, specified charging/export rules, and fixed-design comparisons | An optimum applies within its declared feasible choices. A fixed-design result is not an unrestricted economic optimum. | Report binding constraints and test an expanded domain for an affected claim. |
 | Central cases exclude grid charging | The matched 94-case check preserves zero storage in the 46 PG&E/SCE counties but establishes a small positive storage benefit in San Diego. Exact San Diego sizes remain unresolved; its cost ranges have positive lower bounds. | Report this exception alongside the central findings. Stored grid energy remains ineligible for export. County differences combine assigned utility tariffs with local load and weather; they do not isolate a tariff's causal effect. |

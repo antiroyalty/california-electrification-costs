@@ -72,10 +72,11 @@ FEDERAL_ITC_25D = FederalCredit(
         "https://www.irs.gov/pub/taxpros/fs-2025-01.pdf",
     ),
     implementation_note=(
-        "The battery constructor enforces the capacity minimum. The optimizer "
-        "still extends the eligible unit price below that minimum. Existing "
-        "battery annualization repeats the same incentive treatment at replacement. "
-        "Household tax liability, carryforward, and receipt timing are not modeled."
+        "The battery constructor and explicit federal-only optimizer enforce the "
+        "capacity minimum. That optimizer deducts initial credits once at a declared "
+        "receipt time, retaining gross replacement costs. Legacy net-unit-price "
+        "sizing still extends credits below the minimum and to replacements. "
+        "Household tax liability and carryforward are not inferred."
     ),
 )
 
