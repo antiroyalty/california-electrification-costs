@@ -38,6 +38,22 @@ class HouseholdFederalCredits:
         )
 
 
+@dataclass(frozen=True)
+class FederalCreditReceipts:
+    """Declared realization of initial credits for one household comparison.
+
+    Passing this object to reporting selects federal-only accounting from gross
+    equipment costs. The amounts are explicitly assumed realized, potentially
+    less than the eligible awards. Home credits share one receipt time; the
+    vehicle credit has its own time. Both are elapsed years from initial purchase.
+    Eligibility and realization must be established by the caller.
+    """
+
+    amounts: HouseholdFederalCredits
+    home_receipt_year: float
+    vehicle_receipt_year: float
+
+
 def _nonnegative_finite(value: float, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, Real):
         raise ValueError(f"{name} must be a finite, nonnegative number")

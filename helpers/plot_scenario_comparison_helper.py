@@ -46,7 +46,7 @@ Usage (example)
 from __future__ import annotations
 
 import os
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Mapping, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -58,6 +58,7 @@ from helpers.utility_helpers import get_utility_for_county
 from helpers.capital_cost_map_builder import LIFETIMES
 from evaluations.vehicles import vehicle_annual_adders_from_ledger
 from evaluations.eac import crf as _crf, compute_eac_from_inputs
+from evaluations.federal_credits import FederalCreditReceipts
 from evaluations.tariffs import select_row_value_for_plan as _select_plan_value
 from evaluations.lcoe import lcoe_crf_simple
 from evaluations.constants import DEFAULT_DISCOUNT_RATE
@@ -1031,6 +1032,9 @@ def collect_eac_components(
     electricity_variant: Optional[str] = "nem3",
     *,
     with_solar: bool = True,
+    federal_credit_receipts_by_household: Mapping[
+        tuple[str, str], FederalCreditReceipts
+    ] | None = None,
 ) -> pd.DataFrame:
     """Aggregate the shared county EAC components using a mean or median.
 
@@ -1038,6 +1042,7 @@ def collect_eac_components(
     counterfactual, set with_solar=False and electricity_variant='retail'.
     Plan selection and the optional exact bill timestamp pass to the county
     collector unchanged. Aggregation preserves the requested scenario order.
+    Federal-only receipt declarations also pass unchanged to that collector.
     """
     if agg not in {"mean", "median"}:
         raise ValueError("EAC aggregation must be 'mean' or 'median'")
@@ -1046,6 +1051,7 @@ def collect_eac_components(
         incentive=incentive, discount_rate=discount_rate, timestamp=timestamp,
         electricity_plan_preference=electricity_plan_preference,
         electricity_variant=electricity_variant, with_solar=with_solar,
+        federal_credit_receipts_by_household=federal_credit_receipts_by_household,
     )
     return (
         by_county.groupby("scenario", sort=False)
@@ -1066,6 +1072,9 @@ def collect_eac_components_by_county(
     electricity_variant: Optional[str] = "nem3",
     *,
     with_solar: bool = True,
+    federal_credit_receipts_by_household: Mapping[
+        tuple[str, str], FederalCreditReceipts
+    ] | None = None,
 ) -> pd.DataFrame:
     """Return itemized annual household costs for each scenario and county.
 
@@ -1073,6 +1082,11 @@ def collect_eac_components_by_county(
     with_solar=False selects the original load's bill and deliberately sets
     PV/storage costs to zero, without reading a PV/storage summary. Specify
     electricity_variant='retail' for the no-solar retail counterfactual.
+
+    An explicit receipt map selects federal-only accounting from gross costs.
+    Keys must exactly match (scenario, county_slug) for this request, including
+    explicit zero-credit households. Eligibility and realized amounts/times are
+    caller declarations. Saved system sizes and bills are not reoptimized.
     """
     inc = (incentive or "").lower()
     if inc not in {"full_incentives", "half_incentives", "no_incentives"}:
@@ -1087,6 +1101,15 @@ def collect_eac_components_by_county(
         raise ValueError("No counties provided for EAC-by-county collection")
     if len(set(scenarios)) != len(scenarios) or len(set(county_slugs)) != len(county_slugs):
         raise ValueError("EAC scenarios and counties must be unique")
+    if federal_credit_receipts_by_household is not None:
+        if not isinstance(federal_credit_receipts_by_household, Mapping):
+            raise ValueError("Federal-only credit receipts must be a household mapping")
+        expected = {(scen, slug) for scen in scenarios for slug in county_slugs}
+        if set(federal_credit_receipts_by_household) != expected:
+            raise ValueError("Federal-only credit receipts must exactly cover requested households")
+        if not all(isinstance(value, FederalCreditReceipts)
+                   for value in federal_credit_receipts_by_household.values()):
+            raise ValueError("Each federal-only household requires explicit FederalCreditReceipts")
     if electricity_plan_preference is not None:
         electricity_plan_preference = list(electricity_plan_preference)
 
@@ -1157,6 +1180,10 @@ def collect_eac_components_by_county(
                 incentive=inc, discount_rate=discount_rate, lifetimes=LIFETIMES,
                 annual_bill_electric=e_bill, annual_bill_gas=g_bill,
                 vehicle_om=vehicle_om,
+                federal_credit_receipts=(
+                    None if federal_credit_receipts_by_household is None
+                    else federal_credit_receipts_by_household[(scen, slug)]
+                ),
             )
             if not np.isfinite(comp.total()):
                 raise ValueError(f"Annual household cost must be finite for {scen}/{slug}")

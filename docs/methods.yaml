@@ -108,7 +108,7 @@
       "capital_accounting": "Subtract the annual reduction from annual costs before this credit. For storage, apply alpha_batt_npv to gross purchase cost and subtract the one-time reduction separately. Replacement purchases and remaining value keep their gross basis. Do not also deduct the credit from equipment unit prices.",
       "realization": "The caller declares the amount actually realized and receipt time. The function does not establish eligibility, tax liability, carryforward, or automatic realization of a potential federal credit.",
       "failure_rules": "Require finite real inputs, excluding booleans. Credit and discount rate must be nonnegative; horizon must be positive; receipt must fall within [0,N]. Validate parameters even for zero credit. Reject unsupported receipts beyond study end instead of silently assigning a value.",
-      "integration_status": "Implemented and tested as an isolated calculation. Existing pipeline, optimizer, and reporting incentive treatment remain unchanged; their integration is pending."
+      "integration_status": "Used by the explicit federal-only EAC reporting path for declared realized credits. Default reporting behavior remains unchanged. Optimizer integration and a controlled comparison run are pending."
     },
     "validation": "Independent discounted cash-flow sums verify immediate, fractional-year, delayed, and terminal receipts; zero credit and zero discount; and itemized household credits with different receipt times. A $7,500 credit at 7% over 25 years gives $643.58/year at t=0 or $601.48/year at t=1. A $10,000 battery with gross replacement at year 15, one-third gross remaining value at year 25, and one $3,000 initial credit costs $858.99/year.",
     "code": [
@@ -140,7 +140,7 @@
     "assumptions": {
       "units": "Annual battery capital cost per dollar of modeled purchase cost; r is the real annual discount rate, n is battery service life in years, and N is the study period in years.",
       "central_case": "N=25, matching the assumed solar life; n=15. Purchases occur at years 0 and 15. At year 25 credit one-third of replacement cost, then discount that credit to year 0.",
-      "cost_basis": "Initial and replacement purchases use the same real cost and incentive treatment. The remaining-value credit uses that same replacement-cost basis. Future price and incentive changes are not forecast.",
+      "cost_basis": "The coefficient applies to a common initial/replacement purchase-cost basis and uses that same basis for remaining value. Default reporting retains its existing net-cost treatment. The explicit federal-only reporting path applies this coefficient to gross cost, then subtracts initial credits separately; replacements receive no new credits.",
       "remaining_value": "Value is proportional to unused service life. This estimates remaining service value, not a resale price.",
       "worked_example": "At r=0.07 the coefficient is 0.111642025 per year. For a $10,000 purchase cost: year-25 remaining value $3,333.33, present credit $614.16, annual battery capital cost $1,116.42.",
       "boundaries": "Count purchases strictly before study end; do not buy at the terminal date. Credit only the last battery. Multiple replacements are included when required. Zero interest gives 1/n. Reject negative or non-finite discount rates and nonpositive or non-finite lifetimes and study periods.",
@@ -168,10 +168,14 @@
     "assumptions": {
       "discount_rate": "0.07 real (default unless overridden)",
       "lifetimes": "solar=25, storage=15, appliance rows use lifetime_years (default 15 if missing)",
-      "incentives": "full/half/no incentives applied to PV/storage capex",
+      "incentives": "Default path: full/half/no incentives applied to PV/storage capex. Explicit federal_credit_receipts instead selects gross equipment costs and one-time federal credits, replacing all mixed-incentive ledger and PV-summary prices.",
       "capital_recovery_factor": "CRF = r(1+r)^n / ((1+r)^n - 1)",
       "battery_annualization": "Always use alpha_batt_npv, shared with Step 9b. The study period equals the declared solar life; replacement and proportional remaining value are included.",
       "reporting_validation": "County and aggregate EAC reports share one county collector. It requires a capital ledger with explicit county, incentive, appliance identity, finite costs and operating costs, and positive service lives. Missing county/incentive rows and duplicate equipment rows fail. Explicit zero costs and negative net costs or operating-cost adjustments remain valid. The low-level EAC function retains its existing optional-input conventions; report collectors validate inputs before calling it.",
+      "federal_only": "FederalCreditReceipts declares realized amounts for PV, storage, shared heat pumps, and vehicle credits. Home credits share one receipt time; the EV has its own. Subtract each annualized receipt once over the study horizon from gross capital accounting: PV/storage reductions enter their respective components; heat-pump/vehicle reductions enter capex_electric. Retain gross battery replacement and remaining value. Keep existing appliance service-life annualization and operating costs.",
+      "federal_selection": "County collectors require an exact map from (scenario, county_slug) to FederalCreditReceipts, including explicit zero-credit households. They still select one ledger incentive case for costs and operating costs; alternative rows are never summed. Zero receipt declarations exclude all other incentives; an omitted map preserves default reporting. No-solar requests require zero PV/storage credits and no summary file.",
+      "federal_validation": "Require gross costs to be finite and nonnegative, service lives positive, and ledger rows unique for one selected county/incentive case. Reject missing required gross columns, malformed credits/times/bills, and credits above the corresponding purchase cost. The caller must establish legal eligibility and realization before declaring receipts; reporting does not infer them from gross cost.",
+      "federal_scope": "Reporting of supplied designs only. Saved sizes, dispatch, bills, and headline results are not reoptimized or regenerated. Optimizer integration and the controlled federal-only comparison remain pending.",
       "no_solar_counterfactual": "Step 20 calls the shared EAC collectors with with_solar=False and electricity_variant=retail. Solar/storage capital is deliberately zero and no PV summary is read. Appliance and vehicle costs use the same ledger and calculation as the with-solar case. Bills come from the original-load row. An optional exact timestamp selects saved bills, not other input provenance. The four-case collector and figure are implemented; the September 14 matched run at 11b7dba covers all 47 counties. See docs/research_logs/2026-09-14.md.",
       "comparison_tariffs": "No-solar reporting retains the configured retail import plan; with-solar reporting retains the configured variant, normally NEM 3. Their difference can include a plan change. The four-case comparison must match tariff selection between household types within each solar choice and state any adoption-related plan change."
     },
@@ -183,6 +187,8 @@
     },
     "code": [
       "evaluations/eac.py:compute_eac_from_inputs",
+      "evaluations/federal_credits.py:FederalCreditReceipts",
+      "tests/federal_credit_reporting_test.py",
       "helpers/plot_scenario_comparison_helper.py:collect_eac_components",
       "helpers/plot_scenario_comparison_helper.py:collect_eac_components_by_county",
       "figure_builder/datasets.py:build_claims_eac_source",
@@ -532,7 +538,7 @@
       "scope": "Homeowner-owned solar/storage, heat pumps and heat-pump water heaters, and purchased new vehicles for the declared 2025/2026 comparisons. Other tax-credit categories and federal/state/local rebate programs are outside this registry.",
       "authority": "Immutable records in appliances/federal_credits.py own amounts, dates, eligible costs, tax treatment, primary-source URLs, and implementation notes. Existing regime helpers import these records. The battery constructor reads the registry's capacity minimum.",
       "unchanged_behavior": "Registry extraction preserves existing regime amounts, equipment costs, capture fractions, optimization, and reporting. It does not enforce the shared household cap, optimizer battery eligibility, tax liability, credit timing, or EV buyer/vehicle eligibility.",
-      "approved_pending_comparison": "Compare no federal credits, solar/storage credits alone, and the three modeled federal credit families for explicitly eligible purchases. The isolated household amount calculation and one-time credit annualization are implemented. Pipeline integration, optimizer eligibility, and declared realization/timing remain pending. Existing non-tax rebate paths, including county heat-pump rebates, still require explicit exclusion from that future comparison."
+      "approved_pending_comparison": "Compare no federal credits, solar/storage credits alone, and the three modeled federal credit families for explicitly eligible purchases. Household amounts, one-time annualization, and explicit federal-only reporting from gross costs are implemented. The new reporting path excludes non-tax rebates. Optimizer integration, explicit eligibility/realization declarations, and the controlled comparison run remain pending."
     },
     "code": [
       "appliances/federal_credits.py:FederalCredit",
@@ -551,7 +557,7 @@
       "eligibility": "The caller must establish eligible purchase dates and legal buyer/product requirements. The storage calculation also enforces the capacity threshold. The model covers one taxpayer and one eligible tax year; no other purchase consumes the heat-pump cap. Tax liability, carryforward, and receipt timing are outside this amount calculation.",
       "scope": "One initial purchase bundle. No replacement credits, state/local rebates, federally funded rebates, or other tax-credit categories are added. Inputs must not be mixed-incentive net costs. The shared heat-pump amount is not allocated back to individual appliances.",
       "failure_rules": "All six numeric inputs are required and must be finite, nonnegative real numbers, excluding booleans. Validate them even for excluded credit families. Reject positive storage basis with zero capacity, vehicle credits above the maximum, and non-enum cases. Explicit zero represents absence or ineligibility; missing is an error.",
-      "integration_status": "Isolated calculation and tests are implemented. The separate annualized_one_time_credit helper converts a declared realized amount and receipt time into annual cost reduction. Existing appliance, pipeline, optimizer, and reporting behavior remain unchanged. Integration and declared credit realization/timing are pending."
+      "integration_status": "FederalCreditReceipts supplies declared realized amounts and separate home/vehicle receipt times to the EAC calculation and county collectors. The annualized_one_time_credit helper converts each receipt into an annual reduction from gross costs. Default reporting is unchanged. Eligibility and realization must be declared; optimizer integration and comparison runs remain pending."
     },
     "validation": "Worked bundle: eligible PV $20,000, storage $10,000 at 10 kWh, space heat $12,000, water heat $4,000, and vehicle credit $7,500 produces $0 / $9,000 / $18,500 across the three cases. The combined heat-pump credit is $2,000 rather than the incorrect independent-cap total of $3,200. Tests cover cap saturation, battery thresholds, declared vehicle amounts, zeros, malformed inputs, and total reconciliation.",
     "code": [

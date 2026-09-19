@@ -8,6 +8,7 @@ from typing import Mapping, Optional
 import pandas as pd
 
 from .constants import DEFAULT_DISCOUNT_RATE
+from .federal_credits import FederalCreditReceipts, HouseholdFederalCredits
 
 
 def crf(rate: float, years: float) -> float:
@@ -145,6 +146,58 @@ def alpha_batt_npv(discount_rate: float, batt_life_yrs: float, horizon_yrs: floa
     return (discounted_purchases - discounted_remaining_value) * crf(r, N)
 
 
+def _gross_federal_inputs(ledger_df, pv_summary_row):
+    """Validate gross costs and remove mixed-incentive prices from copied inputs."""
+    ledger = None
+    if ledger_df is not None:
+        if not isinstance(ledger_df, pd.DataFrame):
+            raise ValueError("Federal-only ledger must be a DataFrame or explicit None")
+        required = {"appliance_category", "appliance_type", "base_cost", "lifetime_years"}
+        missing = required - set(ledger_df.columns)
+        if missing:
+            raise ValueError(f"Federal-only ledger missing columns: {sorted(missing)}")
+        ledger = ledger_df.copy()
+        for key in ("county_slug", "incentive_scenario"):
+            if key in ledger and (ledger[key].isna().any() or ledger[key].nunique() != 1):
+                raise ValueError(f"Federal-only ledger requires one selected {key}")
+        if not ledger["appliance_category"].isin(["electric", "gas"]).all():
+            raise ValueError("Federal-only appliance_category must be electric or gas")
+        if not ledger["appliance_type"].map(
+            lambda value: isinstance(value, str) and bool(value.strip())
+        ).all():
+            raise ValueError("Federal-only appliance_type must be non-empty text")
+        if ledger.duplicated(["appliance_category", "appliance_type"]).any():
+            raise ValueError("Federal-only ledger has duplicate appliance rows")
+        for column in ("base_cost", "lifetime_years"):
+            try:
+                ledger[column] = pd.to_numeric(ledger[column], errors="raise")
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"Federal-only {column} must be numeric") from exc
+            if not ledger[column].map(lambda value: isfinite(value)).all():
+                raise ValueError(f"Federal-only {column} must be finite")
+        if (ledger["base_cost"] < 0).any():
+            raise ValueError("Federal-only base_cost must be nonnegative")
+        if (ledger["lifetime_years"] <= 0).any():
+            raise ValueError("Federal-only lifetime_years must be positive")
+        ledger["net_cost"] = ledger["base_cost"]
+
+    pv_summary = None
+    if pv_summary_row is not None:
+        pv_summary = {}
+        for column in ("pv_capex", "storage_capex"):
+            if column not in pv_summary_row:
+                raise ValueError(f"Federal-only PV summary missing {column}")
+            value = pv_summary_row[column]
+            if isinstance(value, bool) or not isinstance(value, Real):
+                raise ValueError(f"Federal-only {column} must be numeric")
+            if not isfinite(value) or value < 0:
+                raise ValueError(f"Federal-only {column} must be finite and nonnegative")
+            pv_summary[column] = float(value)
+        # These zeros deliberately exclude all legacy PV/storage incentives.
+        pv_summary.update(pv_incentives_full=0.0, storage_incentives_full=0.0)
+    return ledger, pv_summary
+
+
 def compute_eac_from_inputs(
     ledger_df: Optional[pd.DataFrame],
     pv_summary_row: Optional[pd.Series | Mapping[str, float]],
@@ -155,6 +208,7 @@ def compute_eac_from_inputs(
     annual_bill_electric: float = 0.0,
     annual_bill_gas: float = 0.0,
     vehicle_om: float = 0.0,
+    federal_credit_receipts: FederalCreditReceipts | None = None,
 ) -> EACComponents:
     """Compute EAC components from in‑memory inputs.
 
@@ -180,11 +234,58 @@ def compute_eac_from_inputs(
       proportional remaining value through alpha_batt_npv, as in optimization.
     - annual_bill_electric, annual_bill_gas: already‑computed annual bills
     - vehicle_om: optional annual vehicle O&M adder (default 0)
+    - federal_credit_receipts: explicit federal-only comparison. Use gross
+      equipment costs and subtract these initial credits once over the study
+      horizon. This replaces all ledger/PV incentives, including rebates. The
+      returned capital components are net of annualized credits. None preserves
+      existing mixed-incentive reporting. It does not mean zero federal credits;
+      supply explicit zero amounts for the federal-only no-credit comparison.
 
     Returns an EACComponents dataclass.
     """
     lifetimes = lifetimes or {"solar": 25, "storage": 15}
     inc = (incentive or "").lower()
+
+    credit_pv = credit_storage = credit_heat = credit_vehicle = 0.0
+    if federal_credit_receipts is not None:
+        receipts = federal_credit_receipts
+        if not isinstance(receipts, FederalCreditReceipts) or not isinstance(
+            receipts.amounts, HouseholdFederalCredits
+        ):
+            raise ValueError("federal_credit_receipts must contain HouseholdFederalCredits")
+        ledger_df, pv_summary_row = _gross_federal_inputs(ledger_df, pv_summary_row)
+        inc = "no_incentives"
+        for name, value in (("annual_bill_electric", annual_bill_electric),
+                            ("annual_bill_gas", annual_bill_gas), ("vehicle_om", vehicle_om)):
+            if isinstance(value, bool) or not isinstance(value, Real) or not isfinite(value):
+                raise ValueError(f"Federal-only {name} must be finite and numeric")
+        heat_basis = vehicle_basis = 0.0
+        if ledger_df is not None:
+            electric = ledger_df[ledger_df["appliance_category"] == "electric"]
+            heat_basis = electric.loc[
+                electric["appliance_type"].isin(["heating", "hot_water"]), "base_cost"
+            ].sum()
+            vehicle_basis = electric.loc[
+                electric["appliance_type"] == "vehicle_charging", "base_cost"
+            ].sum()
+        pv_basis = 0.0 if pv_summary_row is None else pv_summary_row["pv_capex"]
+        storage_basis = 0.0 if pv_summary_row is None else pv_summary_row["storage_capex"]
+        amounts = receipts.amounts
+        reductions = []
+        for name, amount, basis, time in (
+            ("pv_25d_usd", amounts.pv_25d_usd, pv_basis, receipts.home_receipt_year),
+            ("storage_25d_usd", amounts.storage_25d_usd, storage_basis, receipts.home_receipt_year),
+            ("heat_pumps_25c_usd", amounts.heat_pumps_25c_usd, heat_basis, receipts.home_receipt_year),
+            ("vehicle_30d_usd", amounts.vehicle_30d_usd, vehicle_basis, receipts.vehicle_receipt_year),
+        ):
+            reduction = annualized_one_time_credit(
+                credit_usd=amount, receipt_year=time, discount_rate=discount_rate,
+                horizon_years=lifetimes.get("solar", 25),
+            )
+            if amount > basis:
+                raise ValueError(f"Federal-only {name} exceeds the corresponding gross purchase cost")
+            reductions.append(reduction)
+        credit_pv, credit_storage, credit_heat, credit_vehicle = reductions
 
     capex_electric = 0.0
     capex_gas = 0.0
@@ -208,6 +309,8 @@ def compute_eac_from_inputs(
                 if r.get("appliance_category") == "gas":
                     capex_gas += _to_float(r.get("base_cost", 0.0)) * factor
             except Exception:
+                if federal_credit_receipts is not None:
+                    raise
                 # Skip any malformed rows
                 continue
 
@@ -237,9 +340,9 @@ def compute_eac_from_inputs(
         capex_storage = st_net * alpha_batt_npv(discount_rate, storage_life, solar_life)
 
     return EACComponents(
-        capex_pv=capex_pv,
-        capex_storage=capex_storage,
-        capex_electric=capex_electric,
+        capex_pv=capex_pv - credit_pv,
+        capex_storage=capex_storage - credit_storage,
+        capex_electric=capex_electric - credit_heat - credit_vehicle,
         capex_gas=capex_gas,
         annual_bill_electric=_to_float(annual_bill_electric),
         annual_bill_gas=_to_float(annual_bill_gas),

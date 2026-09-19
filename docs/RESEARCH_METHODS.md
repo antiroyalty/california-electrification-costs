@@ -239,7 +239,9 @@ The separate [household credit calculation](../evaluations/federal_credits.py)
 now computes potential purchase credits for explicitly eligible costs. It
 supports three cases: no federal credits, solar/storage credits alone, and all
 three modeled credit families. It returns separate solar, storage, shared
-heat-pump, and vehicle amounts. It does not yet feed the pipeline or optimizer.
+heat-pump, and vehicle amounts. Reporting can now use these amounts when the
+caller explicitly declares their realization and timing. Optimizer integration
+remains pending.
 
 For one taxpayer's purchases in one eligible tax year, the calculation is:
 
@@ -271,11 +273,11 @@ The caller must establish applicable acquisition/installation dates and other
 legal requirements. Selecting credit families does not select a calendar year.
 The amounts precede tax-liability limits and do not assume a receipt date or
 carryforward schedule. They do not grant credits for replacement purchases.
-The approved comparison still requires pipeline integration, optimizer eligibility,
-and declared credit realization and timing. State/local and federally funded
-rebates are outside that comparison. Existing appliance paths still include
-some of those rebates, including county heat-pump rebates. Replacing those paths
-with an explicit federal-only calculation remains pending.
+The approved comparison still requires optimizer integration and declared
+eligibility, realization, and timing. State/local and federally funded rebates
+are outside that comparison. Default appliance paths still include some rebates,
+including county heat-pump rebates. The explicit federal-only reporting path
+described below excludes them.
 
 A separate [credit annualization function](../evaluations/eac.py) converts one
 declared receipt into an annual cost reduction. The caller supplies the amount
@@ -308,9 +310,36 @@ gives $858.99/year, compared with $1,116.42/year before that credit. Independent
 cash-flow tests verify this example and delayed receipt. Credits with different
 receipt times must be converted separately and then summed.
 
-This helper is implemented and tested in isolation. Existing optimizer and
-reporting paths still use their current incentive treatment. Integration remains
-pending; these examples do not revise county results or establish tax eligibility.
+The existing EAC calculation and county collectors now accept explicit federal
+credit receipts. For this comparison, they start from gross equipment costs
+and subtract the annualized initial credits once. They ignore the ledger's
+mixed-incentive net prices and the solar/storage summary's old incentive amounts.
+This excludes county heat-pump rebates, cooking rebates, and utility EV rebates.
+Battery replacement and remaining value use gross costs. Appliance service-life
+annualization, energy bills, and vehicle operating costs keep their existing
+conventions.
+
+The returned solar and storage capital components each include their own credit
+reduction. Electric-appliance capital includes the shared heat-pump and vehicle
+reductions. The reported components still sum to total annual household cost.
+The receipt declaration retains the four purchase-credit amounts and their
+timing. It uses one receipt time for home credits and a separate time for the EV.
+It does not infer tax eligibility or treat a potential award as realized.
+
+Every requested scenario and county must have exactly one receipt declaration.
+Missing or extra households raise errors. The ledger still selects one incentive
+case before reading gross costs and vehicle operating costs; its alternative
+rows are not summed. No-solar reporting requires zero solar/storage credits and
+does not read a solar/storage summary. Credits exceeding the corresponding gross
+purchase cost raise errors. Eligibility, including the battery capacity minimum,
+must be established before declaring receipts.
+
+An explicit declaration of zero credits produces the federal-only no-credit
+comparison and excludes all other incentives. Omitting the declaration preserves
+the existing reporting behavior, including its separately modeled rebates.
+The new path evaluates saved equipment sizes and bills. It does not reoptimize
+them under credits, and it does not update published county results. Matching
+optimizer integration and a controlled comparison run remain pending.
 
 ## Household costs and system selection
 
@@ -705,7 +734,8 @@ Prioritize a check when the limitation could change a stated conclusion.
 | Older results and auxiliary tools can use different capital accounting | The core scenarios were regenerated at `8a98b96`. Other cached sizing and reports retain their recorded versions. Standalone solar/battery/combined sweeps, the older Step 9 size optimizer, and auxiliary NPV diagnostics retain separate conventions. | Use the dated claim assessment for current evidence. Align an auxiliary tool before using it for a comparison under these methods. |
 | Auxiliary payback retains legacy conventions | The September 15 refresh reconciles all 141 matched optimized-EV payback rows using the corrected household and incentive selection. First-column tariff selection, capital-summary conventions, and a $0.01 denominator for nonpositive savings remain. Missing-bill handling is permissive; this refresh independently verifies every required bill. | Use the explicit matched EAC collector for publication. Address these conventions if payback becomes a paper result. Older archived payback outputs remain unchanged. |
 | The 2025 incentive sensitivity simplifies eligibility | Its continuous battery sizing uses an ITC-adjusted unit price without a separate 3 kWh eligibility constraint. Appliance calculations still apply the 25C cap separately to space and water heating, although the federal registry records the shared annual cap. Affected 2025 cases can overstate incentives. | Check sub-3-kWh battery conclusions and whole-household cases using both heating credits if these support a published claim. These issues do not change zero-credit post-ITC inputs. |
-| Federal purchase credits are conditional on declared eligibility and realization | The isolated amount calculation enforces the shared heat-pump cap and battery capacity threshold. A separate helper annualizes one declared receipt. Neither determines qualifying dates, buyer/product eligibility, tax liability, or when a credit is realized. Treating potential credits as immediate guaranteed receipts could overstate savings. | Integrate both calculations with explicit eligibility, realized amounts, and receipt times before using the expanded comparison. Keep initial credits separate from replacement prices and exclude non-tax rebates explicitly. Receipts beyond the study require an explicit model change. Existing pipeline results remain unchanged. |
+| Federal purchase credits are conditional on declared eligibility and realization | The amount calculation enforces the shared heat-pump cap and battery threshold. Reporting now applies explicit realized amounts and times to gross costs and excludes other incentives. It does not infer qualifying dates, buyer/product eligibility, or tax liability. Home credits share one receipt time. Treating potential credits as guaranteed receipts could overstate savings. | Declare eligibility and realization assumptions for the comparison. Separate receipt times or installments require an explicit extension. Receipts beyond the study require an explicit model change. Default reports and saved county results remain unchanged. |
+| Federal-only reporting uses the supplied equipment design | The new reporting path changes cost accounting for saved sizes and bills. Those designs were not optimized with the new one-time credits and battery eligibility rule. The result cannot establish optimal credit-era adoption. | Integrate the same rules into optimization, then rerun matched comparison cases before making adoption claims. |
 | Battery augmentation costs and gradual capacity loss omitted centrally | Storage is treated more favorably than a model that charges for maintaining capacity. Round-trip efficiency losses and the declared replacement remain included. More frequent cycling with grid charging could increase this bias. | Report cycling when interpreting a grid-charging result. Add an explicit degradation or augmentation-cost sensitivity if needed. |
 | Equipment-size bounds, specified charging/export rules, and fixed-design comparisons | An optimum applies within its declared feasible choices. A fixed-design result is not an unrestricted economic optimum. | Report binding constraints and test an expanded domain for an affected claim. |
 | Central cases exclude grid charging | The matched 94-case check preserves zero storage in the 46 PG&E/SCE counties but establishes a small positive storage benefit in San Diego. Exact San Diego sizes remain unresolved; its cost ranges have positive lower bounds. | Report this exception alongside the central findings. Stored grid energy remains ineligible for export. County differences combine assigned utility tariffs with local load and weather; they do not isolate a tariff's causal effect. |
