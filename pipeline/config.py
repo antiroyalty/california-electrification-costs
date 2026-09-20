@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from evaluations.constants import DEFAULT_DISCOUNT_RATE
+from evaluations.federal_credits import PVStorageCreditPolicy
 from tariffs.models import CustomerSegment, NBTScenario, ServiceType
 from pipeline.solver import SolverOptions
 
@@ -53,6 +54,9 @@ class Config:
     max_battery_kwh: float = 40.0
     # The budget applies to one sizing/dispatch solve across all meter rounds.
     coopt_solver: SolverOptions = field(default_factory=SolverOptions)
+    # Federal-only sizing from gross prices. Household reporting requires its
+    # own declared receipts; this does not select a historical tariff year.
+    coopt_federal_credit_policy: PVStorageCreditPolicy | None = None
 
     def nbt_scenario(self) -> NBTScenario:
         return NBTScenario(

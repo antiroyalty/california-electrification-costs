@@ -45,6 +45,12 @@ def _vehicle_compare_pair(current_scenario: str) -> List[str]:
 
 def run(cfg: Config) -> None:
     """Run Module 4: visualize and compare results (Steps 15, 16, 18–22)."""
+    if cfg.coopt_federal_credit_policy is not None:
+        raise ValueError(
+            "Module 4 does not yet support federal-only household reporting. "
+            "Use the EAC collectors with explicit federal_credit_receipts; "
+            "solar/storage sizing credits alone do not declare household credits."
+        )
     c_list: List[str] = list(cfg.counties)
     os.makedirs(cfg.output_dir, exist_ok=True)
 

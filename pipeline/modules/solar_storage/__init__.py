@@ -20,6 +20,8 @@ def _is_coopt_scenario(name: str) -> bool:
 
 def run(cfg: Config) -> None:
     """Run Module 2: compute and co‑optimize solar and storage (Steps 8–9)."""
+    if cfg.coopt_federal_credit_policy is not None and not _is_coopt_scenario(cfg.scenario):
+        raise ValueError("Federal purchase-credit sizing requires a _coopt scenario")
     base_dir = cfg.base_input_dir
     c_list: List[str] = list(cfg.counties)
 
@@ -51,6 +53,13 @@ def run(cfg: Config) -> None:
         # See step9b_cooptimize_pv_battery.py for the full note
         # (2026-07-07 refinement).
         incentive_scenario = IncentiveScenario(cfg.incentive)
+        if cfg.coopt_federal_credit_policy is None:
+            pv_unit_cost = SolarSystemAppliance.per_kw_cost_net(incentive_scenario)
+            battery_unit_cost = BatteryStorageAppliance.per_kwh_cost_net(incentive_scenario)
+        else:
+            # The solver deducts the initial credit once; net prices would count it twice.
+            pv_unit_cost = SolarSystemAppliance.per_kw_cost()
+            battery_unit_cost = BatteryStorageAppliance.per_kwh_cost()
         Step9bCoopt.process(
             base_input_dir=base_dir,
             base_output_dir=base_dir,
@@ -60,10 +69,11 @@ def run(cfg: Config) -> None:
             allow_grid_charging=False,
             allow_batt_export=True,
             discount_rate=cfg.discount_rate,
-            pv_capex_per_kw=SolarSystemAppliance.per_kw_cost_net(incentive_scenario),
-            batt_capex_per_kwh=BatteryStorageAppliance.per_kwh_cost_net(incentive_scenario),
+            pv_capex_per_kw=pv_unit_cost,
+            batt_capex_per_kwh=battery_unit_cost,
             max_battery_kwh=cfg.max_battery_kwh,
             solver_options=cfg.coopt_solver,
+            federal_credit_policy=cfg.coopt_federal_credit_policy,
             nbt_scenario=cfg.nbt_scenario(),
             nbc_dollars_per_kwh_override=cfg.nbc_dollars_per_kwh_override,
         )

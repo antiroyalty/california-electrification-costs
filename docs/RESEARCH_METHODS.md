@@ -241,8 +241,9 @@ supports three cases: no federal credits, solar/storage credits alone, and all
 three modeled credit families. It returns separate solar, storage, shared
 heat-pump, and vehicle amounts. Reporting can now use these amounts when the
 caller explicitly declares their realization and timing. The optimizer core
-also supports this accounting for solar/storage. County-run configuration and
-the controlled comparison remain pending.
+also supports this accounting for solar/storage. Step 9b county runs accept the
+same policy and save its assumptions. The matched household comparison remains
+pending.
 
 For one taxpayer's purchases in one eligible tax year, the calculation is:
 
@@ -384,9 +385,41 @@ linear, NBT, and NEM 2 billing. A synthetic case chooses 2.5 kWh without credits
 and 3 kWh with credits; this is a validation example, not a county finding.
 See [the optimizer credit tests](../tests/federal_credit_optimizer_test.py).
 
-Omitting this policy preserves existing optimizer calls. County-run configuration,
-saved credit assumptions, and matched reoptimization remain the next integration
-step. Existing county results are unchanged.
+Omitting this policy preserves existing optimizer calls. Set
+`Config.coopt_federal_credit_policy` to use it through the solar/storage module.
+That module selects gross appliance prices before calling Step 9b. Direct Step 9b
+calls also select gross defaults in this mode. Explicit price overrides must be
+gross eligible installed costs. The legacy `incentive` setting does not determine
+the new policy's realization fraction.
+
+The Step 9b command line requires the credit case, receipt year, and realization
+fraction together. For example, this runs one conditional solar/storage case into
+a separate output directory:
+
+```sh
+python -m pipeline.steps.step9b_cooptimize_pv_battery \
+  --scenario full_electric_ev_coopt --counties alameda \
+  --base-input-dir data/loadprofiles --base-output-dir /tmp/federal-credit-check \
+  --federal-credit-case solar_storage_federal_credits \
+  --credit-receipt-year 1 --credit-realization-fraction 1
+```
+
+Each county gets a `coopt_accounting_<county>.json` file. It records the credit
+policy and rule snapshot, realized receipts, full-precision capacities, unit and
+purchase costs, annual costs, lifetimes, discount rate, dispatch settings, and
+tariff identity. The existing solver file retains the cost certificate. Federal
+runs also preserve full capacity precision in `electrified_assets.csv`; rounding
+must not change credit eligibility or reported costs. A subsequent legacy run
+rewrites the accounting file with explicit null credit declarations.
+
+In this mode, missing or incomplete county profiles and failed capacity writes
+raise errors. Legacy Step 9b sweeps and non-cooptimized scenarios reject the new
+policy. Module 4 also rejects it: its reports do not yet load household receipts.
+This prevents those paths from silently ignoring the selected credits. The
+saved sizing record covers solar/storage only, including when the selected case
+is `all_modeled_federal_credits`. Heat-pump and EV eligibility and receipts still
+need explicit household declarations. Connecting saved results to a matched
+household comparison is the next step. Existing publication results are unchanged.
 
 ## Household costs and system selection
 
@@ -786,7 +819,7 @@ Prioritize a check when the limitation could change a stated conclusion.
 | Auxiliary payback retains legacy conventions | The September 15 refresh reconciles all 141 matched optimized-EV payback rows using the corrected household and incentive selection. First-column tariff selection, capital-summary conventions, and a $0.01 denominator for nonpositive savings remain. Missing-bill handling is permissive; this refresh independently verifies every required bill. | Use the explicit matched EAC collector for publication. Address these conventions if payback becomes a paper result. Older archived payback outputs remain unchanged. |
 | The legacy 2025 incentive sensitivity simplifies eligibility | Its continuous battery sizing uses an ITC-adjusted unit price without a separate 3 kWh eligibility constraint. Legacy appliance calculations apply the 25C cap separately to space and water heating. Affected 2025 cases can overstate incentives. The explicit federal-only optimizer and household calculator enforce these limits. | Rerun affected comparisons through the new path before using them for published claims. These issues do not change zero-credit post-ITC inputs. |
 | Federal purchase credits are conditional on declared eligibility and realization | The amount calculation enforces the shared heat-pump cap and battery threshold. Reporting now applies explicit realized amounts and times to gross costs and excludes other incentives. It does not infer qualifying dates, buyer/product eligibility, or tax liability. Home credits share one receipt time. Treating potential credits as guaranteed receipts could overstate savings. | Declare eligibility and realization assumptions for the comparison. Separate receipt times or installments require an explicit extension. Receipts beyond the study require an explicit model change. Default reports and saved county results remain unchanged. |
-| Federal-only reporting uses the supplied equipment design | Saved county designs were not optimized with the new one-time credits and battery eligibility rule. Repricing them cannot establish optimal credit-era adoption. The optimizer core now supports these rules, but county-run configuration and saved assumptions remain pending. | Connect the comparison runner, then rerun matched cases before making adoption claims. |
+| Federal-only reporting uses the supplied equipment design | Existing publication designs were not optimized with the new one-time credits and battery eligibility rule. Step 9b now supports those rules and saves solar/storage receipts, but legacy reports do not consume them. Repricing older designs cannot establish optimal credit-era adoption. | Connect saved designs and declared household credits to the matched comparison, then rerun cases before making adoption claims. Legacy sweeps and Module 4 reject explicit federal runs until supported. |
 | Battery augmentation costs and gradual capacity loss omitted centrally | Storage is treated more favorably than a model that charges for maintaining capacity. Round-trip efficiency losses and the declared replacement remain included. More frequent cycling with grid charging could increase this bias. | Report cycling when interpreting a grid-charging result. Add an explicit degradation or augmentation-cost sensitivity if needed. |
 | Equipment-size bounds, specified charging/export rules, and fixed-design comparisons | An optimum applies within its declared feasible choices. A fixed-design result is not an unrestricted economic optimum. | Report binding constraints and test an expanded domain for an affected claim. |
 | Central cases exclude grid charging | The matched 94-case check preserves zero storage in the 46 PG&E/SCE counties but establishes a small positive storage benefit in San Diego. Exact San Diego sizes remain unresolved; its cost ranges have positive lower bounds. | Report this exception alongside the central findings. Stored grid energy remains ineligible for export. County differences combine assigned utility tariffs with local load and weather; they do not isolate a tariff's causal effect. |
@@ -795,7 +828,7 @@ Prioritize a check when the limitation could change a stated conclusion.
 | Annual net-export cap implemented for NBT research | Profitable net-exporting dispatches are excluded. Fixed arrays may curtail generation to comply. A binding cap can link permitted exports to added electrification load and affect the apparent package effect. This is a study constraint, not a utility rule. | Identify binding cases from annual meter totals. For an affected claim, compare with the pre-cap implementation at `9b61415`, using matched inputs and accounting assumptions. |
 | Annual credit timing | SDG&E savings may be overstated relative to the former no-backward-offset convention. A late credit could offset an early charge in the annual model. | Bound the difference using unused eligible credits and earlier eligible payments; inspect affected San Diego cases. |
 | No opening credits or value for balances after the modeled year | Results omit benefits from a household's existing bank or future use of unused credits. | Use a separately specified future-use sensitivity if a claim requires it; opening balances are not supported centrally. |
-| Persisted equipment capacities use two decimal places | Downstream capital reporting can differ slightly from the optimizer, which uses full precision. The core rerun at `8a98b96` had a maximum difference of $1.37/year, in San Mateo; all annual electricity bills reconciled. | Preserve full precision in capacity artifacts and round only presentation in a separate correction. |
+| Legacy equipment-capacity CSVs use two decimal places | Downstream capital reporting can differ slightly from the optimizer, which uses full precision. The core rerun at `8a98b96` had a maximum difference of $1.37/year, in San Mateo; all annual electricity bills reconciled. New explicit federal runs preserve full capacity precision to keep credit eligibility and costs consistent. | Preserve full precision in legacy capacity artifacts and round only presentation in a separate correction. |
 | Cost tolerance and finite solver budget | New solves allow up to $1/year of cost suboptimality, subject to unchanged physical checks. This does not bound capacity differences. Difficult cases can still fail the five-minute budget. NEM 3 now batches meter constraints after its first violation; this fixes the tested San Diego failure but adds solver work to some other counties. | Record cost certificates and execution settings. Faster constraint generation does not guarantee a runtime or identical capacities. Use a tighter tolerance for capacity-threshold claims. |
 | Financial operating value is the objective | The model assigns no monetary value to outage protection, convenience, or household preferences. It therefore does not explain every adoption decision. | Study resilience or preferences separately when such benefits become part of the research question. |
 

@@ -12,6 +12,7 @@ Notes
 Outputs (per county)
 - solar_storage_dispatch_profiles_<county>.csv
 - solar_storage_dispatch_profiles_with_exports_<county>.csv
+- coopt_accounting_<county>.json (cost assumptions, full-precision design, credits)
 
 These match Step 9 column conventions so Step 10 can build aggregator files for Step 12 without changes.
 
@@ -57,6 +58,13 @@ Flags / configuration
 - --batt-capex-kwh (default: BatteryStorageAppliance.per_kwh_cost_net(FULL_INCENTIVES),
   ~$1,461/kWh under the default POST_ITC_2026 regime; ~$1,022/kWh under the expired ITC)
 - --batt-capex-kw (default: 0.0 $/kW)
+- --federal-credit-case (no_federal_credits, solar_storage_federal_credits,
+  all_modeled_federal_credits)
+  Requires --credit-receipt-year and --credit-realization-fraction. Selects gross
+  default prices and initial credits only. Cost overrides must be gross eligible
+  installed prices. Heat-pump/EV credits are outside this sizing objective.
+  This declares a conditional credit case, not a tariff or installation year.
+  Legacy sweep flags are not supported with this mode.
 - --pv-life-yrs (default: 25)
 - --batt-life-yrs (default: 15)
 - --batt-degrade-cost-kwh (default: 0.0 $/kWh throughput)
@@ -104,10 +112,12 @@ from .step9b_cooptimize_core import (
     _solve_lp,
 )
 from evaluations.constants import DEFAULT_DISCOUNT_RATE
+from evaluations.federal_credits import FederalCreditCase, PVStorageCreditPolicy
 from pipeline.solver import SolverOptions
 from appliances.solar_system import SolarSystemAppliance
 from appliances.battery_storage import BatteryStorageAppliance
 from appliances.electric_base import IncentiveScenario
+from appliances.federal_credits import FEDERAL_ITC_25D
 
 # Net (after-incentive, full_incentives scenario) $/kW and $/kWh, derived from
 # the same appliance classes step14 uses to report capex. The optimizer's sizing
@@ -993,8 +1003,8 @@ def process(
     pv_capex_sweep: Optional[List[float]] = None,
     coarse_sweeps: bool = False,
     discount_rate: float = DEFAULT_DISCOUNT_RATE,
-    pv_capex_per_kw: float = DEFAULT_PV_CAPEX_PER_KW,
-    batt_capex_per_kwh: float = DEFAULT_BATT_CAPEX_PER_KWH,
+    pv_capex_per_kw: float | None = None,
+    batt_capex_per_kwh: float | None = None,
     batt_capex_per_kw: float = 0.0,
     pv_life_yrs: int = 25,
     batt_life_yrs: int = 15,
@@ -1003,11 +1013,25 @@ def process(
     solver_options: SolverOptions = SolverOptions(),
     nbt_scenario: NBTScenario | None = None,
     nbc_dollars_per_kwh_override: float | None = None,
+    federal_credit_policy: PVStorageCreditPolicy | None = None,
 ) -> None:
+    if federal_credit_policy is not None:
+        if not isinstance(federal_credit_policy, PVStorageCreditPolicy):
+            raise ValueError("federal_credit_policy must be a PVStorageCreditPolicy")
+        if any((batt_capex_sweep, batt_size_sweep, pv_size_sweep, pv_capex_sweep)):
+            raise ValueError("Federal purchase credits are not supported by legacy Step 9b sweeps")
+    if pv_capex_per_kw is None:
+        pv_capex_per_kw = (SolarSystemAppliance.per_kw_cost()
+                          if federal_credit_policy is not None else DEFAULT_PV_CAPEX_PER_KW)
+    if batt_capex_per_kwh is None:
+        batt_capex_per_kwh = (BatteryStorageAppliance.per_kwh_cost()
+                             if federal_credit_policy is not None else DEFAULT_BATT_CAPEX_PER_KWH)
     resolved_scenario = nbt_scenario or NBTScenario()
     tariff_catalog = TariffCatalog()
     scenario_path = get_scenario_path(base_input_dir, scenario, housing_type)
     counties_to_run = get_counties(scenario_path, counties)
+    if federal_credit_policy is not None and not counties_to_run:
+        raise ValueError("Federal purchase-credit run requires at least one county")
     capacity_records = []
 
     for county in counties_to_run:
@@ -1019,16 +1043,22 @@ def process(
         weather_file = os.path.join(base_input_dir, scenario, housing_type, county_slug, f"weather_TMY_{county_slug}.csv")
         load_file = os.path.join(scenario_path, county_slug, f"combined_profiles_{scenario}_{county_slug}.csv")
         if not (os.path.exists(weather_file) and os.path.exists(load_file)):
+            if federal_credit_policy is not None:
+                raise FileNotFoundError(f"Missing weather or load inputs for {county_slug}")
             print(f"[step9b] Missing inputs for {county_slug}; skipping.")
             continue
 
         weather_df, load_kwh = prepare_weather_and_load(weather_file, load_file, "electricity.real_and_simulated.for_typical_county_home.kwh")
         if len(load_kwh) != 8760:
+            if federal_credit_policy is not None:
+                raise ValueError(f"Federal purchase-credit run requires 8760 load hours: {county_slug}")
             print(f"[step9b] Non‑8760 load for {county_slug}; length={len(load_kwh)} — skipping.")
             continue
         # PV per‑kW AC energy
         G = pv_timeseries_ac_kwh(weather_df, 1.0)
         if len(G) != 8760:
+            if federal_credit_policy is not None:
+                raise ValueError(f"Federal purchase-credit run requires 8760 PV hours: {county_slug}")
             print(f"[step9b] Non‑8760 weather for {county_slug}; length={len(G)} — skipping.")
             continue
 
@@ -1071,6 +1101,7 @@ def process(
             c_deg_per_kwh=batt_degrade_cost_per_kwh,
             max_battery_kwh=max_battery_kwh,
             solver_options=solver_options,
+            federal_credit_policy=federal_credit_policy,
         )
 
         sweep_inputs = inputs
@@ -1086,6 +1117,61 @@ def process(
         _write_step9_outputs(out_dir, county_slug, ts_index, load_kwh, G, result.pv_kw, result.flows)
         with open(os.path.join(out_dir, f"coopt_solver_{county_slug}.json"), "w") as handle:
             json.dump(asdict(result.solver), handle, indent=2, allow_nan=False)
+            handle.write("\n")
+        # Rewrite this declaration in legacy mode too, so new dispatch cannot
+        # retain stale federal credits from an earlier run in the same directory.
+        accounting = {
+            "schema_version": 1,
+            "scope": "solar_storage_only",
+            "scenario": scenario, "housing_type": housing_type, "county": county_slug,
+            "cost_basis": ("gross_with_one_time_federal_credits"
+                           if federal_credit_policy is not None else "caller_supplied_unit_costs"),
+            "federal_credit_policy": ({
+                "case": federal_credit_policy.case.value,
+                "receipt_year": federal_credit_policy.receipt_year,
+                "realization_fraction": federal_credit_policy.realization_fraction,
+            } if federal_credit_policy is not None else None),
+            "federal_rule_25d": asdict(FEDERAL_ITC_25D) if federal_credit_policy is not None else None,
+            "federal_credit_receipts": (asdict(result.federal_credit_receipts)
+                                       if result.federal_credit_receipts is not None else None),
+            "capital_assumptions": {
+                "discount_rate": discount_rate, "study_years": pv_life_yrs,
+                "battery_life_years": batt_life_yrs,
+                "pv_usd_per_kw": pv_capex_per_kw,
+                "battery_usd_per_kwh": batt_capex_per_kwh,
+                "battery_usd_per_kw": batt_capex_per_kw,
+            },
+            "capacities": {
+                "pv_kw": result.pv_kw, "battery_kwh": result.batt_kwh,
+                "battery_kw": result.batt_kw,
+            },
+            "purchase_costs_usd": {
+                "pv": result.pv_kw * pv_capex_per_kw,
+                "storage": result.batt_kwh * batt_capex_per_kwh + result.batt_kw * batt_capex_per_kw,
+            },
+            "annual_costs_usd": {
+                "capital": result.capex_annual,
+                "electricity_bill": result.nbt_settlement.amount_due_usd,
+                "degradation": result.degradation_cost, "total": result.total_cost,
+            },
+            "dispatch_assumptions": {
+                "allow_grid_charging": allow_grid_charging,
+                "allow_battery_export": allow_batt_export,
+                "max_battery_kwh": max_battery_kwh,
+                "battery_degradation_usd_per_kwh": batt_degrade_cost_per_kwh,
+            },
+            "tariff": {
+                "utility": tariff.utility.value, "import_plan": tariff.import_schedule.plan_name,
+                "import_source_id": tariff.import_schedule.source_id,
+                "snapshot_date": tariff.import_schedule.snapshot_as_of,
+                "billing_year": tariff.scenario.billing_year,
+                "nbt_vintage": tariff.scenario.nbt_vintage,
+                "customer_segment": tariff.scenario.customer_segment.value,
+                "nbc_dollars_per_kwh_override": nbc_dollars_per_kwh_override,
+            },
+        }
+        with open(os.path.join(out_dir, f"coopt_accounting_{county_slug}.json"), "w") as handle:
+            json.dump(accounting, handle, indent=2, allow_nan=False)
             handle.write("\n")
         print(f"[step9b] {county_slug}: PV={result.pv_kw:.2f} kW, Battery={result.batt_kwh:.2f} kWh")
 
@@ -1300,9 +1386,15 @@ def process(
             "Import Tariff Source ID": tariff.import_schedule.source_id,
             "NBT Billing Year": tariff.scenario.billing_year,
             "NBT Interconnection Vintage": tariff.scenario.nbt_vintage,
-            "Solar Capacity (kW)": round(result.pv_kw, 2),
-            "Battery Capacity (kWh)": round(result.batt_kwh, 2),
-            "Battery Power Capacity (kW)": round(result.batt_kw, 2),
+            "Solar Capacity (kW)": (result.pv_kw if federal_credit_policy is not None
+                                    else round(result.pv_kw, 2)),
+            "Battery Capacity (kWh)": (result.batt_kwh if federal_credit_policy is not None
+                                       else round(result.batt_kwh, 2)),
+            "Battery Power Capacity (kW)": (result.batt_kw if federal_credit_policy is not None
+                                            else round(result.batt_kw, 2)),
+            "Capital Cost Basis": accounting["cost_basis"],
+            "Federal Credit Case": (federal_credit_policy.case.value
+                                    if federal_credit_policy is not None else "not_configured"),
             "Battery Capacity Upper Bound (kWh)": float(max_battery_kwh),
             "Meter Direction Binaries": int(result.meter_binary_count),
             "Solver Rounds": int(result.solver_rounds),
@@ -1336,8 +1428,15 @@ def process(
                 try:
                     old_df = pd.read_csv(cap_path)
                 except Exception:
+                    if federal_credit_policy is not None:
+                        raise
                     old_df = pd.DataFrame()
                 # Merge on County (slug)
+                if federal_credit_policy is not None:
+                    if "County" not in old_df or old_df["County"].isna().any():
+                        raise ValueError("Existing capacity summary requires nonmissing County values")
+                    if old_df["County"].duplicated().any():
+                        raise ValueError("Existing capacity summary has duplicate County rows")
                 if not old_df.empty:
                     # Drop overlapping counties in old, then append new
                     keep = [
@@ -1355,6 +1454,8 @@ def process(
             else:
                 new_df.to_csv(cap_path, index=False)
     except Exception as e:
+        if federal_credit_policy is not None:
+            raise
         print(f"[step9b] Warning: could not write/merge capacity summary CSV: {e}")
 
 
@@ -1370,13 +1471,29 @@ def main():
     p.add_argument("--coarse-sweeps", action="store_true",
                    help="Use 12×24 monthly-hourly averages for sweep plots (faster)")
     p.add_argument("--discount-rate", type=float, default=DEFAULT_DISCOUNT_RATE)
-    p.add_argument("--pv-capex-kw", type=float, default=DEFAULT_PV_CAPEX_PER_KW)
-    p.add_argument("--batt-capex-kwh", type=float, default=DEFAULT_BATT_CAPEX_PER_KWH)
+    p.add_argument("--pv-capex-kw", type=float, default=None)
+    p.add_argument("--batt-capex-kwh", type=float, default=None)
+    p.add_argument("--federal-credit-case", choices=[case.value for case in FederalCreditCase])
+    p.add_argument("--credit-receipt-year", type=float)
+    p.add_argument("--credit-realization-fraction", type=float)
     p.add_argument("--max-battery-kwh", type=float, default=40.0)
     p.add_argument("--solver-backend", choices=["highs", "cbc"], default="highs")
     p.add_argument("--solver-cost-gap-usd", type=float, default=1.0)
     p.add_argument("--solver-time-limit-seconds", type=float, default=300.0)
     args = p.parse_args()
+    declarations = (args.federal_credit_case, args.credit_receipt_year,
+                    args.credit_realization_fraction)
+    if any(v is not None for v in declarations) and any(v is None for v in declarations):
+        p.error("Declare all three federal credit options: case, receipt year, and realization fraction")
+    federal_policy = None
+    if args.federal_credit_case is not None:
+        try:
+            federal_policy = PVStorageCreditPolicy(
+                FederalCreditCase(args.federal_credit_case), args.credit_receipt_year,
+                args.credit_realization_fraction,
+            )
+        except ValueError as exc:
+            p.error(str(exc))
 
     sweep_vals = list(DEFAULT_BATT_CAPEX_SWEEP) if args.use_defaults else None
     size_vals  = list(DEFAULT_BATT_SIZE_SWEEP)  if args.use_defaults else None
@@ -1408,6 +1525,7 @@ def main():
         pv_life_yrs=25,
         batt_life_yrs=15,
         batt_degrade_cost_per_kwh=0.0,
+        federal_credit_policy=federal_policy,
     )
 
 
