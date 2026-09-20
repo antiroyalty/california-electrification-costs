@@ -1035,6 +1035,7 @@ def collect_eac_components(
     federal_credit_receipts_by_household: Mapping[
         tuple[str, str], FederalCreditReceipts
     ] | None = None,
+    pv_storage_costs_by_household: Mapping[tuple[str, str], Mapping[str, float]] | None = None,
 ) -> pd.DataFrame:
     """Aggregate the shared county EAC components using a mean or median.
 
@@ -1052,6 +1053,7 @@ def collect_eac_components(
         electricity_plan_preference=electricity_plan_preference,
         electricity_variant=electricity_variant, with_solar=with_solar,
         federal_credit_receipts_by_household=federal_credit_receipts_by_household,
+        pv_storage_costs_by_household=pv_storage_costs_by_household,
     )
     return (
         by_county.groupby("scenario", sort=False)
@@ -1075,6 +1077,7 @@ def collect_eac_components_by_county(
     federal_credit_receipts_by_household: Mapping[
         tuple[str, str], FederalCreditReceipts
     ] | None = None,
+    pv_storage_costs_by_household: Mapping[tuple[str, str], Mapping[str, float]] | None = None,
 ) -> pd.DataFrame:
     """Return itemized annual household costs for each scenario and county.
 
@@ -1087,6 +1090,9 @@ def collect_eac_components_by_county(
     Keys must exactly match (scenario, county_slug) for this request, including
     explicit zero-credit households. Eligibility and realized amounts/times are
     caller declarations. Saved system sizes and bills are not reoptimized.
+    An explicit PV/storage cost map supplies gross pv_capex and storage_capex
+    from verified optimizer records instead of the legacy capital summary.
+    This option requires federal receipts and with_solar=True.
     """
     inc = (incentive or "").lower()
     if inc not in {"full_incentives", "half_incentives", "no_incentives"}:
@@ -1113,13 +1119,21 @@ def collect_eac_components_by_county(
     if electricity_plan_preference is not None:
         electricity_plan_preference = list(electricity_plan_preference)
 
+    if pv_storage_costs_by_household is not None:
+        if federal_credit_receipts_by_household is None or not with_solar:
+            raise ValueError("Explicit PV/storage costs require federal receipts and with_solar=True")
+        if (not isinstance(pv_storage_costs_by_household, Mapping)
+                or set(pv_storage_costs_by_household) != set(federal_credit_receipts_by_household)
+                or not all(isinstance(v, Mapping) for v in pv_storage_costs_by_household.values())):
+            raise ValueError("Explicit PV/storage costs must exactly cover requested households")
+
     rows = []
     for scen in scenarios:
         ledger = _validate_eac_ledger(
             _read_capital_ledger(base_input_dir, scen, housing_type),
             f"Capital ledger for {scen}",
         )
-        if with_solar:
+        if with_solar and pv_storage_costs_by_household is None:
             pvsum = _read_capital_summary_with_pv(base_input_dir, scen, housing_type)
             _require_columns(
                 pvsum,
@@ -1138,7 +1152,9 @@ def collect_eac_components_by_county(
                 )
             # None denotes an explicit no-solar case, never a missing summary.
             pv_row = None
-            if with_solar:
+            if pv_storage_costs_by_household is not None:
+                pv_row = pv_storage_costs_by_household[(scen, slug)]
+            elif with_solar:
                 matching = pvsum[pvsum["county_slug"].str.lower() == slug]
                 if len(matching) != 1:
                     raise ValueError(

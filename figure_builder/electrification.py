@@ -13,10 +13,12 @@ from figure_builder.datasets import EAC_COMPONENT_COLUMNS, expected_claim_counti
 from figure_builder import git_short_sha
 from figure_builder.dispatch import HOUSING_TYPE, LOAD_COL, county_dispatch_input_paths
 from figure_builder.metadata import file_identity
+from figure_builder.federal_accounting import load_credit_declarations, validate_saved_accounting
 from helpers.plot_scenario_comparison_helper import (
     _latest_electricity_csv,
     _latest_gas_csv,
     collect_eac_components_by_county,
+    _validate_eac_ledger,
 )
 from tariffs import resolve_county_service_assignment
 from tariffs.import_rates import required_nbt_import_plan
@@ -153,13 +155,16 @@ def _validate_run_identity(model_run_sha, run_timestamps):
 
 def build_electrification_source(
     *, model_run_sha: str, run_timestamps: dict[str, str],
-    base_input_dir: str | Path, completion_dir: str | Path, source: str | Path,
+    base_input_dir: str | Path, completion_dir: str | Path | None, source: str | Path,
     counties: set[str] | None = None,
+    federal_credit_declarations: str | Path | None = None,
 ) -> Path:
     """Collect two completed optimized runs and their original-load counterfactuals.
 
     Completion labels identify the declared model run. File hashes identify the
     exact collected inputs; they do not reconstruct those files' generation history.
+    Explicit federal declarations use saved accounting and solver records in place
+    of legacy completion labels; completion_dir can then be None.
     """
     _validate_run_identity(model_run_sha, run_timestamps)
     counties = expected_claim_counties() if counties is None else set(counties)
@@ -173,17 +178,29 @@ def build_electrification_source(
         files[str(Path(path).resolve())] = identity
         return identity
 
+    declarations = None
+    if federal_credit_declarations is not None:
+        record(federal_credit_declarations)
+        declarations = load_credit_declarations(
+            federal_credit_declarations,
+            {(scenario, county) for scenario in HOUSEHOLDS.values() for county in counties},
+        )
     frames, settings, weather = [], {}, {}
     for household, scenario in HOUSEHOLDS.items():
         suffix = f"{scenario}_{HOUSING_TYPE.replace('-', '_')}.csv"
-        record(base / "capital_costs" / f"capital_costs_{suffix}")
-        record(base / "capital_costs" / f"capital_costs_summary_with_pv_{suffix}")
+        ledger_path = base / "capital_costs" / f"capital_costs_{suffix}"
+        record(ledger_path)
+        if declarations is None:
+            record(base / "capital_costs" / f"capital_costs_summary_with_pv_{suffix}")
+        else:
+            ledger = _validate_eac_ledger(pd.read_csv(ledger_path), f"Capital ledger for {scenario}")
         assets_path = base / scenario / HOUSING_TYPE / "CAPITAL_COSTS" / "electrified_assets.csv"
         record(assets_path)
         assets = pd.read_csv(assets_path)
-        bills, designs = {}, {}
+        bills, designs, federal_records = {}, {}, {}
         for county in sorted(counties):
-            record(Path(completion_dir) / scenario / f"{county}_diagnostics_g{model_run_sha}.html")
+            if declarations is None:
+                record(Path(completion_dir) / scenario / f"{county}_diagnostics_g{model_run_sha}.html")
             weather_path, load_path = county_dispatch_input_paths(county, scenario, base)
             weather[household, county] = record(weather_path)["sha256"]
             record(load_path)
@@ -198,6 +215,24 @@ def build_electrification_source(
                 raise ValueError(f"Missing optimization settings: {scenario}/{county}")
             settings[household, county] = design[MATCHED_SETTINGS].to_dict()
             designs[county] = design
+            if declarations is None:
+                if design.get("Capital Cost Basis") == "gross_with_one_time_federal_credits":
+                    raise ValueError("Federal optimizer results require explicit household credit declarations")
+            else:
+                directory = base / scenario / HOUSING_TYPE / county
+                paths = [directory / f"coopt_{name}_{county}.json" for name in ("accounting", "solver")]
+                for path in paths:
+                    record(path)
+                accounting, solver = [json.loads(path.read_text()) for path in paths]
+                validate_saved_accounting(
+                    accounting, solver, design, declarations[scenario, county], ledger,
+                    scenario=scenario, county=county, housing_type=HOUSING_TYPE,
+                )
+                federal_records[county] = accounting
+                settings[household, county]["federal_accounting"] = {
+                    key: accounting[key] for key in
+                    ("federal_credit_policy", "capital_assumptions", "dispatch_assumptions", "tariff")
+                }
             locators = (("electricity", _latest_electricity_csv), ("gas", _latest_gas_csv))
             for fuel, locate in locators:
                 path = locate(str(base), scenario, HOUSING_TYPE, county, run_timestamps[scenario])
@@ -222,10 +257,34 @@ def build_electrification_source(
                         f"Exact bill plan is missing or ambiguous: {scenario}/{county}/{solar}"
                     )
                 selected_bills[county] = (float(electric[column]), float(gas[gas_columns[0]]))
+            federal_options = {}
+            if declarations is not None:
+                receipts, purchase_costs = {}, {}
+                for county in sorted(counties):
+                    a = federal_records[county]
+                    purchase = a["purchase_costs_usd"]
+                    receipts[scenario, county] = declarations[scenario, county].receipts_for_system(
+                        pv_gross_usd=purchase["pv"] if with_solar else 0,
+                        storage_gross_usd=purchase["storage"] if with_solar else 0,
+                        storage_capacity_kwh=a["capacities"]["battery_kwh"] if with_solar else 0,
+                    )
+                    purchase_costs[scenario, county] = {
+                        "pv_capex": purchase["pv"], "storage_capex": purchase["storage"],
+                    }
+                    if with_solar and not np.isclose(
+                        selected_bills[county][0], a["annual_costs_usd"]["electricity_bill"],
+                        rtol=0, atol=.001,
+                    ):
+                        raise ValueError(f"Saved federal dispatch and reported electricity bill differ: {county}")
+                federal_options = dict(
+                    federal_credit_receipts_by_household=receipts,
+                    pv_storage_costs_by_household=purchase_costs if with_solar else None,
+                )
             costs = collect_eac_components_by_county(
                 str(base), HOUSING_TYPE, [scenario], sorted(counties),
                 timestamp=run_timestamps[scenario], electricity_plan_preference=preferences,
                 electricity_variant="nem3" if with_solar else "retail", with_solar=with_solar,
+                **federal_options,
             )
             for row in costs.to_dict("records"):
                 county = row["county_slug"]
@@ -252,9 +311,15 @@ def build_electrification_source(
                     solver_cost_gap_usd_per_year=gap if with_solar else 0.0,
                     reporting_cost_difference_usd_per_year=(
                         row["capex_pv"] + row["capex_storage"] + row["annual_bill_electric"]
-                        - float(design["Coopt Total Cost"])
+                        - (federal_records[county]["annual_costs_usd"]["total"]
+                           if declarations is not None else float(design["Coopt Total Cost"]))
                     ) if with_solar else 0.0,
                 )
+                if declarations is not None:
+                    row["federal_credit_case"] = declarations[scenario, county].pv_storage_policy.case.value
+                    amounts = receipts[scenario, county].amounts
+                    row.update({name: getattr(amounts, name) for name in
+                                ("pv_25d_usd", "storage_25d_usd", "heat_pumps_25c_usd", "vehicle_30d_usd")})
                 frames.append(row)
     for county in counties:
         if settings["gas", county] != settings["electric", county]:
@@ -279,6 +344,9 @@ def build_electrification_source(
         "scenario_run_timestamps": run_timestamps, "expected_counties": sorted(counties),
         "households": HOUSEHOLDS, "housing_type": HOUSING_TYPE,
         "discount_rate": 0.07, "incentive_scenario": "full_incentives",
+        "cost_basis": "gross_with_one_time_federal_credits" if declarations is not None else "legacy",
+        "federal_credit_declarations": (file_identity(federal_credit_declarations)
+                                        if declarations is not None else None),
         "matched_settings_by_county": {c: settings["gas", c] for c in sorted(counties)},
         "tariff_comparison": (
             "Match plans between households within each solar choice; "
@@ -310,16 +378,21 @@ def main():
     parser.add_argument("--gas-run-timestamp", required=True)
     parser.add_argument("--electric-run-timestamp", required=True)
     parser.add_argument("--base-input-dir", required=True)
-    parser.add_argument("--completion-dir", required=True)
+    parser.add_argument("--completion-dir", help="Required for legacy diagnostics completion labels")
+    parser.add_argument("--federal-credit-declarations",
+                        help="JSON declaring eligible household purchases, credit realization, and timing")
     parser.add_argument("--source", required=True)
     parser.add_argument("--counties", nargs="+")
     args = parser.parse_args()
+    if args.federal_credit_declarations is None and args.completion_dir is None:
+        parser.error("Legacy comparisons require --completion-dir")
     result = build_electrification_source(
         model_run_sha=args.model_run_sha,
         run_timestamps={HOUSEHOLDS["gas"]: args.gas_run_timestamp,
                         HOUSEHOLDS["electric"]: args.electric_run_timestamp},
         base_input_dir=args.base_input_dir, completion_dir=args.completion_dir,
         source=args.source, counties=set(args.counties) if args.counties else None,
+        federal_credit_declarations=args.federal_credit_declarations,
     )
     print(f"Wrote four-case costs, comparisons, and source receipt: {result}")
 

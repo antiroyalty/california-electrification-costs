@@ -102,6 +102,56 @@ class PVStorageCreditPolicy:
         )
 
 
+@dataclass(frozen=True)
+class HouseholdCreditDeclaration:
+    """Eligible initial purchases and assumed realization for one household.
+
+    Home credits share the solar/storage receipt year. Heat-pump and vehicle
+    realization can differ from solar/storage realization. Explicit zero means
+    absent or ineligible. Legal eligibility is not inferred from the ledger.
+    """
+
+    pv_storage_policy: PVStorageCreditPolicy
+    space_heat_pump_eligible_basis_usd: float
+    water_heat_pump_eligible_basis_usd: float
+    heat_pump_realization_fraction: float
+    eligible_vehicle_credit_usd: float
+    vehicle_realization_fraction: float
+    vehicle_receipt_year: float
+
+    def __post_init__(self):
+        if not isinstance(self.pv_storage_policy, PVStorageCreditPolicy):
+            raise ValueError("pv_storage_policy must be a PVStorageCreditPolicy")
+        for name in ("heat_pump_realization_fraction", "vehicle_realization_fraction"):
+            if _nonnegative_finite(getattr(self, name), name) > 1:
+                raise ValueError(f"{name} cannot exceed one")
+        _nonnegative_finite(self.vehicle_receipt_year, "vehicle_receipt_year")
+        # Validate eligible bases and vehicle maximum even in excluded families.
+        self.receipts_for_system(pv_gross_usd=0, storage_gross_usd=0, storage_capacity_kwh=0)
+
+    def receipts_for_system(
+        self, *, pv_gross_usd: float, storage_gross_usd: float, storage_capacity_kwh: float,
+    ) -> FederalCreditReceipts:
+        potential = evaluate_federal_purchase_credits(
+            case=self.pv_storage_policy.case, pv_eligible_basis_usd=pv_gross_usd,
+            storage_eligible_basis_usd=storage_gross_usd,
+            storage_capacity_kwh=storage_capacity_kwh,
+            space_heat_pump_eligible_basis_usd=self.space_heat_pump_eligible_basis_usd,
+            water_heat_pump_eligible_basis_usd=self.water_heat_pump_eligible_basis_usd,
+            eligible_vehicle_credit_usd=self.eligible_vehicle_credit_usd,
+        )
+        return FederalCreditReceipts(
+            amounts=HouseholdFederalCredits(
+                pv_25d_usd=potential.pv_25d_usd * self.pv_storage_policy.realization_fraction,
+                storage_25d_usd=potential.storage_25d_usd * self.pv_storage_policy.realization_fraction,
+                heat_pumps_25c_usd=potential.heat_pumps_25c_usd * self.heat_pump_realization_fraction,
+                vehicle_30d_usd=potential.vehicle_30d_usd * self.vehicle_realization_fraction,
+            ),
+            home_receipt_year=self.pv_storage_policy.receipt_year,
+            vehicle_receipt_year=self.vehicle_receipt_year,
+        )
+
+
 def _nonnegative_finite(value: float, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, Real):
         raise ValueError(f"{name} must be a finite, nonnegative number")
