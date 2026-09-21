@@ -243,8 +243,9 @@ heat-pump, and vehicle amounts. Reporting can now use these amounts when the
 caller explicitly declares their realization and timing. The optimizer core
 also supports this accounting for solar/storage. Step 9b county runs accept the
 same policy and save its assumptions. The matched comparison now reads these
-records and explicit household declarations. Controlled comparison runs remain
-pending.
+records and explicit household declarations. The Alameda pilot has passed; the
+credited Los Angeles and San Diego solves remain unresolved. The statewide
+comparison remains pending. See the pilot status below.
 
 For one taxpayer's purchases in one eligible tax year, the calculation is:
 
@@ -276,8 +277,9 @@ The caller must establish applicable acquisition/installation dates and other
 legal requirements. Selecting credit families does not select a calendar year.
 The amounts precede tax-liability limits and do not assume a receipt date or
 carryforward schedule. They do not grant credits for replacement purchases.
-The approved comparison still requires matched runs with declared eligibility,
-realization, and timing. State/local and federally funded rebates
+Matched runs require declared eligibility, realization, and timing. The pilot
+assumptions below do not establish population-wide eligibility.
+State/local and federally funded rebates
 are outside that comparison. Default appliance paths still include some rebates,
 including county heat-pump rebates. The explicit federal-only reporting path
 described below excludes them.
@@ -421,7 +423,8 @@ saved sizing record covers solar/storage only, including when the selected case
 is `all_modeled_federal_credits`. Heat-pump and EV eligibility and receipts still
 need explicit household declarations. The matched comparison collector now reads
 these records through `--federal-credit-declarations`. Existing publication
-results are unchanged; the controlled comparison still requires new matched runs.
+results are unchanged. The isolated pilot supplies new matched Alameda results;
+the remaining credited designs and statewide comparison remain pending.
 
 The declaration file uses JSON with `schema_version: 1` and a `households` list.
 Each entry names `scenario` and `county_slug`. It contains the saved
@@ -473,6 +476,21 @@ establish legal eligibility. Legacy Module 4 and sweeps remain unsupported for
 this mode. Use the dedicated matched collector after completing each isolated run.
 Changing credit availability while holding NBT rates and vintage fixed is a
 policy sensitivity. It is not a reconstruction of historical 2025 household bills.
+
+The [September 20 pilot](research_logs/2026-09-20-federal-credit-pilot.md) attempted
+both households in Alameda, Los Angeles, and San Diego, with and without federal
+solar/storage credits. All six no-credit designs passed. Only Alameda's two
+credited designs passed the $1/year cost bound. The four credited Los Angeles
+and San Diego cases timed out. A 600-second retry did not resolve Los Angeles's
+gas case. The three-utility pilot is incomplete; statewide results remain pending.
+
+Alameda's 12 matched cost cells passed bill replay and independent cash-flow and
+dispatch checks. The pilot assumes full eligibility and realization, home credits
+after one year, and a $7,500 EV credit at purchase. It excludes other rebates
+and holds 2026 NBT rates fixed. The $2,000 shared heat-pump credit and EV credit
+reduce electric-household annual cost by $803.97 in both solar choices.
+This constant reduction cancels from solar-adoption savings and the package
+effect. The isolated outputs do not replace existing statewide publication data.
 
 ## Household costs and system selection
 
@@ -872,7 +890,7 @@ Prioritize a check when the limitation could change a stated conclusion.
 | Auxiliary payback retains legacy conventions | The September 15 refresh reconciles all 141 matched optimized-EV payback rows using the corrected household and incentive selection. First-column tariff selection, capital-summary conventions, and a $0.01 denominator for nonpositive savings remain. Missing-bill handling is permissive; this refresh independently verifies every required bill. | Use the explicit matched EAC collector for publication. Address these conventions if payback becomes a paper result. Older archived payback outputs remain unchanged. |
 | The legacy 2025 incentive sensitivity simplifies eligibility | Its continuous battery sizing uses an ITC-adjusted unit price without a separate 3 kWh eligibility constraint. Legacy appliance calculations apply the 25C cap separately to space and water heating. Affected 2025 cases can overstate incentives. The explicit federal-only optimizer and household calculator enforce these limits. | Rerun affected comparisons through the new path before using them for published claims. These issues do not change zero-credit post-ITC inputs. |
 | Federal purchase credits are conditional on declared eligibility and realization | The amount calculation enforces the shared heat-pump cap and battery threshold. Reporting now applies explicit realized amounts and times to gross costs and excludes other incentives. It does not infer qualifying dates, buyer/product eligibility, or tax liability. Home credits share one receipt time. Treating potential credits as guaranteed receipts could overstate savings. | Declare eligibility and realization assumptions for the comparison. Separate receipt times or installments require an explicit extension. Receipts beyond the study require an explicit model change. Default reports and saved county results remain unchanged. |
-| Federal-only comparisons require newly optimized designs and declared eligibility | The matched collector now combines verified Step 9b records and explicit household credits. Existing publication designs were not optimized with these rules. Collection does not establish qualifying dates, taxpayer eligibility, or complete file-generation history. | Run isolated matched credit cases before making adoption claims. State the eligibility and realization assumptions. The comparison supports the central 7%/25-year/15-year framing; legacy sweeps and Module 4 remain unsupported. |
+| Federal-only pilot coverage is incomplete | Alameda's matched comparison passed, but the four credited Los Angeles and San Diego designs did not meet the $1/year cost bound. Rejected candidates cannot support capacity or cost findings. The pilot assumes full eligibility and realization and excludes other rebates, so its baseline differs from earlier publication results. | Resolve the credited-solve runtime and repeat the failed pilot cases before expanding statewide. Preserve the accounting and acceptance checks. State eligibility, realization, and timing assumptions; collection does not establish them. Legacy sweeps and Module 4 remain unsupported. |
 | Battery augmentation costs and gradual capacity loss omitted centrally | Storage is treated more favorably than a model that charges for maintaining capacity. Round-trip efficiency losses and the declared replacement remain included. More frequent cycling with grid charging could increase this bias. | Report cycling when interpreting a grid-charging result. Add an explicit degradation or augmentation-cost sensitivity if needed. |
 | Equipment-size bounds, specified charging/export rules, and fixed-design comparisons | An optimum applies within its declared feasible choices. A fixed-design result is not an unrestricted economic optimum. | Report binding constraints and test an expanded domain for an affected claim. |
 | Central cases exclude grid charging | The matched 94-case check preserves zero storage in the 46 PG&E/SCE counties but establishes a small positive storage benefit in San Diego. Exact San Diego sizes remain unresolved; its cost ranges have positive lower bounds. | Report this exception alongside the central findings. Stored grid energy remains ineligible for export. County differences combine assigned utility tariffs with local load and weather; they do not isolate a tariff's causal effect. |
