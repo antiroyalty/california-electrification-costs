@@ -243,9 +243,10 @@ heat-pump, and vehicle amounts. Reporting can now use these amounts when the
 caller explicitly declares their realization and timing. The optimizer core
 also supports this accounting for solar/storage. Step 9b county runs accept the
 same policy and save its assumptions. The matched comparison now reads these
-records and explicit household declarations. The Alameda pilot has passed; the
-credited Los Angeles and San Diego solves remain unresolved. The statewide
-comparison remains pending. See the pilot status below.
+records and explicit household declarations. The initial Alameda comparison has
+passed. The [runtime follow-up](research_logs/2026-09-20-federal-credit-runtime.md)
+validates additional credited designs. The refreshed three-county comparison and
+statewide run remain pending. See the pilot status below.
 
 For one taxpayer's purchases in one eligible tax year, the calculation is:
 
@@ -388,6 +389,39 @@ linear, NBT, and NEM 2 billing. A synthetic case chooses 2.5 kWh without credits
 and 3 kWh with credits; this is a validation example, not a county finding.
 See [the optimizer credit tests](../tests/federal_credit_optimizer_test.py).
 
+Credited NBT runs now tighten the battery search before adding meter constraints.
+First, a no-battery relaxation proposes a solar size. At that size, a feasible
+solar-only dispatch serves load first and curtails exports above the annual cap.
+Shared billing plus annual solar capital cost gives an upper bound, $U$, on the
+sizing objective. Fixed appliance and vehicle costs cancel in this comparison.
+The optimal sizing objective cannot exceed this feasible alternative.
+
+A second relaxation maximizes gross annual battery-capacity cost subject to
+the sizing objective at most $U$. Its certified bound gives a safe capacity ceiling.
+If that ceiling is below 3 kWh, eligibility is impossible; one further relaxation
+bounds the remaining uncredited batteries. The temporary cost constraint is then
+removed. The search ceiling is rounded outward by $10^{-6}$ kWh. It is never
+tightened below 0.001 kWh, to avoid nearly fixed numerical intervals. This floor
+expands the search; it is not a minimum installation size. Zero remains feasible.
+
+The reduced ceiling also tightens hourly export limits. An exporting household
+must first serve its load from solar and usable stored energy. Thus:
+
+$$
+E_h\leq\max\left(0,\;G_h K_{\mathrm{PV,max}}
++\eta_d(s_{\max}-s_{\min})K_{\mathrm{battery,bound}}-L_h\right).
+$$
+
+Here, $E_h$ is exported kWh, $G_h$ is available solar kWh per kW, and $L_h$ is
+household load. The state-of-charge fractions are $s_{\min}$ and $s_{\max}$;
+$\eta_d$ is discharge efficiency. Charging losses can only reduce this bound.
+The existing meter-direction binaries enforce the combined and individual flow
+bounds. These steps preserve the economic optimum and the declared credit rules.
+They apply to free credited NBT storage sizing with a positive capacity price.
+Fixed designs and other accounting paths retain their existing solve sequence.
+See [the bound calculations](../pipeline/optimization_bounds.py) and
+[their regression tests](../tests/optimization_bounds_test.py).
+
 Omitting this policy preserves existing optimizer calls. Set
 `Config.coopt_federal_credit_policy` to use it through the solar/storage module.
 That module selects gross appliance prices before calling Step 9b. Direct Step 9b
@@ -477,12 +511,15 @@ this mode. Use the dedicated matched collector after completing each isolated ru
 Changing credit availability while holding NBT rates and vintage fixed is a
 policy sensitivity. It is not a reconstruction of historical 2025 household bills.
 
-The [September 20 pilot](research_logs/2026-09-20-federal-credit-pilot.md) attempted
+The [initial September 20 pilot](research_logs/2026-09-20-federal-credit-pilot.md) attempted
 both households in Alameda, Los Angeles, and San Diego, with and without federal
 solar/storage credits. All six no-credit designs passed. Only Alameda's two
 credited designs passed the $1/year cost bound. The four credited Los Angeles
 and San Diego cases timed out. A 600-second retry did not resolve Los Angeles's
-gas case. The three-utility pilot is incomplete; statewide results remain pending.
+gas case. The [runtime follow-up](research_logs/2026-09-20-federal-credit-runtime.md)
+now passes both Los Angeles cases and San Diego gas at the default budget.
+San Diego electric still fails that budget. The follow-up records its separate
+longer-budget check. Refreshed matched reporting and statewide results remain pending.
 
 Alameda's 12 matched cost cells passed bill replay and independent cash-flow and
 dispatch checks. The pilot assumes full eligibility and realization, home credits
@@ -702,7 +739,7 @@ HiGHS remains the default backend and requires SciPy 1.16.1 or later, the
 validated minimum version. The earlier SciPy 1.11.4 wrapper drops the
 absolute-gap setting. CBC can be selected explicitly. Each county
 sizing/dispatch problem has a default 300-second budget shared across
-model construction and all solver rounds. Data preparation and optional
+model construction, bound tightening, and all solver rounds. Data preparation and optional
 sensitivity cases are separate; each sensitivity solve has its own budget.
 Solver limits are cooperative, so finalization and validation can add overhead.
 A timeout is accepted only if the available candidate passes the cost bound
@@ -711,7 +748,9 @@ and all physical checks. Otherwise the run stops with an error.
 `Config.coopt_solver` contains these settings as `SolverOptions`. Step 9b also
 exposes `--solver-backend`, `--solver-cost-gap-usd`, and
 `--solver-time-limit-seconds`. County outputs record the settings, elapsed time,
-cost gap, and lower bound. A `coopt_solver_<county>.json` file records each round.
+cost gap, and lower bound. A `coopt_solver_<county>.json` file records each round
+and labels auxiliary bound calculations separately. An auxiliary objective is
+not a lower bound on total household cost and never enters the final certificate.
 CBC's printed bounds are adjusted downward for their displayed rounding.
 Changing a backend is an explicit run choice; there is no automatic retry.
 `SolverRun` owns the shared deadline, selects the configured backend, retains
@@ -890,7 +929,7 @@ Prioritize a check when the limitation could change a stated conclusion.
 | Auxiliary payback retains legacy conventions | The September 15 refresh reconciles all 141 matched optimized-EV payback rows using the corrected household and incentive selection. First-column tariff selection, capital-summary conventions, and a $0.01 denominator for nonpositive savings remain. Missing-bill handling is permissive; this refresh independently verifies every required bill. | Use the explicit matched EAC collector for publication. Address these conventions if payback becomes a paper result. Older archived payback outputs remain unchanged. |
 | The legacy 2025 incentive sensitivity simplifies eligibility | Its continuous battery sizing uses an ITC-adjusted unit price without a separate 3 kWh eligibility constraint. Legacy appliance calculations apply the 25C cap separately to space and water heating. Affected 2025 cases can overstate incentives. The explicit federal-only optimizer and household calculator enforce these limits. | Rerun affected comparisons through the new path before using them for published claims. These issues do not change zero-credit post-ITC inputs. |
 | Federal purchase credits are conditional on declared eligibility and realization | The amount calculation enforces the shared heat-pump cap and battery threshold. Reporting now applies explicit realized amounts and times to gross costs and excludes other incentives. It does not infer qualifying dates, buyer/product eligibility, or tax liability. Home credits share one receipt time. Treating potential credits as guaranteed receipts could overstate savings. | Declare eligibility and realization assumptions for the comparison. Separate receipt times or installments require an explicit extension. Receipts beyond the study require an explicit model change. Default reports and saved county results remain unchanged. |
-| Federal-only pilot coverage is incomplete | Alameda's matched comparison passed, but the four credited Los Angeles and San Diego designs did not meet the $1/year cost bound. Rejected candidates cannot support capacity or cost findings. The pilot assumes full eligibility and realization and excludes other rebates, so its baseline differs from earlier publication results. | Resolve the credited-solve runtime and repeat the failed pilot cases before expanding statewide. Preserve the accounting and acceptance checks. State eligibility, realization, and timing assumptions; collection does not establish them. Legacy sweeps and Module 4 remain unsupported. |
+| Federal-only matched reporting is incomplete | Alameda's matched comparison passed. Runtime validation resolves three further credited designs at the default budget; San Diego electric still fails that budget. Rejected candidates cannot support capacity or cost findings. Full eligibility and realization are conditional assumptions, and excluding other rebates changes the baseline from earlier results. | Follow the recorded runtime checks, then rebuild the matched pilot before expanding statewide. Preserve the accounting and acceptance checks. State eligibility, realization, and timing assumptions; collection does not establish them. Legacy sweeps and Module 4 remain unsupported. |
 | Battery augmentation costs and gradual capacity loss omitted centrally | Storage is treated more favorably than a model that charges for maintaining capacity. Round-trip efficiency losses and the declared replacement remain included. More frequent cycling with grid charging could increase this bias. | Report cycling when interpreting a grid-charging result. Add an explicit degradation or augmentation-cost sensitivity if needed. |
 | Equipment-size bounds, specified charging/export rules, and fixed-design comparisons | An optimum applies within its declared feasible choices. A fixed-design result is not an unrestricted economic optimum. | Report binding constraints and test an expanded domain for an affected claim. |
 | Central cases exclude grid charging | The matched 94-case check preserves zero storage in the 46 PG&E/SCE counties but establishes a small positive storage benefit in San Diego. Exact San Diego sizes remain unresolved; its cost ranges have positive lower bounds. | Report this exception alongside the central findings. Stored grid energy remains ineligible for export. County differences combine assigned utility tariffs with local load and weather; they do not isolate a tariff's causal effect. |
@@ -900,7 +939,7 @@ Prioritize a check when the limitation could change a stated conclusion.
 | Annual credit timing | SDG&E savings may be overstated relative to the former no-backward-offset convention. A late credit could offset an early charge in the annual model. | Bound the difference using unused eligible credits and earlier eligible payments; inspect affected San Diego cases. |
 | No opening credits or value for balances after the modeled year | Results omit benefits from a household's existing bank or future use of unused credits. | Use a separately specified future-use sensitivity if a claim requires it; opening balances are not supported centrally. |
 | Legacy equipment-capacity CSVs use two decimal places | Downstream capital reporting can differ slightly from the optimizer, which uses full precision. The core rerun at `8a98b96` had a maximum difference of $1.37/year, in San Mateo; all annual electricity bills reconciled. New explicit federal runs preserve full capacity precision to keep credit eligibility and costs consistent. | Preserve full precision in legacy capacity artifacts and round only presentation in a separate correction. |
-| Cost tolerance and finite solver budget | New solves allow up to $1/year of cost suboptimality, subject to unchanged physical checks. This does not bound capacity differences. Difficult cases can still fail the five-minute budget. NEM 3 now batches meter constraints after its first violation; this fixes the tested San Diego failure but adds solver work to some other counties. | Record cost certificates and execution settings. Faster constraint generation does not guarantee a runtime or identical capacities. Use a tighter tolerance for capacity-threshold claims. |
+| Cost tolerance and finite solver budget | New solves allow up to $1/year of cost suboptimality, subject to unchanged physical checks. This does not bound capacity differences. Difficult cases can still fail the five-minute budget. Credited NBT sizing now adds bound calculations within that same budget; these can add work when the original problem was already easy. | Record cost certificates and execution settings. Bound tightening and meter-constraint batching do not guarantee a runtime or identical capacities. Use a tighter tolerance for capacity-threshold claims. |
 | Financial operating value is the objective | The model assigns no monetary value to outage protection, convenience, or household preferences. It therefore does not explain every adoption decision. | Study resilience or preferences separately when such benefits become part of the research question. |
 
 ## Verification and publication boundaries

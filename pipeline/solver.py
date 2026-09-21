@@ -40,12 +40,19 @@ class CostCertificate:
 
 
 @dataclass(frozen=True)
+class AuxiliaryCertificate:
+    purpose: str
+    certificate: CostCertificate
+
+
+@dataclass(frozen=True)
 class SolverReport:
     options: SolverOptions
     elapsed_seconds: float
     lower_bound_usd: float
     optimality_gap_usd: float
     rounds: tuple[CostCertificate, ...]
+    auxiliary_solves: tuple[AuxiliaryCertificate, ...] = ()
 
     @property
     def round_count(self) -> int:
@@ -192,6 +199,7 @@ class SolverRun:
         self._started = time.monotonic()
         self._deadline = self._started + options.time_limit_seconds
         self._rounds: list[CostCertificate] = []
+        self._auxiliary: list[AuxiliaryCertificate] = []
 
     @property
     def elapsed_seconds(self) -> float:
@@ -201,14 +209,21 @@ class SolverRun:
     def round_count(self) -> int:
         return len(self._rounds)
 
-    def solve_round(self, problem) -> CostCertificate:
-        """Solve one relaxation within the shared run budget."""
-
+    def _solve(self, problem) -> CostCertificate:
         remaining_seconds(self._deadline)
         if self.options.backend == "highs":
-            certificate = solve_highs(problem, self.options, self._deadline)
-        else:
-            certificate = solve_cbc(problem, self.options, self._deadline)
+            return solve_highs(problem, self.options, self._deadline)
+        return solve_cbc(problem, self.options, self._deadline)
+
+    def solve_auxiliary(self, problem, *, purpose: str) -> CostCertificate:
+        """Use the same budget without treating another objective as a cost bound."""
+        certificate = self._solve(problem)
+        self._auxiliary.append(AuxiliaryCertificate(purpose, certificate))
+        return certificate
+
+    def solve_round(self, problem) -> CostCertificate:
+        """Solve one relaxation within the shared run budget."""
+        certificate = self._solve(problem)
         self._rounds.append(certificate)
         return certificate
 
@@ -239,4 +254,5 @@ class SolverRun:
             lower_bound_usd=lower_bound_usd,
             optimality_gap_usd=optimality_gap_usd,
             rounds=tuple(self._rounds),
+            auxiliary_solves=tuple(self._auxiliary),
         )

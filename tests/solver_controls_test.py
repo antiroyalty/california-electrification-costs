@@ -148,6 +148,44 @@ def test_solver_run_requires_a_certificate_before_finalizing():
         SolverRun(SolverOptions()).finalize(40)
 
 
+def test_auxiliary_cost_proofs_are_saved_but_never_certify_the_household(monkeypatch):
+    certificates = iter([CostCertificate(100, 100, "optimal"),
+                         CostCertificate(10, 9.5, "time_limit")])
+    monkeypatch.setattr(solver, "solve_highs", lambda *args: next(certificates))
+    run = SolverRun(SolverOptions())
+    run.solve_auxiliary(object(), purpose="different_cost_objective")
+    with pytest.raises(RuntimeError, match="without a cost certificate"):
+        run.finalize(100)
+    run.solve_round(object())
+    report = run.finalize(10)
+    assert report.round_count == 1
+    assert report.lower_bound_usd == 9.5
+    assert report.optimality_gap_usd == .5
+    saved = asdict(report)["auxiliary_solves"][0]
+    assert saved["purpose"] == "different_cost_objective"
+    assert saved["certificate"]["lower_bound_usd"] == 100
+
+
+def test_auxiliary_solves_share_the_county_deadline(monkeypatch):
+    now = [time.monotonic()]
+    monkeypatch.setattr(solver, "time", SimpleNamespace(monotonic=lambda: now[0]))
+    calls = []
+
+    def exhaust_budget(problem, options, deadline):
+        calls.append(deadline)
+        now[0] = deadline + .01
+        return CostCertificate(40, 40, "optimal")
+
+    monkeypatch.setattr(solver, "solve_highs", exhaust_budget)
+    run = SolverRun(SolverOptions())
+    run.solve_auxiliary(object(), purpose="initial_bound")
+    with pytest.raises(RuntimeError, match="time budget exhausted"):
+        run.solve_auxiliary(object(), purpose="second_bound")
+    with pytest.raises(RuntimeError, match="time budget exhausted"):
+        run.solve_round(object())
+    assert len(calls) == 1
+
+
 def _no_solar_inputs():
     return core.CooptInputs([100], [0], [.4], [.1])
 

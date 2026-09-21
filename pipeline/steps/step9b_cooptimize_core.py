@@ -25,6 +25,9 @@ from pipeline.solver import (
     SolverReport,
     SolverRun,
 )
+from pipeline.optimization_bounds import (
+    maximum_meter_export_kwh, tighten_nbt_battery_bound,
+)
 
 # See step9b_cooptimize_pv_battery.py for the full note on why these must
 # match the appliance classes step14 uses for reporting, not a standalone
@@ -870,6 +873,33 @@ def _solve_lp(
 
     prob += capex_annual + energy_cost + degrade_cost
 
+    storage_search_bound = None
+    if nbt_terms is not None and storage_credit_mode is not None and c_batt_kwh > 0:
+        storage_search_bound = tighten_nbt_battery_bound(
+            prob, solver_run=solver_run, pv_size=PV_kw, battery_size=B_E,
+            credit_eligible=storage_credit_mode, pv_gen_per_kw=G, load_kwh=L,
+            weights=weights, terms=nbt_terms,
+            pv_annual_cost_per_kw=c_pv_kw * (alpha_pv - annual_credit_fraction),
+            battery_annual_cost_per_kwh=c_batt_kwh * alpha_batt,
+            minimum_credited_kwh=credit_minimum_kwh,
+        )
+        battery_capacity_bound = storage_search_bound.maximum_kwh
+        for variable in [B_E, B_P, *pv2batt, *grid2batt, *batt2load, *batt2grid, *soc]:
+            variable.upBound = min(variable.upBound, battery_capacity_bound)
+        export_bounds = [maximum_meter_export_kwh(
+            pv_available_kwh=pv_availability_bounds[h], load_kwh=float(L[h]),
+            battery_kwh=battery_capacity_bound,
+            usable_soc_fraction=_SOC_MAX_FR - _SOC_MIN_FR, discharge_efficiency=ETA_DIS,
+        ) for h in range(H)]
+        for h in range(H):
+            pv2grid[h].upBound = min(pv2grid[h].upBound, export_bounds[h])
+            batt2grid[h].upBound = min(batt2grid[h].upBound, export_bounds[h])
+        print(
+            f"[coopt] battery search bound={battery_capacity_bound:.6f} kWh; "
+            f"feasible solar-only cost=${storage_search_bound.feasible_annual_cost_usd:.6f}/year; "
+            f"elapsed={solver_run.elapsed_seconds:.1f}s", flush=True,
+        )
+
     # Each intermediate model relaxes physical meter constraints. Its lower
     # bound is valid for the full problem, even with an early solver stop.
     # Accept only a physically valid candidate within the declared cost gap.
@@ -939,6 +969,12 @@ def _solve_lp(
             prob += batt2grid[h] <= (
                 battery_capacity_bound if allow_batt_export else 0.0
             ) * (1 - mode)
+            if storage_search_bound is not None:
+                # With no imports, load plus exports cannot exceed PV plus
+                # the usable SOC decrease. Charging losses only reduce that bound.
+                prob += pv2grid[h] <= pv2grid[h].upBound * (1 - mode)
+                prob += batt2grid[h] <= batt2grid[h].upBound * (1 - mode)
+                prob += pv2grid[h] + batt2grid[h] <= export_bounds[h] * (1 - mode)
 
     # Extract values
     pv_kw_val = _normalize_nonnegative_solver_value(

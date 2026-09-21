@@ -1,5 +1,8 @@
 # Federal-credit pilot at fixed NBT rates
 
+This report preserves the initial pilot. See the
+[runtime follow-up](2026-09-20-federal-credit-runtime.md) for subsequent validation.
+
 The planned three-utility pilot is incomplete. Alameda's three credit comparisons
 passed. The four credited Los Angeles and San Diego designs exceeded the accepted
 $1/year cost gap. Resolve those solves before expanding statewide.
