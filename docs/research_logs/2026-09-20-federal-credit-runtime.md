@@ -8,8 +8,10 @@ budget. Its remaining cost gap falls from $94.05/year to $3.09/year.
 This change preserves the pilot's model and $1/year acceptance limit. It does
 not change credit eligibility, equipment prices, tariffs, dispatch permissions,
 or the declared 40 kWh storage ceiling. It reduces the solver's search using
-proved cost and energy bounds. The current change is based on `992c4db` and is
-not yet committed. The run records identify the modified model files by SHA-256.
+proved cost and energy bounds. Validation ran from `992c4db` with uncommitted
+changes identified by SHA-256. Those changes are now committed as `ca1214a`.
+See the [September 21 investigation](2026-09-21-federal-credit-runtime.md) for
+the remaining San Diego electric case.
 
 ## Default-budget results
 
