@@ -689,5 +689,29 @@
       "appliances/gas_water_heating.py:GasWaterHeatingAppliance",
       "appliances/gas_heating.py:GasHeatingAppliance"
     ]
+  },
+  "electrification.pilot_diagnostic": {
+    "title": "Bounded Federal-Credit Pilot Diagnostic",
+    "formula": "Delta = sum_j (annual_component_electric,j - annual_component_gas,j). A_n = 1 / sum_{t=1..n}(1+r)^(-t). Gross appliance annual cost = C*A_n; initial credit annual benefit = T*(1+r)^(-receipt_year)*A_25.",
+    "assumptions": {
+      "scope": "Three pilot counties, three credit cases, four household/solar choices each; 36 saved cells. Diagnostic only; no central model or input changes.",
+      "selection": "Select full_incentives explicitly, then use gross base_cost. Require one row for every declared appliance. Separate vehicle maintenance, insurance, and gasoline; EV electricity remains in the home bill. Reconcile components to saved totals.",
+      "vehicle_price_sensitivity": "Apply 11000/14600 from DOE 2025 Table ES-3 (both source premiums in 2024 dollars) to the existing $14476 vehicle-only premium. Retain the $1400 charger, 12-year service-life annualization, initial credits, and loads. The resulting $449.40/year reduction leaves a $494.52–$650.29/year premium. This is a ratio sensitivity, not a wholesale cost-vintage refresh.",
+      "transport": "Saved residential charging is 1682.327914 kWh/year; all-location source charging is 3540.206095 kWh/year. Home share is 47.52%. Dividing the latter by an assumed 12000 miles gives 29.50 kWh/100 miles, not verification of actual mileage. Public charging remains excluded.",
+      "fixed_storage": "Hold a qualifying 3 kWh battery; optimize solar, power, and dispatch. Preserve 7%, 25 years, replacement at 15, one-third residual at 25, initial 30% credit at year 1. At a fixed eligible capacity, repricing storage adds a constant to the objective. A cheaper candidate establishes value if it beats a lower bound on solar-only cost; an unprofitable candidate does not rule out every other battery size.",
+      "bounds": "If costs lie in [L_b,U_b] for fixed battery and [L_0,U_0] for solar-only, the true optimized penalty lies in [L_b-U_0,U_b-L_0]. Record original solve certificates and rejected attempts. Cost bounds do not bound capacities or empirical uncertainty.",
+      "relaxed_bound": "The diagnostic temporarily observes SolverRun.solve_round and stops after its first certificate. It changes no objective coefficient or constraint. Initial meter-direction restrictions are relaxed; the cost lower bound is valid for every feasible fixed-battery design. No relaxed dispatch is accepted or reported as a physical solution. Subtract the saved feasible solar-only cost and a roundoff allowance to bound the minimum penalty. A positive bound establishes loss; a negative bound is inconclusive.",
+      "storage_result": "At $1460.64/kWh, a fixed 3 kWh battery increases cost in all four tested Alameda/Los Angeles household cases. Repricing this fixed capacity to a sourced $999/kWh proves positive storage value in Los Angeles: at least $87.43/year for gas and $88.32/year for electric. Alameda has positive minimum penalties even at the lower price. Three physical designs pass the $5/year acceptance limit; Alameda electric uses a conclusive optimistic lower bound and no rejected design is accepted. This does not establish unrestricted optimal sizes or a new whole-household electrification premium."
+    },
+    "validation": "Independent hand examples test one-incentive selection, initial-credit timing, component reconciliation, gasoline separation, and malformed or missing ledger data. Pilot totals reconcile to 1e-7 USD/year. New dispatch requires bill replay, physical checks, independent replacement/credit accounting, and the declared $5/year cost limit. Tests also verify that the initial certificate bounds a complete solve and that the diagnostic restores the solver method on success and failure. Rejected physical designs remain rejected under the $5/year rule.",
+    "code": [
+      "scripts/analyze_federal_credit_pilot.py:household_components",
+      "scripts/analyze_federal_credit_pilot.py:fixed_battery_lower_bound",
+      "tests/federal_credit_pilot_diagnostics_test.py"
+    ],
+    "data_sources": {
+      "report": "docs/research_logs/2026-09-21-pilot-diagnostic.md",
+      "catalogue": "docs/data_sources.yaml"
+    }
   }
 }

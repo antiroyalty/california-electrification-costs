@@ -533,6 +533,26 @@ cost by $803.97 in both solar choices. This constant reduction cancels from
 solar-adoption savings and the package effect. The isolated outputs do not replace
 existing statewide publication data. The statewide credit comparison remains pending.
 
+The [pilot diagnostic](research_logs/2026-09-21-pilot-diagnostic.md) separates
+the annual cost difference into equipment, energy, vehicle upkeep, and credits.
+Its independent ledger calculation reconciles all 36 saved household-cost cells.
+Before credits, the EV and charger add $1,999/year of capital cost. Space and
+water heating add another $1,367–$1,808/year. Energy savings offset part of these
+costs. This decomposition is descriptive; it does not isolate each appliance's
+effect on electricity demand or optimal solar sizing.
+
+An analytical sensitivity applies DOE's 2025-to-2022 vehicle-premium ratio to
+the existing vehicle-only premium. It holds the charger, demand, and credits
+fixed. The remaining electrification premium is $495–$650/year in the pilot.
+This source-based sensitivity does not replace the declared equipment prices.
+The diagnostic also tests a fixed qualifying battery with solar and dispatch
+free to change. At a sourced $999/kWh sensitivity price, a 3 kWh battery saves
+about $88/year for Los Angeles gas households and $89/year for electric households.
+Alameda's same-size battery still loses at that price, as shown by conservative
+cost bounds. These checks do not identify the best battery size at the lower
+price or recompute the total electrification comparison. See the diagnostic
+for solver bounds, rejected attempts, and the limits of the quote benchmark.
+
 ## Household costs and system selection
 
 The principal cost measure is equivalent annual cost (EAC): an annual amount that
@@ -918,7 +938,7 @@ Prioritize a check when the limitation could change a stated conclusion.
 | Adoption includes an import-rate plan change | The four-case collector matches plans between households within each solar choice. It compares the declared retail plan without solar to the required NEM 3 plan with optimized equipment. Adoption savings and the package effect therefore include the tariff transition. | Report the aligned-load diagnostic, which separates calendar, plan, and equipment contributions. Choosing the cheapest eligible no-solar plan remains outside this comparison. |
 | Retail and NEM 3 use different calendars | Retail bills retain the source profile calendar; NEM 3 uses the declared 2026 calendar. The aligned-load diagnostic bounds the package-effect difference at $3.64/year across the matched run. All 47 signs remain positive. | Use one calendar in future reporting. This bounded difference does not explain the tariff-inclusive or within-tariff equipment finding. |
 | Building and vehicle electrification are bundled | The matched comparison identifies their combined household-cost effect. It cannot attribute the effect to appliances or the EV separately. | Add matched intermediate scenarios if separate attribution becomes a research question. |
-| Vehicle charging and driving use independent reference inputs | Home charging repeats a statewide 2030 fleet-average day. ICE fuel uses 12,000 miles per year. Equal transport service has not been established. | Check their mileage and vehicle-efficiency basis before describing the comparison as equal travel demand. See the data source catalogue. |
+| Vehicle charging and driving use independent reference inputs | Home charging repeats a statewide 2030 fleet-average day. The pilot uses 1,682 kWh/year at home, or 47.5% of its source's 3,540 kWh across all locations. ICE fuel uses 12,000 miles/year. Equal transport service has not been established. | Retain the declared home-charging boundary. Describe comparisons as conditional modeled costs, not complete equal-mileage vehicle ownership costs. Normalizing demand requires a separate reviewed input change. See the source catalogue and pilot diagnostic. |
 | Charging away from home is intentionally outside the model scope | Home load includes residential charging only. Public/workplace and DC fast charging costs are also excluded, so reported household costs do not cover all transport expenditure. Simon's $642.54/year estimate remains historical context. | A future extension could verify those prices and demand, then add a separate expense outside the home electricity bill. This is not required for publication within the stated scope. A constant expense cancels within each household's adoption comparison. |
 | Some vehicle input provenance remains incomplete | Simon identifies AAA gasoline prices, but the snapshot date and exact citation are missing. The $3,000 utility rebate lacks program-specific support. Insurance uses older national estimates, and the 12-year vehicle-life citation describes batteries. | Use the source catalogue to resolve material gaps and state the remaining reference assumptions. These findings do not change inputs in this documentation review. |
 | Alpine gasoline uses a proxy; the original price date is unknown | Alpine uses $4.589/gallon, the unweighted median of the other 57 stored county prices. This does not establish its local price. Each $1/gallon difference changes annual fuel cost by $494.85. | Retain this explicit assumption and check price sensitivity if Alpine's classification drives a claim. Replace it with a documented observation when revisiting gasoline inputs. |
@@ -926,7 +946,7 @@ Prioritize a check when the limitation could change a stated conclusion.
 | Constant vehicle repair and maintenance allowances | The allowances average 144,000 miles from new using older survey rates. They do not represent county or vehicle-model variation, inflation, or actual repair timing. At 7%, the flat allowance increases the ICE-minus-EV maintenance difference by $21.93/year against a 12-year calculation with mileage bands applied each year. | Use the documented constant allowance for the current comparison. A future sensitivity can update prices or ownership patterns. The timing check covers maintenance alone; it is not a full household-cost uncertainty bound. |
 | Known profiles and prices throughout an optimization run | Dispatch assumes advance knowledge of the modeled year. Real controllers face forecast errors, which can reduce achievable savings. | Compare a controller with limited forecasts on the same cases. |
 | Reduced 12 × 24 sensitivity chronology | Averaging can change cycling, usable credits, and optimal capacities. Mixed-resolution comparisons cannot isolate a policy effect by themselves. | Use full-year checks for findings near a threshold or sensitive to chronology. |
-| Declared equipment costs, lifetimes, and incentive cases | These are sourced modeling inputs, not a new survey of prices available to every household. | Refresh cost benchmarks or report a focused sensitivity when cost uncertainty affects a claim. |
+| Declared equipment costs, lifetimes, and incentive cases | These are sourced inputs, not a survey of prices available to every household. DOE's 2025 vehicle-premium benchmark is below the implemented 2022 value. A later battery quote median is $999/kWh versus the central $1,461/kWh model benchmark. | Report the bounded pilot sensitivities and their source limitations. These comparisons differ in vintage, sampling, and system size. They do not automatically replace central assumptions. |
 | County equipment costs include imputed values | The heat-pump cost inputs use the median of available counties where source data are absent: three counties for space heating and nine for water heating. These are not local price observations. | Identify these counties in cost interpretation and refresh their inputs when local data become available. |
 | Battery remaining-value and replacement-cost assumptions | The method values five remaining years at one-third of replacement cost. It assumes unchanged real purchase costs. Legacy net-price calls repeat incentive treatment; the explicit federal-only path grants only an initial credit. Future prices and resale values can differ; the direction of error is uncertain. | State these assumptions with the results. Use a focused sensitivity if they could change an adoption conclusion. |
 | Older results and auxiliary tools can use different capital accounting | The core scenarios were regenerated at `8a98b96`. Other cached sizing and reports retain their recorded versions. Standalone solar/battery/combined sweeps, the older Step 9 size optimizer, and auxiliary NPV diagnostics retain separate conventions. | Use the dated claim assessment for current evidence. Align an auxiliary tool before using it for a comparison under these methods. |

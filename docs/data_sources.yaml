@@ -61,6 +61,13 @@ sources:
       - Home charging intentionally excludes the public/workplace and DC-fast columns; their costs are also outside the current model scope.
       - Charging energy is not normalized to the ICE model's 12000 annual miles.
       - The module's EVI-Pro Lite API description is stale; the workbook is the active input.
+    pilot_audit_2026_09_21: >-
+      All three saved pilot EV profiles contain 1682.327914 kWh/year of residential
+      charging and 3540.206095 kWh/year across the four source charging columns.
+      Residential charging is 47.52 percent. All-location energy divided by an
+      assumed 12000 miles is 29.50 kWh/100 miles; this calculation does not establish
+      the source fleet's mileage or equal service with the modeled ICE vehicle.
+      The agreed exclusion of charging away from home remains unchanged.
 
   doe_vehicle_purchase_costs_2022:
     title: 2022 Incremental Purchase Cost Methodology and Results for Clean Vehicles
@@ -78,6 +85,26 @@ sources:
       Modeled representative vehicle classes, not observed Tesla Model Y prices.
       The Tesla comment is too specific. Values are historical benchmarks, not current quotes.
     related_sources: [bls_cpi_december_2023, dot_home_charger_installation]
+
+  doe_vehicle_incremental_costs_2025:
+    title: 2025 Incremental Purchase Cost Methodology and Results for Clean Vehicles
+    publisher: US Department of Energy
+    publication_date: '2025-01-13'
+    role: pilot_sensitivity_only
+    url: https://www.energy.gov/sites/default/files/2025-01/2025.01.13_DOE_Incremental_Cost_Report_for_publication.pdf
+    locator: Table ES-3, PDF page 4
+    verification: >-
+      Reviewed the primary-source table on September 21, 2026. It compares
+      the midsize-SUV BEV premium at 11000 USD for the 2025 report with 14600 USD
+      for the earlier report, both expressed in 2024 dollars.
+    use: >-
+      Apply the ratio 11000/14600 to the existing vehicle-only premium of 14476 USD.
+      Keep the 1400 USD charger, 12-year annualization, demand, and initial credit.
+      Annual household cost falls by 449.40 USD in each pilot county.
+    limitations: >-
+      This is a source-based ratio sensitivity, not an observed vehicle quote,
+      a whole-model inflation adjustment, or an implemented central price change.
+      Vehicle eligibility and lifetime remain declared assumptions.
 
   bls_cpi_december_2023:
     title: Consumer Price Index - December 2023
@@ -305,6 +332,28 @@ sources:
       report below as precedent; it is not the origin of the selected ATB 2024 value.
     related_sources: [cec_distributed_generation_2024]
 
+  energysage_storage_quotes_2024:
+    title: EnergySage 20th Solar and Storage Marketplace Report
+    publisher: EnergySage
+    publication_date: '2025-04-29'
+    role: pilot_sensitivity_only
+    url: https://www.energysage.com/press/energysage-marketplace-intel-report-20/
+    supporting_url: https://docs.nlr.gov/docs/fy25osti/95135.pdf
+    verification: >-
+      The primary publisher reports a 999 USD/kWh storage quote median in its
+      2024 marketplace results. NREL's Spring 2025 Solar Industry Update presents
+      EnergySage storage prices as median gross costs. Reviewed September 21, 2026.
+    use: >-
+      Reprice the pilot's fixed 3 kWh candidate from 1460.64 to 999 USD/kWh,
+      preserving its initial credit, gross replacement, and remaining value.
+      This changes a constant in that fixed-capacity optimization objective.
+    limitations: >-
+      National marketplace quotes are not a representative survey of completed
+      installations or quotes for these counties and this 3 kWh size. This nominal
+      benchmark is a sensitivity, not a price forecast, inflation adjustment, or
+      automatic replacement of the central ATB cost. The model retains proportional
+      pricing and a gross replacement at the same unit price.
+
   cec_distributed_generation_2024:
     title: Modeling Distributed Generation in California
     publisher: California Energy Commission
@@ -320,7 +369,7 @@ sources:
     title: TECH Clean California installation project data, aggregated by county
     publisher: TECH Clean California
     role: implemented_input
-    url: null
+    url: https://techcleanca.com/heat-pump-data/heat-pump-data-visuals/
     data_date: null
     local_inputs: [data/County_Median_HPSH_Stats.csv, data/County_Median_HPWH_Stats.csv]
     locator: Simon sections 4.3 and 4.4
@@ -330,6 +379,11 @@ sources:
       and the listed HPWH categories. Space heaters retain ducted AHRI types without -O.
       Missing counties receive the median of available county values.
     verification: Simon documents filters and contractor-cost scope; current CSVs are tracked and the methods identify missing counties.
+    pilot_audit_2026_09_21: >-
+      All six pilot heat-pump purchase costs match the tracked county median CSVs.
+      The public TECH page confirms that its dataset covers paid incentive
+      applications, not all installations. The saved export date and aggregation
+      receipt remain unresolved; the current page does not date the existing CSVs.
     limitations: >-
       Raw export date, exact download URL, and aggregation receipt remain to be recovered.
       Simon counts 13 water-heater and 5 space-heater gaps across California; current
