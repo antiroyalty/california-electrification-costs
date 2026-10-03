@@ -28,8 +28,9 @@ observations per component. MIDAS identity and units are verified from
 PDF's EEC headers and PG&E content marker. A deliberately broad total-schedule
 magnitude guardrail additionally rejects likely 100× currency/unit scaling.
 
-`acc_plus_rates.csv` stores the separate flat ACC Plus adders by utility,
-interconnection vintage, and customer segment. Sources:
+`acc_plus_rates.csv` preserves reference ACC Plus adders by utility,
+interconnection vintage, and customer segment. The research model excludes
+this bonus and does not load these rates. Sources:
 
 - PG&E Advice 7174-E: https://www.pge.com/tariffs/assets/pdf/adviceletter/ELEC_7174-E.pdf
 - SCE Schedule NBT: https://www.sce.com/sites/default/files/custom-files/PDF_Files/ELECTRIC_SCHEDULES_NBT.pdf
@@ -61,7 +62,8 @@ undeclared units, and likely cents-versus-dollars errors.
 ## Annual true-up and net-surplus sources
 
 `true_up_source_manifest.json` indexes the official utility evidence acquired
-on 2026-08-10 for the future annual true-up implementation. Raw sources are
+on 2026-08-10. These archives support credit-pool interpretation, NEM 2 NSC
+inputs, and the former detailed NBT accounting examples. Raw sources are
 kept in two groups:
 
 - `sources/nbt_rules/` contains each utility's complete NBT tariff schedule;
@@ -90,19 +92,15 @@ units, complete month coverage, finite nonnegative values, and a broad NSC
 magnitude guardrail before writing. `NetSurplusCompensationSchedule` validates
 the normalized table and its manifest linkage, then resolves exactly one rate
 for an explicitly supplied utility and `YYYY-MM` true-up month. It never selects
-a month implicitly. `NBTScenario.true_up_month` makes the current research's
-`2026-08` selection explicit and requires it to fall within the billing year.
+a month implicitly. NEM 2 uses an explicit true-up month. The capped NBT
+research model does not use NSC or surplus-adjustment rates and has no true-up
+month setting. Its base credits settle once per representative year.
 
-`TrueUpPolicy` and `calculate_true_up_settlement` implement the source-backed
-annual settlement rules independently of the monthly billing loop. The
-settlement first debits annual net-surplus kWh at the utility-wide average
-retail export compensation rate, then credits the same kWh at the selected NSC
-rate. Generation and delivery banks remain separate throughout. Remaining EEC
-is applied to prior eligible charges for PG&E and SCE; PG&E then carries any
-residual EEC, while SCE forfeits it. SDG&E does not retroactively apply residual
-EEC and sets it to zero after the net-surplus debit. ACC Plus is not recouped
-and carries unchanged. These rules are linked to the archived NBT schedules by
-the policy `source_id`.
+The former NBT settlement engine remains in Git at `860949e`. Its worked
+examples are preserved in [the accounting closure note](../../docs/HOUSEHOLD_COST_RECONCILIATION.md).
+Current annual research accounting uses SCE's combined energy pool and separate
+generation/delivery pools for PG&E and SDG&E. This is an explicit research
+approximation; it does not reconstruct monthly payments or future carryover.
 
 The average-retail-export adjustment prices are a separate source input from
 both hourly ACC export prices and monthly NSC prices. They have not yet been
@@ -130,20 +128,33 @@ the tariff's $/kWh language. Every normalized row retains both the table
 PG&E adjustment-rate table could be source-locked from PG&E's public materials
 as of 2026-08-11. PG&E lookup therefore raises an explicit missing-rate error;
 the June 2025 illustrative statement values are not treated as August 2026
-data. Until that input is acquired, the end-to-end bill must not guess a rate
-or derive one from the representative household profile.
+data. This missing source does not block capped annual NBT research costs.
 
-`calculate_nbt_bill` performs the annual settlement after building its monthly
-ledger. `BillLedger.monthly_amount_due` preserves the pre-true-up total;
-`BillLedger.annual_amount_due` adds the signed true-up adjustment. The attached
-`true_up_settlement` exposes surplus kWh, component adjustment charges, EEC
-applied at settlement, the cash-paid charge eligible for backward application,
-NSC credit, forfeited or carried balances, and all source IDs. For the
-backward-looking EEC step, component-neutral ACC Plus is allocated proportionally
-across the remaining generation and delivery energy charges; only the residual
-cash-paid eligible charge is offered to true-up, preventing a second credit
-against a charge ACC Plus already offset. Annual net importers
-require no NSC or adjustment-rate lookup because both quantities are exactly
-zero. Annual net exporters for SCE and SDG&E resolve the source-locked monthly
-inputs. PG&E annual net exporters fail explicitly until PG&E's corresponding
-current adjustment-rate source is acquired.
+`calculate_nbt_bill` aggregates hourly dollars and applies base credits once
+within each annual eligible pool. `BillLedger` reports annual meter energy,
+charges, credits earned/applied/unused, and the final bill. Base credits cannot
+pay fixed or non-bypassable charges. Reports reject annual exports above imports.
+See [research methods](../../docs/RESEARCH_METHODS.md) for equations and limitations.
+
+## Deferred NEM 2 billing counterfactual
+
+`nem2_source_manifest.json` indexes the official sources acquired on
+2026-08-17 for the planned NEM 2 billing implementation. The bundle contains
+CPUC Decision D.16-01-044 and the current NEM 2 tariff schedule for PG&E, SCE,
+and SDG&E. The source PDFs are stored under `sources/nem2_rules/`.
+
+The utility schedules use different tariff identifiers. PG&E uses `NEM2`.
+SCE and SDG&E use `NEM-ST`. The manifest preserves these identifiers instead
+of assigning one synthetic name to all three schedules.
+
+The archived SDG&E source comes from the current tariff API, electric tariff
+key 871. The older static SDG&E PDF endpoint still served a 2017 schedule on
+2026-08-17 and is not part of this bundle. The SCE endpoint returned a
+multipart response. The archive contains the exact embedded PDF payload with
+the HTTP wrapper removed.
+
+This commit archives governing evidence only. Runtime code does not yet read
+this manifest, and no output is labeled as NEM 2. The next implementation step
+must define and test NEM 2 retail crediting, gross-import nonbypassable charges,
+annual true-up, and net-surplus compensation before the optimizer can use this
+regime.

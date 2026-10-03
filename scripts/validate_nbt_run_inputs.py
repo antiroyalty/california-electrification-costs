@@ -33,9 +33,7 @@ def _parser() -> argparse.ArgumentParser:
     selection.add_argument("--all-counties", action="store_true")
     parser.add_argument("--billing-year", type=int, default=2026)
     parser.add_argument("--nbt-vintage", type=int, default=2026)
-    parser.add_argument("--true-up-month", default="2026-08")
     parser.add_argument("--tariff-snapshot-date", default="2026-08-09")
-    parser.add_argument("--exclude-acc-plus", action="store_true")
     return parser
 
 
@@ -53,9 +51,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     nbt_scenario = NBTScenario(
         billing_year=args.billing_year,
         nbt_vintage=args.nbt_vintage,
-        include_acc_plus=not args.exclude_acc_plus,
         tariff_snapshot_date=args.tariff_snapshot_date,
-        true_up_month=args.true_up_month,
     )
     results, failures = preflight_nbt_run(
         base_input_dir=args.base_input_dir,
@@ -69,22 +65,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         f"NBT preflight: scenario={args.scenario}, billing_year="
         f"{nbt_scenario.billing_year}, vintage={nbt_scenario.nbt_vintage}, "
         f"tariff_snapshot={nbt_scenario.tariff_snapshot_date}, "
-        f"true_up_month={nbt_scenario.true_up_month}, "
-        f"acc_plus={nbt_scenario.include_acc_plus}"
     )
     for result in results:
-        true_up_sources = (
-            f"{result.adjustment_source_id},{result.nsc_source_id}"
-            if result.net_surplus_kwh > 0.0
-            else "not-required"
-        )
         print(
             f"PASS {result.county_slug}: {result.utility.value}; "
-            f"rows={result.row_count}; annual_net_surplus="
-            f"{result.net_surplus_kwh:,.1f} kWh; "
+            f"rows={result.row_count}; annual_imports={result.annual_import_kwh:,.1f} kWh; "
+            f"annual_exports={result.annual_export_kwh:,.1f} kWh; "
             f"import_source={result.import_source_id}; "
             f"export_sources={','.join(result.export_source_ids)}; "
-            f"true_up_sources={true_up_sources}"
         )
     for failure in failures:
         print(f"FAIL {failure}", file=sys.stderr)

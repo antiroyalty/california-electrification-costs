@@ -265,7 +265,8 @@ class ImportRateSchedule:
         required = required_nbt_import_plan(parsed)
         if selected != required:
             raise ValueError(
-                f"NBT customers in {parsed.value} must use {required}; received {selected}"
+                f"The source-locked research tariff for {parsed.value} must use "
+                f"{required}; received {selected}"
             )
         details, resolved_snapshot_date = _load_snapshot_plan(
             Path(snapshot_data_path),
@@ -278,7 +279,7 @@ class ImportRateSchedule:
                 resolved_nbc = float(details["nonBypassableRate"])
             except KeyError as exc:
                 raise KeyError(
-                    f"Required NBT plan {parsed.value} {selected} has no "
+                    f"Required research plan {parsed.value} {selected} has no "
                     "nonBypassableRate"
                 ) from exc
         else:
@@ -349,6 +350,6 @@ class ImportRateSchedule:
             return float(day_rates["fixedCharge"])
         except KeyError as exc:
             raise KeyError(
-                f"Required NBT plan {self.utility.value} {self.plan_name} has no "
+                f"Required research plan {self.utility.value} {self.plan_name} has no "
                 f"fixedCharge for {season}/{key}"
             ) from exc

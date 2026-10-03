@@ -25,11 +25,11 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from helpers.main_helpers import slugify_county_name, get_scenario_path, get_counties
+from evaluations.vehicles import vehicle_annual_adders_from_ledger
 
 # Reuse PV + dispatch implementation from Step 9 DIY
 import step9_my_own_solar_storage as diy
 from helpers.capital_cost_map_builder import LIFETIMES
-from step15_payback_periods import vehicle_annual_adders_from_ledger
 from evaluations.eac import crf as _crf
 from evaluations.constants import DEFAULT_DISCOUNT_RATE
 
@@ -140,14 +140,18 @@ def _eac_baseline_components(
     capex_electric = 0.0
     capex_gas = 0.0
     vehicle_om = 0.0
-    if ledger is None or ledger.empty:
-        return {"capex_electric": 0.0, "capex_gas": 0.0, "vehicle_om": 0.0}
-    df = ledger.copy()
-    df = df[df['county_slug'].str.lower() == county_slug.lower()]
+    adders = vehicle_annual_adders_from_ledger(
+        ledger,
+        county_slug=county_slug,
+        incentive_scenario="full_incentives",
+    )
+    county_ledger = ledger[
+        ledger['county_slug'].str.lower() == county_slug.lower()
+    ].copy()
+    df = county_ledger
     # Use 'full_incentives' rows by default
-    if 'incentive_scenario' in df.columns:
-        df['incentive_scenario'] = df['incentive_scenario'].str.lower()
-        df = df[df['incentive_scenario'] == 'full_incentives']
+    df['incentive_scenario'] = df['incentive_scenario'].str.lower()
+    df = df[df['incentive_scenario'] == 'full_incentives']
     # Annualize per-row
     for _, r in df.iterrows():
         try:
@@ -160,18 +164,13 @@ def _eac_baseline_components(
         except Exception:
             continue
     # Vehicle O&M
-    try:
-        adders = vehicle_annual_adders_from_ledger(df)
-        if county_slug in adders.index:
-            ev_val = float(adders.loc[county_slug, 'ev_operating']) if 'ev_operating' in adders.columns else 0.0
-            ice_val = float(adders.loc[county_slug, 'ice_operating']) if 'ice_operating' in adders.columns else 0.0
-            scen_l = (scenario or '').lower()
-            if ('ev' in scen_l) or (ev_val > 0):
-                vehicle_om += ev_val
-            if ('ice' in scen_l) or (ice_val > 0 and 'ev' not in scen_l):
-                vehicle_om += ice_val
-    except Exception:
-        pass
+    ev_val = adders.ev_operating_usd_per_year
+    ice_val = adders.ice_operating_usd_per_year
+    scen_l = (scenario or '').lower()
+    if ('ev' in scen_l) or (ev_val > 0):
+        vehicle_om += ev_val
+    if ('ice' in scen_l) or (ice_val > 0 and 'ev' not in scen_l):
+        vehicle_om += ice_val
     return {
         "capex_electric": float(capex_electric),
         "capex_gas": float(capex_gas),

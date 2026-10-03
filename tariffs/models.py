@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date
 from enum import Enum
+import math
 from typing import TYPE_CHECKING, Sequence
 
 import pandas as pd
@@ -10,6 +11,28 @@ import pandas as pd
 if TYPE_CHECKING:
     from .catalog import ExportCreditSchedule
     from .import_rates import ImportRateSchedule
+
+
+# One milliwatt-hour per modeled year: numerical equality, not a sizing allowance.
+ANNUAL_ENERGY_TOLERANCE_KWH = 1e-6
+
+
+def annual_net_surplus_kwh(annual_import_kwh: float, annual_export_kwh: float) -> float:
+    """Return positive annual meter surplus, treating rounding noise as zero."""
+    if any(not math.isfinite(v) or v < 0 for v in (annual_import_kwh, annual_export_kwh)):
+        raise ValueError("Annual meter energy must be finite and non-negative")
+    surplus_kwh = annual_export_kwh - annual_import_kwh
+    return surplus_kwh if surplus_kwh > ANNUAL_ENERGY_TOLERANCE_KWH else 0.0
+
+
+def require_annual_export_cap(annual_import_kwh: float, annual_export_kwh: float) -> None:
+    """Reject meter flows outside the NBT research model's annual energy domain."""
+    if annual_net_surplus_kwh(annual_import_kwh, annual_export_kwh) > 0:
+        raise ValueError(
+            "NBT research requires annual exported kWh <= annual imported kWh; "
+            f"imports={annual_import_kwh:.12g}, exports={annual_export_kwh:.12g}. "
+            "Regenerate dispatch within the cap before reporting research costs."
+        )
 
 
 class Utility(str, Enum):
@@ -44,6 +67,37 @@ class CustomerSegment(str, Enum):
     EQUITY = "equity"
 
 
+class ExportCompensationRegime(str, Enum):
+    """Export-compensation policy used by a sizing counterfactual."""
+
+    NBT_2026 = "nbt_2026"
+    NEM2_AT_2026_RETAIL_RATES = "nem2_at_2026_retail_rates"
+
+    @classmethod
+    def parse(
+        cls,
+        value: str | "ExportCompensationRegime",
+    ) -> "ExportCompensationRegime":
+        if isinstance(value, cls):
+            return value
+        try:
+            return cls(str(value))
+        except ValueError as exc:
+            expected = ", ".join(member.value for member in cls)
+            raise ValueError(
+                f"Unsupported export-compensation regime {value!r}; "
+                f"expected one of: {expected}"
+            ) from exc
+
+    @property
+    def max_pv_to_annual_load_ratio(self) -> float:
+        """Policy-specific annual PV-generation sizing limit."""
+
+        if self is ExportCompensationRegime.NBT_2026:
+            return 1.5
+        return 1.0
+
+
 @dataclass(frozen=True)
 class NBTScenario:
     """Explicit policy choices needed to resolve one NBT tariff bundle.
@@ -56,9 +110,7 @@ class NBTScenario:
     nbt_vintage: int = 2026
     service_type: ServiceType = ServiceType.BUNDLED
     customer_segment: CustomerSegment = CustomerSegment.STANDARD
-    include_acc_plus: bool = True
     tariff_snapshot_date: str = "2026-08-09"
-    true_up_month: str = "2026-08"
 
     def __post_init__(self) -> None:
         if self.billing_year < 2023:
@@ -73,14 +125,6 @@ class NBTScenario:
             date.fromisoformat(self.tariff_snapshot_date)
         except ValueError as exc:
             raise ValueError("tariff_snapshot_date must be an ISO date (YYYY-MM-DD)") from exc
-        try:
-            parsed_true_up_month = datetime.strptime(self.true_up_month, "%Y-%m")
-        except (TypeError, ValueError) as exc:
-            raise ValueError("true_up_month must be a canonical YYYY-MM string") from exc
-        if parsed_true_up_month.strftime("%Y-%m") != self.true_up_month:
-            raise ValueError("true_up_month must be a canonical YYYY-MM string")
-        if parsed_true_up_month.year != self.billing_year:
-            raise ValueError("true_up_month must fall within billing_year")
 
 
 @dataclass(frozen=True)
@@ -120,8 +164,6 @@ class TariffBundle:
     scenario: NBTScenario
     import_schedule: "ImportRateSchedule"
     export_schedule: "ExportCreditSchedule"
-    acc_plus_rate: float
 
     def __post_init__(self) -> None:
-        if self.acc_plus_rate < 0:
-            raise ValueError("ACC Plus rate cannot be negative")
+        object.__setattr__(self, "utility", Utility.parse(self.utility))

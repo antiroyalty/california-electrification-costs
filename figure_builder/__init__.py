@@ -31,16 +31,44 @@ if str(REPO) not in sys.path:
 SWEEP_DIR = REPO / "figure_builder" / "sweeps"
 FIG_DIR = REPO / "figure_builder" / "figures"
 
+
+def _export_regime_cache_fragment(value) -> str:
+    from tariffs import ExportCompensationRegime
+
+    return ExportCompensationRegime.parse(value).value
+
+
 def sweep_csv_path(
     slug: str,
     regime: str = "post_itc_2026",
     resolution: str = "288",
+    export_compensation_regime="nbt_2026",
 ) -> Path:
-    """Cache path keyed by temporal resolution and policy regime."""
+    """Cache path keyed by resolution, export policy, and capital policy."""
 
     if resolution not in {"288", "8760"}:
         raise ValueError("resolution must be '288' or '8760'")
-    return SWEEP_DIR / f"sweep_{resolution}_{slug}_{regime}.csv"
+    export_fragment = _export_regime_cache_fragment(
+        export_compensation_regime
+    )
+    return SWEEP_DIR / (
+        f"sweep_{resolution}_{slug}_{export_fragment}_{regime}.csv"
+    )
+
+
+def market_observation_csv_path(
+    slug: str,
+    regime: str = "post_itc_2026",
+    export_compensation_regime="nbt_2026",
+) -> Path:
+    """Cache path for the exact-price, full-chronology publication solve."""
+
+    export_fragment = _export_regime_cache_fragment(
+        export_compensation_regime
+    )
+    return SWEEP_DIR / (
+        f"market_8760_{slug}_{export_fragment}_{regime}.csv"
+    )
 
 
 # --- one claims snapshot per commit -----------------------------------------

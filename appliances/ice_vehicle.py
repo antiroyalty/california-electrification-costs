@@ -1,6 +1,14 @@
 from typing import Dict
 from helpers.gasoline_cost_helper import calculate_annual_fuel_cost
 
+# Constant repair/maintenance allowance: 12 years at 12,000 miles/year.
+# CR Table 2.1 gives rates for 0–50k, 50–100k, and 100–200k odometer miles:
+# https://advocacy.consumerreports.org/wp-content/uploads/2020/09/Maintenance-Cost-White-Paper-9.24.20-1.pdf
+# Average the first 144,000 miles; retain source dollars without inflation adjustment.
+DEFAULT_ANNUAL_MAINTENANCE_COST_USD = (
+    50_000 * 0.028 + 50_000 * 0.060 + 44_000 * 0.079
+) / 12
+
 class ICEVehicleAppliance:
     def __init__(self, 
                  vehicle_type: str = "ICE", # Assuming midsize SUV 
@@ -10,7 +18,7 @@ class ICEVehicleAppliance:
                     #  https://www.fhwa.dot.gov/policyinformation/statistics/2022/mv1.cfm - # vehicles in CA
                     #  https://www.energy.ca.gov/data-reports/energy-almanac/transportation-energy/california-gasoline-data-facts-and-statistics - #gas of gas sold 2024 CA
                     #  https://www.fhwa.dot.gov/policyinformation/statistics/2022/vm2.cfm - VMT per year in CA
-                 annual_maintenance_cost: float = 283.65, # https://theicct.org/wp-content/uploads/2021/06/EV-equity-feb2021.pdf - $/mile multiplied by VMT/vehicle/year
+                 annual_maintenance_cost: float = DEFAULT_ANNUAL_MAINTENANCE_COST_USD,
                  annual_insurance_cost: float = 1836.0): # https://theicct.org/wp-content/uploads/2021/06/EV-equity-feb2021.pdf - $/month multiplied by 12
         """
         Initialize ICE vehicle appliance.
@@ -20,7 +28,9 @@ class ICEVehicleAppliance:
             base_cost: Base vehicle purchase cost in dollars
             lifetime_years: Expected vehicle ownership period in years
             fuel_efficiency_mpg: Vehicle fuel efficiency in miles per gallon
-            annual_maintenance_cost: Annual maintenance cost in dollars
+            annual_maintenance_cost: Annual repair/maintenance allowance in dollars.
+                The default represents 12 years at 12,000 miles/year. Pass an
+                explicit allowance when changing that reference ownership pattern.
             annual_insurance_cost: Annual insurance cost in dollars
         """
         self.name = f"ice_{vehicle_type.lower()}"
@@ -39,26 +49,8 @@ class ICEVehicleAppliance:
         """Return annualized cost over the vehicle lifetime."""
         return self.base_cost / self.lifetime_years
 
-    def get_annual_operating_cost_estimate(self, 
-                                         county_name: str,
-                                         annual_maintenance_cost: float = 1200.0) -> float:
-        """
-        Estimate annual operating costs for ICE vehicle using county-specific data.
-        
-        Args:
-            county_name: County name for location-specific costs and VMT
-            annual_maintenance_cost: Annual maintenance cost (default: $1,200)
-            
-        Returns:
-            Estimated annual operating cost for ICE vehicle
-        """
-        fuel_data = calculate_annual_fuel_cost(county_name, self.fuel_efficiency_mpg)
-        annual_fuel_cost = fuel_data['annual_fuel_cost']
-        
-        return annual_fuel_cost + annual_maintenance_cost
-    
     def get_cost_breakdown(self, county_name: str) -> Dict:
-        """Return detailed cost breakdown for ICE vehicle."""
+        """Return capital and annual fuel, maintenance, and insurance costs."""
         # Calculate fuel costs using county-specific data
         fuel_data = calculate_annual_fuel_cost(county_name, self.fuel_efficiency_mpg)
         annual_fuel_cost = fuel_data['annual_fuel_cost']

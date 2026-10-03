@@ -388,6 +388,7 @@ def process(
                     title=f"DIY Dispatch — {scenario} — {county}",
                     show=False,
                     save_path=plots_path,
+                    close=True,
                 )
                 print(f"Saved step9_my_own_solar_storage plots to: {plots_path}")
             except Exception as plot_err:

@@ -1,5 +1,13 @@
 # Net Billing Tariff model
 
+> **Status:** This note contains tariff-source background and earlier implementation
+> descriptions. Its billing and optimization sections predate the shared accounting
+> integration at `1634760`, including SCE's combined credit pool. For current methods
+> and the approved annual-accounting simplifications, use
+> [Research methods and approach](RESEARCH_METHODS.md). The
+> [accounting closure note](HOUSEHOLD_COST_RECONCILIATION.md) records the detailed
+> verification and integration history.
+
 This repository models the California Net Billing Tariff (often called NEM
 3.0) through the `tariffs/` package. There is one runtime path shared by PV and
 battery co-optimization and annual bill evaluation.

@@ -7,7 +7,7 @@ from typing import Optional
 
 import pandas as pd
 
-from evaluations.eac import crf
+from evaluations.eac import alpha_batt_npv, crf
 from evaluations.incentives import apply_pv_storage_incentives
 from helpers.diagnostics_data import (
     compute_npv_details,
@@ -132,7 +132,10 @@ def create_cost_waterfall_chart(
 
     pv_net = net.get("pv_net", 0.0)
     storage_net = net.get("storage_net", 0.0)
-    annualized_capex = pv_net * crf(discount_rate, pv_life_yrs) + storage_net * crf(discount_rate, storage_life_yrs)
+    annualized_capex = (
+        pv_net * crf(discount_rate, pv_life_yrs)
+        + storage_net * alpha_batt_npv(discount_rate, storage_life_yrs, pv_life_yrs)
+    )
     total_with = scenario_solar_cost + annualized_capex
 
     try:
@@ -217,6 +220,7 @@ def create_storage_value_vs_cost_chart(
     storage_life_yrs: int = 15,
     batt_capex_per_kwh: float = 800.0,
     batt_capex_per_kw: float = 0.0,
+    horizon_yrs: int = 25,
 ) -> Optional[str]:
     storage_value = estimate_storage_value_upper_bound(
         base_input_dir, scenario, housing_type, county_slug
@@ -226,9 +230,8 @@ def create_storage_value_vs_cost_chart(
         return None
     batt_kwh = caps.get("battery_kwh") or 0.0
     batt_kw = caps.get("battery_kw") or 0.0
-    annualized_cost = (float(batt_kwh) * batt_capex_per_kwh + float(batt_kw) * batt_capex_per_kw) * crf(
-        discount_rate, storage_life_yrs
-    )
+    battery_cost = float(batt_kwh) * batt_capex_per_kwh + float(batt_kw) * batt_capex_per_kw
+    annualized_cost = battery_cost * alpha_batt_npv(discount_rate, storage_life_yrs, horizon_yrs)
 
     try:
         import matplotlib.pyplot as plt

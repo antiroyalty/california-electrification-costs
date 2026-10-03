@@ -14,11 +14,7 @@ from helpers.main_helpers import slugify_county_name
 from .calendar import calendarize_full_year
 from .catalog import TariffCatalog
 from .geography import resolve_county_service_assignment
-from .models import EnergyFlows, NBTScenario, Utility
-from .true_up import (
-    AverageRetailExportCompensationSchedule,
-    NetSurplusCompensationSchedule,
-)
+from .models import EnergyFlows, NBTScenario, Utility, require_annual_export_cap
 
 
 _REQUIRED_COLUMNS = (
@@ -38,11 +34,8 @@ class NBTPreflightResult:
     row_count: int
     annual_import_kwh: float
     annual_export_kwh: float
-    net_surplus_kwh: float
     import_source_id: str
     export_source_ids: tuple[str, ...]
-    adjustment_source_id: str | None
-    nsc_source_id: str | None
 
 
 def _profile_path(
@@ -156,8 +149,6 @@ def preflight_nbt_county(
     county: str,
     nbt_scenario: NBTScenario,
     tariff_catalog: TariffCatalog | None = None,
-    adjustment_schedule: AverageRetailExportCompensationSchedule | None = None,
-    nsc_schedule: NetSurplusCompensationSchedule | None = None,
 ) -> NBTPreflightResult:
     """Validate one county artifact and every tariff source it will require."""
 
@@ -170,6 +161,9 @@ def preflight_nbt_county(
         county_slug,
     )
     validated = _validated_flows(path, nbt_scenario).validated_frame()
+    annual_import_kwh = math.fsum(validated["import_kwh"])
+    annual_export_kwh = math.fsum(validated["export_kwh"])
+    require_annual_export_cap(annual_import_kwh, annual_export_kwh)
 
     tariff = (tariff_catalog or TariffCatalog()).bundle(
         assignment.utility,
@@ -187,22 +181,6 @@ def preflight_nbt_county(
             f"{assignment.utility.value} tariff sources are missing identity"
         )
 
-    annual_import_kwh = float(validated["import_kwh"].sum())
-    annual_export_kwh = float(validated["export_kwh"].sum())
-    net_surplus_kwh = max(annual_export_kwh - annual_import_kwh, 0.0)
-    adjustment_source_id = None
-    nsc_source_id = None
-    if net_surplus_kwh > 0.0:
-        adjustment = (
-            adjustment_schedule
-            or AverageRetailExportCompensationSchedule.from_csv()
-        ).resolve(assignment.utility, nbt_scenario.true_up_month)
-        nsc = (
-            nsc_schedule or NetSurplusCompensationSchedule.from_csv()
-        ).resolve(assignment.utility, nbt_scenario.true_up_month)
-        adjustment_source_id = adjustment.source_id
-        nsc_source_id = nsc.source_id
-
     return NBTPreflightResult(
         county_slug=county_slug,
         utility=assignment.utility,
@@ -210,11 +188,8 @@ def preflight_nbt_county(
         row_count=len(validated),
         annual_import_kwh=annual_import_kwh,
         annual_export_kwh=annual_export_kwh,
-        net_surplus_kwh=net_surplus_kwh,
         import_source_id=import_source_id,
         export_source_ids=export_source_ids,
-        adjustment_source_id=adjustment_source_id,
-        nsc_source_id=nsc_source_id,
     )
 
 

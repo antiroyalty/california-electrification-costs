@@ -135,7 +135,22 @@ def set_commit_label(html: str, sha: str) -> str:
     and the footer "Generated from commit ...") to `sha`. Used when a snapshot is
     copied forward to a new commit, so it self-identifies correctly instead of
     inheriting the source snapshot's sha."""
-    html = re.sub(r"(commit <b>)[0-9a-f]{6,40}(</b>)", rf"\g<1>{sha}\g<2>", html)
+    build_info = f'''<div class="buildinfo">
+    <span>commit <b>{sha}</b></span>
+    <span><b>source-locked 2026</b> tariffs</span>
+    <span><b>47 of 58</b> CA counties modeled</span>
+    <span>working-paper artifact</span>
+  </div>'''
+    build_info_pattern = r'<div class="buildinfo">.*?</div>'
+    if len(re.findall(build_info_pattern, html, flags=re.S)) != 1:
+        raise ValueError("claims document must contain exactly one buildinfo block")
+    html = re.sub(
+        build_info_pattern,
+        lambda _: build_info,
+        html,
+        count=1,
+        flags=re.S,
+    )
     html = re.sub(r"(Generated from commit )[0-9a-f]{6,40}", rf"\g<1>{sha}", html)
     return html
 

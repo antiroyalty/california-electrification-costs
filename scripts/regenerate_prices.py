@@ -44,7 +44,7 @@ def regenerate_county_prices(
 
     import_prices = tariff.import_schedule.rates_for(timestamps)
     export_prices = [
-        rate + tariff.acc_plus_rate
+        rate
         for rate in tariff.export_schedule.rates_for(
             timestamps,
             component="total",
@@ -86,7 +86,6 @@ def main() -> None:
         billing_year=2026,
         nbt_vintage=2026,
         tariff_snapshot_date="2026-08-09",
-        true_up_month="2026-08",
     )
     tariff_catalog = TariffCatalog()
 

@@ -113,21 +113,27 @@ def test_example_calculations() -> None:
         [
             {
                 "county_slug": "alameda",
+                "incentive_scenario": "full_incentives",
                 "appliance_category": "electric",
                 "appliance_type": "vehicle_charging",
                 "annual_operating_cost": 100.0,
             },
             {
                 "county_slug": "alameda",
+                "incentive_scenario": "full_incentives",
                 "appliance_category": "gas",
                 "appliance_type": "vehicle_fuel",
                 "annual_operating_cost": 200.0,
             },
         ]
     )
-    adders = vehicles.vehicle_annual_adders_from_ledger(df)
-    assert adders.loc["alameda", "ev_operating"] == pytest.approx(100.0)
-    assert adders.loc["alameda", "ice_operating"] == pytest.approx(200.0)
+    adders = vehicles.vehicle_annual_adders_from_ledger(
+        df,
+        county_slug="alameda",
+        incentive_scenario="full_incentives",
+    )
+    assert adders.ev_operating_usd_per_year == pytest.approx(100.0)
+    assert adders.ice_operating_usd_per_year == pytest.approx(200.0)
 
     lcoe_val = lcoe.lcoe_crf_simple(1000.0, 0.0, 1000.0, 0.1, 10)
     expected = eac.crf(0.1, 10)

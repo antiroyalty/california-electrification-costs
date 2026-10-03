@@ -5,11 +5,14 @@ This module provides county-specific data for gasoline prices and vehicle miles 
 to enable accurate cost calculations for ICE vehicles in different California counties.
 """
 
+from math import isfinite
+from numbers import Real
 from typing import Dict, Optional
 from helpers.main_helpers import slugify_county_name
 
-# County-specific gasoline costs in dollars per gallon
-# Data should be updated regularly to reflect current market conditions
+# County prices in USD/gallon, imported in commit d86887e on 2025-08-06.
+# Simon attributes them to AAA; the exact observation date is not retained.
+# Alpine uses the explicit proxy below. See docs/data_sources.yaml for provenance.
 COUNTY_GASOLINE_COSTS = {
     # Northern California Counties
     "alameda": 4.581,
@@ -36,7 +39,9 @@ COUNTY_GASOLINE_COSTS = {
     "nevada": 5.067,
     "placer": 4.613,
     "el-dorado": 4.642,
-    "alpine": 0,
+    # Approved proxy: fixed median of the other 57 prices in this table.
+    # This is not an observed Alpine price or a fallback for other missing counties.
+    "alpine": 4.589,
     "amador": 4.615,
     "calaveras": 4.529,
     "tuolumne": 4.608,
@@ -149,13 +154,26 @@ COUNTY_ANNUAL_VMT = {
     "imperial": 0
 }
 
-# Default values for counties not in the database
-DEFAULT_GASOLINE_COST = 0.0  # dollars per gallon
+# Declared annual mileage assumption; gasoline prices have no fallback.
 DEFAULT_ANNUAL_VMT = 12000   # miles per year (typical CA default)
 
 def get_gasoline_cost_for_county(county_name: str) -> float:
+    """Return a finite positive gasoline price in USD/gallon, or fail clearly."""
     county_slug = slugify_county_name(county_name)
-    return COUNTY_GASOLINE_COSTS.get(county_slug, DEFAULT_GASOLINE_COST)
+    if county_slug not in COUNTY_GASOLINE_COSTS:
+        raise ValueError(f"Missing gasoline price for county '{county_slug}'.")
+    price = COUNTY_GASOLINE_COSTS[county_slug]
+    if (
+        isinstance(price, bool)
+        or not isinstance(price, Real)
+        or not isfinite(price)
+        or price <= 0
+    ):
+        raise ValueError(
+            f"Gasoline price for county '{county_slug}' must be a finite positive "
+            f"number in USD/gallon; got {price!r}."
+        )
+    return float(price)
 
 
 def get_annual_vmt_for_county(county_name: str) -> int:

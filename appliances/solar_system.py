@@ -14,10 +14,18 @@ from appliances.incentive_policy import (
 class SolarSystemAppliance(ElectricAppliance):
     """Solar panel system with sizing based on capacity in kW."""
 
+    GROSS_COST_USD_PER_WATT = 3.3
+    COST_BASIS_YEAR = 2023
+    COST_SOURCE_ID = "cpuc_2023_residential_pv_cost"
+    COST_SOURCE_URL = (
+        "https://docs.cpuc.ca.gov/PublishedDocs/Published/"
+        "G000/M499/K921/499921246.PDF"
+    )
+
     def __init__(self, capacity_kw: float, lifetime_years: int = 25,
                  policy_regime: PolicyRegime = DEFAULT_POLICY_REGIME):
-        # Solar panel specifications (2025 pricing)
-        dollars_per_watt = 3.3  # $3.3/W https://docs.cpuc.ca.gov/PublishedDocs/Published/G000/M499/K921/499921246.PDF 2023
+        # Sourced residential PV unit economics.
+        dollars_per_watt = self.GROSS_COST_USD_PER_WATT
         installation_markup = 0.0  # 0% installation markup
         design_markup = 0.0  # 0% design/engineering markup
 
