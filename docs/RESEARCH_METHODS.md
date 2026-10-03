@@ -228,6 +228,21 @@ incentives must be evaluated from their own declared inputs.
 See the [tariff data documentation](../data/tariffs/README.md) and
 [publication builder](../figure_builder/README.md).
 
+The NEM 2 optimizer now includes the complete electricity bill, including fixed
+utility charges. It sums daily charges once for each distinct modeled date.
+The objective, reported settlement, and solver lower bound include the same
+fixed amount. Reduced hourly profiles retain that amount without weighting it
+again. Fixed charges do not depend on equipment size or dispatch, so this
+addition does not change which design minimizes cost. It changes the absolute
+cost reported by the optimizer. Older saved NEM 2 objectives omit this amount.
+
+The matched NEM 2 comparison for Alameda, Los Angeles, and San Diego still
+requires county-run and household-reporting integration. The existing county
+path remains NBT-only. New results must also state and check solar-sizing limits:
+the older comparison permits annual solar generation of 100% of load under
+NEM 2 and 150% under NBT. Those different limits must not be described as a
+comparison that changes only export compensation.
+
 The [federal-credit registry](../appliances/federal_credits.py) collects the
 modeled solar/storage (25D), heat-pump (25C), and new-vehicle (30D) rules in one
 place. Each record identifies amounts, applicable dates, eligible costs, tax
@@ -950,6 +965,7 @@ Prioritize a check when the limitation could change a stated conclusion.
 | County equipment costs include imputed values | The heat-pump cost inputs use the median of available counties where source data are absent: three counties for space heating and nine for water heating. These are not local price observations. | Identify these counties in cost interpretation and refresh their inputs when local data become available. |
 | Battery remaining-value and replacement-cost assumptions | The method values five remaining years at one-third of replacement cost. It assumes unchanged real purchase costs. Legacy net-price calls repeat incentive treatment; the explicit federal-only path grants only an initial credit. Future prices and resale values can differ; the direction of error is uncertain. | State these assumptions with the results. Use a focused sensitivity if they could change an adoption conclusion. |
 | Older results and auxiliary tools can use different capital accounting | The core scenarios were regenerated at `8a98b96`. Other cached sizing and reports retain their recorded versions. Standalone solar/battery/combined sweeps, the older Step 9 size optimizer, and auxiliary NPV diagnostics retain separate conventions. | Use the dated claim assessment for current evidence. Align an auxiliary tool before using it for a comparison under these methods. |
+| Earlier NEM 2 optimizer costs omit fixed utility charges | The current objective and settlement include them. Adding the same fixed amount to every design preserves the economic optimum, but earlier absolute costs are lower by that amount. | Regenerate costs through the corrected path before a new matched comparison. Preserve the original dated outputs. |
 | Auxiliary payback retains legacy conventions | The September 15 refresh reconciles all 141 matched optimized-EV payback rows using the corrected household and incentive selection. First-column tariff selection, capital-summary conventions, and a $0.01 denominator for nonpositive savings remain. Missing-bill handling is permissive; this refresh independently verifies every required bill. | Use the explicit matched EAC collector for publication. Address these conventions if payback becomes a paper result. Older archived payback outputs remain unchanged. |
 | The legacy 2025 incentive sensitivity simplifies eligibility | Its continuous battery sizing uses an ITC-adjusted unit price without a separate 3 kWh eligibility constraint. Legacy appliance calculations apply the 25C cap separately to space and water heating. Affected 2025 cases can overstate incentives. The explicit federal-only optimizer and household calculator enforce these limits. | Rerun affected comparisons through the new path before using them for published claims. These issues do not change zero-credit post-ITC inputs. |
 | Federal purchase credits are conditional on declared eligibility and realization | The amount calculation enforces the shared heat-pump cap and battery threshold. Reporting now applies explicit realized amounts and times to gross costs and excludes other incentives. It does not infer qualifying dates, buyer/product eligibility, or tax liability. Home credits share one receipt time. Treating potential credits as guaranteed receipts could overstate savings. | Declare eligibility and realization assumptions for the comparison. Separate receipt times or installments require an explicit extension. Receipts beyond the study require an explicit model change. Default reports and saved county results remain unchanged. |

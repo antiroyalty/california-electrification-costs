@@ -34,6 +34,7 @@ def _fixed_inputs(tariff):
             offsettable_rates_usd_per_kwh=(.4, .4), billing_months=(1, 1),
             interval_nbc_rate_usd_per_kwh=.02, monthly_net_consumption_rate_usd_per_kwh=.01,
             nsc_rate_usd_per_kwh=.03, nsc_rate_source_id="test_only",
+            fixed_charge_usd=0.0,
         )
         return CooptInputs([1, 1], [3, 0], [.4, .4], [.4, .4], nem2_terms=terms)
     return CooptInputs([1, 1], [3, 0], [.4, .4], [.04, .04])

@@ -56,6 +56,7 @@ def test_nem2_dispatch_inputs_preserve_exact_settlement_terms():
         monthly_net_consumption_rate_usd_per_kwh=0.005,
         nsc_rate_usd_per_kwh=0.02,
         nsc_rate_source_id="fixture_nsc_source",
+        fixed_charge_usd=0.0,
     )
     dispatch = DispatchInputs(
         slug="fixture",

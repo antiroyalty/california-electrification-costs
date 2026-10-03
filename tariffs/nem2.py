@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 import json
 import math
+from numbers import Real
 from pathlib import Path
 from typing import Mapping
 
@@ -412,10 +413,10 @@ class NEM2TariffBundle:
         self,
         timestamps: pd.DatetimeIndex,
     ) -> "NEM2OptimizationTerms":
-        """Return exact variable-rate terms for co-optimization.
+        """Return the complete bill terms for the represented calendar days.
 
-        Fixed daily charges do not affect sizing or dispatch, so the optimizer
-        omits them. The final bill evaluator adds those charges back.
+        Fixed charges enter once per distinct day. They do not affect sizing,
+        but keep the objective and its cost certificate on the full-bill basis.
         """
 
         index = pd.DatetimeIndex(pd.to_datetime(timestamps))
@@ -446,12 +447,16 @@ class NEM2TariffBundle:
             ),
             nsc_rate_usd_per_kwh=self.nsc_rate.rate_usd_per_kwh,
             nsc_rate_source_id=self.nsc_rate.source_id,
+            fixed_charge_usd=math.fsum(
+                self.import_schedule.daily_fixed_charge(day)
+                for day in index.normalize().unique()
+            ),
         )
 
 
 @dataclass(frozen=True)
 class NEM2OptimizationTerms:
-    """Variable bill terms required by the NEM 2 sizing objective."""
+    """Bill terms, including fixed dollars for the entire modeled period."""
 
     offsettable_rates_usd_per_kwh: tuple[float, ...]
     billing_months: tuple[int, ...]
@@ -459,6 +464,7 @@ class NEM2OptimizationTerms:
     monthly_net_consumption_rate_usd_per_kwh: float
     nsc_rate_usd_per_kwh: float
     nsc_rate_source_id: str
+    fixed_charge_usd: float
 
     def __post_init__(self) -> None:
         if not self.offsettable_rates_usd_per_kwh:
@@ -484,6 +490,11 @@ class NEM2OptimizationTerms:
         object.__setattr__(self, "offsettable_rates_usd_per_kwh", rates)
         if not self.nsc_rate_source_id:
             raise ValueError("nsc_rate_source_id must be non-empty")
+        if (isinstance(self.fixed_charge_usd, bool)
+                or not isinstance(self.fixed_charge_usd, Real)
+                or not math.isfinite(self.fixed_charge_usd)
+                or self.fixed_charge_usd < 0):
+            raise ValueError("fixed_charge_usd must be finite and nonnegative")
 
 
 @dataclass(frozen=True)

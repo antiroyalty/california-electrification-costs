@@ -21,6 +21,7 @@ analytically exact.
 """
 import os
 import sys
+from dataclasses import replace
 
 import pytest
 
@@ -69,6 +70,7 @@ def _nem2_terms(
         monthly_net_consumption_rate_usd_per_kwh=0.01,
         nsc_rate_usd_per_kwh=0.03,
         nsc_rate_source_id="fixture_nsc_source",
+        fixed_charge_usd=0.0,
     )
 
 
@@ -604,6 +606,37 @@ class TestLPSizingPriceMatchesReportingPrice:
 # ---------------------------------------------------------------------------
 
 class TestNEM2CooptimizationSettlement:
+    @pytest.mark.parametrize("backend", ["highs", "cbc"])
+    def test_fixed_charge_shifts_cost_and_certificate_without_changing_sizes(self, backend):
+        from pipeline.solver import SolverOptions
+
+        inputs = _nem2_inputs(max_generation_ratio=1.0)
+        charged = replace(inputs, nem2_terms=replace(inputs.nem2_terms, fixed_charge_usd=73.25))
+        options = dict(weights=[365] * 24, max_battery_kwh=3,
+                       solver_options=SolverOptions(backend=backend, annual_cost_gap_usd=1e-6))
+        without = _solve_lp(inputs, **options)
+        with_fixed = _solve_lp(charged, **options)
+        assert with_fixed.pv_kw == pytest.approx(without.pv_kw)
+        assert with_fixed.batt_kwh == pytest.approx(without.batt_kwh)
+        assert with_fixed.total_cost - without.total_cost == pytest.approx(73.25)
+        assert with_fixed.solver.lower_bound_usd - without.solver.lower_bound_usd == pytest.approx(
+            73.25,
+        )
+        assert with_fixed.solver.optimality_gap_usd == pytest.approx(
+            without.solver.optimality_gap_usd, abs=1e-6,
+        )
+
+    def test_monthly_aggregation_preserves_fixed_dollars_without_hour_weights(self):
+        terms = replace(_nem2_terms(8760), fixed_charge_usd=182.50)
+        inputs = CooptInputs([1.0] * 8760, [0.0] * 8760, [0.38] * 8760,
+                             [0.38] * 8760, nem2_terms=terms)
+        aggregated, weights = build_monthly_hourly_inputs(inputs)
+        assert aggregated.nem2_terms.fixed_charge_usd == pytest.approx(182.50)
+        result = _solve_lp(aggregated, weights=weights, cycle_monthly=True)
+        # Flat 8,760 kWh demand at $0.40/kWh plus one annual fixed charge.
+        assert result.total_cost == pytest.approx(8760 * 0.40 + 182.50)
+        assert result.nem2_settlement.fixed_charge_usd == pytest.approx(182.50)
+
     def test_fixed_system_reconciles_each_variable_bill_component(self):
         result = _solve_lp(
             _nem2_inputs(),

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+from dataclasses import replace
 
 import pandas as pd
 import pytest
@@ -383,3 +384,72 @@ def test_nem2_optimizer_terms_reject_the_wrong_billing_year():
 
     with pytest.raises(ValueError, match="billing year 2026"):
         bundle.optimization_terms_for(full_year_hourly_index(2018))
+
+
+def test_optimizer_fixed_charges_count_each_calendar_day_once():
+    bundle = _fixture_bundle(nsc_rate_usd_per_kwh=0.03)
+    times = pd.DatetimeIndex([
+        "2026-01-31 00:00", "2026-01-31 01:00",
+        "2026-02-01 00:00", "2026-02-01 01:00",
+    ])
+    terms = bundle.optimization_terms_for(times)
+    # Two days at $0.50/day, regardless of the number of represented hours.
+    assert terms.fixed_charge_usd == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize("value", [-1, float("nan"), float("inf"), True, None, "1.0"])
+def test_optimizer_rejects_invalid_fixed_dollars(value):
+    bundle = _fixture_bundle(nsc_rate_usd_per_kwh=0.03)
+    terms = bundle.optimization_terms_for(pd.DatetimeIndex(["2026-01-05"]))
+    with pytest.raises(ValueError, match="fixed_charge_usd"):
+        replace(terms, fixed_charge_usd=value)
+
+
+@pytest.mark.parametrize("credited", [False, True])
+@pytest.mark.parametrize("pv_yield,expected_bill,expired_credit", [
+    # 10 imports and 4 exports: $1.20 energy + $0.10 NBC + $0.06 recovery + $0.50 fixed.
+    (4.0, 1.86, 0.0),
+    # 10 imports and 20 exports: retail credit expires; $0.10 NBC + $0.50 fixed - $0.30 NSC.
+    (20.0, 0.30, 2.0),
+])
+def test_optimizer_full_bill_matches_hand_calculation_and_report(
+    credited, pv_yield, expected_bill, expired_credit,
+):
+    from evaluations.eac import compute_eac_from_inputs
+    from evaluations.federal_credits import FederalCreditCase, PVStorageCreditPolicy
+    from pipeline.solver import SolverOptions
+    from pipeline.steps.step9b_cooptimize_core import CooptInputs, _solve_lp
+
+    bundle = _fixture_bundle(nsc_rate_usd_per_kwh=0.03)
+    times = pd.date_range("2026-01-05", periods=2, freq="h")
+    terms = bundle.optimization_terms_for(times)
+    rates = list(terms.offsettable_rates_usd_per_kwh)
+    inputs = CooptInputs([10, 0], [0, pv_yield], rates, rates, nem2_terms=terms,
+                         max_pv_to_annual_load_ratio=3)
+    policy = (PVStorageCreditPolicy(FederalCreditCase.PV_STORAGE, 1, 1)
+              if credited else None)
+    result = _solve_lp(
+        inputs, fixed_pv_kw=1, fixed_batt_kwh=0, c_pv_kw=1000,
+        federal_credit_policy=policy,
+        solver_options=SolverOptions(annual_cost_gap_usd=1e-6),
+    )
+    flows = result.flows
+    ledger = calculate_nem2_bill(EnergyFlows(
+        times,
+        [a + b for a, b in zip(flows.grid_to_load, flows.grid_to_batt)],
+        [a + b for a, b in zip(flows.pv_to_grid, flows.batt_to_grid)],
+    ), bundle)
+    assert ledger.annual_amount_due_usd == pytest.approx(expected_bill)
+    assert result.nem2_settlement.amount_due_usd == pytest.approx(expected_bill)
+    assert result.nem2_settlement.fixed_charge_usd == pytest.approx(0.50)
+    assert result.nem2_settlement.expired_retail_export_credit_usd == pytest.approx(expired_credit)
+    assert result.import_cost - result.export_credit == pytest.approx(expected_bill)
+    reported = compute_eac_from_inputs(
+        None, {"pv_capex": 1000, "storage_capex": 0},
+        federal_credit_receipts=result.federal_credit_receipts,
+        annual_bill_electric=ledger.annual_amount_due_usd,
+    )
+    assert result.total_cost == pytest.approx(reported.total())
+    assert result.total_cost - result.solver.lower_bound_usd == pytest.approx(
+        result.solver.optimality_gap_usd, abs=1e-6,
+    )

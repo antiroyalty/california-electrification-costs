@@ -401,11 +401,14 @@
     "assumptions": {
       "comparison": "Hold the 2026 retail-rate snapshot and household profiles fixed while changing export compensation. This is not a historical NEM 2 bill reconstruction.",
       "settlement": "Apply source-selected utility credit exclusions, monthly positive net-consumption recovery charges, annual retail-dollar netting, credit expiry, and net-surplus compensation.",
-      "policy_matrix": "Four counties and two independent axes: NBT versus NEM 2 compensation, and post-ITC versus 2025 ITC capital costs. The four-cell comparison uses the common weighted 12x24 resolution."
+      "complete_objective": "NEM 2 optimization includes the full bill, including fixed charges summed once per distinct calendar day. The objective, numerical settlement, and solver lower bound use that same dollar basis. Monthly-hourly aggregation preserves this total without multiplying it by representative-hour weights. This constant does not change the economic optimum; earlier saved NEM 2 objectives omit it and remain historical outputs.",
+      "policy_matrix": "Four counties and two independent axes: NBT versus NEM 2 compensation, and post-ITC versus 2025 ITC capital costs. The four-cell comparison uses the common weighted 12x24 resolution. Its solar-generation caps differ: 150% of annual load for NBT and 100% for NEM 2. A new matched comparison must state and check these bounds before attributing differences only to export compensation."
     },
+    "validation": "Hand-calculated bills and the independent NEM 2 bill evaluator reconcile with optimizer settlement and federal-credit EAC reporting. Tests cover daily counting, invalid fixed dollars, expired retail credits and net-surplus compensation, HiGHS/CBC objective and lower-bound shifts, unchanged optimal sizes, and fixed-charge preservation in weighted chronology. The matched three-county NEM 2 household comparison remains pending county-run and reporting integration; this change does not regenerate publication results.",
     "code": [
       "tariffs/nem2.py:calculate_nem2_bill",
       "tariffs/nem2.py:NEM2OptimizationTerms",
+      "pipeline/steps/step9b_cooptimize_core.py:NEM2CooptSettlement",
       "figure_builder/policy_cases.py:POLICY_CASES"
     ]
   },

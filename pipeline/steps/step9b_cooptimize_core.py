@@ -130,7 +130,7 @@ class CooptResult:
 
 @dataclass(frozen=True)
 class NEM2CooptSettlement:
-    """Variable NEM 2 bill components represented in the optimizer."""
+    """Complete NEM 2 bill components represented in the optimizer."""
 
     annual_import_kwh: float
     annual_export_kwh: float
@@ -144,6 +144,17 @@ class NEM2CooptSettlement:
     net_surplus_kwh: float
     nsc_credit_usd: float
     nsc_rate_source_id: str
+    fixed_charge_usd: float
+
+    @property
+    def amount_due_usd(self) -> float:
+        return (
+            self.energy_charge_due_at_true_up_usd
+            + self.interval_nbc_charge_usd
+            + self.monthly_net_consumption_charge_usd
+            + self.fixed_charge_usd
+            - self.nsc_credit_usd
+        )
 
 
 def _normalize_nonnegative_solver_value(
@@ -278,6 +289,7 @@ def _verify_invariants(
                 settlement.offsettable_import_charge_usd
                 + settlement.interval_nbc_charge_usd
                 + settlement.monthly_net_consumption_charge_usd
+                + settlement.fixed_charge_usd
             )
         ) <= tol
         assert abs(
@@ -865,6 +877,7 @@ def _solve_lp(
             energy_charge_due_at_true_up
             + interval_nbc_charge
             + monthly_net_consumption_charge
+            + nem2_terms.fixed_charge_usd
             - nsc_credit
         )
     degrade_cost = pulp.lpSum([
@@ -1148,6 +1161,7 @@ def _solve_lp(
             offsettable_import_charge_val
             + interval_nbc_charge_val
             + monthly_net_consumption_charge_val
+            + nem2_terms.fixed_charge_usd
         )
         export_credit_val = (
             retail_export_credit_applied_val + nsc_credit_val
@@ -1171,6 +1185,7 @@ def _solve_lp(
             net_surplus_kwh=net_surplus_kwh_val,
             nsc_credit_usd=nsc_credit_val,
             nsc_rate_source_id=nem2_terms.nsc_rate_source_id,
+            fixed_charge_usd=nem2_terms.fixed_charge_usd,
         )
     degradation_cost_val = sum(
         float(weights[h])
@@ -1289,6 +1304,7 @@ def build_monthly_hourly_inputs(
             ),
             nsc_rate_usd_per_kwh=inputs.nem2_terms.nsc_rate_usd_per_kwh,
             nsc_rate_source_id=inputs.nem2_terms.nsc_rate_source_id,
+            fixed_charge_usd=inputs.nem2_terms.fixed_charge_usd,
         )
     return (
         CooptInputs(
